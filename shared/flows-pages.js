@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "392";
+export const ASSET_VERSION = "393";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -1201,6 +1201,7 @@ export function tickerPage({ username = "", scenes = false } = {}) {
     <p data-k="legacy-vo">This card was built before the volatility and quality readings became gauges, so they are withheld rather than redrawn under a meaning they did not have.</p>
   </div>
   <i hidden data-defer="movelab" data-src="${v("/assets/js/flows-ticker-movelab.js")}" id="ftMoveLab"></i>
+  <i hidden data-defer="network" data-src="${v("/assets/js/flows-ticker-network.js")}" data-css="${v("/assets/css/flows-ticker-network.css")}" id="ftNetwork"></i>
   <i hidden data-defer="live" data-src="${v("/assets/js/flows-ticker-live.js")}" id="ftLive"></i>${scenes ? `
   <i hidden data-defer="surface" data-src="${v("/assets/js/flows-ticker-surface.js")}" id="ftSurface"></i>` : ""}
 `,

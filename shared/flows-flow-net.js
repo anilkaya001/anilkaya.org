@@ -1,0 +1,243 @@
+export const NEAR_Z = 0.25;
+
+export const FIXED_BAND = 0.025;
+
+export const MIN_WINDOWS = 5;
+
+export const SESSION_CAP = 30;
+
+export const DAYS_PER_YEAR = 365;
+
+export const COLUMN_KEYS = Object.freeze(["side", "expiry", "money", "flags"]);
+
+export const SIDE_NODES = Object.freeze([
+  { id: "side:ca", label: "Calls · ask side", cp: "C", ask: true },
+  { id: "side:cr", label: "Calls · rest", cp: "C", ask: false },
+  { id: "side:pa", label: "Puts · ask side", cp: "P", ask: true },
+  { id: "side:pr", label: "Puts · rest", cp: "P", ask: false },
+]);
+
+export const EXPIRY_NODES = Object.freeze([
+  { id: "exp:d0", label: "Same day" },
+  { id: "exp:w1", label: "1 to 7 days" },
+  { id: "exp:m1", label: "8 to 31 days" },
+  { id: "exp:far", label: "32 days and over" },
+]);
+
+export const MONEY_NODES = Object.freeze({
+  scaled: [
+    { id: "mny:itm", label: "In the money" },
+    { id: "mny:near", label: "Near the money" },
+    { id: "mny:otm", label: "Out of the money" },
+  ],
+  fixed: [
+    { id: "mny:itm", label: "In the money, past 2.5%" },
+    { id: "mny:near", label: "Within 2.5% of spot" },
+    { id: "mny:otm", label: "Out of the money, past 2.5%" },
+  ],
+});
+
+export const FLAG_NODES = Object.freeze([
+  { id: "flg:so", label: "Sweep and all opening" },
+  { id: "flg:s", label: "Sweep" },
+  { id: "flg:o", label: "All opening" },
+  { id: "flg:n", label: "Neither flag" },
+  { id: "flg:u", label: "Flags not read" },
+]);
+
+export const TITLES = Object.freeze({ side: "Side", expiry: "Expiry", money: "Strike against spot", flags: "Flags" });
+
+export const FACE_LINES = Object.freeze({
+  gross: "Vendor-flagged windows, not every execution. Premium is gross; legs of a spread count separately.",
+  ask: "Ask side is the vendor's attribution of premium; the rest is bid, mid or unattributed. No lean on this page.",
+  flags: "Opening: every trade in the window is flagged opening by the vendor. Sweep: the window contains a sweep.",
+  spot: "One session spot, not the price at each window's time.",
+});
+
+const finite = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+const DAY = /^(\d{4})-(\d{2})-(\d{2})/;
+
+export function calendarDays(fromIso, toIso) {
+  const a = DAY.exec(String(fromIso));
+  const b = DAY.exec(String(toIso));
+  if (!a || !b) return null;
+  const t1 = Date.UTC(Number(a[1]), Number(a[2]) - 1, Number(a[3]));
+  const t2 = Date.UTC(Number(b[1]), Number(b[2]) - 1, Number(b[3]));
+  if (!Number.isFinite(t1) || !Number.isFinite(t2)) return null;
+  return Math.round((t2 - t1) / 86400000);
+}
+
+export function expiryBucket(days) {
+  if (!Number.isInteger(days) || days < 0) return null;
+  return days === 0 ? "exp:d0" : days <= 7 ? "exp:w1" : days <= 31 ? "exp:m1" : "exp:far";
+}
+
+export function volFor(days, term, iv30) {
+  const rows = (Array.isArray(term) ? term : []).filter((r) => r && finite(r.dte) !== null && finite(r.vol) !== null && r.vol > 0);
+  if (rows.length) {
+    let best = rows[0];
+    for (const r of rows) if (Math.abs(r.dte - days) < Math.abs(best.dte - days)) best = r;
+    return { vol: best.vol, from: "term" };
+  }
+  const iv = finite(iv30);
+  return iv !== null && iv > 0 ? { vol: iv, from: "iv30" } : null;
+}
+
+export function moneyness(cp, strike, spot, sigma, days) {
+  const k = finite(strike);
+  const s = finite(spot);
+  if (k === null || !(k > 0) || s === null || !(s > 0)) return null;
+  let z;
+  if (sigma === null) {
+    const gap = k / s - 1;
+    if (Math.abs(gap) <= FIXED_BAND) return "mny:near";
+    z = gap;
+  } else {
+    if (!(sigma > 0)) return null;
+    z = Math.log(k / s) / (sigma * Math.sqrt(Math.max(days, 1) / DAYS_PER_YEAR));
+    if (Math.abs(z) <= NEAR_Z) return "mny:near";
+  }
+  return (cp === "C") === (z < 0) ? "mny:itm" : "mny:otm";
+}
+
+export function flagNode(sweep, opening) {
+  if (typeof sweep !== "boolean" || typeof opening !== "boolean") return "flg:u";
+  return sweep && opening ? "flg:so" : sweep ? "flg:s" : opening ? "flg:o" : "flg:n";
+}
+
+export function sideSplit(cp, premium, ask) {
+  const a = finite(ask);
+  const valid = a !== null && a >= 0 && a <= 1;
+  const part = valid ? premium * a : 0;
+  const rest = premium - part;
+  const c = cp === "C";
+  return { valid, parts: [[c ? "side:ca" : "side:pa", part], [c ? "side:cr" : "side:pr", rest]].filter((x) => x[1] > 0) };
+}
+
+export function shares(values) {
+  const total = values.reduce((a, v) => a + v, 0);
+  if (!(total > 0)) return values.map(() => null);
+  const order = values.map((v, i) => [v, i]).sort((x, y) => y[0] - x[0] || x[1] - y[1]);
+  const out = new Array(values.length);
+  let cum = 0;
+  let prev = 0;
+  for (const [v, i] of order) {
+    cum += v;
+    const now = Math.round((cum / total) * 100);
+    out[i] = now - prev;
+    prev = now;
+  }
+  return out;
+}
+
+export function buildNet(alerts, ctx = {}) {
+  const session = typeof ctx.session === "string" ? ctx.session.slice(0, 10) : null;
+  if (alerts === undefined || alerts === null) return { state: "unavailable", reason: "This name's dossier carries no flagged-window record." };
+  if (typeof alerts !== "object") return { state: "unavailable", reason: "The flagged windows were not published for this name." };
+  if (alerts.status === "absent" || alerts.status === "pending") return { state: "pending", reason: "The flagged windows publish with tonight's run." };
+  if (alerts.status === "quiet") return { state: "quiet", reason: "No window of this name was flagged in the session." };
+  if (alerts.status !== "ok") return { state: "unavailable", reason: "The flagged windows are not available: " + String(alerts.why || alerts.status || "no reason published") + "." };
+  const dots = Array.isArray(alerts.dots) ? alerts.dots : [];
+  if (!dots.length) return { state: "quiet", reason: "The record carries no flagged window." };
+  if (session && alerts.asOf && String(alerts.asOf).slice(0, 10) !== session) {
+    return { state: "stale", reason: "The windows are for " + String(alerts.asOf).slice(0, 10) + ", not the card's session " + session + "." };
+  }
+  const sessionDay = session || (alerts.asOf ? String(alerts.asOf).slice(0, 10) : null);
+  const excluded = { window: 0, noAsk: 0, noFlags: 0 };
+  const spot = finite(ctx.spot) !== null && ctx.spot > 0 ? ctx.spot : null;
+  const iv30 = finite(ctx.iv30) !== null && ctx.iv30 > 0 ? ctx.iv30 : null;
+  const hasVol = (Array.isArray(ctx.term) && ctx.term.some((r) => r && finite(r.vol) !== null && r.vol > 0 && finite(r.dte) !== null)) || iv30 !== null;
+  const moneyOn = spot !== null;
+  const basis = !moneyOn ? "none" : hasVol ? "vol" : "fixed";
+  const parts = [];
+  let seen = 0;
+  dots.forEach((d, i) => {
+    seen++;
+    const p = finite(d && d.p);
+    const cp = d && (d.cp === "C" || d.cp === "P") ? d.cp : null;
+    const days = d && typeof d.e === "string" && sessionDay ? calendarDays(sessionDay, d.e) : null;
+    const bucket = expiryBucket(days);
+    const k = finite(d && d.k);
+    if (p === null || !(p > 0) || cp === null || bucket === null || (moneyOn && !(k > 0))) { excluded.window++; return; }
+    let sigma = null;
+    if (basis === "vol") {
+      const v = volFor(days, ctx.term, iv30);
+      sigma = v ? v.vol : null;
+    }
+    const money = moneyOn ? moneyness(cp, k, spot, sigma, days) : null;
+    if (moneyOn && money === null) { excluded.window++; return; }
+    const flag = flagNode(d.sw, d.op);
+    if (flag === "flg:u") excluded.noFlags++;
+    const split = sideSplit(cp, p, d.a);
+    if (!split.valid) excluded.noAsk++;
+    for (const [side, v] of split.parts) parts.push({ w: i, v, nodes: [side, bucket, money, flag] });
+  });
+  const total = parts.reduce((a, x) => a + x.v, 0);
+  const drawnWindows = new Set(parts.map((x) => x.w)).size;
+  const prem = finite(alerts.prem);
+  const sumAll = dots.reduce((a, d) => a + (finite(d && d.p) !== null && d.p > 0 ? d.p : 0), 0);
+  if (prem !== null && sumAll > prem * 1.001 + 1) return { state: "inconsistent", reason: "The listed windows add to more than the name's flagged premium, so no network is drawn." };
+  if (!(total > 0)) return { state: "quiet", reason: "No listed window could be placed: " + excluded.window + " had a missing price, strike or expiry." };
+  const cover = prem !== null && prem > 0 ? total / prem : null;
+  const columns = [];
+  const defs = [SIDE_NODES, EXPIRY_NODES, moneyOn ? MONEY_NODES[basis === "fixed" ? "fixed" : "scaled"] : null, FLAG_NODES];
+  const keys = ["side", "expiry", "money", "flags"];
+  defs.forEach((def, c) => {
+    if (!def) return;
+    const nodes = [];
+    for (const n of def) {
+      const mine = parts.filter((x) => x.nodes[c] === n.id);
+      const v = mine.reduce((a, x) => a + x.v, 0);
+      if (v > 0) nodes.push({ id: n.id, label: n.label, v, windows: new Set(mine.map((x) => x.w)).size });
+    }
+    const pct = shares(nodes.map((n) => n.v));
+    nodes.forEach((n, i) => { n.pct = pct[i]; });
+    columns.push({ key: keys[c], title: TITLES[keys[c]], index: c, nodes });
+  });
+  const live = columns.map((c) => c.index);
+  const bands = [];
+  for (let j = 0; j + 1 < live.length; j++) {
+    const m = new Map();
+    for (const x of parts) {
+      const a = x.nodes[live[j]];
+      const b = x.nodes[live[j + 1]];
+      const key = a + ">" + b;
+      m.set(key, (m.get(key) || 0) + x.v);
+    }
+    bands.push([...m].map(([key, v]) => { const [a, b] = key.split(">"); return { a, b, v }; }).sort((x, y) => y.v - x.v || (x.a + x.b < y.a + y.b ? -1 : 1)));
+  }
+  const paths = new Map();
+  for (const x of parts) {
+    const key = live.map((i) => x.nodes[i]).join(">");
+    const e = paths.get(key) || { ids: live.map((i) => x.nodes[i]), v: 0, windows: new Set() };
+    e.v += x.v;
+    e.windows.add(x.w);
+    paths.set(key, e);
+  }
+  const pathList = [...paths.values()].map((e) => ({ ids: e.ids, v: e.v, windows: e.windows.size })).sort((a, b) => b.v - a.v || (a.ids.join() < b.ids.join() ? -1 : 1));
+  const coverNote = cover === null ? "not stated" : cover >= 0.75 ? "standard" : cover >= 0.5 ? "wide" : "largest";
+  return {
+    state: drawnWindows < MIN_WINDOWS ? "thin" : "ok",
+    reason: drawnWindows < MIN_WINDOWS ? "Too few windows for a map." : null,
+    session: sessionDay, total, windows: drawnWindows, listed: seen, n: finite(alerts.n), complete: alerts.complete !== false,
+    cover, coverNote, gap: cover === null ? null : Math.round(100 * (1 - cover)), prem,
+    basis, spot, excluded, columns, bands, paths: pathList, parts,
+  };
+}
+
+export function readoutFor(net, id) {
+  const col = net.columns.find((c) => c.nodes.some((n) => n.id === id));
+  if (!col) return null;
+  const node = col.nodes.find((n) => n.id === id);
+  const idx = col.index;
+  const mine = net.parts.filter((x) => x.nodes[idx] === id);
+  const total = mine.reduce((a, x) => a + x.v, 0);
+  const others = net.columns.filter((c) => c !== col).map((c) => {
+    const sums = new Map();
+    for (const x of mine) sums.set(x.nodes[c.index], (sums.get(x.nodes[c.index]) || 0) + x.v);
+    const rows = c.nodes.map((n) => ({ id: n.id, label: n.label, v: sums.get(n.id) || 0 })).filter((r) => r.v > 0).sort((a, b) => b.v - a.v || (a.id < b.id ? -1 : 1));
+    return { key: c.key, title: c.title, rows };
+  });
+  return { id, label: node.label, column: col.title, v: total, windows: node.windows, of: net.total, others };
+}
