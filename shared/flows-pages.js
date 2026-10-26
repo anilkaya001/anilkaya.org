@@ -852,8 +852,8 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="fwd-engine-same">The engine prices delta, win % and EV on {g} (the card&#39;s carry).</p>
       <p data-k="fwd-par">{f} ± {e}: the chain&#39;s own put-call parity over {n} strikes. Delta, win % and EV are priced on it.</p>
       <p data-k="fwd-blend">{f} ± {e}: the chain&#39;s put-call parity over {n} strikes, weighed against the card&#39;s carry ({c}). Delta, win % and EV are priced on it.</p>
-      <p data-k="fwd-carry2">{f} ± {e}, the card&#39;s carry: {why}. Delta, win % and EV are priced on it.</p>
-      <p data-k="fwd-rate2">{f} ± {e}, the interest rate alone: {why}, and the card holds no carry. Delta, win % and EV are priced on it.</p>
+      <p data-k="fwd-carry2">{f} ± {e}, the card&#39;s carry: {why}. Delta, win % and EV are priced on it. A borrow fee or a dividend the card lacks would not show.</p>
+      <p data-k="fwd-rate2">{f} ± {e}, the interest rate alone: {why}, and the card holds no carry. Delta, win % and EV are priced on it. A borrow fee or a dividend would not show.</p>
       <p data-k="fwd-veto">Not confirmed: the options&#39; own pairs sit far from the card&#39;s {f}, too few to price on and too far to ignore, so delta and win % are withheld.</p>
       <p data-k="fwd-below">Options imply a forward {x} bp below carry: likely a borrow cost or a dividend the card lacks.</p>
       <p data-k="fwd-above">Options imply a forward {x} bp above carry: the card&#39;s dividend may be too high.</p>
@@ -865,6 +865,8 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="range-in">The neighbouring quotes allow {lo} to {hi}.</p>
       <p data-k="range-out">Model Win % sits outside the {lo} to {hi} range implied by neighbouring quotes; treat it with caution.</p>
       <p data-k="range-none">no usable neighbouring quotes</p>
+      <p data-k="range-ee">withheld: the chain shows early-exercise pricing, which the call-side range does not allow for</p>
+      <p data-k="fwd-ee">The chain shows early-exercise pricing: parity falls as the strike rises. The forward is moved away from the carry, call volatility is read from the matching put, and the error is widened.</p>
       <p data-k="sc-cut">Ranked from {n} eligible calls; {m} sent. Top {k} exact for annualised time value over collateral; other orders rank sent rows only.</p>
       <p data-k="sc-cut-partial">Partial chain: first {n} contracts read (page limit); ranking covers these only and is not exact.</p>
       <p data-k="sc-cut-budget">Partial chain: the site&#39;s market-data budget ran out after {n} contracts; ranking covers these only and is not exact.</p>

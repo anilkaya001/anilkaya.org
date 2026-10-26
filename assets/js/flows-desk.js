@@ -900,8 +900,9 @@
     const fit = r.__fitFull;
     const used = fit ? fit.forward.F : f.F;
     if (f.veto) return T("fwd-veto", { f: fmt2(f.Fc) });
-    if (f.src === "parity") return T("fwd-par", { f: fmt2(used), e, n: f.n }) + gapText(f);
-    if (f.src === "blend") return T("fwd-blend", { f: fmt2(used), e, n: f.n, c: fmt2(f.Fc) }) + gapText(f);
+    const early = f.ee === true ? " " + T("fwd-ee") : "";
+    if (f.src === "parity") return T("fwd-par", { f: fmt2(used), e, n: f.n }) + gapText(f) + early;
+    if (f.src === "blend") return T("fwd-blend", { f: fmt2(used), e, n: f.n, c: fmt2(f.Fc) }) + gapText(f) + early;
     if (f.src === "carry") return T(f.qKnown === false ? "fwd-rate2" : "fwd-carry2", { f: fmt2(f.F), e, why: carryWhy(f) });
     return T("fwd-rate2", { f: fmt2(f.F), e, why: carryWhy(f) });
   };

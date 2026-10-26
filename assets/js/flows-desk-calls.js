@@ -220,10 +220,11 @@
       r.__winStruct = structFor(r);
       const popQ = eng && !dash ? eng.prob.popQ : null;
       const fit = r.__fitFull;
-      const range = r.br && fit && terms.cv !== "shares" ? Q.winRange(r.br, { profit: "below", D: fit.forward.D }) : null;
+      const eeCall = Boolean(r.__fwd && r.__fwd.ee === true && r.br && r.br.s === "C");
+      const range = r.br && fit && terms.cv !== "shares" && !eeCall ? Q.winRange(r.br, { profit: "below", D: fit.forward.D }) : null;
       const outside = range && popQ !== null ? Q.outsideRange(popQ, range, { side: r.br.s, D: fit.forward.D }) : false;
       r.__sc = Object.assign(line, {
-        delta, eng, spot: r.__spot, netDelta: nd, popQ, popP: eng && !dash ? eng.prob.popP : null, range, outside,
+        delta, eng, spot: r.__spot, netDelta: nd, popQ, popP: eng && !dash ? eng.prob.popP : null, range, outside, eeCall,
         evN: eng && isNum(eng.ev.p) !== null && line.n !== null ? eng.ev.p * line.n : null,
         early: { div, tv: tvShare, watch: div > 0 && tvShare !== null && tvShare < div, deep: delta !== null && delta >= 0.9 },
       });
@@ -316,6 +317,7 @@
 
   function rangeLine(r, sc) {
     if (terms.cv === "shares") return DASH;
+    if (sc.eeCall) return T("range-ee");
     if (!sc.range) return T("range-none");
     const base = T("range-in", { lo: pct0(sc.range.lo), hi: pct0(sc.range.hi) });
     return sc.outside ? T("range-out", { lo: pct0(sc.range.lo), hi: pct0(sc.range.hi) }) : base;
