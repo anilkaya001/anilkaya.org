@@ -1,0 +1,742 @@
+{
+ "provenance": {
+  "generator": "shared/ff-contract.js helpers over node:crypto sha256",
+  "note": "invented tickers only; not vendor data"
+ },
+ "health": [
+  {
+   "phase": "open",
+   "liveAgeS": 120,
+   "nightlyLate": 0,
+   "error": false,
+   "want": "live"
+  },
+  {
+   "phase": "open",
+   "liveAgeS": 600,
+   "nightlyLate": 0,
+   "error": false,
+   "want": "live"
+  },
+  {
+   "phase": "open",
+   "liveAgeS": 601,
+   "nightlyLate": 0,
+   "error": false,
+   "want": "degraded"
+  },
+  {
+   "phase": "open",
+   "liveAgeS": 900,
+   "nightlyLate": 0,
+   "error": false,
+   "want": "degraded"
+  },
+  {
+   "phase": "open",
+   "liveAgeS": 901,
+   "nightlyLate": 0,
+   "error": false,
+   "want": "down"
+  },
+  {
+   "phase": "open",
+   "liveAgeS": 120,
+   "nightlyLate": 1,
+   "error": false,
+   "want": "degraded"
+  },
+  {
+   "phase": "open",
+   "liveAgeS": 120,
+   "nightlyLate": 2,
+   "error": false,
+   "want": "down"
+  },
+  {
+   "phase": "open",
+   "liveAgeS": 120,
+   "nightlyLate": 0,
+   "error": true,
+   "want": "degraded"
+  },
+  {
+   "phase": "open",
+   "liveAgeS": null,
+   "nightlyLate": 0,
+   "error": false,
+   "want": "unknown"
+  },
+  {
+   "phase": "open",
+   "liveAgeS": 120,
+   "nightlyLate": null,
+   "error": false,
+   "want": "unknown"
+  },
+  {
+   "phase": "closed",
+   "liveAgeS": null,
+   "nightlyLate": 0,
+   "error": false,
+   "want": "resting"
+  },
+  {
+   "phase": "closed",
+   "liveAgeS": 40000,
+   "nightlyLate": 0,
+   "error": false,
+   "want": "resting"
+  },
+  {
+   "phase": "closed",
+   "liveAgeS": null,
+   "nightlyLate": 1,
+   "error": false,
+   "want": "degraded"
+  },
+  {
+   "phase": "closed",
+   "liveAgeS": null,
+   "nightlyLate": 2,
+   "error": false,
+   "want": "down"
+  },
+  {
+   "phase": "closed",
+   "liveAgeS": null,
+   "nightlyLate": null,
+   "error": false,
+   "want": "unknown"
+  }
+ ],
+ "sessions": [
+  {
+   "day": "2026-03-06",
+   "openTrt": "17:30",
+   "closeTrt": "00:00"
+  },
+  {
+   "day": "2026-03-09",
+   "openTrt": "16:30",
+   "closeTrt": "23:00"
+  },
+  {
+   "day": "2026-11-27",
+   "openTrt": "17:30",
+   "closeTrt": "21:00"
+  }
+ ],
+ "edge": [
+  {
+   "name": "five true looks, one hit",
+   "edge": "event",
+   "persist": 1,
+   "op": ">=",
+   "x": 3,
+   "h": 0.5,
+   "looks": [
+    3.1,
+    3.2,
+    3.4,
+    3.1,
+    3.3
+   ],
+   "hitsAt": [
+    0
+   ]
+  },
+  {
+   "name": "dips inside the band do not re-arm",
+   "edge": "event",
+   "persist": 1,
+   "op": ">=",
+   "x": 3,
+   "h": 0.5,
+   "looks": [
+    3.1,
+    2.9,
+    3.3
+   ],
+   "hitsAt": [
+    0
+   ]
+  },
+  {
+   "name": "a dip below the band re-arms",
+   "edge": "event",
+   "persist": 1,
+   "op": ">=",
+   "x": 3,
+   "h": 0.5,
+   "looks": [
+    3.1,
+    2.4,
+    3.2
+   ],
+   "hitsAt": [
+    0,
+    2
+   ]
+  },
+  {
+   "name": "unknown freezes the phase",
+   "edge": "event",
+   "persist": 1,
+   "op": ">=",
+   "x": 3,
+   "h": 0.5,
+   "looks": [
+    3.1,
+    null,
+    3.1
+   ],
+   "hitsAt": [
+    0
+   ]
+  },
+  {
+   "name": "persistence two",
+   "edge": "event",
+   "persist": 2,
+   "op": ">=",
+   "x": 3,
+   "h": 0.5,
+   "looks": [
+    3.1,
+    2,
+    3.1,
+    3.2
+   ],
+   "hitsAt": [
+    3
+   ]
+  },
+  {
+   "name": "unknown holds the count",
+   "edge": "event",
+   "persist": 2,
+   "op": ">=",
+   "x": 3,
+   "h": 0.5,
+   "looks": [
+    3.1,
+    null,
+    3.2
+   ],
+   "hitsAt": [
+    2
+   ]
+  },
+  {
+   "name": "a state metric needs a false first",
+   "edge": "state",
+   "persist": 1,
+   "op": ">=",
+   "x": 3,
+   "h": 0.5,
+   "looks": [
+    3.1,
+    3.2
+   ],
+   "hitsAt": []
+  },
+  {
+   "name": "a state metric fires after a false",
+   "edge": "state",
+   "persist": 1,
+   "op": ">=",
+   "x": 3,
+   "h": 0.5,
+   "looks": [
+    2,
+    3.1
+   ],
+   "hitsAt": [
+    1
+   ]
+  },
+  {
+   "name": "unknown is not a false",
+   "edge": "state",
+   "persist": 1,
+   "op": ">=",
+   "x": 3,
+   "h": 0.5,
+   "looks": [
+    null,
+    3.1
+   ],
+   "hitsAt": []
+  },
+  {
+   "name": "cooldown of five sessions swallows true looks until it ends",
+   "edge": "event",
+   "persist": 1,
+   "op": ">=",
+   "x": 3,
+   "h": 0.5,
+   "cooldown": 5,
+   "sessions": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+   ],
+   "looks": [
+    3.1,
+    2.4,
+    3.2,
+    2.4,
+    3.2,
+    2.4,
+    3.2
+   ],
+   "hitsAt": [
+    0,
+    6
+   ]
+  },
+  {
+   "name": "cooldown of one session is the rest of the session",
+   "edge": "event",
+   "persist": 1,
+   "op": ">=",
+   "x": 3,
+   "h": 0.5,
+   "cooldown": 1,
+   "sessions": [
+    0,
+    0,
+    0,
+    1,
+    1
+   ],
+   "looks": [
+    3.1,
+    2.4,
+    3.2,
+    2.4,
+    3.2
+   ],
+   "hitsAt": [
+    0,
+    4
+   ]
+  },
+  {
+   "name": "looks in the quiet period do not count towards persistence",
+   "edge": "event",
+   "persist": 2,
+   "op": ">=",
+   "x": 3,
+   "h": 0.5,
+   "cooldown": 2,
+   "sessions": [
+    0,
+    0,
+    1,
+    1,
+    2,
+    2
+   ],
+   "looks": [
+    3.1,
+    3.2,
+    2.4,
+    3.1,
+    3.2,
+    3.3
+   ],
+   "hitsAt": [
+    1,
+    5
+   ]
+  },
+  {
+   "name": "a condition that never exits stays one hit whatever the cooldown",
+   "edge": "event",
+   "persist": 1,
+   "op": ">=",
+   "x": 3,
+   "h": 0.5,
+   "cooldown": 2,
+   "sessions": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+   ],
+   "looks": [
+    3.2,
+    3.2,
+    3.2,
+    3.2,
+    3.2,
+    3.2,
+    3.2
+   ],
+   "hitsAt": [
+    0
+   ]
+  },
+  {
+   "name": "a state metric after its cooldown with the exit seen inside it",
+   "edge": "state",
+   "persist": 1,
+   "op": ">=",
+   "x": 3,
+   "h": 0.5,
+   "cooldown": 2,
+   "sessions": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "looks": [
+    2,
+    3.1,
+    2.4,
+    3.2
+   ],
+   "hitsAt": [
+    1,
+    3
+   ]
+  },
+  {
+   "name": "a longer cooldown keeps the same state metric quiet",
+   "edge": "state",
+   "persist": 1,
+   "op": ">=",
+   "x": 3,
+   "h": 0.5,
+   "cooldown": 5,
+   "sessions": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "looks": [
+    2,
+    3.1,
+    2.4,
+    3.2
+   ],
+   "hitsAt": [
+    1
+   ]
+  },
+  {
+   "name": "unknown inside the quiet period freezes everything",
+   "edge": "event",
+   "persist": 1,
+   "op": ">=",
+   "x": 3,
+   "h": 0.5,
+   "cooldown": 3,
+   "sessions": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "looks": [
+    3.1,
+    null,
+    null,
+    3.2
+   ],
+   "hitsAt": [
+    0
+   ]
+  }
+ ],
+ "robust": [
+  {
+   "name": "boundary fires",
+   "x": 1444700,
+   "median": 1000000,
+   "mad": 100000,
+   "floor": 100000,
+   "z": 2.99946,
+   "shown": 3,
+   "fires": true,
+   "floored": false
+  },
+  {
+   "name": "boundary silent",
+   "x": 1443900,
+   "median": 1000000,
+   "mad": 100000,
+   "floor": 100000,
+   "z": 2.99406,
+   "shown": 2.99,
+   "fires": false,
+   "floored": false
+  },
+  {
+   "name": "flat baseline at zero",
+   "x": 0,
+   "median": 0,
+   "mad": 0,
+   "floor": 100000,
+   "z": 0,
+   "shown": 0,
+   "fires": false,
+   "floored": true
+  },
+  {
+   "name": "flat baseline with a print",
+   "x": 5000000,
+   "median": 0,
+   "mad": 0,
+   "floor": 100000,
+   "z": 50,
+   "shown": 50,
+   "fires": true,
+   "floored": true
+  }
+ ],
+ "t5": [
+  {
+   "t": 3,
+   "upper": 0.01505
+  },
+  {
+   "t": 2.5,
+   "upper": 0.02725
+  },
+  {
+   "t": 2,
+   "upper": 0.05097
+  },
+  {
+   "t": 0,
+   "upper": 0.5
+  }
+ ],
+ "canonical": [
+  {
+   "value": {
+    "b": 1,
+    "a": [
+     2,
+     {
+      "d": 4,
+      "c": 3
+     }
+    ],
+    "e": null,
+    "f": 0
+   },
+   "want": "{\"a\":[2,{\"c\":3,\"d\":4}],\"b\":1,\"e\":null,\"f\":0}"
+  },
+  {
+   "value": {
+    "x": 1e+21,
+    "y": 0.1,
+    "z": "q\""
+   },
+   "want": "{\"x\":1e+21,\"y\":0.1,\"z\":\"q\\\"\"}"
+  },
+  {
+   "value": [],
+   "want": "[]"
+  }
+ ],
+ "ids": {
+  "clauses": [
+   {
+    "m": "contract.premium",
+    "op": ">=",
+    "x": 1000000
+   },
+   {
+    "m": "contract.dte",
+    "op": "<=",
+    "x": 21
+   }
+  ],
+  "reversed": [
+   {
+    "m": "contract.dte",
+    "op": "<=",
+    "x": 21
+   },
+   {
+    "m": "contract.premium",
+    "op": ">=",
+    "x": 1000000
+   }
+  ],
+  "clauseCanon": "[{\"m\":\"contract.dte\",\"op\":\"<=\",\"x\":21},{\"m\":\"contract.premium\",\"op\":\">=\",\"x\":1000000}]",
+  "clauseHash": "1c7c4630cb",
+  "sameForReversed": true,
+  "body": {
+   "v": 1,
+   "cadence": "live",
+   "scope": {
+    "kind": "names",
+    "symbols": [
+     "SYX101",
+     "SYX102"
+    ]
+   },
+   "all": [
+    {
+     "m": "contract.premium",
+     "op": ">=",
+     "x": 1000000
+    },
+    {
+     "m": "contract.dte",
+     "op": "<=",
+     "x": 21
+    }
+   ],
+   "persist": 2
+  },
+  "bodyDerived": {
+   "v": 1,
+   "cadence": "live",
+   "scope": {
+    "kind": "names",
+    "symbols": [
+     "SYX101",
+     "SYX102"
+    ]
+   },
+   "all": [
+    {
+     "m": "contract.premium",
+     "op": ">=",
+     "x": 1000000
+    },
+    {
+     "m": "contract.dte",
+     "op": "<=",
+     "x": 21
+    }
+   ],
+   "persist": 2,
+   "d": {
+    "rv": 1,
+    "control": "fact",
+    "q": 0.05,
+    "clauses": [
+     {
+      "step": 1000,
+      "h": {
+       "abs": 50000
+      },
+      "floor": null,
+      "zSpace": null
+     },
+     {
+      "step": 1,
+      "h": {
+       "abs": 0
+      },
+      "floor": null,
+      "zSpace": null
+     }
+    ]
+   },
+   "cooldown": {
+    "unit": "session",
+    "n": 1
+   }
+  },
+  "astHash": "ceb1e212260a29b9d9c9df397e2be97f1608fa25cfdbfa23b5436e68624a6a4f",
+  "memberWire": "w-abcdefghij234567",
+  "keys": [
+   {
+    "layer": "member",
+    "subject": "n:SYX101",
+    "session": "2026-03-09",
+    "clauseHash": "1c7c4630cb",
+    "revision": 0,
+    "key": "n:SYX101:2026-03-09:1c7c4630cb",
+    "hitId": "jbuf2xwsxd4dgwbux6cz"
+   },
+   {
+    "layer": "member",
+    "subject": "c:SYX101:SYX101260918C00100000",
+    "session": "2026-03-09",
+    "clauseHash": "1c7c4630cb",
+    "revision": 0,
+    "key": "c:SYX101:SYX101260918C00100000:2026-03-09:1c7c4630cb",
+    "hitId": "eote7u6fdrimqhleeblk"
+   },
+   {
+    "layer": "house",
+    "subject": "s:Technology",
+    "session": "2026-03-09",
+    "clauseHash": null,
+    "revision": 0,
+    "key": "s:Technology:2026-03-09",
+    "hitId": "majmcei2wkflg5plwo2h"
+   },
+   {
+    "layer": "house",
+    "subject": "n:SYX102",
+    "session": "2026-03-09",
+    "clauseHash": null,
+    "revision": 1,
+    "key": "n:SYX102:2026-03-09:r1",
+    "hitId": "4qrhyeathfhagcrema7o"
+   }
+  ],
+  "base32": {
+   "input": "abc",
+   "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+   "base32": "xj4bnp4pahh6uqkbidpf"
+  }
+ },
+ "labels": [
+  {
+   "day": "2026-03-09",
+   "asOf": "2026-03-09T13:29:00Z",
+   "label": "pre-open"
+  },
+  {
+   "day": "2026-03-09",
+   "asOf": "2026-03-09T13:42:00Z",
+   "label": "open+12m"
+  },
+  {
+   "day": "2026-03-09",
+   "asOf": "2026-03-09T14:35:00Z",
+   "label": "open+1h05m"
+  },
+  {
+   "day": "2026-03-09",
+   "asOf": "2026-03-09T20:00:00Z",
+   "label": "close"
+  },
+  {
+   "day": "2026-03-09",
+   "asOf": "2026-03-09T20:30:00Z",
+   "label": "post-close"
+  },
+  {
+   "day": "2026-03-06",
+   "asOf": "2026-03-06T14:42:00Z",
+   "label": "open+12m"
+  },
+  {
+   "day": "2026-11-27",
+   "asOf": "2026-11-27T18:00:00Z",
+   "label": "close"
+  }
+ ]
+}

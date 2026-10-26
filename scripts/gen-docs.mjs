@@ -164,7 +164,7 @@ export function assign(modules, tracked) {
         const cur = best.get(f);
         if (!cur || score[0] > cur.score[0] || (score[0] === cur.score[0] && (score[1] > cur.score[1] || (score[1] === cur.score[1] && score[2] > cur.score[2])))) best.set(f, { row: i, glob: g, score });
       }
-      if (!hit) dead.push(`${row.paths.join(", ")}: "${g}" matches no file`);
+      if (!hit && row.optional !== true) dead.push(`${row.paths.join(", ")}: "${g}" matches no file`);
     }
   });
   const uncovered = [...tracked].filter((f) => !best.has(f)).sort();

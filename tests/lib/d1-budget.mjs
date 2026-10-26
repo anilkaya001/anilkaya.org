@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { cronJob } from "../../shared/flows-live-worker.js";
+import { FF_PLANNED } from "./d1-budget-ff.mjs";
 
 export const CAPS = Object.freeze({ written: 100000, read: 5000000 });
 
@@ -162,7 +163,7 @@ export function ledger(counts, measured = MEASURED_CEILINGS) {
       read: NIGHTLY.readRows + UPSERT_READS_PER_WRITE * posts },
     { id: "rail.roster", kind: "reader", written: 0, read: railLoads() * measured.rosterRead },
     { id: "members.pages", kind: "reader", written: 0, read: MEMBERS.count * MEMBERS.readRowsPerMemberDay },
-    ...PLANNED.map((x) => ({ id: x.id, kind: "planned", written: x.written, read: x.read })),
+    ...[...PLANNED, ...FF_PLANNED].map((x) => ({ id: x.id, kind: "planned", written: x.written, read: x.read })),
   ];
   return rows;
 }
