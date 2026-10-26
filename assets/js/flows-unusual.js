@@ -361,7 +361,6 @@
       if (tok !== netTok || !loaded || !loaded.net) return;
       if (want === "map" && !loaded.netMap) return;
       if (net) { net.destroy(); net = null; }
-      host.net.classList.remove("is-slot", "is-quiet");
       netMode = want;
       if (want === "3d") net = loaded.net.mount(host.net, host.net.dataset.ambient === "1" ? { ambient: true, fit: true, barInHead: true } : { fit: true, barInHead: true });
       else { net = loaded.netMap.mount(host.net, {}); netSectors(net); }
@@ -376,7 +375,8 @@
   function takeAlerts(alerts, kind, reason, animate) {
     if (host.net) {
       const full = kind === "ok" && alerts.rows.length > 0;
-      if (!net) { host.net.classList.toggle("is-slot", full); host.net.classList.toggle("is-quiet", !full); }
+      host.net.classList.toggle("is-slot", full);
+      host.net.classList.toggle("is-quiet", !full);
     }
     S.alerts = alerts;
     S.alertsKind = kind;

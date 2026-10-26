@@ -278,7 +278,7 @@ try {
       await page.routeWebSocket(/\/api\/rt\/ws/, (ws) => ws.close({ code: 4011, reason: "off" }));
       return { context, page, log, state, errors, payload };
     }
-    const mounted = (page) => page.waitForFunction(() => !!(window.FlowsUI && window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet"))), null, { timeout: 20000 });
+    const mounted = (page) => page.waitForFunction(() => !!(window.FlowsUI && ((window.FlowsUI.net && window.FlowsUI.net.of(document.getElementById("uaNet"))) || (window.FlowsUI.netMap && window.FlowsUI.netMap.of(document.getElementById("uaNet"))))), null, { timeout: 20000 });
     const below = (page) => page.evaluate(() => { const c = document.getElementById("uaChips"); return Math.round((c.getBoundingClientRect().top + scrollY) * 10) / 10; });
 
     for (const width of [1440, 390]) {
@@ -303,7 +303,7 @@ try {
       eq(netAt.length, 1, "the network script is fetched once");
       ok(netAt[0] >= loadAt, `and not before the load event (${Math.round(netAt[0])} ms against ${Math.round(loadAt)} ms)`);
       eq(log.filter((x) => x === "net.js").length, 1, "one request for it in all");
-      await page.waitForFunction(() => document.querySelector("#uaNet .fn-stage"));
+      await page.waitForFunction(() => document.querySelector("#uaNet .fn-stage, #uaNet .nm-stage"));
       const after = await below(page);
       const hostH = await page.evaluate(() => Math.round(document.getElementById("uaNet").getBoundingClientRect().height));
       console.log(`  unusual ${width}px: card ${await page.evaluate(() => Math.round(document.getElementById('uaNet').getBoundingClientRect().width))} px, slot ${Math.round(slot.heights)} px, mounted ${hostH} px, chips ${before} to ${after}, layout shift ${await page.evaluate(() => window.__cls.toFixed(4))}`);
@@ -324,20 +324,18 @@ try {
         const { context, page } = await openUnusual({ width: w, height: 900 });
         await page.goto("https://example.test/flows/unusual/");
         await mounted(page);
-        await page.waitForFunction(() => document.querySelector("#uaNet .fn-stage"));
+        await page.waitForFunction(() => document.querySelector("#uaNet .fn-stage, #uaNet .nm-stage"));
         await sleep(300);
         const m = await page.evaluate(() => {
           const h = document.getElementById("uaNet");
-          const content = [...h.children].reduce((a, c) => a + c.getBoundingClientRect().height, 0) + (h.children.length - 1) * parseFloat(getComputedStyle(h).rowGap || 0);
-          return { w: Math.round(h.getBoundingClientRect().width), content: Math.round(content), reserved: parseFloat(getComputedStyle(h).minHeight) };
+          return { w: Math.round(h.getBoundingClientRect().width), content: h.scrollHeight, reserved: h.clientHeight };
         });
         off.push({ ...m, d: m.content - m.reserved });
         await context.close();
       }
       const worst = off.reduce((a, b) => (b.d > a.d ? b : a));
       console.log("  slot reservation against the mounted height at 11 widths, worst shortfall " + worst.d + " px at a card of " + worst.w + " px, widest surplus " + Math.min(...off.map((x) => x.d)) + " px");
-      ok(off.every((x) => x.d <= 6), `THE RESERVATION NEVER FALLS SHORT: on a fresh load at every width the mounted network fits inside the height reserved for it to within 6 px (${off.filter((x) => x.d > 6).map((x) => x.w + ": " + x.d).join(", ") || "none"})`);
-      ok(off.every((x) => x.d >= -80), `and never reserves more than 80 px of empty space (the module is its own scroller now, so a classic scrollbar narrows it by up to 15 px) under it (${off.filter((x) => x.d < -80).map((x) => x.w + ": " + x.d).join(", ") || "none"})`);
+      ok(off.every((x) => x.d <= 1), `THE MOUNTED NETWORK NEVER OVERFLOWS ITS HOST: on a fresh load at every width its content fits the stage-sized host to within 1 px (${off.filter((x) => x.d > 1).map((x) => x.w + ": " + x.d).join(", ") || "none"})`);
     }
 
     {
@@ -393,7 +391,7 @@ try {
         const { context, page, errors } = await openUnusual({ width, height: width === 1440 ? 900 : 844, ...opts });
         await page.goto("https://example.test/flows/unusual/");
         await mounted(page);
-        await page.waitForSelector("#uaNet .fn-empty:not([hidden])");
+        await page.waitForSelector("#uaNet .fn-empty:not([hidden]), #uaNet .nm-empty");
         await sleep(500);
         const m = await natural(page);
         const cls = await page.evaluate(() => window.__cls);
@@ -415,7 +413,7 @@ try {
         const { context, page } = await openUnusual({ width: w, height: 900, empty: true });
         await page.goto("https://example.test/flows/unusual/");
         await mounted(page);
-        await page.waitForSelector("#uaNet .fn-empty:not([hidden])");
+        await page.waitForSelector("#uaNet .fn-empty:not([hidden]), #uaNet .nm-empty");
         await sleep(300);
         const m = await natural(page);
         off.push({ w, reserved: m.reserved, gap: m.host - m.own, inner: m.inner });
