@@ -44,7 +44,7 @@ export function ledgerBody(glyph) {
           <div class="sf-seg r" role="group" aria-label="View" id="sfView"><button type="button" data-w="table" aria-pressed="true" id="sfViewT">Sectors</button><button type="button" data-w="flow" aria-pressed="false">Flow</button></div>
         </div>
         <div class="sf-body" id="sfBody"></div>
-        <p class="sf-foot" id="sfFoot"></p>
+        <div class="sf-fr"><p class="sf-foot" id="sfFoot"></p><button type="button" class="link sf-all" id="sfAll" aria-haspopup="dialog" hidden></button></div>
       </section>
       <section class="sf-panel sf-read" id="sfRead" aria-label="Reading">
         <div class="sf-ph"><h2>Reading</h2></div>
@@ -55,6 +55,9 @@ export function ledgerBody(glyph) {
   <dialog class="sf-dlg" id="sfInfoDlg" aria-labelledby="sfInfoT"><div class="dg"><h2 id="sfInfoT">How to read this page</h2>
     <div class="body">${para(INFO)}<p>${esc(BALANCING_DEFINITION)}</p><h3>Not built</h3>${para(NOT_BUILT)}</div>
     <div class="x"><button type="button" class="link" id="sfInfoX">Close</button></div></div></dialog>
+  <dialog class="sf-dlg" id="sfAllDlg" aria-labelledby="sfAllT"><div class="dg"><h2 id="sfAllT"></h2>
+    <div class="body sf-allbody" id="sfAllBody"></div>
+    <div class="x"><button type="button" class="link" id="sfAllX">Close</button></div></div></dialog>
 `;
 }
 

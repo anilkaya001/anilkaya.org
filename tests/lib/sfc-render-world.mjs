@@ -19,8 +19,8 @@ export const CSS = fs.readFileSync(path.join(ROOT, "assets/css/flows-sfc.css"), 
 
 const MIME = { ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".json": "application/json" };
 
-export function realisticWorld(seed = 20261023) {
-  const world = makeWorld(seed, { tickers: 90, perName: 7, pathologies: false, floor: 20000, magnitude: 4.4 });
+export function realisticWorld(seed = 20261023, over = {}) {
+  const world = makeWorld(seed, { tickers: 90, perName: 7, pathologies: false, floor: 20000, magnitude: 4.4, ...over });
   const rnd = mulberry32(seed + 7);
   const held = runProduction(world);
   world.tide = {};
@@ -90,6 +90,7 @@ export async function mount(browser, w, h, o = {}) {
       return r.fulfill({ contentType: "application/json", body: JSON.stringify(body), headers: { "X-Payload-Updated": String(NOW_INTRADAY) } });
     }
     if (u.pathname === "/api/flows/now") return r.fulfill({ contentType: "application/json", body: JSON.stringify({ serverNow: NOW_INTRADAY, phase: null, keys: {} }) });
+    if (u.pathname === "/api/flows/meta") return r.fulfill({ contentType: "application/json", body: JSON.stringify({ status: "pending" }) });
     if (u.pathname.startsWith("/api/")) return r.fulfill({ status: 404, contentType: "application/json", body: "{}" });
     return r.fulfill({ contentType: "text/html; charset=utf-8", body: HTML });
   });

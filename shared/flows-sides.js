@@ -50,7 +50,7 @@ export const REASON_LABELS = Object.freeze({
     btw: "Between the quotes",
     cross: "Window includes a floor trade",
     leg: "Spread package legs",
-    ns: "A side not stated",
+    ns: "Side not reported",
   }),
   print: Object.freeze({
     mid: "Matched at the midpoint",
@@ -63,16 +63,16 @@ export const REASON_LABELS = Object.freeze({
 
 export const REASON_HOVERS = Object.freeze({
   window: Object.freeze({
-    btw: "Traded between the bid and ask, or with no quote.",
+    btw: "Traded between the bid and ask, or with no quote: taker unknown.",
     cross: "Has a floor-crossed trade, so the side that initiated is unknown.",
-    leg: "Every trade was part of a multi-leg package; leg prices show no side.",
+    leg: "Every trade was a multi-leg package leg; a leg price hides the side.",
     ns: "The data provider did not report the ask or bid premium.",
   }),
   print: Object.freeze({
     mid: "Traded at the midpoint of bid and ask, so neither side is shown.",
     nq: "No valid bid and ask existed when this trade printed.",
     cross: "Two customers crossed on the floor; neither side initiated against a quote.",
-    leg: "One leg of a multi-leg package; a leg price shows no side.",
+    leg: "One leg of a multi-leg package; a leg price hides the side.",
     disagree: "Two side checks gave different answers, so neither side is counted.",
   }),
 });

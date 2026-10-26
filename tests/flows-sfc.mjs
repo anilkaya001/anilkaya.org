@@ -145,7 +145,7 @@ const eq = (a, b, m) => { assert.deepEqual(a, b, m); checks++; };
     const failed = await runBattery(V, [plant.expect]);
     ok(failed.length === 1 && failed[0].id === plant.expect && failed[0].thrown === false, `planted build ${plant.id} (${plant.title}) fails ${plant.expect} by an assertion, not a crash`);
   }
-  ok(PLANTS.length >= 39, `${PLANTS.length} planted builds`);
+  ok(PLANTS.length >= 40, `${PLANTS.length} planted builds`);
   eq(Object.keys(CHECKS).filter((id) => !PLANTS.some((p) => p.expect === id)), [], "and every check has a planted build that names it");
 }
 
@@ -265,6 +265,35 @@ const eq = (a, b, m) => { assert.deepEqual(a, b, m); checks++; };
     eq([...withFund.uni.weights], [...base.uni.weights], `M8 seed ${seed}: a fund with a stray sector and a market cap adds no weight to any sector`);
     eq(shape(withFund, { counts: false }), shape(base, { counts: false }), `M8 seed ${seed}: and no figure moves`);
   }
+}
+
+{
+  let tested = 0;
+  for (let seed = 331; seed <= 400; seed++) {
+    const w = makeWorld(seed, { tickers: 30, perName: 6, pathologies: false });
+    const base = runProduction(w);
+    if (base.tilt.sum === null) continue;
+    const first = w.rows.find((r) => base.books.has(r.t) && base.tilt.weighted.includes(base.books.get(r.t).column) && Number.isInteger(r.d) && r.size > 0 && r.px !== null);
+    if (!first) continue;
+    const extra = { ...first, oc: first.oc + "u1", prem: 10, askPrem: 0, bidPrem: 0, raw: { ...first.raw, prem: "10.00", askPrem: "0.00", bidPrem: "0.00" } };
+    const after = runProduction({ ...w, rows: w.rows.concat([extra]) });
+    const j = base.books.get(first.t).column;
+    const grown = after.columns.get(j).Ub - base.columns.get(j).Ub;
+    ok(grown > 0n, `M11 seed ${seed}: a window with every side unknown adds to the uncertain exposure of its sector`);
+    const total = base.tilt.weighted.reduce((a, c) => a + BigInt(base.uni.weights.get(c)), 0n);
+    for (const c of base.tilt.weighted) {
+      const a = base.tilt.rows.get(c), b = after.tilt.rows.get(c);
+      eq([b.X, b.a, b.R], [a.X, a.a, a.R], `M11 seed ${seed}: ${c} keeps its exposure, its share and its tilt when a window of unknown side arrives`);
+      const share = BigInt(base.uni.weights.get(c));
+      const move = c === j ? (total - share) * grown : share * grown;
+      const grew = b.W - a.W;
+      ok(grew >= move / total && grew <= (move + total - 1n) / total, `M11 seed ${seed}: the band of ${c} grows by its own share of the new uncertainty and no more, so the total's uncertainty is in every band`);
+      if (a.verdict === "above") ok(b.verdict === "above" || b.verdict === "undetermined", `M11 seed ${seed}: a proven verdict can only be lost, never reversed`);
+      if (a.verdict === "below") ok(b.verdict === "below" || b.verdict === "undetermined", `M11 seed ${seed}: and likewise below`);
+    }
+    tested++;
+  }
+  ok(tested >= 30, `M11 ran on ${tested} worlds`);
 }
 
 {

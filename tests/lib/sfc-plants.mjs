@@ -96,4 +96,6 @@ export const PLANTS = [
     [["Math.max(0, digits - 4)", "Math.max(0, digits - 3)"]], "display.unit"),
   plant("P39-same-session-ge", "windows expiring after the session count as expiring in it", SFC,
     [["row.exp === session) book.sameDay", "row.exp >= session) book.sameDay"]], "world.oracle"),
+  plant("P40-band-own-sector-only", "a sector's band counts only its own uncertain exposure and leaves out the total's", SFC,
+    [["const Q = (Wt - w[i]) * row.U + w[i] * (Ut - row.U);", "const Q = Wt * row.U;"]], "world.oracle"),
 ];

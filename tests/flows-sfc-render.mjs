@@ -22,6 +22,7 @@ const ok = (c, m) => { assert.ok(c, m); checks++; };
 const eq = (a, b, m) => { assert.deepEqual(a, b, m); checks++; };
 
 const MINUS = "−", DASH = "—";
+const COPY_TOTAL_ALL = "Total, all rows";
 const COLOUR_LITERAL = /#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla|hwb|lab|lch|oklab|oklch)\(|(?<![-\w])(?:white|black|red|green|blue|gray|grey|orange|yellow)(?![-\w])/;
 const SIZES = [[1920, 1080], [1920, 940], [1440, 820], [1024, 768], [390, 844], [390, 664]];
 const STATIC_DIALOG = /<dialog[\s\S]*?<\/dialog>/g;
@@ -40,7 +41,7 @@ const STATIC_DIALOG = /<dialog[\s\S]*?<\/dialog>/g;
   const text = htmlToText(HTML.replace(/<aside class="fx-side"[\s\S]*?<\/aside>/, "").replace(/<aside class="ak-dock"[\s\S]*?<\/aside>/, "").replace(/<header[\s\S]*?<\/header>/, ""));
   eq(lintText(text).map((h) => `${h.rule} ${JSON.stringify(h.match)} :: ${h.sentence.slice(0, 80)}`), [], "the served page text passes every copy rule: no unsided, no tape, no sector transfer, nothing leaving, no forecast word, sentences of at most fourteen words");
   const dialog = (HTML.match(STATIC_DIALOG) || []).join(" ");
-  for (const line of COPY.INFO) ok(dialog.includes(line.replace(/'/g, "&#39;")), "the info dialog carries: " + line.slice(0, 50));
+  for (const line of COPY.INFO) ok(dialog.includes(line.replace(/&/g, "&amp;").replace(/'/g, "&#39;")), "the info dialog carries: " + line.slice(0, 50));
   for (const line of COPY.NOT_BUILT) ok(dialog.includes(line), "and the not-built line: " + line.slice(0, 40));
   ok(dialog.includes(COPY.BALANCING_DEFINITION), "and the definition of the balancing entry");
   ok(HTML.includes(COPY.KEY_LINE) && HTML.includes(COPY.ZERO_LINE), "the key and the zero line are in the served HTML");
@@ -131,6 +132,9 @@ const audit = (page) => page.evaluate(() => {
   for (const scroller of [document.querySelector(".flows-main"), document.querySelector(".flows-shell, .flows-body")]) {
     if (scroller && scroller.scrollHeight > scroller.clientHeight + 1 && getComputedStyle(scroller).overflowY !== "visible") out.push("a container scrolls: " + scroller.className + " " + scroller.scrollHeight + " over " + scroller.clientHeight);
   }
+  for (const host of document.querySelectorAll(".sf-mat, .sf-body")) {
+    if (vis(host) && host.scrollHeight > host.clientHeight + 1) out.push("rows clipped in " + host.id + ": " + host.scrollHeight + " over " + host.clientHeight);
+  }
   for (const panel of document.querySelectorAll(".sf-panel")) {
     if (!vis(panel)) continue;
     const pr = panel.getBoundingClientRect();
@@ -138,13 +142,13 @@ const audit = (page) => page.evaluate(() => {
       if (!vis(el) || (el.closest("svg") && el.tagName !== "svg")) continue;
       const r = el.getBoundingClientRect();
       if (r.bottom > pr.bottom + 1 || r.right > pr.right + 1 || r.left < pr.left - 1 || r.top < pr.top - 1) out.push("outside " + panel.id + ": " + el.tagName + "." + el.className + " by " + Math.round(r.bottom - pr.bottom) + "," + Math.round(r.right - pr.right));
-      if (el.matches("th[scope=row], td.c, td.n, td.tl .tv, .sf-chk, .sf-seg button, .sf-crumbs button, .sf-tabs button, .sf-drill, .fl-lab") && el.scrollWidth > el.clientWidth + 1) out.push("text cut: " + el.textContent.trim().slice(0, 30));
+      if (el.matches("th[scope=row], thead th, td.c, td.n, td.tl .tv, .sf-chk, .sf-seg button, .sf-crumbs button, .sf-tabs button, .sf-drill, .fl-lab") && el.scrollWidth > el.clientWidth + 1) out.push("text cut: " + el.textContent.trim().slice(0, 30));
     }
   }
   return out;
 });
 
-const tableCells = (page, selector) => page.evaluate((sel) => [...document.querySelectorAll(sel + " tbody tr, " + sel + " tfoot tr")].map((tr) => ({
+const tableCells = (page, selector) => page.evaluate((sel) => [...document.querySelectorAll(sel + " tbody tr:not(.sub), " + sel + " tfoot tr")].map((tr) => ({
   cls: tr.className, cells: [...tr.children].map((c) => ({ t: c.textContent.trim(), s: c.dataset.s || null, x: c.dataset.x || c.title || null, hidden: getComputedStyle(c).display === "none" })),
 })), selector);
 
@@ -165,7 +169,7 @@ const expected = (w, url) => respondWith(w)(new URL("https://x.test" + url));
     eq(await m.page.textContent("#sfStamp"), view.period.label, `${w}x${h}: the stamp is the period label`);
     eq(await m.page.textContent("#sfScope"), view.scope.line, `${w}x${h}: and the scope line`);
     eq(await m.page.$$eval("#sfChecks .sf-chk", (a) => a.map((x) => [x.dataset.id, x.dataset.state])), view.checks.items.map((i) => [i.id, i.state]), `${w}x${h}: seven check chips with the view's states`);
-    ok(/^\d+ pass( · \d+ fail)?( · \d+ not checked)?$/.test(await m.page.textContent("#sfCheckLine")), `${w}x${h}: the one-line summary of the checks`);
+    ok(/^Internal checks · \d+ pass( · \d+ fail)?( · \d+ not checked)?$/.test(await m.page.textContent("#sfCheckLine")), `${w}x${h}: the one-line summary of the checks`);
     eq(await m.page.$eval("#sfCheckLine", (e) => [e.getAttribute("role"), e.getAttribute("tabindex"), e.hasAttribute("aria-expanded")]), w < 900 ? ["button", "0", true] : [null, null, false], `${w}x${h}: the summary line is a button exactly where it opens the chips`);
     ok(await m.page.$eval("#sfPeriod [data-p=intraday]", (b) => b.getAttribute("aria-pressed") === "true"), `${w}x${h}: Intraday is pressed`);
     eq(await m.page.$$eval("#sfPeriod button", (a) => a.map((b) => b.getAttribute("aria-disabled"))), ["false", "true", "true"], `${w}x${h}: Session and 5 sessions are named unavailable`);
@@ -179,7 +183,9 @@ const expected = (w, url) => respondWith(w)(new URL("https://x.test" + url));
   const rows = await tableCells(m.page, ".sf-lt");
   const L = view.ledger;
   eq(rows.length, 12, "the ledger shows ten entries, net before balancing and the balancing entry");
-  eq(rows.map((r) => r.cells[0].t), [...L.rows.slice(0, 10).map((r) => r.label), L.net.label, L.rows[10].label], "row labels in order, net before balancing above the balancing entry");
+  eq(rows.map((r) => r.cells[0].t), [...L.rows.slice(0, 10).map((r) => r.short), L.net.label, L.rows[10].label], "row labels in order, net before balancing above the balancing entry");
+  eq(await m.page.$$eval(".sf-lt tr.sub td", (a) => a.map((x) => [x.textContent, x.colSpan])), [[COPY.GROUP_ROWS.side.label, 7]], "the four rows whose side is unknown sit under one sub-heading that names them");
+  eq(await m.page.$$eval(".sf-lt tbody tr", (a) => a.map((tr) => tr.className.split(" ")[0] + (tr.classList.contains("in") ? ".in" : ""))).then((a) => a.slice(4, 10)), ["sub", ".in", ".in", ".in", ".in", ""], "and the four rows are indented beneath it");
   const flat = [...L.rows.slice(0, 10), L.net, L.rows[10]];
   rows.forEach((row, i) => row.cells.slice(1).forEach((cell, c) => {
     const want = flat[i].cells[c];
@@ -246,9 +252,10 @@ const expected = (w, url) => respondWith(w)(new URL("https://x.test" + url));
 {
   const m = await mount(browser, 1440, 820);
   await m.page.click('#sfPeriod [data-p="session"]', { force: true });
-  const before = m.asked.length;
+  const ledgerReads = () => m.asked.filter((u) => u.startsWith("/api/flows/ledger")).length;
+  const before = ledgerReads();
   await m.page.waitForTimeout(100);
-  eq(m.asked.length, before, "a period that is not available makes no request");
+  eq(ledgerReads(), before, "a period that is not available makes no request");
   ok((await m.page.textContent("#sfNote")).includes("Session of"), "and its reason is shown beside the control");
   await m.page.click("#sfPeriod [data-p=intraday]");
   await m.page.waitForSelector("#sf[data-busy='false']");
@@ -305,8 +312,8 @@ const expected = (w, url) => respondWith(w)(new URL("https://x.test" + url));
   ok(/Net before balancing|Balancing entry/.test(await m.page.textContent("#sfCellLine")), "down the column ends on the balancing entry and stops there");
   const x = await m.page.$eval(".sf-lt td.c[data-s='ok']", (el) => el.dataset.x);
   ok(/^[−$0-9,.]+$/.test(x) && x.includes("$"), "the exact figure is dollars and cents: " + x);
-  await m.page.hover(".sf-lt tbody tr:nth-child(5) td.c:not(.b)");
-  ok((await m.page.textContent("#sfCellLine")).includes("No side"), "hovering a cell prints it too");
+  await m.page.hover(".sf-lt tbody tr:nth-child(6) td.c:not(.b)");
+  ok((await m.page.textContent("#sfCellLine")).includes("Side unknown"), "hovering a cell prints it too");
   await m.page.mouse.move(5, 5);
   await m.page.focus("#sfInfoBtn");
   await m.page.keyboard.press("Enter");
@@ -329,12 +336,12 @@ const expected = (w, url) => respondWith(w)(new URL("https://x.test" + url));
   const m = await mount(browser, 390, 844);
   eq(await m.page.$$eval("#sfTabs button", (a) => a.map((b) => [b.dataset.v, b.getAttribute("aria-selected")])), [["ledger", "true"], ["side", "false"], ["read", "false"]], "three tabs, Ledger first");
   eq(await m.page.$$eval(".sf-panel", (a) => a.map((p) => getComputedStyle(p).display)), ["flex", "none", "none"], "only the Ledger panel is shown");
-  eq(await m.page.$$eval("#sfGroups button", (a) => a.map((b) => [b.textContent, b.getAttribute("aria-pressed")])), [["Held", "true"], ["No side", "false"], ["Outside", "false"]], "three column groups, Held pressed");
+  eq(await m.page.$$eval("#sfGroups button", (a) => a.map((b) => [b.textContent, b.getAttribute("aria-pressed")])), [["Held", "true"], ["Side unknown", "false"], ["Outside", "false"]], "three column groups, Held pressed");
   const held = await tableCells(m.page, ".sf-lt");
   eq(held.map((r) => r.cells.length), Array(held.length).fill(3), "two columns and a label in the held group");
   eq(held.map((r) => r.cells[0].t), ["Calls, ask side", "Calls, bid side", "Puts, ask side", "Puts, bid side", "Net before balancing", "Balancing entry, defined"], "the held group shows its four entries, net and balancing");
   await m.page.click('#sfGroups [data-g="noside"]');
-  eq((await tableCells(m.page, ".sf-lt")).map((r) => r.cells[0].t), COPY.ROW_COPY.slice(4, 8).map((r) => r.label).concat(["Net before balancing", "Balancing entry, defined"]), "the no-side group shows its four reasons, net and balancing");
+  eq((await tableCells(m.page, ".sf-lt")).map((r) => r.cells[0].t), COPY.ROW_COPY.slice(4, 8).map((r) => r.short).concat(["Net before balancing", "Balancing entry, defined"]), "the side-unknown group shows its four reasons, net and balancing");
   eq(await audit(m.page), [], "and is still one clean screen");
   await m.page.click('#sfGroups [data-g="outside"]');
   eq((await tableCells(m.page, ".sf-lt")).length, 4, "the outside group shows two entries, net and balancing");
@@ -384,7 +391,7 @@ const expected = (w, url) => respondWith(w)(new URL("https://x.test" + url));
   const gone = await mount(browser, 1440, 820, { input: { breadth: null } });
   const absent = await gone.page.$$eval(".sf-lt td.a", (a) => a.map((x) => [x.textContent.trim(), x.dataset.x]));
   ok(absent.length >= 6 && absent.every(([t, x]) => t === DASH && x && x.length > 5), `without a sector tide the outside cells are a dash with a reason, never zero (${absent.length})`);
-  eq(await gone.page.$$eval(".sf-lt tbody tr", (a) => a.length), 12, "and the rows stay");
+  eq(await gone.page.$$eval(".sf-lt tbody tr:not(.sub)", (a) => a.length), 12, "and the rows stay");
   ok((await gone.page.$$eval(".sf-st tbody td.n.a", (a) => a.length)) >= 13, "the sector table marks the outside column absent for every sector");
   const cut = await gone.page.$eval(".sf-lt thead tr:last-child th:nth-child(6)", (e) => e.className);
   ok(/off/.test(cut), "and the unmeasured columns are dimmed in the head");
@@ -424,6 +431,52 @@ const expected = (w, url) => respondWith(w)(new URL("https://x.test" + url));
   await m.ctx.close();
 }
 
+const DEEP = realisticWorld(78, { tickers: 4, perName: 60 });
+const BUSIEST = [...new Set(DEEP.rows.map((r) => r.t))].map((t) => [t, DEEP.rows.filter((r) => r.t === t).length]).sort((a, b) => b[1] - a[1])[0][0];
+const DEEP_ROWS = respondWith(DEEP)(new URL("https://x.test/api/flows/ledger?scope=name%3A" + BUSIEST)).windows.rows.length;
+
+{
+  const crowded = realisticWorld(77, { tickers: 420, perName: 3 });
+  const deep = DEEP;
+  const rowsIn = (page, sel) => page.$$eval(sel, (a) => a.length);
+  const seenIn = (page, sel) => page.$$eval(sel, (a) => a.filter((r) => getComputedStyle(r).display !== "none").length);
+  const cutRows = (page) => page.$$eval(".sf-st tbody tr", (a) => a.filter((r) => getComputedStyle(r).display === "none").length);
+  const phone = await mount(browser, 390, 664);
+  await phone.page.click('#sfTabs [data-v="side"]');
+  await phone.page.waitForTimeout(300);
+  eq(await audit(phone.page), [], "390x664, Sectors tab: the short phone is one clean screen, with no row cut off silently");
+  ok(await phone.page.$eval('.sf-drill[data-scope="sector:Communication Services"]', (b) => b.textContent === "Comm. services" && b.getAttribute("aria-label") === "Open Communication Services"), "a long sector name is shortened on a phone and still named in full for a screen reader");
+  const hidden = await cutRows(phone.page);
+  ok(hidden > 0 && await phone.page.$eval("#sfAll", (b) => !b.hidden && b.textContent === "Show all 13"), `rows that do not fit are set aside (${hidden}) and a button names all 13`);
+  eq(await phone.page.$eval(".sf-st tfoot th", (e) => e.textContent), COPY_TOTAL_ALL, "and the total says it counts every row, not only the rows shown");
+  await phone.page.click("#sfAll");
+  eq(await seenIn(phone.page, "#sfAllBody .sf-st tbody tr"), 13, "the dialog lists all thirteen rows");
+  eq(await phone.page.$eval("#sfAllBody .sf-st tfoot th", (e) => e.textContent), "Total", "and its total is the plain total");
+  await phone.page.keyboard.press("Escape");
+  eq(await phone.page.evaluate(() => document.activeElement && document.activeElement.id), "sfAll", "Escape returns focus to the button");
+  await phone.ctx.close();
+
+  const busiest = BUSIEST;
+  for (const [w, h] of [[1440, 820], [1024, 768], [390, 844], [390, 664]]) {
+    const names = await mount(browser, w, h, { world: crowded, hash: "#scope=sector%3ATechnology" });
+    if (w < 900) { await names.page.click('#sfTabs [data-v="side"]'); await names.page.waitForTimeout(300); }
+    eq(await audit(names.page), [], `${w}x${h}: the ten largest names of a sector are one clean screen`);
+    await names.ctx.close();
+    const win = await mount(browser, w, h, { world: deep, hash: "#scope=name%3A" + busiest });
+    if (w < 900) { await win.page.click('#sfTabs [data-v="side"]'); await win.page.waitForTimeout(300); }
+    const view = expected(deep, "/api/flows/ledger?scope=name%3A" + busiest);
+    const total = view.windows.rows.length;
+    eq(await audit(win.page), [], `${w}x${h}: a name with ${total} rows of windows is one clean screen`);
+    const shown = (await rowsIn(win.page, ".sf-st tbody tr")) - (await cutRows(win.page));
+    ok(total >= 12 && shown >= 3 && shown < total, `${w}x${h}: ${shown} of ${total} window rows are shown, the rest are behind Show all`);
+    ok(await win.page.$eval("#sfAll", (b) => !b.hidden && /^Show all \d+$/.test(b.textContent)), `${w}x${h}: and the button names how many there are`);
+    await win.page.click("#sfAll");
+    eq(await seenIn(win.page, "#sfAllBody .sf-st tbody tr"), total, `${w}x${h}: and the dialog shows every window`);
+    await win.page.keyboard.press("Escape");
+    await win.ctx.close();
+  }
+}
+
 {
   const plants = [
     ["a proven fill drawn to R instead of R minus W", "js", [["if (verdict === \"above\") fill = { x: 0, width: u(c - w) };", "if (verdict === \"above\") fill = { x: 0, width: u(c) };"]], async (page) => { const g = await page.evaluate(() => [...document.querySelectorAll(".sf-st tbody tr")].map((tr) => { const f = tr.querySelector(".sf-fo.up"); const b = tr.querySelector(".sf-bd"); const k = tr.querySelector(".sf-tk"); return f ? [Number(f.getAttribute("width")), Number(k.getAttribute("x1")), Number(b.getAttribute("x"))] : null; }).filter(Boolean)); return g.length > 0 && g.every(([w, tick, lo]) => Math.abs(w - lo) < 0.02); }],
@@ -434,19 +487,24 @@ const expected = (w, url) => respondWith(w)(new URL("https://x.test" + url));
     ["the period button loads even when it is unavailable", "js", [["if (period.getAttribute(\"aria-disabled\") === \"true\") { setNote(period.title || \"\", false); return; }", "if (false) { return; }"]], async (page, asked) => !asked.some((u) => u.includes("period=session"))],
     ["arrow widths not proportional", "js", [["return cents.map((c) => (max > 0 && c > 0 ? Math.max(ARROW_MIN, (ARROW_MAX * c) / max) : 0));", "return cents.map((c) => (max > 0 && c > 0 ? ARROW_MAX : 0));"]], async (page) => { const w = await page.$$eval(".fl-ar", (a) => a.map((x) => Number(x.dataset.w))); return new Set(w.filter((x) => x > 0)).size > 1; }, "#w=flow"],
     ["the summary line is a button even when empty or on a wide screen", "js", [["if (small() && el.textContent !== \"\") {", "if (true) {"]], async (page) => (await page.$eval("#sfCheckLine", (e) => e.getAttribute("role"))) === null],
+    ["the sub-heading of the side-unknown rows left out", "js", [["if (group) html += '<tr class=\"sub\"", "if (false) html += '<tr class=\"sub\""]], async (page) => (await page.$$("tr.sub")).length === 1],
+    ["rows given padding they cannot fit, so the last ones are cut", "css", [[".sf-t th, .sf-t td { padding: 0 4px;", ".sf-t th, .sf-t td { padding: 12px 4px;"]], async (page) => (await audit(page)).length === 0],
+    ["the row fitter switched off, so a long table is cut silently", "js", [["if (!table || !table.tBodies[0] || host.clientHeight === 0) return;", "return;"]], async (page) => (await audit(page)).length === 0, "#scope=name%3A" + BUSIEST, { mount: { world: DEEP } }],
+    ["the total keeps its plain name when rows are set aside", "js", [["if (foot) foot.cells[0].textContent = WORDS.totalAll;", "if (foot) foot.cells[0].textContent = WORDS.total;"]], async (page) => { await page.click('#sfTabs [data-v="side"]'); await page.waitForTimeout(300); return (await page.$eval(".sf-st tfoot th", (e) => e.textContent)) === COPY_TOTAL_ALL; }, "", { w: 390, h: 664 }],
+    ["the dialog holds only the rows that were shown", "js", [["$(\"sfAllBody\").innerHTML = S.sideHtml;", "$(\"sfAllBody\").innerHTML = $(\"sfBody\").innerHTML;"]], async (page) => { await page.click("#sfAll"); return (await page.$$eval("#sfAllBody .sf-st tbody tr", (a) => a.filter((r) => getComputedStyle(r).display !== "none").length)) === DEEP_ROWS; }, "#scope=name%3A" + BUSIEST, { mount: { world: DEEP } }],
     ["an old read overwriting a newer one", "js", [["if (seq !== S.seq) return null;\n        freshFrom(res, body);", "freshFrom(res, body);"]], null],
     ["the sheet lets the page scroll", "css", [[".flows-body[data-flows-page=\"ledger\"] .flows-main {\n  --sf-pad-b: var(--sp-4);\n  height: 100vh;\n  height: 100dvh;\n  padding-bottom: var(--sf-pad-b);\n  display: flex;\n  flex-direction: column;\n  overflow: hidden;\n}", ".flows-body[data-flows-page=\"ledger\"] .flows-main {\n  --sf-pad-b: var(--sp-4);\n  padding-bottom: var(--sf-pad-b);\n}"], [".sf { flex: 1; min-height: 0; display: flex;", ".sf { flex: 1; min-height: 130vh; display: flex;"]], async (page) => (await audit(page)).length === 0],
     ["the label column squeezed", "css", [["@media (min-width: 1280px) {\n  .sf-lt .gr > td:first-child, .sf-lt .corner { width: 30%; }", "@media (min-width: 1280px) {\n  .sf-lt .gr > td:first-child, .sf-lt .corner { width: 6%; }"]], async (page) => (await audit(page)).length === 0],
-    ["the sector column squeezed", "css", [[".sf-st th:first-child { width: 32%; }\n  .sf-st .h-taker, .sf-st .c-taker { width: 10%; }", ".sf-st th:first-child { width: 6%; }\n  .sf-st .h-taker, .sf-st .c-taker { width: 10%; }"]], async (page) => (await audit(page)).length === 0],
+    ["the sector column squeezed", "css", [[".sf-st th:first-child { width: 31%; }\n  .sf-st .h-taker, .sf-st .c-taker { width: 10%; }", ".sf-st th:first-child { width: 6%; }\n  .sf-st .h-taker, .sf-st .c-taker { width: 10%; }"]], async (page) => (await audit(page)).length === 0],
   ];
-  for (const [title, kind, transforms, holds, hash] of plants) {
+  for (const [title, kind, transforms, holds, hash, extra] of plants) {
     let js = JS, css = CSS;
     for (const [from, to] of transforms) {
       const target = kind === "js" ? js : css;
       eq(target.split(from).length - 1, 1, `planted build "${title}" applies exactly once`);
       if (kind === "js") js = js.replace(from, () => to); else css = css.replace(from, () => to);
     }
-    const m = await mount(browser, 1440, 820, { js, css, hash: hash || "", settle: 150 }).catch((error) => { throw new Error(`planted build "${title}" did not load: ${error.message.split("\n")[0]}`); });
+    const m = await mount(browser, (extra && extra.w) || 1440, (extra && extra.h) || 820, { js, css, hash: hash || "", settle: 150, ...((extra && extra.mount) || {}) }).catch((error) => { throw new Error(`planted build "${title}" did not load: ${error.message.split("\n")[0]}`); });
     if (holds === null) {
       await m.page.route("**/api/flows/ledger*", async (route) => {
         const u = new URL(route.request().url());

@@ -99,6 +99,6 @@ export function roundGrid(grid, unit) {
 
 export function caption(unit, kind = "premium") {
   const head = kind === "delta" ? "Delta-dollars, " : "";
-  if (unit.e === 0) return `${head}USD, to $1. Hover for exact.`;
-  return `${head}${unit.scaleName}, to ${unit.stepLabel}. Hover for exact.`;
+  if (unit.e === 0) return `${head}USD, to $1, so totals foot. Hover for exact.`;
+  return `${head}${unit.scaleName}, to ${unit.stepLabel}, so totals foot. Hover for exact.`;
 }

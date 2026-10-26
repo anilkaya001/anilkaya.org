@@ -13,17 +13,19 @@
     failed: (clock) => "The record was unreadable at " + clock + ". No figures are shown rather than old ones.",
     view: { all: "Sectors", sector: "Names", name: "Windows" },
     drill: (label) => "Open " + label,
-    summary: (pass, fail, absent) => pass + " pass" + (fail ? " · " + fail + " fail" : "") + (absent ? " · " + absent + " not checked" : ""),
+    summary: (head, pass, fail, absent) => head + " · " + pass + " pass" + (fail ? " · " + fail + " fail" : "") + (absent ? " · " + absent + " not checked" : ""),
     scaleHead: (text, unit) => unit + ", ±" + text,
     namesHead: ["Name", "Win.", "Premium", "Calls", "Puts", "Cap share", "Tilt"],
     windowsHead: ["Window (TRT)", "Contract", "Premium", "Ask side", "Bid side"],
     total: "Total",
+    totalAll: "Total, all rows",
+    showAll: (n) => "Show all " + n,
     heldBand: "Held windows",
-    sideBand: "Side not stated",
+    sideBand: "Side unknown",
     outBand: "Outside held windows",
     buyers: "Buyers",
     sellers: "Sellers",
-    noside: "no side",
+    noside: "side unknown",
     outside: "outside",
     held: "held",
     leanTitle: "Share of premium on the ask side",
@@ -162,13 +164,18 @@
     const shown = rowsFor(body, cols);
     const heads = L.groups.map((g) => ({ g, n: g.cols.filter((c) => cols.includes(c)).length })).filter((x) => x.n > 0);
     let html = '<table class="sf-t sf-lt" role="grid" aria-readonly="true"><caption class="visually-hidden">Premium ledger. A minus is premium paid and a plus is premium received.</caption><thead>';
-    if (!small()) html += '<tr class="gr"><td></td>' + heads.map((x) => '<th scope="colgroup" colspan="' + x.n + '" class="g-' + x.g.id + '">' + esc(x.g.label) + "</th>").join("") + "</tr>";
+    if (!small()) html += '<tr class="gr"><td></td>' + heads.map((x) => '<th scope="colgroup" colspan="' + x.n + '" class="g-' + x.g.id + '" title="' + esc(x.g.hover) + '">' + esc(x.g.label) + "</th>").join("") + "</tr>";
     html += '<tr><td class="corner"></td>' + cols.map((c) => {
       const col = L.columns[c];
       return '<th scope="col" class="' + (col.measured ? "" : "off") + '" title="' + esc(col.hover) + '"><b>' + esc(col.label) + "</b><i>" + esc(col.sub) + "</i></th>";
     }).join("") + "</tr></thead><tbody>";
+    let group = null;
     for (const row of shown) {
-      html += '<tr class="' + (row.kind || "") + '"><th scope="row" title="' + esc(row.hover) + '">' + esc(row.label) + "</th>" + cols.map((c) => matrixTd(row.cells[c], row.label + ", " + L.columns[c].label + " " + L.columns[c].sub)).join("") + "</tr>";
+      if (row.group !== group) {
+        group = row.group;
+        if (group) html += '<tr class="sub" aria-hidden="true"><td colspan="' + (cols.length + 1) + '" title="' + esc(L.groupRows[group].hover) + '">' + esc(L.groupRows[group].label) + "</td></tr>";
+      }
+      html += '<tr class="' + (row.kind || "") + (row.group ? " in" : "") + '"><th scope="row" title="' + esc(row.hover) + '">' + esc(row.group ? row.short : row.label) + "</th>" + cols.map((c) => matrixTd(row.cells[c], row.label + ", " + L.columns[c].label + " " + L.columns[c].sub)).join("") + "</tr>";
     }
     html += "</tbody></table>";
     const host = $("sfMatrix");
@@ -178,7 +185,7 @@
 
   function wireGrid(table, rows, L, cols) {
     const line = $("sfCellLine");
-    const trs = [...table.querySelectorAll("tbody tr")];
+    const trs = [...table.querySelectorAll("tbody tr:not(.sub)")];
     const tds = trs.map((tr) => [...tr.querySelectorAll("td")]);
     const grid = tds.map((row) => row.map((td) => !td.classList.contains("b")));
     const locate = (td) => {
@@ -233,13 +240,13 @@
     return '<td class="tl a" title="' + esc(cell.x) + '">' + esc(cell.t) + "</td>";
   }
 
-  const drillBtn = (scope, label) => '<button type="button" class="sf-drill" data-scope="' + esc(scope) + '" aria-label="' + esc(WORDS.drill(label)) + '">' + esc(label) + "</button>";
+  const drillBtn = (scope, label, shown) => '<button type="button" class="sf-drill" data-scope="' + esc(scope) + '" aria-label="' + esc(WORDS.drill(label)) + '">' + esc(shown || label) + "</button>";
 
   function sectorsHtml(T) {
     const scale = T.tiltScale ? T.tiltScale.cents : null;
     const head = T.headers.map((h, i) => '<th scope="col" class="h-' + h.id + (i ? " r" : "") + '" title="' + esc(h.hover) + '">' + esc(h.label) + (h.id === "tilt" && T.tiltScale ? "<small>" + esc(WORDS.scaleHead(T.tiltScale.text, T.tiltScale.unit)) + "</small>" : "") + "</th>").join("");
     const rows = T.rows.map((r) => '<tr data-k="' + esc(r.key) + '" data-n="' + r.windows + '"' + (r.windows ? ' data-scope="sector:' + esc(r.key) + '"' : "") + (r.selected ? ' aria-current="true"' : "") + '><th scope="row">' +
-      (r.windows ? drillBtn("sector:" + r.key, r.label) : '<span class="sf-nm">' + esc(r.label) + "</span>") + "</th>" +
+      (r.windows ? drillBtn("sector:" + r.key, r.label, small() ? r.short : r.label) : '<span class="sf-nm">' + esc(small() ? r.short : r.label) + "</span>") + "</th>" +
       numTd(r.taker, "taker") + numTd(r.calls, "calls") + numTd(r.puts, "puts") + numTd(r.noside, "noside") + numTd(r.outside, "outside") + tiltTd(r.tilt, scale) + numTd(r.coverage, "coverage") + "</tr>").join("");
     const t = T.totals;
     const foot = '<tr class="tot"><th scope="row">' + WORDS.total + "</th>" + numTd(t.taker, "taker") + numTd(t.calls, "calls") + numTd(t.puts, "puts") + numTd(t.noside, "noside") + numTd(t.outside, "outside") + numTd(t.tilt, "tilt") + '<td class="n c-coverage"></td></tr>';
@@ -301,10 +308,45 @@
     else if (kind === "sector") { html = namesHtml(d.names); cap = d.names.caption; foot = d.names.footer || ""; }
     else { html = windowsHtml(d.windows); cap = d.windows.caption; foot = ""; }
     body.innerHTML = html;
+    S.sideHtml = S.w === "flow" ? null : html;
     for (const el of body.querySelectorAll("[data-w]")) el.style.setProperty("--w", el.dataset.w + "px");
     $("sfSideCap").textContent = capText(cap);
     $("sfFoot").textContent = foot;
     $("sfBody").dataset.kind = S.w === "flow" ? "flow" : kind;
+    fit();
+  }
+
+  function fit() {
+    const host = $("sfBody");
+    const all = $("sfAll");
+    const table = host.querySelector("table.sf-st");
+    all.hidden = true;
+    S.fitKey = null;
+    if (!table || !table.tBodies[0] || host.clientHeight === 0) return;
+    all.textContent = WORDS.showAll(table.tBodies[0].rows.length);
+    all.hidden = false;
+    const rows = [...table.tBodies[0].rows];
+    const foot = table.tFoot && table.tFoot.rows[0];
+    const show = (k) => rows.forEach((r, i) => r.classList.toggle("cut", i >= k));
+    const over = () => host.scrollHeight > host.clientHeight + 1;
+    if (foot) foot.cells[0].textContent = WORDS.totalAll;
+    show(rows.length);
+    let k = rows.length;
+    if (over()) {
+      let lo = Math.min(3, rows.length);
+      let hi = rows.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        show(mid);
+        if (over()) hi = mid - 1; else lo = mid;
+      }
+      k = lo;
+      show(k);
+    }
+    const cut = rows.length - k;
+    if (foot && !cut) foot.cells[0].textContent = WORDS.total;
+    all.hidden = cut === 0;
+    S.fitKey = host.clientHeight + "x" + host.clientWidth;
   }
 
   function leanSvg(lean) {
@@ -324,6 +366,7 @@
     const items = d.checks.items;
     $("sfChecks").innerHTML = items.map((i) => '<button type="button" class="sf-chk" data-id="' + i.id + '" data-state="' + i.state + '" title="' + esc(i.hover) + '"><i aria-hidden="true">' + GLYPH[i.state] + "</i>" + esc(i.label) + '<span class="visually-hidden"> ' + STATE_WORD[i.state] + "</span></button>").join("");
     S.checks = items;
+    S.head = d.checks.head;
     if (!root.dataset.checks) root.dataset.checks = "closed";
     resetCheckLine();
   }
@@ -345,7 +388,8 @@
     const items = S.checks || [];
     const failing = items.find((i) => i.state === "fail");
     const count = (s) => items.filter((i) => i.state === s).length;
-    $("sfCheckLine").textContent = failing ? failing.text : WORDS.summary(count("pass"), count("fail"), count("absent"));
+    $("sfCheckLine").textContent = failing ? failing.text : WORDS.summary(S.head.label, count("pass"), count("fail"), count("absent"));
+    $("sfCheckLine").title = S.head.hover;
     lineRole();
   }
 
@@ -473,6 +517,33 @@
   $("sfInfoDlg").addEventListener("click", (e) => { if (e.target === $("sfInfoDlg")) $("sfInfoDlg").close(); });
   $("sfInfoX").addEventListener("click", () => $("sfInfoDlg").close());
 
+  $("sfAll").addEventListener("click", () => {
+    if (!S.sideHtml) return;
+    $("sfAllT").textContent = $("sfSideT").textContent;
+    $("sfAllBody").innerHTML = S.sideHtml;
+    for (const el of $("sfAllBody").querySelectorAll("[data-w]")) el.style.setProperty("--w", el.dataset.w + "px");
+    $("sfAllDlg").showModal();
+  });
+  $("sfAllDlg").addEventListener("click", (e) => {
+    if (e.target === $("sfAllDlg") || e.target.closest("#sfAllX")) { $("sfAllDlg").close(); return; }
+    const scope = e.target.closest("[data-scope]");
+    if (scope) { $("sfAllDlg").close(); go({ scope: scope.dataset.scope }); }
+  });
+  $("sfAllDlg").addEventListener("close", () => { if (!$("sfAll").hidden) $("sfAll").focus(); });
+
+  if (typeof ResizeObserver === "function") {
+    let queued = false;
+    new ResizeObserver(() => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        const host = $("sfBody");
+        if (S.sideHtml && host.clientHeight + "x" + host.clientWidth !== S.fitKey) fit();
+      });
+    }).observe($("sfBody"));
+  }
+
   const checks = $("sfChecks");
   const chipText = (e) => {
     const chip = e.target.closest(".sf-chk");
@@ -490,7 +561,7 @@
     if (hashOf(S.scope, S.period, S.w) !== before) load();
   });
 
-  matchMedia("(max-width:899px)").addEventListener("change", () => { lineRole(); if (S.data && S.data.status === "ok") paintLedger(S.data); });
+  matchMedia("(max-width:899px)").addEventListener("change", () => { lineRole(); if (S.data && S.data.status === "ok") { paintLedger(S.data); paintSide(S.data); } });
 
   readHash();
   say(WORDS.loading);

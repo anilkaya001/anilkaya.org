@@ -54,6 +54,11 @@
 .sf-cell { min-height: 18px; padding-bottom: 8px; color: var(--label-3); }
 .sf-cell.on { color: var(--label-1); font-weight: 500; }
 .sf-mat, .sf-body { flex: 1; min-height: 0; position: relative; padding: 0 8px; overflow: hidden; }
+.sf-fr { display: flex; align-items: center; gap: 8px; flex: none; padding-right: 8px; }
+.sf-fr .sf-foot { flex: 1; min-width: 0; }
+.sf .sf-all[hidden] { display: none; }
+.sf-st tr.cut { display: none; }
+.sf-allbody { container-type: inline-size; container-name: sfside; }
 .sf-foot { margin: 0; padding: 4px 12px 8px; font: var(--t-caption); color: var(--label-2); flex: none; min-height: 18px; }
 .sf-t { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
 .sf-lt { height: 100%; }
@@ -71,6 +76,9 @@
 @media (min-width: 1280px) {
   .sf-lt .gr > td:first-child, .sf-lt .corner { width: 30%; }
 }
+.sf-lt tr.sub td { text-align: left; font: var(--t-caption2); letter-spacing: 0.03em; text-transform: uppercase; color: var(--label-3); height: 16px; line-height: 16px; }
+.sf-lt tr.in th { padding-left: 12px; }
+.sf-lt tr.bal td.c { outline: 1px dashed var(--sep-strong); outline-offset: -3px; }
 .sf-lt td.c { cursor: default; }
 .sf-lt td.c:hover { background: var(--fill-4); }
 .sf-lt td.a { color: var(--label-3); }
@@ -80,6 +88,7 @@
 .sf-lt td[data-s="tiny"] { color: var(--label-3); }
 .sf-st thead th.r, .sf-st td.n, .sf-st td.tl { text-align: right; }
 .sf-st thead th small { display: block; font: var(--t-caption2); color: var(--label-3); font-weight: 400; }
+.sf-st thead th.h-taker, .sf-st thead th.h-noside { white-space: normal; }
 .sf-st td.n.a, .sf-st td.tl.a { color: var(--label-4); }
 .sf-st tfoot td, .sf-st tfoot th { border-top: 1px solid var(--sep-strong); border-bottom: 0; font-weight: 600; }
 .sf-st tbody tr:hover { background: var(--fill-4); }
@@ -115,9 +124,9 @@
 @container sfside (max-width: 719px) {
   .sf-st .h-calls, .sf-st .c-calls, .sf-st .h-puts, .sf-st .c-puts { display: none; }
   .sf-st td.tl .vd em { display: none; }
-  .sf-st th:first-child { width: 32%; }
+  .sf-st th:first-child { width: 31%; }
   .sf-st .h-taker, .sf-st .c-taker { width: 10%; }
-  .sf-st .h-noside, .sf-st .c-noside { width: 10%; }
+  .sf-st .h-noside, .sf-st .c-noside { width: 11%; }
   .sf-st .h-outside, .sf-st .c-outside { width: 11%; }
   .sf-st .h-tilt, .sf-st td.tl { width: 28%; }
   .sf-st .h-coverage, .sf-st .c-coverage { width: 9%; }

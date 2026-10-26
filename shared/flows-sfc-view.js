@@ -93,15 +93,15 @@ function ledgerTable(matrix, outsideReason) {
       if (v === null) return blank;
       return cell(v, rounded.cells[ri][cols.indexOf(c)], unit);
     });
-    return { id: copy.id, label: copy.label, hover: copy.hover, cells };
+    return { id: copy.id, label: copy.label, short: copy.short || copy.label, group: copy.group || null, hover: copy.hover, cells };
   });
   const last = rowsIdx.indexOf(10);
   const net = {
-    id: C.NET_ROW.id, label: C.NET_ROW.label, hover: C.NET_ROW.hover,
+    id: C.NET_ROW.id, label: C.NET_ROW.label, short: C.NET_ROW.label, group: null, hover: C.NET_ROW.hover,
     cells: [0, 1, 2, 3, 4, 5].map((c) => (cols.includes(c) ? cell(-matrix.rows[10][c], -rounded.cells[last][cols.indexOf(c)], unit) : gone(outsideReason))),
   };
   const largest = matrix.rows[10].reduce((m, v) => (v === null ? m : Math.max(m, Math.abs(v))), 0);
-  return { unit, caption: caption(unit), keyLine: C.KEY_LINE, zeroLine: C.ZERO_LINE, groups: C.GROUPS, columns: C.COLUMN_COPY.map((col, c) => ({ ...col, measured: cols.includes(c) })), rows, net, foots, measured: cols.length, largest };
+  return { unit, caption: caption(unit), keyLine: C.KEY_LINE, zeroLine: C.ZERO_LINE, groups: C.GROUPS, groupRows: C.GROUP_ROWS, columns: C.COLUMN_COPY.map((col, c) => ({ ...col, measured: cols.includes(c) })), rows, net, foots, measured: cols.length, largest };
 }
 
 function lineOfLean(lean) {
@@ -175,7 +175,7 @@ function sectorTable(columns, selected, tides, uni, tilt) {
     const pct = i >= 0 && t.sided > 0 ? Math.floor((100 * t.covered) / t.sided) : null;
     const taker = i >= 0 ? t.AC + t.AP - (t.BC + t.BP) : null;
     return {
-      key: c, label: c, kind: kindOf(c), selected: selected === c, windows: i >= 0 ? t.n : 0, premium: i >= 0 ? safe(t.T) : null,
+      key: c, label: c, short: C.SECTOR_SHORT[c] || c, kind: kindOf(c), selected: selected === c, windows: i >= 0 ? t.n : 0, premium: i >= 0 ? safe(t.T) : null,
       taker: i >= 0 ? cell(taker, r1.rowTotals[i], unit) : nothing,
       calls: i >= 0 ? cell(g1[i][0], r1.cells[i][0], unit) : nothing,
       puts: i >= 0 ? cell(g1[i][1], r1.cells[i][1], unit) : nothing,
@@ -399,7 +399,7 @@ export function ledgerView(input) {
     });
     if (checks.ledgerFail) {
       const reason = C.WITHHELD.ledger(hashOf({ sums, sideDiff }));
-      return { ...head, status: "failed", why: reason, scope: { kind: scope.kind, key: scope.key }, withheld: { reason, all: true }, checks: { items: checks.items, failed: checks.failed, notes: [] } };
+      return { ...head, status: "failed", why: reason, scope: { kind: scope.kind, key: scope.key }, withheld: { reason, all: true }, checks: { head: C.CHECKS_HEAD, items: checks.items, failed: checks.failed, notes: [] } };
     }
     const lean = leanRead({ T: totals.T, A: totals.AC + totals.AP, B: totals.BC + totals.BP });
     const notes = [
@@ -418,7 +418,7 @@ export function ledgerView(input) {
         kind: scope.kind, key: scope.key, sector: scope.sector || null, name: scope.name || null, line: scopeLine, held, seen: totalSeen, shed,
         crumbs: [{ label: "All sectors", key: "all" }, ...(scope.kind === "sector" ? [{ label: scope.sector, key: scope.key }] : []), ...(scope.kind === "name" ? [{ label: scope.name, key: scope.key }] : [])],
       },
-      withheld: null, checks: { items: checks.items, failed: checks.failed, notes }, ledger, sectors: sectorsOut, lean: { ...lean, line: lineOfLean(lean) },
+      withheld: null, checks: { head: C.CHECKS_HEAD, items: checks.items, failed: checks.failed, notes }, ledger, sectors: sectorsOut, lean: { ...lean, line: lineOfLean(lean) },
       tilt: checks.tiltFail ? { status: "absent", reason: tiltHold, rows: [], unweighted: [] } : { ...tilt, lines: [C.TILT_LINES.definition, C.TILT_LINES.total(tilt.weighted.length), C.TILT_LINES.reading, C.TILT_LINES.funds, ...(shed ? [C.TILT_LINES.shed(shed)] : [])] },
       flow: flowView(totals, outside),
       stock: { status: "absent", reason: NO_OPEN_INTEREST, line: C.PANEL_LINES.stock, memo: { sameSession: safe(totals.sameDay), text: `Premium in held windows that expire this session: ${money(totals.sameDay)}.`, exact: exactDollars(totals.sameDay) }, notBuilt: C.NOT_BUILT_LINE },

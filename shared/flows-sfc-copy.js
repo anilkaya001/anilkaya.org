@@ -8,16 +8,16 @@ export const KEY_LINE = "Minus (−) means that column paid the premium; plus (+
 export const WINDOW_BASIS_REASONS = Object.freeze(["btw", "cross", "leg", "ns"]);
 
 export const GROUPS = Object.freeze([
-  Object.freeze({ id: "held", label: "Held windows", short: "Held", cols: Object.freeze([0, 1]) }),
-  Object.freeze({ id: "noside", label: "Side not stated", short: "No side", cols: Object.freeze([2, 3]) }),
-  Object.freeze({ id: "outside", label: "Outside held windows", short: "Outside", cols: Object.freeze([4, 5]) }),
+  Object.freeze({ id: "held", label: "Held windows", short: "Held", hover: "The flagged windows the live record kept.", cols: Object.freeze([0, 1]) }),
+  Object.freeze({ id: "noside", label: "Side unknown", short: "Side unknown", hover: "Premium whose side is unknown, booked as a pair that nets to zero.", cols: Object.freeze([2, 3]) }),
+  Object.freeze({ id: "outside", label: "Outside held", short: "Outside", hover: "Sector tide premium that the held windows do not hold.", cols: Object.freeze([4, 5]) }),
 ]);
 
 export const COLUMN_COPY = Object.freeze([
-  Object.freeze({ id: "TK", label: "Takers", sub: "held", group: "held", hover: "Held windows only: premium paid on the ask side, received on the bid side." }),
-  Object.freeze({ id: "LP", label: "Providers", sub: "held", group: "held", hover: "Held windows only: the other side of each taker trade." }),
-  Object.freeze({ id: "BN", label: "Buyers", sub: "no side", group: "noside", hover: "Buyers in held windows whose side is not shown." }),
-  Object.freeze({ id: "SN", label: "Sellers", sub: "no side", group: "noside", hover: "Sellers in held windows whose side is not shown." }),
+  Object.freeze({ id: "TK", label: "Takers", sub: "held", group: "held", hover: "Held windows only: premium paid on the ask side, received on the bid side. Takers are inferred from the price against the quote." }),
+  Object.freeze({ id: "LP", label: "Providers", sub: "held", group: "held", hover: "Held windows only: the passive side of each taker trade. It is anyone resting at the quote, not only market makers." }),
+  Object.freeze({ id: "BN", label: "Buyers", sub: "held", group: "noside", hover: "Buyers in held windows whose side is unknown." }),
+  Object.freeze({ id: "SN", label: "Sellers", sub: "held", group: "noside", hover: "Sellers in held windows whose side is unknown." }),
   Object.freeze({ id: "TO", label: "Takers", sub: "outside", group: "outside", hover: "Net taker premium outside held windows, from the sector tide." }),
   Object.freeze({ id: "LO", label: "Providers", sub: "outside", group: "outside", hover: "The other side of taker premium outside held windows." }),
 ]);
@@ -27,14 +27,16 @@ export const ROW_COPY = Object.freeze([
   Object.freeze({ id: "r2", label: "Calls, bid side", hover: "Premium on the bid side: takers received, providers paid." }),
   Object.freeze({ id: "r3", label: "Puts, ask side", hover: "Premium on the ask side: takers paid, providers received." }),
   Object.freeze({ id: "r4", label: "Puts, bid side", hover: "Premium on the bid side: takers received, providers paid." }),
-  Object.freeze({ id: "r5", label: "No side: between quotes", hover: REASON_HOVERS.window.btw, reason: "btw" }),
-  Object.freeze({ id: "r6", label: "No side: has floor trade", hover: REASON_HOVERS.window.cross, reason: "cross" }),
-  Object.freeze({ id: "r7", label: "No side: spread legs", hover: REASON_HOVERS.window.leg, reason: "leg" }),
-  Object.freeze({ id: "r8", label: "No side: not stated", hover: REASON_HOVERS.window.ns, reason: "ns" }),
+  Object.freeze({ id: "r5", label: "Side unknown: between quotes", short: "Between quotes", group: "side", hover: REASON_HOVERS.window.btw, reason: "btw" }),
+  Object.freeze({ id: "r6", label: "Side unknown: floor trade", short: "Floor trade", group: "side", hover: REASON_HOVERS.window.cross, reason: "cross" }),
+  Object.freeze({ id: "r7", label: "Side unknown: spread legs", short: "Spread legs", group: "side", hover: REASON_HOVERS.window.leg, reason: "leg" }),
+  Object.freeze({ id: "r8", label: "Side unknown: not reported", short: "Not reported", group: "side", hover: REASON_HOVERS.window.ns, reason: "ns" }),
   Object.freeze({ id: "r9", label: "Net calls outside held", hover: "Sector tide net call premium, less the held-window net." }),
   Object.freeze({ id: "r10", label: "Net puts outside held", hover: "Sector tide net put premium, less the held-window net." }),
   Object.freeze({ id: "r11", label: "Balancing entry, defined", hover: "Closes each column; defined, not observed." }),
 ]);
+
+export const GROUP_ROWS = Object.freeze({ side: Object.freeze({ label: "Side unknown", hover: "Booked both ways, so each pair nets to zero. Never split." }) });
 
 export const NET_ROW = Object.freeze({ id: "net", label: "Net before balancing", hover: "What each column paid or received in the rows above." });
 
@@ -47,11 +49,13 @@ export const SECTOR_HEADERS = Object.freeze([
   Object.freeze({ id: "taker", label: "Taker net", hover: "Ask-side premium minus bid-side premium." }),
   Object.freeze({ id: "calls", label: "Calls", hover: "Call premium on the ask side minus the bid side." }),
   Object.freeze({ id: "puts", label: "Puts", hover: "Put premium on the ask side minus the bid side." }),
-  Object.freeze({ id: "noside", label: "No side", hover: "Held-window premium with no side shown." }),
+  Object.freeze({ id: "noside", label: "Side unknown", hover: "Held-window premium whose side is unknown." }),
   Object.freeze({ id: "outside", label: "Outside", hover: "Sector tide net premium outside held windows: tide less the held-window net." }),
-  Object.freeze({ id: "tilt", label: "Tilt", hover: "Delta-dollars against the sector's market-cap share, with its band." }),
+  Object.freeze({ id: "tilt", label: "Tilt", hover: "Delta-dollars against the sector's market-cap share, with its band. Not against usual options activity." }),
   Object.freeze({ id: "coverage", label: "Cov.", hover: "Share of sided premium whose windows have a computed delta." }),
 ]);
+
+export const SECTOR_SHORT = Object.freeze({ "Communication Services": "Comm. services", "Consumer Cyclical": "Cons. cyclical", "Consumer Defensive": "Cons. defensive", "Financial Services": "Financials" });
 
 export const PANEL_LINES = Object.freeze({
   ledger: "Who paid and who received option premium, by holder.",
@@ -75,18 +79,25 @@ export const DELTA_NOTES = Object.freeze([
   "Contracts per side are estimated from premium at the window's average price.",
   "Deltas use Black-Scholes at 4%, no dividends and window-end volatility.",
   "Delta uses the vendor's stock price for each window. Its time within the window is unstated.",
-  "The band covers no-side contracts and windows without a delta.",
+  "The band covers side-unknown contracts and windows without a delta.",
+  "The band is proven for held windows, under these conventions.",
   "It takes the estimated contract counts and modelled deltas as given.",
 ]);
 
 export const INFO = Object.freeze([
   "This page is a closed ledger of option premium in held windows. Every dollar paid is recorded once as received.",
   "Liquidity providers are a column of their own. So every row and every column sums to zero.",
-  "A window is held when the live record keeps it. Smaller windows are shed and counted in the scope line.",
+  "A provider is whoever rested at the quote, not only a market maker.",
+  "Only held flagged windows are booked. Smaller windows are shed and counted in the scope line.",
   "Figures are window totals, not trade by trade. Premium is booked by where a window traded against the bid and ask.",
   "Cells are rounded so rows and columns still add up. Hover or focus a cell for the exact figure.",
+  "Premium whose side is unknown is booked both ways, so it nets to zero. It is never split.",
   "The ledger records no entries between sectors. Each sector closes on itself.",
   "Tilt compares a sector's delta-dollars with its market-cap share. It is exposure, not cash.",
+  "Delta-dollars are taker contracts times 100 times delta times the stock price.",
+  "Tilt is set against market-cap share, not against usual options activity.",
+  "Index & ETF and No sector have no benchmark, so they carry no verdict.",
+  "The checks test that figures agree with each other. They do not test the vendor's data.",
   "Outside rows are the sector tide less held windows. They also hold trades the vendor never flagged.",
   "All times are TRT.",
 ]);
@@ -105,28 +116,28 @@ export const CHECKS = Object.freeze({
   }),
   columns: Object.freeze({
     label: "Columns close",
-    pass: (k, largest) => (k === 6 ? `Balancing entries close all 6 columns; the largest is ${largest}.` : `Balancing entries close ${k} of 6 columns. The outside columns are absent.`),
+    pass: (k, largest) => (k === 6 ? `Defined balancing entries close all 6 columns; the largest is ${largest}.` : `Defined balancing entries close ${k} of 6 columns. The outside columns are absent.`),
     fail: (x) => `Balancing entries sum to ${centsText(x)}, not zero.`,
     absent: "— · no held windows in this scope",
     hover: "What one holder pays, another receives; the closing entries cancel.",
   }),
   sides: Object.freeze({
     label: "Sides close",
-    pass: (n) => `Bought + sold + no side = total premium, over ${n} windows.`,
+    pass: (n) => `Bought + sold + side unknown = total premium, over ${n} windows.`,
     fail: (x) => `Sides do not close: off by ${centsText(x)}.`,
     absent: "— · no held windows in this scope",
-    hover: "Each held-window premium dollar is bought, sold or no-side, once.",
+    hover: "Each held-window premium dollar is bought, sold or side unknown, once.",
   }),
   sectors: Object.freeze({
-    label: "Sectors match",
+    label: "Sectors add up",
     pass: "The sector table adds to the ledger, to the cent.",
     fail: (x) => `Sector table differs from the ledger by ${centsText(x)}.`,
     absent: "— · no held windows in this scope",
     single: "— · one scope: the sector table is not summed",
-    hover: "The thirteen sector rows add to the ledger's taker and no-side totals.",
+    hover: "The thirteen sector rows add to the ledger's taker and side-unknown totals.",
   }),
   tilt: Object.freeze({
-    label: "Tilt sums to zero",
+    label: "Tilts sum to zero",
     pass: (sum, n) => `Tilt sums to ${sum} delta-dollars over ${n} weighted ${n === 1 ? "sector" : "sectors"}. Index & ETF and No sector are excluded.`,
     fail: (sum, n) => `Tilt sums to ${sum} over ${n} sectors, not zero.`,
     absent: "— · no sector has a market-cap weight",
@@ -145,6 +156,8 @@ export const CHECKS = Object.freeze({
     hover: "Opening less closing trades equals the change in open interest.",
   }),
 });
+
+export const CHECKS_HEAD = Object.freeze({ label: "Internal checks", hover: "They test that the figures agree, not that the vendor's data is right." });
 
 export const WITHHELD = Object.freeze({
   ledger: (hash) => `Ledger checks failed; figures withheld; logged as ${hash}.`,
@@ -183,16 +196,16 @@ export const EMPTY = Object.freeze({
 export const OVERFLOW = "Total too large to sum exactly.";
 
 export const SCOPE_LINE = Object.freeze({
-  all: (money, held, shed, total) => (total === null || shed === 0 ? `${money} traded in ${held} held windows.` : `${money} traded in ${held} held windows. ${shed} of ${total} were shed and are not counted.`),
-  sector: (money, n, sector, shed) => `${money} traded in ${n} held ${sector} windows.${shed ? ` ${shed} were shed across all sectors.` : ""}`,
-  name: (money, n, name, shed) => `${money} traded in ${n} held ${name} windows.${shed ? ` ${shed} were shed across all names.` : ""}`,
+  all: (money, held, shed, total) => (total === null || shed === 0 ? `${money} traded in ${held} held flagged windows.` : `${money} traded in ${held} held flagged windows. ${shed} of ${total} were shed and are not counted.`),
+  sector: (money, n, sector, shed) => `${money} traded in ${n} held flagged ${sector} windows.${shed ? ` ${shed} were shed across all sectors.` : ""}`,
+  name: (money, n, name, shed) => `${money} traded in ${n} held flagged ${name} windows.${shed ? ` ${shed} were shed across all names.` : ""}`,
 });
 
 export const FLOW_LINES = Object.freeze({
   paid: (m) => `Takers paid ${m} net in held windows.`,
   received: (m) => `Takers received ${m} net in held windows.`,
   even: "Takers paid and received the same in held windows.",
-  noside: (m) => `Buyers to sellers, side not stated: ${m}.`,
+  noside: (m) => `Buyers to sellers, side unknown: ${m}.`,
   outsidePaid: (m) => `Outside held windows, takers paid ${m} net.`,
   outsideReceived: (m) => `Outside held windows, takers received ${m} net.`,
   outsideEven: "Outside held windows, takers paid and received the same.",
@@ -202,8 +215,8 @@ export const FLOW_LINES = Object.freeze({
 });
 
 export const TILT_VERDICT = Object.freeze({
-  above: Object.freeze({ glyph: "▶", word: "Over", long: "Above share" }),
-  below: Object.freeze({ glyph: "◀", word: "Under", long: "Below share" }),
+  above: Object.freeze({ glyph: "▶", word: "Above share", long: "Above share" }),
+  below: Object.freeze({ glyph: "◀", word: "Below share", long: "Below share" }),
   undetermined: Object.freeze({ glyph: "○", word: "Within band", long: "Undetermined" }),
   at: Object.freeze({ glyph: "○", word: "At share", long: "At share" }),
 });

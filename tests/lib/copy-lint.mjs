@@ -27,6 +27,8 @@ const RX = {
   unsided: /\bun[\s‐‑–-]?sided\b/i,
   modal: /\b(?:will|would|should|shall|expects?|expected|expecting|expectations?|likely|unlikely|could|might|predicts?|predicted|predicting|predictions?|forecasts?|forecasted|forecasting|signals?\s+that|suggests?\s+that)\b|(?<!\d\s)\bmay\b(?!\s+\d)/i,
   negForecast: /\b(?:no|not\s+an?|never\s+an?)\s+(?:forecasts?|predictions?)\b/gi,
+  stance: /\b(?:bullish|bearish|positioning|sentiment|conviction|intent|intends?|rotation|rotating|betting)\b/i,
+  noSide: /\bno[\s-]sides?\b/i,
   tickers: /\b[A-Z][A-Z0-9.]{1,5}\b/g,
 };
 
@@ -61,7 +63,11 @@ export const tooLong = (s, max = 14) => {
 
 export const modal = (s) => first(RX.modal, strip(s).replace(RX.tickers, " ").replace(RX.negForecast, " "));
 
-export const RULES = Object.freeze({ tape, unsided, sectorTransfer, flowLeaving, tooLong, modal });
+export const stance = (s) => first(RX.stance, strip(s));
+
+export const noSide = (s) => first(RX.noSide, strip(s));
+
+export const RULES = Object.freeze({ tape, unsided, sectorTransfer, flowLeaving, tooLong, modal, stance, noSide });
 
 export const lintSentence = (s, rules = RULES) => Object.entries(rules).flatMap(([rule, f]) => {
   const match = f(s);

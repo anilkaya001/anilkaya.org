@@ -33,8 +33,8 @@ const throws = (f, type, m) => { assert.throws(f, type, m); checks++; };
   eq([exactDollars(0), exactDollars(5), exactDollars(-123456789), exactDollars(100000)], ["$0.00", "$0.05", `${MINUS}$1,234,567.89`, "$1,000.00"], "exact dollars carry cents and the typographic minus");
   eq([exactCents(-1234), exactCents(0)], [`${MINUS}1,234 ¢`, "0 ¢"], "exact cents");
   eq([moneyShort(0), moneyShort(99900), moneyShort(123400), moneyShort(-4500000), moneyShort(250000000), moneyShort(12000000000000)], ["$0", "$999", "$1.2k", `${MINUS}$45.0k`, "$2.50M", "$120.00B"], "short money");
-  eq(caption(unitFor(5000)), "USD, to $1. Hover for exact.", "caption at dollar unit");
-  eq(caption(unitFor(1e9), "delta"), "Delta-dollars, USD millions, to $10k. Hover for exact.", "caption for delta-dollars");
+  eq(caption(unitFor(5000)), "USD, to $1, so totals foot. Hover for exact.", "caption at dollar unit");
+  eq(caption(unitFor(1e9), "delta"), "Delta-dollars, USD millions, to $10k, so totals foot. Hover for exact.", "caption for delta-dollars");
   eq([niceScale(0), niceScale(1), niceScale(99), niceScale(100), niceScale(101), niceScale(250), niceScale(500), niceScale(501), niceScale(4999999), niceScale(-1234567)], [100, 1, 100, 100, 200, 500, 500, 1000, 5000000, 2000000], "the tilt scale rounds up to 1, 2 or 5 times a power of ten, by the absolute value");
   throws(() => niceScale(1.5), RangeError, "a scale of a non-integer is refused");
   throws(() => niceScale(9e15), RangeError, "and one that would leave the safe integers");
@@ -287,13 +287,13 @@ const throws = (f, type, m) => { assert.throws(f, type, m); checks++; };
   const sec = views.get("sector");
   for (const row of sec.names.rows) if (row.tilt.s === "ok") ok(Number.isSafeInteger(row.tilt.tiltC), "a name's tilt cell carries its number");
   const single = views.get("sector");
-  eq(single.checks.items.find((i) => i.id === "sectors"), { id: "sectors", label: "Sectors match", state: "absent", text: COPY.CHECKS.sectors.single, hover: COPY.CHECKS.sectors.hover }, "one scope has nothing to compare, so the check is not claimed");
+  eq(single.checks.items.find((i) => i.id === "sectors"), { id: "sectors", label: COPY.CHECKS.sectors.label, state: "absent", text: COPY.CHECKS.sectors.single, hover: COPY.CHECKS.sectors.hover }, "one scope has nothing to compare, so the check is not claimed");
   eq(views.get("all").checks.items.find((i) => i.id === "stock").text, "Not checked: open interest is not stored.", "the stock identity is neutral wording, not a pass");
   ok(/^Windows and tide are both from Fri 23 Oct\. Tide at \d\d:\d\d TRT, windows at \d\d:\d\d TRT\.$/.test(views.get("all").checks.items.find((i) => i.id === "session").text), "the session check names both stamps");
   ok(/^Rows foot over 11 rows, exactly and as displayed\.$/.test(views.get("all").checks.items[0].text), "rows foot exactly and as displayed");
-  ok(/^Balancing entries close all 6 columns; the largest is \$[\d.,]+[kMB]?\.$/.test(views.get("all").checks.items[1].text), "the columns check names the largest balancing entry");
-  ok(/^Balancing entries close 4 of 6 columns\. The outside columns are absent\.$/.test(views.get("no-tide").checks.items[1].text), "and says so when the outside columns are absent");
-  ok(/^Bought \+ sold \+ no side = total premium, over \d+ windows\.$/.test(views.get("all").checks.items[2].text), "sides name the number of windows");
+  ok(/^Defined balancing entries close all 6 columns; the largest is \$[\d.,]+[kMB]?\.$/.test(views.get("all").checks.items[1].text), "the columns check names the largest balancing entry");
+  ok(/^Defined balancing entries close 4 of 6 columns\. The outside columns are absent\.$/.test(views.get("no-tide").checks.items[1].text), "and says so when the outside columns are absent");
+  ok(/^Bought \+ sold \+ side unknown = total premium, over \d+ windows\.$/.test(views.get("all").checks.items[2].text), "sides name the number of windows");
 }
 
 {
@@ -341,7 +341,7 @@ const BALANCE = { file: "shared/flows-sfc.js", transforms: [["balancing[c] = s =
 const TILT_SUM = { file: "shared/flows-sfc.js", transforms: [["    sum += row.R;", "    sum += row.R + 1n;"]] };
 
 const LEAKS = {
-  ledger: { file: "shared/flows-sfc-view.js", transforms: [["checks: { items: checks.items, failed: checks.failed, notes: [] } };", "checks: { items: checks.items, failed: checks.failed, notes: [] }, ledger, sectors, lean } ;".replace("lean } ;", "lean: leanRead({ T: totals.T, A: totals.AC + totals.AP, B: totals.BC + totals.BP }) };")]] },
+  ledger: { file: "shared/flows-sfc-view.js", transforms: [["checks: { head: C.CHECKS_HEAD, items: checks.items, failed: checks.failed, notes: [] } };", "checks: { head: C.CHECKS_HEAD, items: checks.items, failed: checks.failed, notes: [] }, ledger, sectors, lean } ;".replace("lean } ;", "lean: leanRead({ T: totals.T, A: totals.AC + totals.AP, B: totals.BC + totals.BP }) };")]] },
   tiltSectors: { file: "shared/flows-sfc-view.js", transforms: [["ledger, sectors: sectorsOut, lean:", "ledger, sectors, lean:"]] },
   tiltNames: { file: "shared/flows-sfc-view.js", transforms: [["tilt.unit : unitFor(0), tiltHold);", "tilt.unit : unitFor(0));"]] },
 };
@@ -418,13 +418,15 @@ const failClosedTilt = (V, input) => {
     flowLeaving: ["Flow left the building.", "Premium is leaving.", "Cash leaves the account."],
     modal: ["Energy will rise.", "Premium may fall.", "It could change.", "Takers expect more.", "This is likely.", "A forecast of flows.", "It suggests that sellers lead."],
     tooLong: ["One two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen."],
+    stance: ["Takers are bullish.", "Bearish positioning in Energy.", "Sentiment turned.", "A rotation is under way.", "Traders show conviction."],
+    noSide: ["No side: between quotes", "Premium with no side.", "A no-side entry."],
   };
   const fine = [
     "Takers bought 63% of premium with a stated side; bounds 34–80%.", "Rows foot: largest row sum 0 ¢ over 11 rows.", "The ledger records no entries between sectors.",
     "Each sector closes on itself.", "Tilt is exposure, not cash.", "Held-window premium by sector, with the outside remainder.", "Net call premium +$451.9k; net put premium −$98.1k.",
     "Fri 23 May", "Sector tide for 11 of 13 groups.", "Columns on the left list the holders.", "Click the left column to sort.", "A table on the left side of the page.", "Window includes a floor trade",
     "Not a forecast.", "No forecast is made.", "Sector tide ends at 18:25 TRT, before the close.", "Index & ETF has no market-cap weight.", "Technology is above its share.",
-    "Money is booked once as paid and once as received.", "Provider premium equals taker premium.", "The tape-free design.".replace("tape-free", "design"),
+    "Money is booked once as paid and once as received.", "Provider premium equals taker premium.", "Side unknown: between quotes", "Premium whose side is unknown is booked both ways.", "Above share", "Below share", "The tape-free design.".replace("tape-free", "design"),
   ];
   for (const [rule, list] of Object.entries(flag)) for (const s of list) ok(RULES[rule](s) !== null, `${rule} flags ${JSON.stringify(s)}`);
   for (const s of fine) eq(lintSentence(s), [], `no rule flags ${JSON.stringify(s)}`);
@@ -464,9 +466,11 @@ const lintAll = (V) => {
     ["unsided", COPY_FILE, [["This page is a closed ledger of option premium in held windows.", "This page is a closed ledger of unsided option premium in held windows."]]],
     ["sectorTransfer", COPY_FILE, [["Closes each column; defined, not observed.", "Premium moved from Technology to Energy; defined, not observed."]]],
     ["modal", COPY_FILE, [["Tilt compares each sector to its weight share, so tilts cancel.", "Tilt will compare each sector to its weight share, so tilts cancel."]]],
-    ["tooLong", COPY_FILE, [["(total === null || shed === 0 ? `${money} traded in ${held} held windows.`", "(total === null || shed === 0 ? `${money} of option premium traded in ${held} held windows across every sector in the universe today.`"]]],
-    ["tape", COPY_FILE, [["Held windows only: the other side of each taker trade.", "Held windows only: the other side of each taker trade on the tape."]]],
+    ["tooLong", COPY_FILE, [["(total === null || shed === 0 ? `${money} traded in ${held} held flagged windows.`", "(total === null || shed === 0 ? `${money} of option premium traded in ${held} held flagged windows across every sector in the universe today.`"]]],
+    ["tape", COPY_FILE, [["Held windows only: the passive side of each taker trade.", "Held windows only: the passive side of each taker trade on the tape."]]],
     ["flowLeaving", COPY_FILE, [["Outside rows are the sector tide less held windows.", "Premium left held windows as outside rows."]]],
+    ["stance", COPY_FILE, [["It is exposure, not cash.", "It is bullish positioning, not cash."]]],
+    ["noSide", COPY_FILE, [["label: \"Side unknown: between quotes\"", "label: \"No side: between quotes\""]]],
   ];
   for (const [rule, file, transforms] of planted) {
     const V = await loadVariant({ file, transforms }, "lint-" + rule);
