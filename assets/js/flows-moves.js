@@ -18,7 +18,7 @@
   const SIG_Q = 0.1, SIG_MIN_Z = 2;
   const SIG_FLAGGED_LINE = "Beyond the usual for this name, after correcting for how many names were tested.";
   const SIG_PLAIN_LINE = "Not beyond the usual for this name, after correcting for how many were tested.";
-  const SIG_REASONS = { below: "Below 2 typical days: not tested, but counted in the correction.", noscale: "No typical day is published, so no test.", nomove: "No usable move is published, so no test.", nocount: "The count of days beyond that is not published, so no test." };
+  const SIG_REASONS = { below: "Below 2 typical days: not tested, but counted in the correction.", noscale: "No typical day is published, so no test.", nomove: "No usable move is published, so no test.", nocount: "The count of days beyond that is not published, so no test.", unplaced: "Earnings are not separated, so no test." };
   const SIG_INFO_SENTENCES = ["The test asks if today's move is beyond the name's own one-year rate.", "The rate is days beyond 2 or 3 typical days, plus one, over 253.", "So the smallest p is 1 in 253, and few names can pass.", "Every name with a typical day and no earnings is counted in the correction.", "Names are corrected together at a 10% false-discovery rate.", "Big market days move many names at once, so the test can overstate.", "It is a ranking aid, not a forecast."];
   const SIG_FOOT_NONE = "No name could be tested.";
   const PEER_MIN = 10;
@@ -38,6 +38,7 @@
   const NO_RD = "Names that just reported are not separated: no report column tonight.";
   const REPORTED_UNTESTED = "Just reported: not tested.";
   const REPORTED_APART = "Just reported: event not separated.";
+  const WHY_UNPLACED = "Earnings are not separated, so no median.";
   const allEvent = (hz) => "Every measured name reports within " + hz + " sessions.";
   const sessionsText = (hz) => (hz === null || hz === undefined ? "the earnings window" : hz + " sessions");
   let W = null;
@@ -99,6 +100,7 @@
     const lm = logMove(chg);
     if (lm === null) return { t: x.t, state: "nomove", z: null, level: null, hits: null, p: null };
     const z = lm / sig;
+    if (x.event !== true && x.event !== false) return { t: x.t, state: "unplaced", z, level: null, hits: null, p: null };
     if (x.event === true) return { t: x.t, state: "event", z, level: null, hits: null, p: null };
     if (Math.abs(lm) < SIG_MIN_Z * sig) return { t: x.t, state: "below", z, level: null, hits: null, p: 1 };
     const level = Math.abs(lm) >= 3 * sig ? 3 : 2;
@@ -159,17 +161,18 @@
       if (!r || PINS.includes(r.t)) continue;
       const key = r.sector || NO_SECTOR;
       let b = by.get(key);
-      if (!b) by.set(key, b = { name: key, key: r.sector || "__none", total: 0, measured: 0, ms: [] });
+      if (!b) by.set(key, b = { name: key, key: r.sector || "__none", total: 0, measured: 0, unplaced: 0, ms: [] });
       b.total++;
       const m = ivDays(r.chg, r.iv);
       if (m === null) continue;
       b.measured++;
-      if (r.event !== true) b.ms.push(m);
+      if (r.event === false) b.ms.push(m);
+      else if (r.event !== true) b.unplaced++;
     }
     return [...by.values()].map((b) => {
       const n = b.ms.length;
       const beyond = b.ms.filter((m) => Math.abs(m) > SECTOR_BEYOND).length;
-      return { name: b.name, key: b.key, total: b.total, measured: b.measured, n, apart: b.measured - n, median: n ? med(b.ms) : null, beyond: n ? beyond : null, share: n ? beyond / n : null, why: n ? null : b.measured === 0 ? WHY_NO_IV : allEvent(hz) };
+      return { name: b.name, key: b.key, total: b.total, measured: b.measured, n, apart: b.measured - n - b.unplaced, median: n ? med(b.ms) : null, beyond: n ? beyond : null, share: n ? beyond / n : null, why: n ? null : b.measured === 0 ? WHY_NO_IV : b.unplaced > 0 ? WHY_UNPLACED : allEvent(hz) };
     }).sort((a, b) => (a.median === null) - (b.median === null) || (b.median === null ? 0 : b.median) - (a.median === null ? 0 : a.median) || cmp(a.name, b.name));
   }
   function shareText(beyond, n) {
@@ -226,9 +229,9 @@
   const plural = (n, a, b) => n + " " + (n === 1 ? a : b);
 
   const S = { rows: null, known: new Map(), day: null, generatedAt: null, live: null, frozen: false, frozenAt: null, listHeld: false, listView: "names", dirty: false, model: null, sel: null, dir: null, earn: false, sector: "", hit: [], geo: null, topN: 6, hz: null, ahead: null, rdOn: false };
-  const earn = (r, hz, j) => { const st = hz !== null && j !== null ? F.earn(r, hz, j) : null; return { state: st, event: st === "reaction" || st === "after" || st === "ahead" }; };
-  const tagText = (x) => (x.state === "reaction" ? "Reaction day" : x.state === "after" ? "Day after report" : "Earnings in " + x.away + (x.away === 1 ? " session" : " sessions"));
-  const eventSaid = (x) => (x.state === "reaction" ? "reported in this session" : x.state === "after" ? "reported in the session before" : "earnings within " + sessionsText(S.hz));
+  const earn = (r, hz, j) => { const st = hz !== null && j !== null ? F.earn(r, hz, j) : null; return { state: st, event: st === null ? null : st === "reaction" || st === "after" || st === "ahead" }; };
+  const tagText = (x) => (x.unstated ? "Report time not stated" : x.state === "reaction" ? "Reaction session" : x.state === "after" ? "Reacted one session ago" : "Earnings in " + x.away + (x.away === 1 ? " session" : " sessions"));
+  const eventSaid = (x) => (x.unstated ? "report time not stated, so the reaction is within a session of this one" : x.state === "reaction" ? "reacted to its report in this session" : x.state === "after" ? "reacted to its report one session ago" : "earnings within " + sessionsText(S.hz));
   const eventNote = (x) => (x.state === "reaction" || x.state === "after" ? REPORTED_APART : W ? W.apart : NO_HORIZON);
   const cards = new Map();
   let cardTimer = 0;
@@ -266,7 +269,7 @@
       if (m === null) continue;
       const sig = num(r.sig);
       const ed = num(r.ed);
-      out.push({ t: r.t, chg: r.chg, iv: r.iv, m, a: Math.abs(m), z: sig !== null && sig > 0 && logMove(r.chg) !== null ? logMove(r.chg) / sig : null, sig, f2: num(r.f2), f3: num(r.f3), sector: r.sector || null, cap: r.cap || null, ed, state: r.state, event: r.event === true, away: r.state === "ahead" && ed !== null ? ed - j : null });
+      out.push({ t: r.t, chg: r.chg, iv: r.iv, m, a: Math.abs(m), z: sig !== null && sig > 0 && logMove(r.chg) !== null ? logMove(r.chg) / sig : null, sig, f2: num(r.f2), f3: num(r.f3), sector: r.sector || null, cap: r.cap || null, ed, state: r.state, unstated: (r.state === "reaction" || r.state === "after") && (ed === 0 || (num(r.rdMax) !== null && !(Number.isInteger(r.rd) && r.rd >= 0))), event: r.event === true ? true : r.event === false ? false : null, away: r.state === "ahead" && ed !== null ? ed - j : null });
     }
     return out;
   }

@@ -344,24 +344,24 @@
     tick: (m) => { if (typeof m !== "number" || !Number.isFinite(m)) return null; const n = ((Math.floor(m) % 1440) + 1440) % 1440; return two(Math.floor(n / 60)) + ":" + two(n % 60); },
     open: (day) => (dayAt(day) === null ? null : 1470 - nyClock(new Date(day + "T12:00:00Z")).mins),
     compact,
-    earn: (r, hz, j = 0) => {
+    earn: (r, hz, j = 0, back = 1) => {
       const w = Number.isInteger;
-      if (!r || typeof r !== "object" || !w(hz) || hz < 1 || !w(j) || j < 0) return null;
+      if (!r || typeof r !== "object" || !w(hz) || hz < 1 || !w(j) || j < 0 || !w(back) || back < 0) return null;
       const a = [];
       if (w(r.rd) && r.rd >= 0) a.push(r.rd + j);
-      if (w(r.ed) && r.ed >= 0 && r.ed <= j) a.push(j - r.ed);
+      if (w(r.ed) && r.ed >= 0 && r.ed <= j) a.push(r.ed === 0 ? Math.max(j - 1, 0) : j - r.ed);
       if (w(r.rdMax) && r.rdMax >= 0) a.push(Math.max(r.rdMax - 1, 0) + j);
       const age = a.length ? Math.min(...a) : null;
-      if (age !== null && age <= 1) return age === 0 ? "reaction" : "after";
+      if (age !== null && age <= back) return age === 0 ? "reaction" : "after";
       if (!w(r.ed) || r.ed < 0) return "undated";
       return r.ed - j >= 1 && r.ed - j <= hz ? "ahead" : "clear";
     },
-    earnIn: (r, hz, j) => { const e = F.earn(r, hz, j); return e === null ? null : e === "reaction" || e === "after" || e === "ahead"; },
-    elapsed: (asOf, ahead, day) => {
-      if (!isoDay(asOf) || !isoDay(day) || !Array.isArray(ahead)) return null;
-      if (day <= asOf) return 0;
-      const n = ahead.length && day <= ahead[ahead.length - 1] ? ahead.filter((d) => d <= day).length : null;
-      return n !== null && n <= 2 ? n : null;
+    earnIn: (r, hz, j, back) => { const e = F.earn(r, hz, j, back); return e === null ? null : e === "reaction" || e === "after" || e === "ahead"; },
+    elapsed: (asOf, ahead, day, jmax = 2) => {
+      if (!isoDay(asOf) || !isoDay(day) || !Array.isArray(ahead) || !Number.isInteger(jmax)) return null;
+      if (day === asOf) return 0;
+      const n = day < asOf ? 0 : ahead.indexOf(day) + 1;
+      return n > 0 && n <= jmax ? n : null;
     },
     horizon: (hz) => {
       if (!Number.isInteger(hz) || hz < 1) return null;

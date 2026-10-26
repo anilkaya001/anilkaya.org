@@ -15,7 +15,7 @@ export function earningsState(row, hz, j = 0, back = REACTION_BACK_SESSIONS) {
   const { ed, rd, rdMax } = row;
   const ages = [];
   if (whole(rd) && rd >= 0) ages.push(rd + j);
-  if (whole(ed) && ed >= 0 && ed <= j) ages.push(j - ed);
+  if (whole(ed) && ed >= 0 && ed <= j) ages.push(ed === 0 ? Math.max(j - 1, 0) : j - ed);
   if (whole(rdMax) && rdMax >= 0) ages.push(Math.max(rdMax - 1, 0) + j);
   const age = ages.length ? Math.min(...ages) : null;
   if (age !== null && age <= back) return age === 0 ? "reaction" : "after";

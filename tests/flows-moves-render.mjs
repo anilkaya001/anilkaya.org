@@ -1020,6 +1020,21 @@ async function exercise(browser, js, early, only) {
     }
 
     {
+      const list = [];
+      for (let i = 0; i < 6; i++) list.push(["FLAG" + i, 0.035 + i * 0.001, 0.3, 60, "Technology", 2e10, 0.01, 0, 0]);
+      list.push(["EVT", 0.05, 0.3, 5, "Technology", 1e10, 0.01, 0, 0]);
+      const bare = await mount(browser, 1440, 820, { js, body: FX.universe(list, { hz: null }) });
+      const foot = await bare.page.locator("#mvFnote").innerText();
+      P(foot.includes(SIG.SIG_FOOT_NONE) && !/tested names? (is|are) beyond/.test(foot), "WITH NO WINDOW STATED nothing is tested, since an earnings mover would pass as a clear name: " + foot.slice(-120));
+      await bare.page.evaluate(() => document.querySelector('.mv-row[data-t="FLAG5"]').click());
+      await bare.page.waitForTimeout(120);
+      const rail = await bare.page.locator("#mvRail").innerText();
+      P(rail.includes("Earnings are not separated, so no test.") && !rail.includes(SIG.SIG_FLAGGED_LINE) && !rail.includes(SIG.SIG_PLAIN_LINE), "a name's rail gives that reason and no p");
+      same((await railKv(bare.page)).kv["p, own rate"], undefined, "and prints no p");
+      await bare.ctx.close();
+    }
+
+    {
       const wide = await mount(browser, 1440, 820, { js, body: FX.universe(FX.names(), { hz: 30 }) });
       P((await wide.page.locator("#mvApartH").innerText()) === "Earnings within 30 sessions", "THE HEADING FOLLOWS THE PAYLOAD'S OWN WINDOW");
       await wide.page.click("#mvInfoBtn");
@@ -1072,17 +1087,46 @@ const rungFailures = (src) => {
   for (const [chg, sig, level] of table) {
     const got = X.rarityParts({ chg, sig, f2: 11, f3: 5 });
     if ((got ? got.level : 0) !== level) bad.push(`chg ${chg} on sig ${sig} is rung ${got ? got.level : 0}, the log return puts it at ${level}`);
-    const run = X.sigRun([{ t: "AAA", chg, sig, f2: 11, f3: 5, ed: null }], 0.1);
+    const run = X.sigRun([{ t: "AAA", chg, sig, f2: 11, f3: 5, ed: null, event: false }], 0.1);
     const it = run.items[0];
     if ((it.level === null ? 0 : it.level) !== level) bad.push(`the test puts chg ${chg} on sig ${sig} at rung ${it.level}, not ${level}`);
     const z = Math.log1p(chg) / sig;
     if (!(Math.abs((it.z === null ? NaN : it.z) - z) < 1e-12)) bad.push(`its typical days are ${it.z}, not ${z}`);
   }
-  const total = X.sigRun([{ t: "AAA", chg: -1, sig: 0.02, f2: 11, f3: 5, ed: null }], 0.1).items[0];
+  const total = X.sigRun([{ t: "AAA", chg: -1, sig: 0.02, f2: 11, f3: 5, ed: null, event: false }], 0.1).items[0];
   if (total.state !== "nomove" || total.p !== null || total.z !== null) bad.push(`a change of -100% is state ${total.state}, not a move that cannot be tested`);
   return bad;
 };
 eq(rungFailures(JS), [], "the rung of a move, the test's rung and its typical days are read off the log return, the way the nightly counts are");
+
+const unplacedFailures = (src) => {
+  const bad = [];
+  const sb = { globalThis: null };
+  sb.globalThis = sb;
+  vm.runInNewContext(src, sb);
+  const X = sb.__MovesTest;
+  const mover = (t, event) => ({ t, chg: 0.09, sig: 0.02, f2: 3, f3: 1, event });
+  const run = X.sigRun([mover("U0", null), mover("U1", undefined), mover("OK", false), mover("EV", true)], 0.1);
+  const states = run.items.map((i) => i.state).join(",");
+  if (states !== "unplaced,unplaced,tested,event") bad.push(`states ${states}`);
+  if (run.m !== 1 || run.tested !== 1) bad.push(`the correction counts ${run.m} names, not the one placed`);
+  if (run.items[0].p !== null || run.items[0].adj !== null || run.items[0].counted !== false) bad.push("an unplaced name carries a p");
+  const sec = X.sectorStats([{ t: "A", chg: 0.5, iv: 0.3, sector: "X", event: null }, { t: "B", chg: 0.5, iv: 0.3, sector: "X" }], null)[0];
+  if (sec.n !== 0 || sec.apart !== 0 || sec.median !== null || sec.why !== "Earnings are not separated, so no median.") bad.push(`sector of unplaced names: ${JSON.stringify([sec.n, sec.apart, sec.median, sec.why])}`);
+  const mixed = X.sectorStats([{ t: "A", chg: 0.5, iv: 0.3, sector: "X", event: false }, { t: "B", chg: 0.5, iv: 0.3, sector: "X", event: null }], 21)[0];
+  if (mixed.n !== 1 || mixed.apart !== 0) bad.push(`a placed name beside an unplaced one: n ${mixed.n}, apart ${mixed.apart}`);
+  return bad;
+};
+eq(unplacedFailures(JS), [], "a name whose earnings state is not placed is neither tested nor counted in a sector median, and the correction counts only placed names");
+for (const [why, from, to] of [
+  ["an unplaced name tested", 'if (x.event !== true && x.event !== false) return { t: x.t, state: "unplaced"', 'if (false) return { t: x.t, state: "unplaced"'],
+  ["an unplaced name counted in the median", "if (r.event === false) b.ms.push(m);", "if (r.event !== true) b.ms.push(m);"],
+  ["an unplaced name counted as set apart", "apart: b.measured - n - b.unplaced,", "apart: b.measured - n,"],
+  ["an unplaced sector given the all-event sentence", "b.unplaced > 0 ? WHY_UNPLACED : allEvent(hz)", "allEvent(hz)"],
+]) {
+  ok(JS.split(from).length === 2, `the planted build "${why}" targets one line`);
+  ok(unplacedFailures(JS.replace(from, to)).length > 0, `the unplaced battery fails the planted build "${why}"`);
+}
 for (const [why, from, to] of [
   ["the rung read off the simple change", "const level = Math.abs(lm) >= 3 * x.sig ? 3 : Math.abs(lm) >= 2 * x.sig ? 2 : 0;", "const level = Math.abs(x.chg) >= 3 * x.sig ? 3 : Math.abs(x.chg) >= 2 * x.sig ? 2 : 0;"],
   ["the test's rung read off the simple change", "const level = Math.abs(lm) >= 3 * sig ? 3 : 2;", "const level = Math.abs(chg) >= 3 * sig ? 3 : 2;"],
@@ -1122,6 +1166,8 @@ const MUTANTS = [
   ["no add-one in the page's rate", "p: (hits + 1) / (SESSIONS + 1) };\n  }\n  function sigRun", "p: hits / SESSIONS };\n  }\n  function sigRun"],
   ["names below 2 left out of the correction", "return { t: x.t, state: \"below\", z, level: null, hits: null, p: 1 };\n    const level", "return { t: x.t, state: \"below\", z, level: null, hits: null, p: null };\n    const level"],
   ["earnings names tested", "if (x.event === true) return { t: x.t, state: \"event\"", "if (false) return { t: x.t, state: \"event\""],
+  ["an earnings state that is not placed read as no event", "event: st === null ? null : st === \"reaction\"", "event: st === \"reaction\""],
+  ["names whose earnings are not placed tested", "if (x.event !== true && x.event !== false) return { t: x.t, state: \"unplaced\"", "if (false) return { t: x.t, state: \"unplaced\""],
   ["the flagged sentence on every tested name", "if (g.state === \"tested\") return g.flag ? SIG_FLAGGED_LINE : SIG_PLAIN_LINE;", "if (g.state === \"tested\") return SIG_FLAGGED_LINE;"],
   ["the foot counts the tested as flagged", "M.sg.flagged + \" of \"", "M.sg.tested + \" of \""],
   ["the old muted note back", "<span class=\"sub c\" data-k=\"sig\">' + esc(sigLine(x)) + \"</span>\"", "<span class=\"sub c\" data-k=\"sig\">Significance test: not yet published.</span>\""],
@@ -1150,7 +1196,7 @@ for (const [name, from, to] of MUTANTS) {
 
 const SEC_MUTANTS = [
   ["beyond counts a name exactly on the line", "Math.abs(m) > SECTOR_BEYOND).length;", "Math.abs(m) >= SECTOR_BEYOND).length;"],
-  ["names reporting soon counted in the median", "if (r.event !== true) b.ms.push(m);", "b.ms.push(m);"],
+  ["names reporting soon counted in the median", "if (r.event === false) b.ms.push(m);", "b.ms.push(m);"],
   ["SPY and QQQ counted in their sector", "if (!r || PINS.includes(r.t)) continue;", "if (!r) continue;"],
   ["a sector with no figures given a median of zero", "median: n ? med(b.ms) : null,", "median: n ? med(b.ms) : 0,"],
   ["ties left in the order the rows came", "|| cmp(a.name, b.name));", ");"],

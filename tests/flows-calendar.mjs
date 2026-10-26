@@ -242,6 +242,14 @@ const rdOf = (asOf, report, time) => { const b = C.backward(report, asOf, time);
 }
 
 {
+  ok(FIX.holidays.includes("2025-01-09"), "the independent source lists 9 January 2025, the closure for the national day of mourning for President Carter, among the holidays");
+  eq(C.isSession("2025-01-09"), false, "and the table agrees, although no holiday rule would close that Thursday");
+  eq(C.isSession("2025-01-08") && C.isSession("2025-01-10"), true, "the days around it trade");
+  eq(C.sessionsBetween("2025-01-08", "2025-01-10"), 1, "so the closure is one session fewer, not an extra one");
+  eq(C.addSessions("2025-01-08", 1), "2025-01-10", "and counting forward from the 8th lands on the 10th");
+}
+
+{
   const asOf = "2026-08-24";
   const list = C.ahead(asOf);
   deep(list, ["2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28", "2026-08-31"], "the five sessions after the universe's session, the dates a page counts a live session against");

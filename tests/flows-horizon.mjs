@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { bootUI } from "./lib/ui-boot.mjs";
 import { earningsState, earningsInside, horizonWords, HORIZON_SESSIONS, REACTION_BACK_SESSIONS, AHEAD_SESSIONS, LIVE_ELAPSED_MAX } from "../shared/flows-horizon.js";
-import { ahead as aheadOf, addSessions, sessionsBetween, isSession, previousSession } from "../shared/flows-calendar.js";
+import { ahead as aheadOf, addSessions, sessionsBetween, isSession } from "../shared/flows-calendar.js";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -12,6 +12,7 @@ const RDS = [undefined, null, -1, 0, 1, 2, 3, 98, 99, 1.5, "1"];
 const RDMAXS = [undefined, null, -1, 0, 1, 2, 3, 5, 2.5];
 const HZS = [1, 2, 5, 20, 21, 22, 30, 0, -1, 1.5, null, undefined, "21"];
 const JS = [0, 1, 2, 3, 5, 8, -1, 1.5, undefined, null];
+const BACKS = [undefined, 0, 1, 2, 3, -1, 1.5, null, "1"];
 const ROWS = [null, undefined, 5, "x", []];
 
 function grid(F) {
@@ -26,6 +27,12 @@ function grid(F) {
       const wantIn = earningsInside(row, hz, j);
       if (F.earnIn(row, hz, j) !== wantIn) note(`earnIn ${JSON.stringify([ed, rd, rdMax, hz, j])}`);
     }
+    for (const hz of [1, 2, 21]) for (const j of [0, 1, 2, 3]) for (const back of BACKS) {
+      const want = earningsState(row, hz, j, back);
+      const got = F.earn(row, hz, j, back);
+      if (want !== got) note(`earn back ${JSON.stringify([ed, rd, rdMax, hz, j, back])}: ${got} not ${want}`);
+      if (F.earnIn(row, hz, j, back) !== earningsInside(row, hz, j, back)) note(`earnIn back ${JSON.stringify([ed, rd, rdMax, hz, j, back])}`);
+    }
   }
   for (const row of ROWS) for (const hz of HZS) {
     if (F.earn(row, hz, 0) !== earningsState(row, hz, 0)) note(`earn of a ${JSON.stringify(row)} row`);
@@ -39,8 +46,6 @@ function grid(F) {
   return bad;
 }
 
-const lastSessionOnOrBefore = (day) => (isSession(day) ? day : previousSession(day));
-
 function elapsedGrid(F) {
   const bad = [];
   for (const asOf of ["2026-08-24", "2026-08-21", "2026-11-24", "2026-11-25", "2026-12-23", "2026-12-24", "2027-04-01", "2026-06-30", "2026-07-02", "2026-04-02"]) {
@@ -48,14 +53,19 @@ function elapsedGrid(F) {
     const last = list[list.length - 1];
     for (let k = -4; k <= 24; k++) {
       const d = new Date(Date.parse(asOf + "T00:00:00Z") + k * 86400000).toISOString().slice(0, 10);
-      const n = d <= asOf ? 0 : d > last ? null : sessionsBetween(asOf, lastSessionOnOrBefore(d));
-      const want = n !== null && n <= LIVE_ELAPSED_MAX ? n : null;
-      const got = F.elapsed(asOf, list, d);
-      if (got !== want) bad.push(`elapsed ${asOf} ${d}: ${got} not ${want}`);
+      const n = d === asOf ? 0 : d < asOf || d > last || !isSession(d) ? null : sessionsBetween(asOf, d);
+      for (const jmax of [undefined, 0, 1, 2, 3, 5]) {
+        const cap = jmax === undefined ? LIVE_ELAPSED_MAX : jmax;
+        const want = n !== null && n <= cap ? n : null;
+        const got = F.elapsed(asOf, list, d, jmax);
+        if (got !== want) bad.push(`elapsed ${asOf} ${d} jmax ${jmax}: ${got} not ${want}`);
+      }
     }
     if (F.elapsed(asOf, [], addSessions(asOf, 1)) !== null) bad.push("an empty calendar answers null");
+    if (F.elapsed(asOf, [], asOf) !== 0) bad.push("the session itself needs no calendar");
     if (F.elapsed(asOf, null, asOf) !== null) bad.push("no calendar answers null");
     if (F.elapsed("x", list, asOf) !== null || F.elapsed(asOf, list, "") !== null) bad.push("a bad day answers null");
+    if (F.elapsed(asOf, list, addSessions(asOf, 1), 1.5) !== null) bad.push("a fractional cap answers null");
   }
   return bad;
 }
@@ -68,22 +78,37 @@ eq(real.F.earn({ ed: 3, rd: null }, HORIZON_SESSIONS, 0), "ahead", "the kernel r
 eq(real.F.horizon(HORIZON_SESSIONS).apart, horizonWords(HORIZON_SESSIONS).apart, "and prints the leaf's sentence for the horizon");
 eq(aheadOf("2026-08-24").length, AHEAD_SESSIONS, "the payload carries the five session days after the nightly's");
 eq(REACTION_BACK_SESSIONS, 1, "the reaction window looks back one session");
+eq(real.F.earn({ ed: 0 }, 21, 0), "reaction", "a report of unstated time dated on the nightly's session reacts on it or on the next");
+eq(real.F.earn({ ed: 0 }, 21, 1), "reaction", "and at one session on, the evening report has reacted today");
+eq(real.F.earn({ ed: 0 }, 21, 2), "after", "and at two sessions on, the evening report reacted yesterday so the day is an after day, not a clear one");
+eq(real.F.earn({ ed: 1 }, 21, 2), "after", "a report of known timing one session ahead reacted on the next session, so at two it is the day after");
+eq(real.F.earn({ ed: 1 }, 21, 1), "reaction", "a report of known timing one session ahead reacts on that session");
+eq(earningsState({ ed: 0 }, 21, 2), "after", "the leaf agrees");
+eq(real.F.earn({ ed: null, rd: 1 }, 21, 0, 0), "undated", "and a name that reacted a session ago is then not an event");
+eq(real.F.earn({ ed: null, rd: 1 }, 21, 0, 2), "after", "while a window of two keeps it an after day");
+eq(real.F.earn({ ed: null, rd: 2 }, 21, 0, 2), "after", "up to the second session");
 eq(LIVE_ELAPSED_MAX, 2, "and a nightly more than two sessions old places no earnings state");
 
 const BUILDS = [
-  ["the reaction window is zero sessions", [["if (age !== null && age <= 1) return age === 0", "if (age !== null && age <= 0) return age === 0"]]],
-  ["the reaction window is two sessions", [["if (age !== null && age <= 1) return age === 0", "if (age !== null && age <= 2) return age === 0"]]],
+  ["the reaction window is zero sessions", [["if (age !== null && age <= back) return age === 0", "if (age !== null && age <= 0) return age === 0"]]],
+  ["the reaction window is two sessions", [["if (age !== null && age <= back) return age === 0", "if (age !== null && age <= 2) return age === 0"]]],
   ["a null rd is an age", [["if (w(r.rd) && r.rd >= 0) a.push(r.rd + j);", "if (r.rd >= 0) a.push(r.rd + j);"]]],
   ["the elapsed sessions are not added to rd", [["a.push(r.rd + j);", "a.push(r.rd);"]]],
-  ["a report that landed in the elapsed sessions is not seen", [["if (w(r.ed) && r.ed >= 0 && r.ed <= j) a.push(j - r.ed);", ""]]],
+  ["a report that landed in the elapsed sessions is not seen", [["if (w(r.ed) && r.ed >= 0 && r.ed <= j) a.push(r.ed === 0 ? Math.max(j - 1, 0) : j - r.ed);", ""]]],
+  ["a report of unstated time dated on the session aged as if its time were known", [["a.push(r.ed === 0 ? Math.max(j - 1, 0) : j - r.ed);", "a.push(j - r.ed);"]]],
+  ["the reaction window is fixed in the kernel", [["age <= back", "age <= 1"]]],
+  ["a negative window accepted", [[" || !w(back) || back < 0) return null;", ") return null;"]]],
   ["an unstated time counted at its later age", [["a.push(Math.max(r.rdMax - 1, 0) + j);", "a.push(r.rdMax + j);"]]],
   ["the horizon is not moved by the elapsed sessions", [["return r.ed - j >= 1 && r.ed - j <= hz ?", "return r.ed >= 1 && r.ed <= hz ?"]]],
   ["the horizon is one session short", [["r.ed - j >= 1 && r.ed - j <= hz ?", "r.ed - j >= 1 && r.ed - j < hz ?"]]],
   ["a horizon of zero accepted", [["!w(hz) || hz < 1 ||", "!w(hz) ||"]]],
   ["an undated name called clear", [["if (!w(r.ed) || r.ed < 0) return \"undated\";", "if (!w(r.ed) || r.ed < 0) return \"clear\";"]]],
-  ["elapsed counts the day itself short", [["ahead.filter((d) => d <= day).length : null", "ahead.filter((d) => d < day).length : null"]]],
-  ["elapsed answers a stale nightly with its count", [["return n !== null && n <= 2 ? n : null;", "return n;"]]],
-  ["elapsed refuses one session too early", [["return n !== null && n <= 2 ? n : null;", "return n !== null && n <= 1 ? n : null;"]]],
+  ["elapsed counts the day itself short", [["const n = day < asOf ? 0 : ahead.indexOf(day) + 1;", "const n = day < asOf ? 0 : ahead.indexOf(day);"]]],
+  ["elapsed answers a stale nightly with its count", [["return n > 0 && n <= jmax ? n : null;", "return n > 0 ? n : null;"]]],
+  ["elapsed refuses one session too early", [["return n > 0 && n <= jmax ? n : null;", "return n > 0 && n < jmax ? n : null;"]]],
+  ["elapsed ages data older than the nightly", [["const n = day < asOf ? 0 : ahead.indexOf(day) + 1;", "const n = day < asOf ? 1 : ahead.indexOf(day) + 1;"]]],
+  ["elapsed counts a day that is no session", [["const n = day < asOf ? 0 : ahead.indexOf(day) + 1;", "const n = day < asOf ? 0 : ahead.filter((d) => d <= day).length;"]]],
+  ["elapsed ignores the cap it is given", [["n <= jmax ? n : null;", "n <= 2 ? n : null;"]]],
   ["a sentence with the number hard-coded", [["apart: \"Earnings within \" + hz + \" sessions: event not separated.\"", "apart: \"Earnings within 21 sessions: event not separated.\""]]],
   ["the count dropped", [["return { n: hz, apart:", "return { n: hz + 1, apart:"]]],
 ];
