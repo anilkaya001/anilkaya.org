@@ -73,7 +73,7 @@
 .sf-lt .gr th.g-noside, .sf-lt thead th:nth-child(4), .sf-lt tbody td:nth-child(4) { border-left: 1px solid var(--sep); }
 .sf-lt .gr th.g-outside, .sf-lt thead th:nth-child(6), .sf-lt tbody td:nth-child(6) { border-left: 1px solid var(--sep); }
 .sf-lt .gr > td:first-child, .sf-lt .corner { width: 33%; }
-@media (min-width: 1280px) {
+@media (min-width: 1280.01px) {
   .sf-lt .gr > td:first-child, .sf-lt .corner { width: 30%; }
 }
 .sf-lt tr.sub td { text-align: left; font: var(--t-caption2); letter-spacing: 0.03em; text-transform: uppercase; color: var(--label-3); height: 16px; line-height: 16px; }
