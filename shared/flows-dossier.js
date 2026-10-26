@@ -2,7 +2,7 @@ import { vnum, isoDay, sessionsBetween } from "./flows-cross.js";
 import { median } from "./flows-stats.js";
 import { askShareRead } from "./flows-tape-stats.js";
 import { opById } from "./flows-vendor-ops.js";
-import { formatScaled } from "./flows-round.js";
+import { formatScaled } from "./flows-display-round.js";
 import { usableX, exSplit, ETF_TOP } from "./flows-vendor-extras.js";
 
 export const DOSSIER_VERSION = 1;

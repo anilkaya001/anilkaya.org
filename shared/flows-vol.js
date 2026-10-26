@@ -1,4 +1,5 @@
 import { rowsOrNull as rowsOf } from "./flows-rows.js";
+import { eventTerms } from "./flows-event-variance.js";
 import { mean, sampleVar, sampleSd, median, quantileSorted, shareAtOrBelow, pearson } from "./flows-stats.js";
 
 export { mean, sampleVar, sampleSd, median, quantileSorted, shareAtOrBelow, pearson };
@@ -157,8 +158,8 @@ export function ivRankPercentile(history, current) {
   const h = finite((history || []).map(vnum));
   const x = vnum(current);
   if (!h.length || x === null) return { rank: null, percentile: null };
-  const lo = Math.min(...h);
-  const hi = Math.max(...h);
+  const lo = Math.min(...h, x);
+  const hi = Math.max(...h, x);
   return {
     rank: hi > lo ? (x - lo) / (hi - lo) : null,
     percentile: shareAtOrBelow(x, h),
@@ -180,16 +181,10 @@ export function varianceRiskPremium(iv, rvForecast) {
 }
 
 export function eventVariance(front, back) {
-  const s1 = vnum(front && front.vol), t1 = vnum(front && front.T);
-  const s2 = vnum(back && back.vol), t2 = vnum(back && back.T);
-  const none = { diffusiveVol: null, eventSd: null, eventMeanAbs: null };
-  if (s1 === null || s2 === null || !(t1 > 0) || !(t2 > t1)) return { ...none, code: "input-absent" };
-  const sd2 = (s2 * s2 * t2 - s1 * s1 * t1) / (t2 - t1);
-  if (!(sd2 > 0)) return { ...none, code: "calendar-arbitrage" };
-  const j2 = s1 * s1 * t1 - sd2 * t1;
-  if (!(j2 > 0)) return { ...none, diffusiveVol: Math.sqrt(sd2), code: "no-premium" };
-  const j = Math.sqrt(j2);
-  return { diffusiveVol: Math.sqrt(sd2), eventSd: j, eventMeanAbs: j * Math.sqrt(2 / Math.PI), code: null };
+  return eventTerms(
+    { vol: vnum(front && front.vol), T: vnum(front && front.T) },
+    { vol: vnum(back && back.vol), T: vnum(back && back.T) },
+  );
 }
 
 export function forwardVol(near, far) {

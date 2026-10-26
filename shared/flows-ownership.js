@@ -112,9 +112,9 @@ export function pooledFive(list) {
   if (five.every((x) => x.sv !== null && x.tv !== null && x.tv > 0)) {
     let s = 0, t = 0;
     for (const x of five) { s += x.sv; t += x.tv; }
-    return { ratio5: s / t, ratio5Basis: "pooled", ratio5Why: null };
+    return { ratio5: s / t, ratio5Basis: "pooled" };
   }
-  if (five.every((x) => x.ratio !== null)) return { ratio5: mean(five.map((x) => x.ratio)), ratio5Basis: "mean", ratio5Why: null };
+  if (five.every((x) => x.ratio !== null)) return { ratio5: mean(five.map((x) => x.ratio)), ratio5Basis: "mean" };
   return noFive(SILENCE.coverage);
 }
 
@@ -146,7 +146,7 @@ export function shortVolumeSummary(rows, { sessionDate = null, window = SVR_WIND
     mean60: z.mean, sd60: z.sd, z: z.z, n: z.n, reason: z.reason,
     ...pooledFive(list),
     path: list.slice(-20).map((x) => [x.d, x.ratio === null ? null : Number(x.ratio.toFixed(4))]),
-    rule: "z of the latest FINRA short-volume ratio against the 60 sessions before it; a 40-50% baseline is market-making, not short interest; FINRA-reported volume only, not all trading",
+    rule: "z of the latest FINRA-reported short-volume ratio against the 60 sessions before it; a 40-50% baseline is market-making, not short interest",
   };
 }
 

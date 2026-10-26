@@ -34,7 +34,8 @@ function cases(M) {
     if ((got.reason || null) !== e.reason) say(`${sc.name}: reason ${got.reason} where ${e.reason} is right`);
     near(got.ratio5, e.ratio5, `${sc.name}: five-session ratio`);
     if (got.ratio5Basis !== e.ratio5Basis) say(`${sc.name}: basis ${got.ratio5Basis} where ${e.ratio5Basis} is right`);
-    if (got.ratio5Why !== e.ratio5Why) say(`${sc.name}: ratio5 reason ${got.ratio5Why} where ${e.ratio5Why} is right`);
+    if ((got.ratio5Why ?? null) !== e.ratio5Why) say(`${sc.name}: ratio5 reason ${got.ratio5Why} where ${e.ratio5Why} is right`);
+    if (e.ratio5 !== null && "ratio5Why" in got) say(`${sc.name}: a figure carries a reason key`);
     if ("avg5" in got) say(`${sc.name}: the mean-of-ratios field is still published`);
     if (Number.isNaN(got.z) || got.z === Infinity || got.z === -Infinity) say(`${sc.name}: z is not finite`);
   }
@@ -48,6 +49,21 @@ ok(["pooled", "mean"].every((b) => FX.scenarios.some((s) => s.expect.ratio5Basis
   const rows = (n) => Array.from({ length: n }, (_, i) => ({ market_date: `2026-09-${String(10 + i).padStart(2, "0")}`, short_volume: 100 + i, total_volume: 1000, short_volume_ratio: "0.1" }));
   const four = OWN.shortVolumeSummary(rows(4), { sessionDate: "2026-09-30" });
   eq([four.ratio5, four.ratio5Basis, four.ratio5Why], [null, null, "too_few"], "four sessions are not a five-session ratio and say so, never a figure over three days");
+}
+
+{
+  const spec = readFileSync(new URL("../docs/uw-openapi.yaml", import.meta.url), "utf8");
+  const at = spec.indexOf("    Short Screener:");
+  const example = spec.slice(at, spec.indexOf("      properties:", at));
+  const field = (k) => { const m = example.match(new RegExp("^\\s+" + k + ": '?([^'\\n]+)'?$", "m")); return m ? m[1] : null; };
+  const row = { symbol: field("symbol"), market_date: field("market_date"), short_interest: Number(field("short_interest")), total_float: Number(field("total_float")),
+    si_float: field("si_float"), days_to_cover: field("days_to_cover") };
+  ok(row.symbol === "EXMP" && row.short_interest === 75000 && row.total_float === 4250000, "the vendor's own short-interest example is read from the committed specification");
+  const got = OWN.latestShortInterest([row], { sessionDate: "2023-04-17" }).byTicker.get("EXMP");
+  ok(Math.abs(got.si - 75000 / 4250000) < 1e-9, "the vendor's si_float is shares short over float as a fraction, 1.7647 per cent here and not 1.7647 as a percent");
+  ok(got.dtc === 2.1 && got.shares === 75000 && got.float === 4250000 && got.date === "2023-04-15" && got.stale === false, "and the days to cover, the shares, the float and the settlement date are carried as the vendor states them, the date being the settlement date and not the publication date");
+  const old = OWN.latestShortInterest([row], { sessionDate: "2023-06-30" }).byTicker.get("EXMP");
+  ok(old.stale === true && old.ageDays === 76, "a settlement more than 45 days old is stale by its settlement date");
 }
 
 const MUTANTS = [
@@ -69,4 +85,4 @@ for (const [name, transforms] of MUTANTS) {
   ok(cases(mod).length > 0, `planted wrong build must fail: ${name}`);
 }
 
-console.log(`✓ math-short: ${checks} assertions - the five-session short-volume ratio is the pooled sum of short over the sum of total when five sessions carry both counts, the mean of the five stated ratios otherwise with its basis named, and nothing under five sessions; the z is the sample deviation against the sixty sessions before the latest; and ${MUTANTS.length} planted wrong builds that each fail`);
+console.log(`✓ math-short: ${checks} assertions - the five-session short-volume ratio is the pooled sum of short over the sum of total when five sessions carry both counts, the mean of the five stated ratios otherwise with its basis named, and nothing under five sessions; the z is the sample deviation against the sixty sessions before the latest; the vendor's own short-interest example reads as a fraction of float with a settlement date; and ${MUTANTS.length} planted wrong builds that each fail`);

@@ -3,7 +3,7 @@ import { guardAnswer, numeralsIn } from "./flows-ask.js";
 import { VARIATION_VOTES, VARIATION_LINES } from "./flows-variation.js";
 import { STRUCTURE_BY_ID, AFFINITY, BUCKET_LINES } from "./flows-quant-structures.js";
 import { CLAIM_LINES } from "./flows-fact-ids.js";
-import { formatScaled } from "./flows-round.js";
+import { formatScaled } from "./flows-display-round.js";
 
 export const NEURON_CONTEXT_VERSION = 6;
 export const NEURON_MAX_IDEAS = 3;

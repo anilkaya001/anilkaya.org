@@ -349,7 +349,7 @@ const print = (o = {}) => ({
   }
   ok(/^at or above the ask$/.test(SIDE_WORDS.A) && /^at or below the bid$/.test(SIDE_WORDS.B), "the strong tiers use the lexicon's phrases");
   ok(!banned.test(largeLabel(25000)), "and the large-print label");
-  deep([...SOURCE.matchAll(/^import[^\n]*from "([^"]+)";/gm)].map((m) => m[1]), ["./flows-round.js"], "the classifier is a leaf over the rounding leaf alone");
+  deep([...SOURCE.matchAll(/^import[^\n]*from "([^"]+)";/gm)].map((m) => m[1]), ["./flows-display-round.js"], "the classifier is a leaf over the rounding leaf alone");
   ok(!/\brequire\(|\bimport\(/.test(SOURCE), "and loads nothing at run time");
   ok(!/Date\.now|new Date\(\)|Math\.random|process\.|globalThis/.test(SOURCE), "and reads no clock, no randomness and no environment: the caller passes the time");
 }

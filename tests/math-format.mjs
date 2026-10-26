@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { bootUI } from "./lib/ui-boot.mjs";
-import * as LEAF from "../shared/flows-round.js";
+import * as LEAF from "../shared/flows-display-round.js";
 import * as TAPE from "../shared/flows-tape-stats.js";
 
 const HERE = new URL("./", import.meta.url);
@@ -69,8 +69,8 @@ const block = (src) => {
   return norm(src.slice(start, src.indexOf(tail, start) + tail.length));
 };
 {
-  const ui = read("../assets/js/flows-ui.js"), leafSrc = read("../shared/flows-round.js");
-  eq(block(ui), block(leafSrc), "the nine rounding functions are the same code in flows-ui.js and in shared/flows-round.js");
+  const ui = read("../assets/js/flows-ui.js"), leafSrc = read("../shared/flows-display-round.js");
+  eq(block(ui), block(leafSrc), "the nine rounding functions are the same code in flows-ui.js and in shared/flows-display-round.js");
   for (const line of ["const NOISE = 1e-9;", 'const SCALE_SUFFIX = ["", "K", "M", "B", "T"];', "const SHORT_DP = [0, 0, 1, 2, 2];"]) {
     ok(ui.includes(line), `flows-ui.js holds ${line}`);
     ok(norm(leafSrc).replace(/Object\.freeze\((\[[^\]]*\])\)/g, "$1").includes(line), `and so does the leaf`);
@@ -207,7 +207,7 @@ function ratchet(now, base) {
   const problems = [];
   for (const f of new Set([...Object.keys(now), ...Object.keys(base)])) {
     const a = now[f] || 0, b = base[f] || 0;
-    if (a > b) problems.push(`${f} has ${a} local rounding sites where the baseline allows ${b}: format through FlowsUI.F, or shared/flows-round.js on the server`);
+    if (a > b) problems.push(`${f} has ${a} local rounding sites where the baseline allows ${b}: format through FlowsUI.F, or shared/flows-display-round.js on the server`);
     if (a < b) problems.push(`${f} has ${a} local rounding sites and the baseline still says ${b}: lower it with node math-format.mjs --write-sites so the cleanup cannot be undone`);
   }
   return problems;

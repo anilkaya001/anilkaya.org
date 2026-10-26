@@ -38,9 +38,14 @@ def main():
             holidays.append(d.isoformat())
     early = {}
     trt = {}
+    closes = {}
     for s in sessions:
         d = s.date()
         close = cal.closes.loc[s].tz_convert(NY)
+        close_utc = close.astimezone(timezone.utc)
+        if close_utc.date() != d:
+            raise SystemExit("the close of " + d.isoformat() + " is not on its own UTC day")
+        closes.setdefault(str(close_utc.hour * 60 + close_utc.minute), []).append(d.isoformat())
         open_ = cal.opens.loc[s].tz_convert(NY)
         close_min = close.hour * 60 + close.minute
         if close_min != 960:
@@ -92,6 +97,7 @@ def main():
         "sessionCount": len(session_days),
         "holidays": holidays,
         "early": early,
+        "closesUtc": closes,
         "trtSpans": spans,
         "dst": dst,
         "instants": instants,

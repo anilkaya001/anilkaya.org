@@ -1,4 +1,4 @@
-import { formatScaled } from "./flows-round.js";
+import { formatScaled } from "./flows-display-round.js";
 
 export const MODEL_IMPLIED = "Model-implied, not a quote and not advice. Based on the engine's fitted prices and its own probabilities, under the stated assumptions. No track record yet.";
 

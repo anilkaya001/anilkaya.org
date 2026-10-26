@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { bootUI } from "./lib/ui-boot.mjs";
 import { isTradingDay, closeMinutes, easternOffsetMinutes, easternDay } from "../shared/flows-freshness.js";
-import { isSession, nyseEarlyCloses, etDayOf } from "../shared/flows-quant-time.js";
+import { isSession, nyseEarlyCloses, etDayOf, closeUtcMs, yearFraction, YEAR_SECONDS } from "../shared/flows-quant-time.js";
+import { loadMutated } from "./truth/mutants.mjs";
 import { boundaries } from "../shared/flows-time.js";
 
 const HERE = new URL("./", import.meta.url);
@@ -60,6 +61,37 @@ ok(spans > 3600, "every session from 2017 to 2031 has its TRT open and close che
 eq(spanOf(false, false).closeTrtMin, 1440, "in US standard time the regular close is 00:00 TRT, the next calendar day");
 eq(spanOf(true, false).openTrtMin, 990, "and in US daylight time the open is 16:30 TRT");
 
+function yearBattery(M) {
+  const bad = [];
+  let n = 0;
+  for (const [minute, list] of Object.entries(FX.closesUtc)) {
+    for (const d of list) {
+      const want = Date.parse(d + "T00:00:00Z") + Number(minute) * 60000;
+      n++;
+      if (M.closeUtcMs(d) !== want) { if (bad.length < 6) bad.push(`${d}: the close is ${M.closeUtcMs(d)} where the exchange closes at ${want}`); continue; }
+      if (n % 7 !== 0) continue;
+      const week = M.yearFraction(want - 7 * DAY, d);
+      if (week !== 7 / 365 && bad.length < 6) bad.push(`${d}: a week before the close is ${week} years, not 7/365`);
+      const minuteBefore = M.yearFraction(want - 60000, d);
+      if (minuteBefore !== 1 / 525600 && bad.length < 6) bad.push(`${d}: a minute before the close is ${minuteBefore} years, not 1/525600`);
+      if (M.yearFraction(want, d) !== 0 && bad.length < 6) bad.push(`${d}: at the close the time left is ${M.yearFraction(want, d)}`);
+      if (!(M.yearFraction(want + 60000, d) < 0) && bad.length < 6) bad.push(`${d}: a minute after the close the time left is not negative`);
+    }
+  }
+  return bad;
+}
+eq(yearBattery({ closeUtcMs, yearFraction }).join("; "), "", "the time to expiry runs to the exchange's own close of the expiry day (16:00 New York, 13:00 on the 37 early closes), in whole minutes over 525,600, and is negative after it");
+eq(YEAR_SECONDS, 365 * 86400, "and a year is 365 days of 86,400 seconds, the implied-volatility convention");
+for (const [name, transforms] of [
+  ["the close is taken at 21:00 UTC whatever the day", [["export function yearFraction(asOfMs, expiryDay) {\n  const close = closeUtcMs(expiryDay);", "export function yearFraction(asOfMs, expiryDay) {\n  const close = Date.parse(expiryDay + \"T21:00:00Z\");"]]],
+  ["the year is 252 days", [["export const YEAR_SECONDS = 365 * 86400;", "export const YEAR_SECONDS = 252 * 86400;"]]],
+  ["the time left is measured in whole days", [["return (close - asOfMs) / (YEAR_SECONDS * 1000);", "return Math.round((close - asOfMs) / 86400000) * 86400 / YEAR_SECONDS;"]]],
+]) {
+  let mod;
+  try { mod = await loadMutated("shared/flows-quant-time.js", transforms, { salt: Math.floor(Math.random() * 1e6) }); } catch (e) { assert.fail(`the planted build '${name}' did not load: ${e.message}`); }
+  ok(yearBattery(mod).length > 0, `planted wrong build must fail: ${name}`);
+}
+
 const UI = bootUI();
 {
   const printAt = (iso) => Date.parse(iso);
@@ -91,4 +123,4 @@ const UI = bootUI();
   ok(wrongOffset.F.etDay(Date.parse("2026-01-15T21:00:00Z")) !== "2026-01-15", "and so does a New York clock set to Istanbul (planted wrong build)");
 }
 
-console.log(`✓ math-time: ${checks} assertions - the hand-written NYSE calendar, early closes, US daylight rule and Eastern day against exchange_calendars and the IANA zone from 2015 to 2031, the TRT open and close of every session since 2017 (16:30 to 23:00 in US daylight time, 17:30 to 00:00 after it), and the closing print kept in the New York session whatever its TRT date`);
+console.log(`✓ math-time: ${checks} assertions - the hand-written NYSE calendar, early closes, US daylight rule and Eastern day against exchange_calendars and the IANA zone from 2015 to 2031, the TRT open and close of every session since 2017 (16:30 to 23:00 in US daylight time, 17:30 to 00:00 after it), the time to expiry in whole minutes to the exchange's own close over a 365-day year, and the closing print kept in the New York session whatever its TRT date`);

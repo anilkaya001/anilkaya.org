@@ -19,7 +19,7 @@ import { easternDay } from "./flows-freshness.js";
 import { parseOptionSymbol } from "./flows-premium.js";
 import { bookLevels } from "./flows-quant-card.js";
 import { compactNumbers } from "./flows-cross.js";
-import { formatScaled, wholePercent } from "./flows-round.js";
+import { formatScaled, wholePercent } from "./flows-display-round.js";
 export { HORIZON_SESSIONS };
 
 export function numOrNull(value) {

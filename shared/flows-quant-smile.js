@@ -1,4 +1,5 @@
 import { normCdf, normPdf, black76, black76ImpliedVol, impliedVolB76 } from "./flows-quant-bs.js";
+import { eventTerms } from "./flows-event-variance.js";
 
 export const SMILE_LINES = Object.freeze({
   TICK: 0.05,
@@ -991,15 +992,12 @@ export function fixedTenorVol(input) {
   return { vol: Math.sqrt(w / days), extrapolated: false };
 }
 
+const EVENT_WHY = Object.freeze({ "input-absent": "event.slices", "calendar-arbitrage": "event.inverted", "no-premium": "event.no-premium" });
+
 export function eventVariance(input) {
   const { front, back } = input || {};
-  if (!front || !back || !(back.T > front.T) || !(front.T > 0)) return { diffusiveVol: null, eventSd: null, eventMeanAbs: null, why: "event.slices" };
-  const sd2 = (back.vol * back.vol * back.T - front.vol * front.vol * front.T) / (back.T - front.T);
-  if (!(sd2 > 0)) return { diffusiveVol: null, eventSd: null, eventMeanAbs: null, why: "event.inverted" };
-  const J2 = front.vol * front.vol * front.T - sd2 * front.T;
-  if (!(J2 > 0)) return { diffusiveVol: Math.sqrt(sd2), eventSd: null, eventMeanAbs: null, why: "event.no-premium" };
-  const J = Math.sqrt(J2);
-  return { diffusiveVol: Math.sqrt(sd2), eventSd: J, eventMeanAbs: J * Math.sqrt(2 / Math.PI), why: null };
+  const r = eventTerms(front, back);
+  return { diffusiveVol: r.diffusiveVol, eventSd: r.eventSd, eventMeanAbs: r.eventMeanAbs, why: r.code === null ? null : EVENT_WHY[r.code] };
 }
 
 function solveSmall(A, b) {
