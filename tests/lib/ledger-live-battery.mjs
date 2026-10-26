@@ -13,8 +13,8 @@ export const PLANTS = [
   { id: "R7-drift-never-pauses", title: "a drift that keeps coming back is counted but never pauses", live: [["    if (L.drift.events >= DRIFT_PAUSE) {\n      pause(\"The live books drifted from a full recompute.\");\n      return false;\n    }\n", ""]], expect: "drift-pause" },
   { id: "R11-drift-not-rebuilt", title: "a drift is counted and the books are left as they are", live: [["    L.ledger.engine().rebuild();\n", ""]], expect: "drift-rebuild" },
   { id: "R8-parity-ignored", title: "a book the browser cannot reproduce is used anyway", live: [["if (!parity.ok) { pause(", "if (false) { pause("]], expect: "parity" },
-  { id: "R9-innerhtml-every-paint", title: "every live paint replaces the markup", ctl: [["if (api) api.morph(host, text);\n    else host.innerHTML = text;", "host.innerHTML = text;"]], expect: "writes" },
-  { id: "R10-flash-unthrottled", title: "a flash on every repaint, with no gap between them", live: [["const FLASH_GAP_MS = 500;", "const FLASH_GAP_MS = 0;"]], expect: "flash" },
+  { id: "R9-innerhtml-every-paint", title: "every live paint replaces the markup", ctl: [["if (api.morph(el, markup) < 0) return false;", "el.innerHTML = markup;"]], expect: "writes" },
+  { id: "R10-flash-unchanged", title: "a cell is highlighted on every repaint whether or not its figure moved", ctl: [["return put(td, text) && was !== undefined && was !== \"pending\";", "put(td, text);\n    return was !== undefined && was !== \"pending\";"]], expect: "flash" },
 ];
 export const BASE_LIVE = once(LIVE_JS, "const VERIFY_MS = 15000;", "const VERIFY_MS = 250;");
 const tamperBook = () => { const b = JSON.parse(JSON.stringify(serverBook(liveWorld()))); b.viewHash = "00000000"; return b; };
@@ -56,8 +56,8 @@ export async function battery(browser, o) {
     let wrote = true;
     let flashed = true;
     for (let i = 0; i < 3; i++) {
+      await m.page.waitForFunction(() => !document.querySelector("#sf .chg"), null, { timeout: 6000 });
       const before = await snapshot();
-      await m.page.waitForTimeout(400);
       await m.page.evaluate(() => window.__watch(["#sfMatrix", "#sfBody"]));
       await sim.send(sim.rows(1));
       await m.page.waitForTimeout(100);
@@ -65,33 +65,22 @@ export async function battery(browser, o) {
       const rep = await m.page.evaluate(() => {
         window.__unwatch();
         const cells = new Set();
-        const flash = new Set();
         const all = [...document.querySelectorAll("#sfMatrix td, #sfMatrix th, #sfBody td, #sfBody th")];
         for (const mu of window.__muts) {
           const el = mu.target.nodeType === 1 ? mu.target : mu.target.parentElement;
           const cell = el && el.closest("td, th");
-          if (mu.type === "attributes" && mu.attributeName === "data-flash") { if (cell) flash.add(all.indexOf(cell)); continue; }
           if (cell) cells.add(all.indexOf(cell));
         }
-        return { cells: [...cells].sort((a, b) => a - b), flash: [...flash] };
+        const lit = all.map((c, j) => (c.classList.contains("chg") ? j : -1)).filter((j) => j >= 0);
+        return { cells: [...cells].sort((a, b) => a - b), lit };
       });
       const changed = [];
       before.forEach((t, j) => { if (t !== after[j]) changed.push(j); });
       if (JSON.stringify(changed) !== JSON.stringify(rep.cells)) wrote = false;
-      if (!rep.flash.every((j) => changed.includes(j))) flashed = false;
+      if (!rep.lit.every((j) => changed.includes(j))) flashed = false;
     }
-    await m.page.waitForTimeout(700);
-    await m.page.evaluate(() => window.__watch(["#sfMatrix", "#sfBody"]));
-    const t0 = await m.page.evaluate(() => performance.now());
-    for (let i = 0; i < 4; i++) await sim.send(sim.rows(1), { quiet: true });
-    const burst = await m.page.evaluate(() => {
-      window.__unwatch();
-      const waves = new Set();
-      window.__muts.forEach((mu, i) => { if (mu.type === "attributes" && mu.attributeName === "data-flash") waves.add(window.__mutAt[i]); });
-      return { waves: waves.size, now: performance.now() };
-    });
     note("writes", wrote);
-    note("flash", flashed && burst.waves <= Math.floor((burst.now - t0) / 500) + 1);
+    note("flash", flashed);
     await m.page.waitForTimeout(o.verifyWait || 1000);
     note("verify", (await statusOf(m.page)).drift.runs >= 3);
     await m.ctx.close();

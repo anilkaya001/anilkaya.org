@@ -26,7 +26,7 @@
     hidden: document.hidden, hiddenAt: 0, catching: false, caughtAt: null, inflight: null, lag: kit.createSamples(),
     parity: { state: "pending", at: null, text: null }, drift: { runs: 0, count: 0, events: 0, at: null, rebuiltAt: null }, pageOnly: 0, serverReadAt: null,
     timers: { strip: 0, verify: 0 }, view: null, viewKey: "", strip: null, last: null,
-    announced: "", announceAt: 0, ticks: new WeakMap(), lastTotal: null, announcedState: "", holdList: false, holdSel: false, lastWall: 0, lastMono: 0,
+    announced: "", announceAt: 0, ticks: new WeakMap(), lastTotal: null, announcedState: "", fit: { step: 0, width: -1, state: "" }, holdList: false, holdSel: false, lastWall: 0, lastMono: 0,
     counts: { frames: 0, rows: 0, bases: 0, paints: 0, skipped: 0, writes: 0, verifies: 0, fetchFails: 0, snapshots: 0 },
     base: null, dirty: false, raf: 0,
   };
@@ -262,12 +262,38 @@
     host.append(btn);
     title.insertBefore(host, info);
     L.strip = { host, btn, dot, word, val, more, tone: "", verdict: "" };
+    if (typeof ResizeObserver === "function") new ResizeObserver(() => { if (!L.hidden) renderStrip(); }).observe(title);
     btn.addEventListener("click", () => {
       const m = L.last || kit.stripModel(modelNow());
       const facts = m.chips.map((c) => [c.label, c.value]);
       const state = { live: "live", delayed: "fresh", stale: "stale", closed: "closed", pending: "pending" }[m.verdict.state];
       UI.openInfo(btn, { title: "Live ledger", state, lead: m.chips[0].title || m.chips[0].value, facts });
     });
+  }
+
+  function stripFits(s) {
+    const title = s.host.parentElement;
+    if (!title) return true;
+    const cs = getComputedStyle(title);
+    if (cs.flexWrap !== "nowrap") return s.host.offsetWidth <= title.clientWidth + 0.5;
+    const gap = parseFloat(cs.columnGap) || 0;
+    const kids = Array.from(title.children).filter((el) => el.getClientRects().length > 0);
+    const total = kids.reduce((a, el) => a + Math.max(el.offsetWidth, el.scrollWidth), 0) + gap * Math.max(0, kids.length - 1);
+    return total <= title.clientWidth + 0.5;
+  }
+
+  function fitStrip(state, val, more) {
+    const s = L.strip;
+    const title = s.host.parentElement;
+    const width = title ? title.clientWidth : 0;
+    if (L.fit.width !== width || L.fit.state !== state) L.fit = { step: 0, width, state };
+    for (; L.fit.step < 2; L.fit.step++) {
+      setText(s.val, val);
+      setText(s.more, L.fit.step < 1 ? more : "");
+      if (stripFits(s)) return;
+    }
+    setText(s.val, "");
+    setText(s.more, "");
   }
 
   function renderStrip() {
@@ -281,8 +307,7 @@
     if (s.host.dataset.tone !== feed.tone) s.host.dataset.tone = feed.tone;
     setText(s.word, m.verdict.word);
     const caught = L.caughtAt !== null && nowMs() - L.caughtAt < 10000 && m.verdict.state !== "hidden" ? " · caught up " + kit.trtClock(L.caughtAt, { seconds: true }) : "";
-    setText(s.val, feed.value + caught);
-    setText(s.more, lag.value === "— no new windows yet" || lag.value.startsWith("—") ? "" : "Vendor to hub " + lag.value);
+    fitStrip(m.verdict.state, feed.value + caught, lag.value === "— no new windows yet" || lag.value.startsWith("—") ? "" : "Vendor to hub " + lag.value);
     const label = "Live ledger: " + m.verdict.word + ". Open for the latency details.";
     if (s.btn.getAttribute("aria-label") !== label) s.btn.setAttribute("aria-label", label);
     if (m.verdict.state !== L.announcedState) {
