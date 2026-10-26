@@ -392,7 +392,7 @@ try {
     eq(r.rows["Strike-sum crossing"], "$101.25", "the strike-sum crossing under its own name");
     eq(r.rows["Zero-gamma level"], "$99.50", "and the zero-gamma level beside it, never merged with it");
     ok(!("Gamma flip" in r.rows), "no row is labelled with the ambiguous 'Gamma flip'");
-    eq(r.rows["Priced move"], "±7.3%", "the priced move");
+    eq(r.rows["Priced move to the end-of-week expiry"], "±7.3%", "the vendor's priced move, labelled with the horizon it is quoted for");
     eq(r.rows["IV rank"], "73.4% · 2026-08-28", "THE RANK IS PICKED BY DATE, NOT BY INDEX — 73.4 on 2026-08-28 is the newest of three shuffled rows");
 
     const edged = clone(base);
@@ -1136,13 +1136,14 @@ try {
     const prints = await rowsOf("Prints");
     eq(prints.length, dp.rows.filter((r) => typeof r.prem === "number").length, "the tape draws one row per published priced print");
     ok(prints.every((r) => /^\d{2}:\d{2}$/.test(r.time) || r.time === "—"), `every print carries its time off the tape's own timestamp (${prints[0] && prints[0].time})`);
-    eq(prints.filter((r) => r.tags.includes("cancelled")).length, dp.rows.filter((r) => r.canceled === true && typeof r.prem === "number").length, "exactly the cancelled prints carry the tag, and the tag says what the flag says");
+    eq(prints.filter((r) => r.tags.includes("canceled")).length, dp.rows.filter((r) => r.canceled === true && typeof r.prem === "number").length, "exactly the canceled prints carry the tag, and the tag says what the flag says");
+    ok(prints.slice(-1)[0].canceled && prints.filter((r) => r.canceled).length === 1 && !prints.slice(0, -1).some((r) => r.canceled), "and a canceled print is listed after every live one, never ranked among them");
     const iBoth = dp.rows.findIndex((r) => typeof r.bid === "number" && typeof r.ask === "number");
     if (iBoth >= 0) ok(/^\d+\.\d{2} \/ \d+\.\d{2}$/.test(prints[iBoth].quote), `a quoted print carries bid and ask side by side (${prints[iBoth].quote})`);
     const iNone = dp.rows.findIndex((r) => r.bid === null || r.ask === null);
     if (iNone >= 0) eq(prints[iNone].quote, "—", "a print missing either side of the quote carries the dash, never half a spread");
     const tapeInfo = await modInfo(page, "m-tape");
-    if (dp.shed > 0) ok(tapeInfo.includes(dp.rows.length + " kept of " + dp.seen), `the disclosure states ${dp.rows.length} kept of ${dp.seen}`);
+    if (dp.shed > 0) ok(tapeInfo.includes(dp.rows.filter((r) => r.canceled !== true).length + " kept of " + dp.seen), `the disclosure states ${dp.rows.filter((r) => r.canceled !== true).length} kept of ${dp.seen}`);
     if (dp.unpriced > 0) ok(tapeInfo.includes("+" + dp.unpriced + " unpriced print"), "and counts the unpriced prints out rather than seating them");
     ok(tapeInfo.includes(dp.note.slice(0, 60)), "the payload's own darkpool note is rendered, not paraphrased");
     const ois = await rowsOf("OI");

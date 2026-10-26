@@ -55,9 +55,11 @@ export const STOCK_NOTES = Object.freeze({
     "from a list is not evidence of quiet.",
 });
 
+const CANCELED_SHOWN = 3;
+
 export function shapeStockDarkpool(raw, { cap = STOCK_CAPS.darkpool } = {}) {
   const list = unwrap(raw);
-  if (list === null) return { ...notAList(raw, cap), unpriced: 0 };
+  if (list === null) return { ...notAList(raw, cap), unpriced: 0, canceled: 0 };
   const rows = [];
   let unpriced = 0;
   for (const r of list) {
@@ -77,14 +79,21 @@ export function shapeStockDarkpool(raw, { cap = STOCK_CAPS.darkpool } = {}) {
   rows.sort((a, b) => (b.prem - a.prem)
     || ((a.at || "") < (b.at || "") ? -1 : (a.at || "") > (b.at || "") ? 1 : 0)
     || ((b.size ?? -1) - (a.size ?? -1)));
-  const seen = rows.length;
-  const kept = rows.slice(0, cap);
-  return {
+  const live = rows.filter((r) => r.canceled !== true);
+  const voided = rows.filter((r) => r.canceled === true);
+  const seen = live.length;
+  const kept = live.slice(0, cap);
+  const out = {
     status: kept.length ? "ok" : "quiet",
-    rows: kept, seen, cap,
+    rows: kept.concat(voided.slice(0, CANCELED_SHOWN)), seen, cap,
     shed: seen - kept.length,
     unpriced,
+    canceled: voided.length,
   };
+  if (!kept.length && voided.length) {
+    out.reason = `all ${voided.length} priced off-exchange print${voided.length === 1 ? " was" : "s were"} canceled`;
+  }
+  return out;
 }
 
 export function shapeStockOiChange(raw, { cap = STOCK_CAPS.oiDeltas } = {}) {

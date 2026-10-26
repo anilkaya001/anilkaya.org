@@ -329,8 +329,8 @@
     return h("span", {
       class: "bd-n bd-move",
       title: st.horizon
-        ? `The option market prices ±${(hm * 100).toFixed(1)}% over ${st.horizon} trading sessions` +
-          (hr !== null ? `; this name has delivered ±${(hr * 100).toFixed(1)}% over the same horizon.` : ".")
+        ? `One standard deviation of the option market's 30-day implied volatility over ${st.horizon} trading sessions on a 252-session year is ±${(hm * 100).toFixed(1)}%` +
+          (hr !== null ? `; the same scaling of this name's realized volatility is ±${(hr * 100).toFixed(1)}%. A priced range, not a forecast.` : ". A priced range, not a forecast.")
         : "",
     }, "±" + (hm * 100).toFixed(1) + "%");
   }
@@ -442,7 +442,7 @@
     { key: "px", label: "Price", title: "Last price and today's change; sorts by the change", sort: { first: "desc", get: (row) => num(row.chg) }, cell: priceCell },
     { key: "strip", label: "5d", title: "Score over the last five scored sessions", cell: stripCell },
     { key: "netPrem", label: "Premium", title: "Net premium", sort: { first: "desc", get: (row) => num(row.netPrem) }, cell: (row) => cellText(fmtMoney(row.netPrem), "bd-n", { "data-tone": toneOf(row.netPrem) }) },
-    { key: "hm", label: "Move", title: "Priced move over the board's horizon", sort: { first: "desc", get: (row) => num(row.hm) }, cell: moveCell },
+    { key: "hm", label: "Move", title: "One standard deviation of 30-day implied volatility over the board's horizon", sort: { first: "desc", get: (row) => num(row.hm) }, cell: moveCell },
     { key: "g", label: "γ", title: "Dealer gamma regime", sort: { first: "asc", text: true, get: (row) => (row.gRegime === "long" || row.gRegime === "short" ? row.gRegime : null) }, cell: gammaCell },
     { key: "ivr", label: "IVR", title: "Implied volatility rank, own year", sort: { first: "desc", get: (row) => num(row.ivr) }, cell: (row) => quietPct(num(row.ivr) === null ? null : row.ivr * 100) },
     { key: "vrpP", label: "VRP", title: "Volatility risk premium, percentile across the market", uni: true, sort: { first: "desc", get: (row) => uniPct("vrp", row) }, cell: uniCell("vrp") },
@@ -965,7 +965,7 @@
   ] : [
     "Score: the composite ranked across every scored name, +100 strongest bullish and −100 strongest bearish. Conv: how much of the evidence agrees; the count behind it is on the name's card.",
     "5d: the score over the last five scored sessions, oldest first; a dot is a session the name was not scored.",
-    "Premium: call premium bought minus put premium bought across the session. Move: the option market's priced move over the board's horizon.",
+    "Premium: call premium bought minus put premium bought across the session. Move: one standard deviation of the option market's 30-day implied volatility over the board's horizon, on a 252-session year; a priced range, not a forecast.",
     "Dealer γ: blue where dealers are long gamma and hedging damps moves, orange where they are short and hedging amplifies them.",
     "IVR: where 30-day implied volatility sits within its own past year, 0 at the low and 100 at the high. VRP: implied minus realized volatility as a percentile across every eligible name. SI: short interest as a share of float, as a percentile across every eligible name.",
     "Flags: New to this side, places climbed or fallen since the previous board, held on incumbency, and earnings within " + EARNINGS_SOON_DAYS + " days.",

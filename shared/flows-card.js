@@ -19,7 +19,7 @@ import { easternDay } from "./flows-freshness.js";
 import { parseOptionSymbol } from "./flows-premium.js";
 import { bookLevels } from "./flows-quant-card.js";
 import { compactNumbers } from "./flows-cross.js";
-import { formatScaled } from "./flows-round.js";
+import { formatScaled, wholePercent } from "./flows-round.js";
 export { HORIZON_SESSIONS };
 
 export function numOrNull(value) {
@@ -500,12 +500,14 @@ export function buildPricedMove({
   const lead = (() => {
     if (impliedH !== null) {
       const downPct = pct(1 - impliedLow / s), upPct = pct(impliedHigh / s - 1);
+      const horizon = `${sessions} session${sessions === 1 ? "" : "s"}`;
       const said = wings
-        ? `Options price ${sessions} session${sessions === 1 ? "" : "s"} from −${downPct}% ` +
-          `to +${upPct}% — ${impliedLow.toFixed(2)} to ${impliedHigh.toFixed(2)}, leaning ` +
+        ? `Options price ${horizon} from −${downPct}% ` +
+          `to +${upPct}% (one standard deviation of 30-day implied volatility, each end at its own wing, on a 252-session year) — ` +
+          `${impliedLow.toFixed(2)} to ${impliedHigh.toFixed(2)}, leaning ` +
           `${wings.skew > 0 ? "down" : wings.skew < 0 ? "up" : "neither way"} on the wing skew`
-        : `Options price a ±${pct(impliedH)}% move over ${sessions} session` +
-          `${sessions === 1 ? "" : "s"} — ${impliedLow.toFixed(2)} to ${impliedHigh.toFixed(2)}`;
+        : `Options price a one-standard-deviation move of ±${pct(impliedH)}% over ${horizon} ` +
+          `(30-day implied volatility on a 252-session year) — ${impliedLow.toFixed(2)} to ${impliedHigh.toFixed(2)}`;
       const pinSaid = pin
         ? ` That is ${pct(impliedH)}% against ${pct(realizedH ?? 0)}% realized, with implied ` +
           `volatility at ${pct(iv)}%: the price reads as pinned by an event, so no ` +
@@ -516,7 +518,8 @@ export function buildPricedMove({
         (pin ? "." + pinSaid
           : realizedH === null
             ? ", with no realized volatility to compare it against."
-            : `, against ${pct(realizedH)}% realized.`),
+            : `, against ${pct(realizedH)}% realized.`) +
+        ` A priced range, not a forecast: under the market's own pricing about two closes in three land inside it.`,
         {
           impliedPct: pct(impliedH),
           sessions,
@@ -532,9 +535,9 @@ export function buildPricedMove({
     const lo = Number((s * (1 - m)).toFixed(2));
     const hi = Number((s * (1 + m)).toFixed(2));
     return panelLead(
-      `Options price a ±${pct(m)}% move to the nearest end-of-week expiry ` +
-
-      `— ${lo.toFixed(2)} to ${hi.toFixed(2)}. No interpolated implied ` +
+      `The vendor's end-of-week figure: ±${pct(m)}% to the nearest end-of-week expiry, ` +
+      `about 0.85 of the at-the-money straddle, a band the market prices to hold about half the time ` +
+      `— ${lo.toFixed(2)} to ${hi.toFixed(2)}. Not a forecast and not a one-day move. No interpolated implied ` +
       `volatility, so no fixed-horizon band to compare across names.`,
       { quotedPct: pct(m), low: lo, high: hi });
   })();
@@ -1242,6 +1245,7 @@ export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionD
 
   const rows = unwrapRows(raw);
   const shaped = [];
+  let canceled = 0;
   for (const r of rows) {
     if (!r || typeof r !== "object") continue;
     if (feed === "oiChange") {
@@ -1258,6 +1262,7 @@ export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionD
       const at = typeof r.executed_at === "string" && r.executed_at ? r.executed_at : null;
 
       if (!t || (value === null && at === null)) continue;
+      if (r.canceled === true) { canceled++; continue; }
 
       shaped.push({ t: String(t).toUpperCase(), value, at, day: easternDay(at), raw: r });
     }
@@ -1271,7 +1276,7 @@ export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionD
       status: "quiet", feed, label: CROSS_LABEL[feed],
       reason: CROSS_LABEL[feed] + " was read this run and carried no row that could be " +
         "placed against a ticker, so no name in the board made it and none missed it",
-      population: 0, requested: numOrNull(limit), rowsSeen: rows.length,
+      population: 0, requested: numOrNull(limit), rowsSeen: rows.length, canceled,
       entries: {}, coverage: { of: wanted.size, in: 0 },
       asOf: null, asOfStated: false, asOfSessions: 0, sameSession: null,
     };
@@ -1326,7 +1331,7 @@ export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionD
   for (const t of wanted) if (entries[t]) present++;
 
   const lim = numOrNull(limit);
-  const capped = (lim !== null && shaped.length >= lim) || (!!raw && raw.vendorCapped === true);
+  const capped = (lim !== null && shaped.length + canceled >= lim) || (!!raw && raw.vendorCapped === true);
 
   return {
     status: "ok", feed, label: CROSS_LABEL[feed],
@@ -1334,6 +1339,7 @@ export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionD
     requested: numOrNull(limit),
     capped,
     rowsSeen: rows.length,
+    canceled,
     names: Object.keys(entries).length,
     ordered, orderedBy, cut, cutAt,
     ...unit,
@@ -1367,6 +1373,7 @@ function crossFrame(f) {
     feed: f.feed, label: f.label,
     population: numOrNull(f.population), requested: numOrNull(f.requested),
     names: numOrNull(f.names),
+    canceled: numOrNull(f.canceled),
     capped: f.capped === null || f.capped === undefined ? null : !!f.capped,
     ordered: f.ordered || null, orderedBy: f.orderedBy || null,
     cut: numOrNull(f.cut), cutAt: f.cutAt || null,
@@ -1832,8 +1839,8 @@ function stockPanel(raw, shaper, note, lead, unfetched) {
   return panel;
 }
 
-function darkpoolLead(panel) {
-  const rows = panel.rows || [];
+export function darkpoolLead(panel) {
+  const rows = (panel.rows || []).filter((r) => r.canceled !== true);
   if (!rows.length) return null;
   const total = rows.reduce((a, r) => a + (r.prem || 0), 0);
   const top = rows[0].prem;
@@ -1844,21 +1851,24 @@ function darkpoolLead(panel) {
     ? ` ${panel.unpriced} further print${panel.unpriced === 1 ? "" : "s"} ` +
       `carried no premium and could not be ranked.`
     : "";
+  const voided = panel.canceled > 0
+    ? ` ${panel.canceled} canceled print${panel.canceled === 1 ? " is" : "s are"} left out.`
+    : "";
   if (!(total > 0)) {
     return panelLead(
       `Off-exchange prints in this name carry $0 across ${scope} — a measured ` +
-      `zero, not a missing reading.${unpriced}`,
+      `zero, not a missing reading.${unpriced}${voided}`,
       { kept: rows.length, seen: panel.seen, shed: panel.shed,
-        unpriced: panel.unpriced, dollars: 0 });
+        unpriced: panel.unpriced, canceled: panel.canceled || 0, dollars: 0 });
   }
   const t = saidMagnitude(total);
-  const topPct = Math.round((top / total) * 100);
+  const topPct = wholePercent(top / total);
   return panelLead(
     `Off-exchange prints carry $${t.shown}${t.suffix} in this name across ` +
-    `${scope} — ${topPct}% of it in the single largest.${unpriced}`,
+    `${scope} — ${topPct}% of it in the single largest.${unpriced}${voided}`,
     { shown: t.shown, dollars: t.exact, topPct, topDollars: top,
       kept: rows.length, seen: panel.seen, shed: panel.shed,
-      unpriced: panel.unpriced });
+      unpriced: panel.unpriced, canceled: panel.canceled || 0 });
 }
 
 function oiDeltasLead(panel) {

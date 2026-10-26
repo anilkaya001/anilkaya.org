@@ -308,7 +308,7 @@
     if (!lvls.some((l) => l.kind === "strike_sum_crossing")) rows.push(["Strike-sum crossing", num(card.strikeSumCrossing) !== null ? "$" + F.px(card.strikeSumCrossing) : "— quiet: the strike ladder's running sum does not change sign over the strikes read"]);
     if (!lvls.some((l) => l.kind === "zero_gamma")) rows.push(["Zero-gamma level", num(card.zeroGamma) !== null ? "$" + F.px(card.zeroGamma) : "— unavailable: the card carries no chain profile, or its profile changes no sign within ±15% of spot"]);
     const pm = (card.panels || {}).pricedMove;
-    if (pm && pm.status === "ok") rows.push(["Priced move", num(pm.movePerc) !== null ? "±" + F.pct(pm.movePerc) : num(pm.impliedMove) !== null ? "±" + F.pct(pm.impliedMove) : null]);
+    if (pm && pm.status === "ok") rows.push([num(pm.movePerc) !== null ? "Priced move to the end-of-week expiry" : "Priced move, " + (num(pm.sessions) || 10) + " sessions, one s.d.", num(pm.movePerc) !== null ? "±" + F.pct(pm.movePerc) : num(pm.impliedMove) !== null ? "±" + F.pct(pm.impliedMove) : null]);
     const rk = rankByDate(card);
     const vc = (card.panels || {}).volContext;
     const why = !vc ? "the card predates the volatility context panel" : vc.status !== "ok" ? String(vc.reason || vc.note || "the volatility context was not published").replace(/\.$/, "") : !vc.ivRank || vc.ivRank.status !== "ok" ? String((vc.ivRank && (vc.ivRank.reason || vc.ivRank.note)) || "no ranked session on the card").replace(/\.$/, "") : "no ranked session on the card";
@@ -486,7 +486,7 @@
       UI.gaugeChip({ icon: "levels", color: "--accent-soft", value: im === null ? chipDash(stOf(card.panels.pricedMove, "priced move").state) : "±" + F.pct(im), label: (num(pm.sessions) || 10) + "d move",
         info: () => ({ title: "Priced move", state: stOf(card.panels.pricedMove, "priced move").state === "ok" ? null : stOf(card.panels.pricedMove, "priced move").state,
           lead: leadOf(card.panels.pricedMove) || reasonOf(stOf(card.panels.pricedMove, "priced move")),
-          facts: [["Implied", im === null ? null : "±" + F.pct(im)], ["Range", F.px(pm.impliedLow) + " – " + F.px(pm.impliedHigh)], ["Realized", num(pm.realizedMove) === null ? null : "±" + F.pct(pm.realizedMove)], ["Horizon", pm.horizonRule || null]],
+          facts: [["Implied, one standard deviation", im === null ? null : "±" + F.pct(im)], ["Range", F.px(pm.impliedLow) + " – " + F.px(pm.impliedHigh)], ["Realized, same scaling", num(pm.realizedMove) === null ? null : "±" + F.pct(pm.realizedMove)], ["Vendor's end-of-week figure", num(pm.movePerc) === null ? null : "±" + F.pct(pm.movePerc) + ", about 0.85 of the at-the-money straddle, " + (pm.horizonRule || "")]],
           notes: [pm.bandNote] }) }),
     ];
     $("ftChips").replaceChildren(UI.chips(chipList.filter(Boolean), "Signal"));
@@ -2686,17 +2686,18 @@
     if (kind === "prints") {
       const dp = P.darkpool;
       const R = (dp.rows || []).filter((r) => num(r.prem) !== null);
-      const mx = Math.max(...R.map((r) => r.prem), 1);
-      return R.map((r, i) => {
+      const live = R.filter((r) => r.canceled !== true);
+      const mx = Math.max(...live.map((r) => r.prem), 1);
+      return live.concat(R.filter((r) => r.canceled === true)).map((r, i) => {
         const hhmm = F.time(r.at, false);
         const quote = num(r.bid) !== null && num(r.ask) !== null ? F.px(r.bid) + " / " + F.px(r.ask) : DASH;
         const row = UI.listRow({ primary: F.px(r.px), secondary: hhmm + (S ? SEP + F.pct(r.px / S - 1, 2, true) : ""),
-          meter: r.prem / mx, index: i, value: F.money(r.prem), cols: TAPE_COLS.prints });
+          meter: r.canceled === true ? 0 : r.prem / mx, index: i, value: F.money(r.prem), cols: TAPE_COLS.prints });
         row.dataset.time = hhmm;
         row.dataset.quote = quote;
         row.title = "Quote at the print: " + quote;
         row.classList.add("ft-print");
-        if (r.canceled === true) { row.dataset.canceled = "true"; row.querySelector(".ui-row-m").append(tag("cancelled", { tone: "down" })); }
+        if (r.canceled === true) { row.dataset.canceled = "true"; row.querySelector(".ui-row-m").append(tag("canceled", { tone: "down" })); }
         return row;
       });
     }
@@ -2774,7 +2775,7 @@
         sections: [{ title: "Contracts", lines: [leadOf(tc) || reasonOf(views[0].st), tc && tc.relation, basisLine, "ΔOI counts the change in open interest the vendor reports against the prior clearing day; the spacing of the two counts is unstated, so it is whatever span the vendor clears on."] },
           { title: "Open interest", lines: [leadOf(oi) || reasonOf(views[1].st), oi && oi.note, oi && num(oi.shed) ? oi.rows.length + " kept of " + oi.seen + " lines." : null, "Streaks count the sessions open interest rose (↑OI) and volume beat open interest (V>OI), as the vendor counts them; a missing counter is a dash, never a zero."] },
           views[2].never ? null : { title: "Alerts", lines: [al ? "The session's " + al.n + " flow alerts on this name, largest premium first; the right column is the share of each alert's premium the vendor attributes to the ask side." : reasonOf(views[2].st)] },
-          { title: "Prints", lines: [leadOf(dp) || reasonOf(views[3].st), dp && dp.note, dp && num(dp.shed) ? dp.rows.length + " kept of " + dp.seen + " prints" + (num(dp.unpriced) ? ", +" + dp.unpriced + " unpriced print" + (dp.unpriced === 1 ? "" : "s") : "") + "." : null, "Each print shows its time, price, distance from the close and the quote at execution; a print missing either side of the quote shows a dash, never half a spread."] },
+          { title: "Prints", lines: [leadOf(dp) || reasonOf(views[3].st), dp && dp.note, dp && num(dp.shed) ? dp.rows.filter((r) => r.canceled !== true).length + " kept of " + dp.seen + " prints" + (num(dp.unpriced) ? ", +" + dp.unpriced + " unpriced print" + (dp.unpriced === 1 ? "" : "s") : "") + "." : null, dp && num(dp.canceled) ? dp.canceled + " canceled print" + (dp.canceled === 1 ? " is" : "s are") + " left out of the ranking and of the dollars; the largest are listed last, marked canceled." : null, "Each print shows its time, price, distance from the close and the quote at execution; a print missing either side of the quote shows a dash, never half a spread."] },
           views[4].never ? null : { title: "Shelves", lines: [dl ? "Dark and lit volume by price within " + dl.bandAtr + " ATR of spot; " + F.pct(dl.darkShare, 0) + " of the in-band volume printed dark. The purple rows are the three largest dark shelves." : reasonOf(views[4].st)] }],
       }) });
     vw.start();
@@ -2847,9 +2848,10 @@
     const cut = f.kind === "money" ? (f.orderedBy && /premium|dollar/.test(f.orderedBy) ? "The list is ranked by dollar size." : f.cutAt ? "The vendor answered newest first; the list reaches back to " + F.time(f.cutAt) + "." : null)
       : num(f.cut) !== null ? "The last place in the list held " + F.int(f.cut, true) + " " + f.unit + "." : null;
     const reach = cov ? "The join reached " + cov.in + " of " + cov.of + " names carrying a card." : null;
-    if (f.status !== "ok") return { title, lines: [(f.status === "quiet" ? "Not in this list — " : "Unavailable — ") + cap(f.reason || "not read"), f.status === "quiet" ? cut : null, f.status === "quiet" ? reach : null] };
+    const voided = num(f.canceled) ? f.canceled + " canceled print" + (f.canceled === 1 ? " is" : "s are") + " left out of the list." : null;
+    if (f.status !== "ok") return { title, lines: [(f.status === "quiet" ? "Not in this list — " : "Unavailable — ") + cap(f.reason || "not read"), f.status === "quiet" ? cut : null, f.status === "quiet" ? reach : null, f.status === "quiet" ? voided : null] };
     const val = f.kind === "money" ? F.money(f.value) : F.int(f.value, true) + " " + (Math.abs(f.value) === 1 ? f.unitOne || f.unit : f.unit);
-    return { title, lines: ["Ranks " + f.rank + " of " + f.population + " (" + val + ").", f.sameSession ? "Dated the same session this card describes." : "Dated " + f.asOf + " — NOT the session this card describes.", cut, reach] };
+    return { title, lines: ["Ranks " + f.rank + " of " + f.population + " (" + val + ").", f.sameSession ? "Dated the same session this card describes." : "Dated " + f.asOf + " — NOT the session this card describes.", cut, reach, voided] };
   }
 
   function buildContext(card) {
