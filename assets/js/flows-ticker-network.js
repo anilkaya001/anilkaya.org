@@ -5,7 +5,7 @@
   const FIXED_BAND = 0.025;
   const MIN_WINDOWS = 5;
   const DAYS_PER_YEAR = 365;
-    const NODES = {
+  const NODES = {
     side: [["side:ca", "Calls · ask side"], ["side:cr", "Calls · rest"], ["side:pa", "Puts · ask side"], ["side:pr", "Puts · rest"]],
     expiry: [["exp:d0", "Same day"], ["exp:w1", "1 to 7 days"], ["exp:m1", "8 to 31 days"], ["exp:far", "32 days and over"]],
     scaled: [["mny:itm", "In the money"], ["mny:near", "Near the money"], ["mny:otm", "Out of the money"]],
@@ -26,25 +26,33 @@
   function daysBetween(from, to) {
     const a = DAY.exec(String(from)), b = DAY.exec(String(to));
     if (!a || !b) return null;
-    return Math.round((Date.UTC(+b[1], +b[2] - 1, +b[3]) - Date.UTC(+a[1], +a[2] - 1, +a[3])) / 864e5);
+    const x = Date.UTC(+a[1], +a[2] - 1, +a[3]), y = Date.UTC(+b[1], +b[2] - 1, +b[3]);
+    if (new Date(x).toISOString().slice(0, 10) !== a[0] || new Date(y).toISOString().slice(0, 10) !== b[0]) return null;
+    return Math.round((y - x) / 864e5);
   }
   const bucketOf = (d) => (!Number.isInteger(d) || d < 0 ? null : d === 0 ? "exp:d0" : d <= 7 ? "exp:w1" : d <= 31 ? "exp:m1" : "exp:far");
 
+  const termRows = (term) => (Array.isArray(term) ? term : []).filter((r) => r && num(r.dte) !== null && r.dte > 0 && num(r.vol) !== null && r.vol > 0).sort((x, y) => x.dte - y.dte);
+
   function volAt(days, term, iv30) {
-    const rows = (Array.isArray(term) ? term : []).filter((r) => r && num(r.dte) !== null && num(r.vol) !== null && r.vol > 0);
-    if (rows.length) {
-      let best = rows[0];
-      for (const r of rows) if (Math.abs(r.dte - days) < Math.abs(best.dte - days)) best = r;
-      return best.vol;
-    }
-    return num(iv30) !== null && iv30 > 0 ? iv30 : null;
+    const rows = termRows(term);
+    if (!rows.length) return num(iv30) !== null && iv30 > 0 ? iv30 : null;
+    const t = Math.max(days, 1);
+    if (t <= rows[0].dte) return rows[0].vol;
+    const last = rows[rows.length - 1];
+    if (t >= last.dte) return last.vol;
+    let j = 1;
+    while (rows[j].dte < t) j++;
+    const a = rows[j - 1], b = rows[j];
+    const wa = a.vol * a.vol * a.dte, wb = b.vol * b.vol * b.dte;
+    return Math.sqrt((wa + ((wb - wa) * (t - a.dte)) / (b.dte - a.dte)) / t);
   }
 
   function moneyOf(cp, k, spot, sigma, days) {
     let z;
     if (sigma === null) {
-      z = k / spot - 1;
-      if (Math.abs(z) <= FIXED_BAND) return "mny:near";
+      z = k - spot;
+      if (Math.abs(z) <= FIXED_BAND * spot) return "mny:near";
     } else {
       z = Math.log(k / spot) / (sigma * Math.sqrt(Math.max(days, 1) / DAYS_PER_YEAR));
       if (Math.abs(z) <= NEAR_Z) return "mny:near";
@@ -55,15 +63,11 @@
   function pctsOf(values) {
     const total = values.reduce((a, v) => a + v, 0);
     if (!(total > 0)) return values.map(() => null);
-    const order = values.map((v, i) => [v, i]).sort((x, y) => y[0] - x[0] || x[1] - y[1]);
-    const out = new Array(values.length);
-    let cum = 0, prev = 0;
-    for (const [v, i] of order) {
-      cum += v;
-      const now = Math.round((cum / total) * 100);
-      out[i] = now - prev;
-      prev = now;
-    }
+    const raw = values.map((v) => (v / total) * 100);
+    const out = raw.map((r) => Math.floor(r));
+    let left = 100 - out.reduce((a, v) => a + v, 0);
+    const order = raw.map((r, i) => [r - out[i], values[i], i]).sort((x, y) => y[0] - x[0] || y[1] - x[1] || x[2] - y[2]);
+    for (let j = 0; left > 0 && j < order.length; j++, left--) out[order[j][2]]++;
     return out;
   }
 
@@ -74,18 +78,17 @@
     if (typeof alerts !== "object") return { state: "unavailable", reason: "The flagged windows were not published for this name." };
     if (alerts.status === "absent" || alerts.status === "pending") return { state: "pending", reason: "The flagged windows publish with tonight's run." };
     if (alerts.status === "quiet") return { state: "quiet", reason: "No window of this name was flagged in the session." };
-    if (alerts.status !== "ok") return { state: "unavailable", reason: "The flagged windows are not available: " + String(alerts.why || alerts.status || "no reason published") + "." };
+    if (alerts.status !== "ok") return { state: "unavailable", reason: "The flagged windows are not available: " + String(alerts.why || alerts.status || "no reason published").replace(/[.\s]+$/, "") + "." };
     const dots = Array.isArray(alerts.dots) ? alerts.dots : [];
     if (!dots.length) return { state: "quiet", reason: "The record carries no flagged window." };
     if (session && alerts.asOf && String(alerts.asOf).slice(0, 10) !== session) {
       return { state: "stale", reason: "The windows are for " + String(alerts.asOf).slice(0, 10) + ", not the card's session " + session + "." };
     }
     const day = session || (alerts.asOf ? String(alerts.asOf).slice(0, 10) : null);
-    const excluded = { window: 0, noAsk: 0, noFlags: 0 };
+    const excluded = { window: 0, unattributed: 0, unflagged: 0 };
     const spot = num(ctx.spot) !== null && ctx.spot > 0 ? ctx.spot : null;
     const iv30 = num(ctx.iv30) !== null && ctx.iv30 > 0 ? ctx.iv30 : null;
-    const hasVol = iv30 !== null || (Array.isArray(ctx.term) && ctx.term.some((r) => r && num(r.vol) !== null && r.vol > 0 && num(r.dte) !== null));
-    const basis = spot === null ? "none" : hasVol ? "vol" : "fixed";
+    const basis = spot === null ? "none" : termRows(ctx.term).length ? "term" : iv30 !== null ? "iv30" : "fixed";
     const parts = [];
     dots.forEach((d, i) => {
       const p = num(d && d.p);
@@ -94,12 +97,12 @@
       const bucket = bucketOf(days);
       const k = num(d && d.k);
       if (p === null || !(p > 0) || cp === null || bucket === null || (spot !== null && !(k > 0))) { excluded.window++; return; }
-      const money = spot === null ? null : moneyOf(cp, k, spot, basis === "vol" ? volAt(days, ctx.term, iv30) : null, days);
+      const money = spot === null ? null : moneyOf(cp, k, spot, basis === "term" || basis === "iv30" ? volAt(days, ctx.term, iv30) : null, days);
       const flag = typeof d.sw === "boolean" && typeof d.op === "boolean" ? (d.sw && d.op ? "flg:so" : d.sw ? "flg:s" : d.op ? "flg:o" : "flg:n") : "flg:u";
-      if (flag === "flg:u") excluded.noFlags++;
+      if (flag === "flg:u") excluded.unflagged++;
       const a = num(d.a);
       const ok = a !== null && a >= 0 && a <= 1;
-      if (!ok) excluded.noAsk++;
+      if (!ok) excluded.unattributed++;
       const ask = ok ? p * a : 0;
       const c = cp === "C";
       if (ask > 0) parts.push({ w: i, v: ask, nodes: [c ? "side:ca" : "side:pa", bucket, money, flag] });
@@ -107,10 +110,10 @@
     });
     const total = parts.reduce((s, x) => s + x.v, 0);
     const drawn = new Set(parts.map((x) => x.w)).size;
-    const prem = num(alerts.prem);
+    const prem = num(alerts.prem) !== null && alerts.prem >= 0 ? alerts.prem : null;
     const listed = dots.reduce((s, d) => s + (num(d && d.p) !== null && d.p > 0 ? d.p : 0), 0);
     if (prem !== null && listed > prem * 1.001 + 1) return { state: "inconsistent", reason: "The listed windows add to more than the name's flagged premium, so no network is drawn." };
-    if (!(total > 0)) return { state: "quiet", reason: "No listed window could be placed: " + excluded.window + " had a missing price, strike or expiry." };
+    if (!(total > 0)) return { state: "unavailable", reason: day === null ? "The windows carry no session date, so days to expiry cannot be counted." : "No listed window could be placed: " + excluded.window + " had a missing or invalid price, side, strike or expiry." };
     const cover = prem !== null && prem > 0 ? total / prem : null;
     const defs = [NODES.side, NODES.expiry, spot === null ? null : basis === "fixed" ? NODES.fixed : NODES.scaled, NODES.flags];
     const keys = ["side", "expiry", "money", "flags"];
@@ -148,9 +151,9 @@
     const paths = [...byPath.values()].map((e) => ({ ids: e.ids, v: e.v, windows: e.w.size })).sort((a, b) => b.v - a.v || (a.ids.join() < b.ids.join() ? -1 : 1));
     return {
       state: drawn < MIN_WINDOWS ? "thin" : "ok", reason: drawn < MIN_WINDOWS ? "Too few windows for a map." : null,
-      session: day, total, windows: drawn, listed: dots.length, n: num(alerts.n), complete: alerts.complete !== false,
+      session: day, total, windows: drawn, listed: dots.length, n: num(alerts.n), complete: typeof alerts.complete === "boolean" ? alerts.complete : null,
       cover, coverNote: cover === null ? "not stated" : cover >= 0.75 ? "standard" : cover >= 0.5 ? "wide" : "largest",
-      gap: cover === null ? null : Math.round(100 * (1 - cover)), prem, basis, spot, excluded, columns, bands, paths, parts,
+      gap: cover === null ? null : Math.max(0, Math.round(100 * (1 - cover))), prem, basis, spot, excluded, columns, bands, paths, parts,
     };
   }
 
@@ -165,7 +168,7 @@
       const rows = c.nodes.map((n) => ({ id: n.id, label: n.label, v: sums.get(n.id) || 0 })).filter((r) => r.v > 0).sort((a, b) => b.v - a.v || (a.id < b.id ? -1 : 1));
       return { key: c.key, title: c.title, rows };
     });
-    return { id, label: node.label, column: col.title, v: mine.reduce((s, x) => s + x.v, 0), windows: node.windows, of: net.total, others };
+    return { id, label: node.label, column: col.title, pct: node.pct, v: mine.reduce((s, x) => s + x.v, 0), windows: node.windows, of: net.total, others };
   }
 
   if (typeof document === "undefined") {
@@ -195,15 +198,18 @@
 
   function spotLine(net) {
     if (net.basis === "none") return "Strike against spot is not read: this card has no spot for the session.";
-    if (net.basis === "fixed") return "Strike against the session spot of " + F.px(net.spot) + ". No implied volatility is on this card, so near means within 2.5% of spot.";
-    return "Strike against the session spot of " + F.px(net.spot) + ": near means within a quarter of a standard deviation to the window's own expiry, from the name's implied volatility. " + FACE.spot;
+    if (net.basis === "fixed") return "Strike against the session spot of " + F.px(net.spot) + ". No implied volatility is on this card, so the middle band is within 2.5% of spot. " + FACE.spot;
+    const from = net.basis === "term" ? "the card's volatility at that expiry, interpolated in total variance between listed expiries" : "the 30-day implied volatility";
+    return "Strike against the session spot of " + F.px(net.spot) + ": near means within a quarter of a standard deviation to the window's own expiry, from " + from + "; a same-day expiry counts as one day. " + FACE.spot;
   }
 
+  const pctShown = (p, frac) => (p === 0 && frac > 0 ? "<1%" : p + "%");
+
   function sentence(r) {
-    const head = r.label + ": " + money(r.v) + ", " + Math.round((r.v / r.of) * 100) + "% of these windows' premium, in " + r.windows + (r.windows === 1 ? " window." : " windows.");
+    const head = r.label + ": " + money(r.v) + ", " + pctShown(r.pct, r.v / r.of) + " of these windows' premium, in " + r.windows + (r.windows === 1 ? " window." : " windows.");
     const tails = r.others.map((o) => {
       const p = pctsOf(o.rows.map((x) => x.v));
-      return o.title + ": " + o.rows.slice(0, 3).map((x, i) => x.label + " " + p[i] + "%").join(", ") + (o.rows.length > 3 ? ", and " + (o.rows.length - 3) + " more" : "");
+      return o.title + ": " + o.rows.slice(0, 3).map((x, i) => x.label + " " + pctShown(p[i], x.v / r.v)).join(", ") + (o.rows.length > 3 ? ", and " + (o.rows.length - 3) + " more" : "");
     });
     return head + " In those windows, " + tails.join(". ") + ".";
   }
@@ -253,8 +259,8 @@
     const head = h("div", { class: "fnw-bar" }, thin ? null : seg, h("span", { class: "fnw-stamp" }, net.session ? "Session " + F.day(net.session) + (gen && F.trtDay(gen) ? " \u00b7 read " + F.day(F.trtDay(gen)) + " " + F.time(gen) : "") : ""));
     const notes = [FACE.gross, FACE.ask, FACE.flags, spotLine(net)];
     if (net.excluded.window) notes.push(net.excluded.window + (net.excluded.window === 1 ? " window is" : " windows are") + " left out of every column: a missing price, strike or expiry.");
-    if (net.excluded.noAsk) notes.push(net.excluded.noAsk + (net.excluded.noAsk === 1 ? " window carries" : " windows carry") + " no side attribution, so " + (net.excluded.noAsk === 1 ? "its premium sits" : "their premium sits") + " in the rest.");
-    if (net.excluded.noFlags) notes.push(net.excluded.noFlags + (net.excluded.noFlags === 1 ? " window has" : " windows have") + " no sweep or opening flag read, shown as flags not read.");
+    if (net.excluded.unattributed) notes.push(net.excluded.unattributed + (net.excluded.unattributed === 1 ? " window carries" : " windows carry") + " no side attribution, so " + (net.excluded.unattributed === 1 ? "its premium sits" : "their premium sits") + " in the rest and the ask-side figures are a lower bound.");
+    if (net.excluded.unflagged) notes.push(net.excluded.unflagged + (net.excluded.unflagged === 1 ? " window has" : " windows have") + " no sweep or opening flag read, shown as flags not read.");
     const face = h("p", { class: "fnw-face" }, notes.join(" "));
     wrap.append(head, read, warn, cover, narrow, stage, tableBox, face);
 
@@ -353,8 +359,8 @@
         for (const n of c.nodes) {
           const p = geo.pos.get(n.id);
           const el = h("button", { class: "fnw-chip", type: "button", "data-id": n.id, "data-col": c.key, "aria-pressed": "false",
-            "aria-label": c.title + ", " + n.label + ": " + money(n.v) + ", " + n.pct + "% of these windows' premium" },
-            h("b", null, n.label), h("span", null, money(n.v) + " · " + n.pct + "%"), h("i", { class: "fnw-fill", "aria-hidden": "true" }));
+            "aria-label": c.title + ", " + n.label + ": " + money(n.v) + ", " + pctShown(n.pct, n.v / net.total) + " of these windows' premium" },
+            h("b", null, n.label), h("span", null, money(n.v) + " · " + pctShown(n.pct, n.v / net.total)), h("i", { class: "fnw-fill", "aria-hidden": "true" }));
           el.style.left = p.x + "px";
           el.style.top = p.y + "px";
           el.style.width = p.w + "px";
@@ -380,7 +386,7 @@
       const ids = new Map(net.columns.flatMap((c) => c.nodes.map((n) => [n.id, n.label])));
       const rows = (all) => (all ? net.paths : net.paths.slice(0, 12)).map((p) => {
         const tr = h("tr", null, p.ids.map((id, i) => h(i === 0 ? "th" : "td", { scope: i === 0 ? "row" : null }, ids.get(id))),
-          h("td", { class: "c-num" }, money(p.v)), h("td", { class: "c-num" }, Math.round((p.v / net.total) * 100) + "%"));
+          h("td", { class: "c-num" }, money(p.v)), h("td", { class: "c-num" }, pctShown(Math.round((p.v / net.total) * 100), p.v / net.total)));
         return tr;
       });
       const t = h("table", { class: "fnw-tbl" },

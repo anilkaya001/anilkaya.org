@@ -1282,6 +1282,7 @@ try {
     sq.panels.ivSurface.iv[0][0] = null;
     await mount(page, sq);
     ok(await pickView(page, "m-vol", "Surface"), "the volatility module offers the Surface view");
+    await page.waitForFunction(() => document.querySelector("#m-vol svg rect"), null, { timeout: 5000 });
     const nq = await page.evaluate(() => {
       const mod = document.getElementById("m-vol");
       const key = [...mod.querySelectorAll(".ui-key")].find((k) => /Not quoted/.test(k.textContent));

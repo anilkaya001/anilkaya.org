@@ -78,14 +78,53 @@ ok(!/--up\b|--down\b|--up-mark|--down-mark/.test(CSS), "nor the lean colours");
   near(0.30 * Math.sqrt(30 / 365), 0.0860, 5e-4, "hand check: 30 days at 30% is a standard deviation of 8.6% of spot");
   ok(Math.abs(Math.log(102 / 100)) / (0.30 * Math.sqrt(30 / 365)) < 0.25 && Math.abs(Math.log(103 / 100)) / (0.30 * Math.sqrt(30 / 365)) > 0.25, "102 is inside a quarter of it and 103 is outside");
   near(0.30 * Math.sqrt(1 / 365), 0.0157, 5e-4, "a same-day window at 30% has a standard deviation of 1.6% of spot, so a 2.5% band would call it all near");
-  eq(L.volFor(10, [{ dte: 7, vol: 0.5 }, { dte: 30, vol: 0.3 }], 0.4).vol, 0.5, "the vol of the nearest listed expiry is used");
-  eq(L.volFor(25, [{ dte: 7, vol: 0.5 }, { dte: 30, vol: 0.3 }], 0.4).vol, 0.3, "and the other one beyond the midpoint");
+  const TERM2 = [{ dte: 7, vol: 0.25 }, { dte: 30, vol: 0.45 }];
+  near(L.volFor(18, TERM2, 0.4).vol, 0.41725, 1e-4, "hand worked: a window 18 days out between a 7-day row at 25% and a 30-day row at 45% has 0.4172 of volatility, not the nearer row's 0.25");
+  near(L.volFor(18, TERM2, 0.4).vol, Math.sqrt((0.0625 * 7 + (0.2025 * 30 - 0.0625 * 7) * (11 / 23)) / 18), 1e-12, "which is linear total variance: 3.1337 over 18 days");
+  eq(L.volFor(7, TERM2, 0.4).vol, 0.25, "at a listed expiry the row's own volatility");
+  eq(L.volFor(30, TERM2, 0.4).vol, 0.45, "at the other");
+  eq(L.volFor(3, TERM2, 0.4).vol, 0.25, "before the first row it is held flat");
+  eq(L.volFor(90, TERM2, 0.4).vol, 0.45, "and after the last");
+  ok(Math.abs(L.volFor(18, TERM2, 0.4).vol - L.volFor(19, TERM2, 0.4).vol) < 0.01, "and it moves smoothly across the midpoint of the two rows, where nearest-row would jump from 0.25 to 0.45");
+  eq(L.volFor(18, [{ dte: 30, vol: 0.45 }, { dte: 7, vol: 0.25 }], 0.4).vol, L.volFor(18, TERM2, 0.4).vol, "whatever order the rows come in");
+  eq(L.volFor(18, [{ dte: 0, vol: 0.9 }, ...TERM2], 0.4).vol, L.volFor(18, TERM2, 0.4).vol, "a zero-day row is dropped");
   eq(L.volFor(10, [], 0.4).vol, 0.4, "with no term the thirty-day vol");
   eq(L.volFor(10, null, null), null, "with neither, nothing");
-  eq(API.volAt(10, [{ dte: 7, vol: 0.5 }, { dte: 30, vol: 0.3 }], 0.4), 0.5, "the page picks the same expiry");
+  near(API.volAt(18, TERM2, 0.4), 0.41725, 1e-4, "the page interpolates the same way");
+  eq(API.volAt(7, TERM2, 0.4), 0.25, "and returns the listed row at its own expiry");
+  eq(API.volAt(30, TERM2, 0.4), 0.45, "and at the other");
+  ok(Math.abs(API.volAt(18, TERM2, 0.4) - API.volAt(19, TERM2, 0.4)) < 0.01, "and is continuous across the midpoint");
+  eq(API.volAt(18, [{ dte: 0, vol: 0.9 }, ...TERM2], 0.4), API.volAt(18, TERM2, 0.4), "and drops a zero-day row");
+  eq(L.moneyness("C", 97.5, 100, null, 5), "mny:near", "the fixed band: 97.5 on a spot of 100 is exactly 2.5% below and near");
+  eq(L.moneyness("C", 102.5, 100, null, 5), "mny:near", "and 102.5 exactly 2.5% above is near too, though 102.5 / 100 - 1 and 97.5 / 100 - 1 are not equal and opposite in floating point");
+  eq(API.moneyOf("C", 97.5, 100, null, 5), "mny:near", "the page agrees below");
+  eq(API.moneyOf("C", 102.5, 100, null, 5), "mny:near", "and above");
+  eq(L.moneyness("C", 102.6, 100, null, 5), "mny:otm", "past the band a call above spot is out of the money");
+  eq(L.shares([334, 333, 333]), [34, 33, 33], "the largest node never prints the smaller figure: 334, 333 and 333 are 34, 33 and 33, where cumulative rounding printed 33, 34 and 33");
+  eq(plain(API.pctsOf([334, 333, 333])), [34, 33, 33], "the page agrees");
+  eq(plain(API.pctsOf([0.2, 99.8])), [0, 100], "a node can round to nothing");
+  eq(API.daysBetween("2025-01-10", "2025-13-45"), null, "a day that is not a date is never normalised into one");
+  eq(API.daysBetween("2025-02-30", "2025-03-04"), null, "nor February 30");
+  eq(L.calendarDays("2025-02-30", "2025-03-04"), null, "in the leaf either");
+  eq(API.daysBetween("2024-02-29", "2024-03-01"), 1, "but the leap day is real");
   for (const values of [[1, 1, 1], [1, 2, 3, 4], [33, 33, 34], [0.5, 0.25, 0.25], [7, 3], [1, 1, 1, 1, 1, 1, 1]]) {
     eq(L.shares(values).reduce((a, x) => a + x, 0), 100, "the shares of " + values.join("/") + " add to exactly 100");
     eq(plain(API.pctsOf(values)), L.shares(values), "and the page's equal the leaf's");
+  }
+  {
+    let s = 20261027;
+    const rnd = () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
+    let kept = 0;
+    for (let t = 0; t < 3000; t++) {
+      const n = 1 + Math.floor(rnd() * 8);
+      const values = Array.from({ length: n }, () => (rnd() < 0.15 ? Math.floor(rnd() * 3) + 1 : rnd() * 1000 + 1));
+      const out = L.shares(values);
+      eq(out.reduce((a, x) => a + x, 0), 100, "the shares add to 100");
+      for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) if (values[a] > values[b] && out[a] < out[b]) { ok(false, "a larger node printed a smaller share: " + values.join("/") + " gave " + out.join("/")); }
+      kept++;
+      eq(plain(API.pctsOf(values)), out, "the page's shares equal the leaf's");
+    }
+    ok(kept === 3000, "and a larger node never prints a smaller share, over 3000 random columns");
   }
   eq(L.shares([0, 0]), [null, null], "an empty column has no shares");
 }
@@ -130,10 +169,24 @@ const WORLD = mk([
   eq(L.buildNet(WORLD, { ...CTX, spot: null }).basis, "none", "and the basis says so");
   eq(L.buildNet(WORLD, { ...CTX, iv30: null }).basis, "fixed", "with a spot and no volatility the band is the fixed 2.5% and says so");
   ok(L.buildNet(WORLD, { ...CTX, iv30: null }).columns[2].nodes.every((n) => /2\.5%/.test(n.label)), "its nodes name the 2.5%, not near the money");
-  eq(L.buildNet(WORLD, CTX).basis, "vol", "with a volatility the band is scaled");
+  eq(L.buildNet(WORLD, CTX).basis, "iv30", "with only the 30-day volatility the band is scaled by it and the basis says so");
+  eq(L.buildNet(WORLD, { ...CTX, term: [{ dte: 7, vol: 0.25 }, { dte: 30, vol: 0.45 }] }).basis, "term", "with the term structure it is interpolated and the basis says so");
+  eq(L.buildNet(WORLD, { ...CTX, term: [{ dte: 0, vol: 0.25 }], iv30: null }).basis, "fixed", "a term of zero-day rows is no term");
   eq(L.buildNet(mk([]), CTX).state, "quiet", "no windows is quiet");
   eq(L.buildNet({ status: "quiet" }, CTX).state, "quiet", "a quiet record is quiet");
   eq(L.buildNet(undefined, CTX).state, "unavailable", "no record is unavailable, never an empty map");
+  const noSession = L.buildNet({ status: "ok", n: 6, complete: true, prem: 8.8e6, dots: WORLD.dots }, { spot: 100, iv30: 0.3 });
+  eq(noSession.state, "unavailable", "windows with no session date cannot be placed: unavailable, not quiet");
+  ok(/no session date/.test(noSession.reason), "and the reason names the missing date: " + noSession.reason);
+  const bad2 = L.buildNet(mk(WORLD.dots.map((d) => ({ ...d, cp: "X" }))), CTX);
+  eq(bad2.state, "unavailable", "windows that all fail are unavailable");
+  ok(/missing or invalid price, side, strike or expiry/.test(bad2.reason), "with the reason that names the side as well: " + bad2.reason);
+  eq(L.buildNet({ status: "unavailable", why: "store." }, CTX).reason, "The flagged windows are not available: store.", "a reason that ends in a full stop does not print two");
+  eq(L.buildNet({ ...WORLD, complete: undefined }, CTX).complete, null, "a record that does not say whether it is complete is not called complete");
+  eq(L.buildNet({ ...WORLD, prem: -5 }, CTX).cover, null, "a negative premium is not stated, and is not blamed on the windows");
+  eq(L.buildNet({ ...WORLD, prem: -5 }, CTX).state, "ok", "so the map still draws");
+  const tiny = L.buildNet(mk(Array.from({ length: 5 }, () => dot(20.22, "C", 100, "2026-08-28", 0.5, true, true)), { prem: 100 }), CTX);
+  ok(tiny.gap >= 0, "the width of the warning is never negative: " + tiny.gap);
   eq(L.buildNet({ ...WORLD, asOf: "2026-08-21" }, CTX).state, "stale", "windows of another session are stale");
   eq(L.buildNet({ ...WORLD, prem: 1000 }, CTX).state, "inconsistent", "windows that add to more than the name's premium are refused");
   const half = L.buildNet({ ...WORLD, prem: 17600000 }, CTX);
@@ -143,8 +196,8 @@ const WORLD = mk([
   eq(L.buildNet({ ...WORLD, prem: 40000000 }, CTX).coverNote, "largest", "under half it is the largest windows only");
   eq(L.buildNet({ ...WORLD, n: 49 }, CTX).cover, 1, "the count of windows is not the coverage");
   const nulls = L.buildNet(mk([...WORLD.dots, { ...dot(400000, "C", 100, "2026-08-28", 0.5, true, true), a: null }, { ...dot(300000, "P", 100, "2026-08-28", 0.5, true, true), sw: undefined }]), CTX);
-  eq(nulls.excluded.noAsk, 1, "a window with no ask share is counted");
-  eq(nulls.excluded.noFlags, 1, "and one with no flag is counted");
+  eq(nulls.excluded.unattributed, 1, "a window with no ask share is counted");
+  eq(nulls.excluded.unflagged, 1, "and one with no flag is counted");
   ok(nulls.columns[3].nodes.some((n) => n.id === "flg:u" && n.v === 300000), "and its premium sits in flags not read, not in neither flag");
   near(nulls.columns[0].nodes.find((n) => n.id === "side:cr").v, WORLD.dots[2].p + 1500000 * 0.5 + 400000, 1e-6, "the window with no ask share is all in the rest, never coerced to the ask side");
   const excl = L.buildNet(mk([...WORLD.dots, dot(700000, "C", 100, "2026-08-20"), dot(100000, "C", 100, "soon")]), CTX);
@@ -201,6 +254,16 @@ const BATTERY = [];
     dot(1e6, "C", 105, "2025-04-30", 0.5, false, false), dot(1e6, "P", 95, "2025-03-10", 0.5, false, false), dot(1e6, "C", 100.2, "2025-03-07", 0.5, false, true),
   ];
   BATTERY.push({ alerts: { ...mk(edge), asOf: "2025-03-07" }, ctx: { session: "2025-03-07", spot: 100, iv30: 0.3, term: null } });
+  const spots = [97.5, 102.5, 102.6, 97.4, 100].map((k) => dot(1e6, "C", k, "2026-08-28", 0.5, true, true));
+  BATTERY.push({ alerts: mk(spots), ctx: { session: SESSION, spot: 100, iv30: null, term: null } });
+  BATTERY.push({ alerts: mk([...spots, dot(1e6, "P", 100, "2026-13-45", 0.5, true, true), dot(1e6, "P", 100, "2026-02-30", 0.5, true, true)]), ctx: { session: SESSION, spot: 100, iv30: 0.3, term: [{ dte: 0, vol: 0.9 }, { dte: 7, vol: 0.25 }, { dte: 30, vol: 0.45 }] } });
+  BATTERY.push({ alerts: mk(Array.from({ length: 6 }, (_, i) => dot(1e6, i % 2 ? "C" : "P", 100 + i, "2026-09-11", 0.5, true, true))), ctx: { session: SESSION, spot: 100, iv30: 0.3, term: [{ dte: 7, vol: 0.25 }, { dte: 30, vol: 0.45 }] } });
+  BATTERY.push({ alerts: { status: "ok", n: 6, complete: true, prem: 8.8e6, dots: WORLD.dots }, ctx: { spot: 100, iv30: 0.3 } });
+  BATTERY.push({ alerts: { status: "unavailable", why: "store." }, ctx: CTX });
+  BATTERY.push({ alerts: { ...WORLD, complete: undefined }, ctx: CTX });
+  BATTERY.push({ alerts: { ...WORLD, prem: -5 }, ctx: CTX });
+  BATTERY.push({ alerts: mk(Array.from({ length: 5 }, () => dot(20.22, "C", 100, "2026-08-28", 0.5, true, true)), { prem: 100 }), ctx: CTX });
+  BATTERY.push({ alerts: mk(Array.from({ length: 6 }, (_, i) => dot(3340 + (i < 1 ? 0 : -1), "C", 100, "2026-08-28", 0.5, true, true)), { prem: 20000 }), ctx: CTX });
   BATTERY.push({ alerts: mk([dot(1, "C", 100, "2026-08-24", 0.5, true, true), dot(1, "C", 100, "2026-08-24", 0.5, true, true), dot(1, "C", 100, "2026-08-24", 0.5, true, true), dot(1, "C", 100, "2026-08-24", 0.5, true, true), dot(1, "C", 100, "2026-08-24", 0.5, true, true)]), ctx: CTX });
 }
 
@@ -214,6 +277,7 @@ const compare = (A) => {
       for (const c of a.columns) {
         if (Math.abs(c.nodes.reduce((s, n) => s + n.v, 0) - a.total) > 1e-6 * Math.max(1, a.total)) bad.push("world " + i + " column " + c.key + " does not add to the total");
         if (c.nodes.reduce((s, n) => s + n.pct, 0) !== 100) bad.push("world " + i + " column " + c.key + " shares do not add to 100");
+        for (const m of c.nodes) for (const n of c.nodes) if (m.v > n.v && m.pct < n.pct) bad.push("world " + i + " column " + c.key + ": a larger node prints a smaller share");
       }
       a.bands.forEach((list, j) => { if (Math.abs(list.reduce((s, x) => s + x.v, 0) - a.total) > 1e-6 * Math.max(1, a.total)) bad.push("world " + i + " hop " + j + " does not add to the total"); });
       if (a.cover !== null && Math.abs(a.cover - a.total / a.prem) > 1e-12) bad.push("world " + i + " coverage is not premium over premium");
@@ -237,23 +301,33 @@ const compare = (A) => {
 
 const MUTANTS = [
   ["the card's ask share used for the side column", "const ask = ok ? p * a : 0;", "const ask = ok ? p * (num(alerts.askShare) === null ? 0.5 : alerts.askShare) : 0;"],
-  ["a missing ask share not counted", "if (!ok) excluded.noAsk++;", ""],
+  ["a missing ask share not counted", "if (!ok) excluded.unattributed++;", ""],
   ["a missing ask share read as zero and the premium dropped", "const ask = ok ? p * a : 0;", "const ask = ok ? p * a : -1;"],
   ["a missing flag read as neither", ": \"flg:u\";", ": \"flg:n\";"],
   ["an ask share past one accepted", "const ok = a !== null && a >= 0 && a <= 1;", "const ok = a !== null && a >= 0;"],
   ["moneyness not scaled by the expiry", "(sigma * Math.sqrt(Math.max(days, 1) / DAYS_PER_YEAR))", "sigma"],
   ["no one-day floor", "Math.max(days, 1) / DAYS_PER_YEAR", "days / DAYS_PER_YEAR"],
   ["calls and puts swapped", "(cp === \"C\") === (z < 0)", "(cp === \"P\") === (z < 0)"],
-  ["the farthest expiry's vol", "if (Math.abs(r.dte - days) < Math.abs(best.dte - days)) best = r;", "if (Math.abs(r.dte - days) > Math.abs(best.dte - days)) best = r;"],
+  ["the nearer expiry's volatility instead of the interpolated one", "return Math.sqrt((wa + ((wb - wa) * (t - a.dte)) / (b.dte - a.dte)) / t);", "return t - a.dte < b.dte - t ? a.vol : b.vol;"],
+  ["volatility interpolated in vol, not in total variance", "return Math.sqrt((wa + ((wb - wa) * (t - a.dte)) / (b.dte - a.dte)) / t);", "return a.vol + ((b.vol - a.vol) * (t - a.dte)) / (b.dte - a.dte);"],
   ["coverage by window count", "const cover = prem !== null && prem > 0 ? total / prem : null;", "const cover = prem !== null && prem > 0 && num(alerts.n) ? drawn / alerts.n : null;"],
   ["the fixed band at three percent", "const FIXED_BAND = 0.025;", "const FIXED_BAND = 0.03;"],
+  ["the fixed band by a ratio, asymmetric at the edge", "if (Math.abs(z) <= FIXED_BAND * spot) return \"mny:near\";", "if (Math.abs(k / spot - 1) <= FIXED_BAND) return \"mny:near\";"],
   ["the near band at half a deviation", "const NEAR_Z = 0.25;", "const NEAR_Z = 0.5;"],
-  ["local time for the day count", "return Math.round((Date.UTC(+b[1], +b[2] - 1, +b[3]) - Date.UTC(+a[1], +a[2] - 1, +a[3])) / 864e5);", "return Math.floor((new Date(+b[1], +b[2] - 1, +b[3]) - new Date(+a[1], +a[2] - 1, +a[3])) / 864e5);"],
-  ["shares rounded one by one", "const now = Math.round((cum / total) * 100);\n      out[i] = now - prev;\n      prev = now;", "out[i] = Math.round((v / total) * 100);"],
+  ["local time for the day count", "return Math.round((y - x) / 864e5);", "return Math.floor((new Date(+b[1], +b[2] - 1, +b[3]) - new Date(+a[1], +a[2] - 1, +a[3])) / 864e5);"],
+  ["a day that is not a date normalised into one", "if (new Date(x).toISOString().slice(0, 10) !== a[0] || new Date(y).toISOString().slice(0, 10) !== b[0]) return null;", ""],
+  ["the leftover units handed to the first nodes", "y[0] - x[0] || y[1] - x[1] || x[2] - y[2]", "x[2] - y[2]"],
+  ["no leftover units handed out", "for (let j = 0; left > 0 && j < order.length; j++, left--) out[order[j][2]]++;", ""],
   ["a window with no placeable expiry kept in some columns", "cp === null || bucket === null || (spot", "cp === null || (spot"],
   ["the readout ignores the selection", "for (const x of mine) sums.set(x.nodes[c.index]", "for (const x of net.parts) sums.set(x.nodes[c.index]"],
   ["a strike of zero placed", "(spot !== null && !(k > 0))", "(spot !== null && k === null)"],
   ["the same-day bucket folded into the week", "d === 0 ? \"exp:d0\" : d <= 7", "d <= 7 ? \"exp:w1\" : d <= 7"],
+  ["windows with no session date called quiet", "return { state: \"unavailable\", reason: day === null", "return { state: \"quiet\", reason: day === null"],
+  ["an unfinished record called complete", "complete: typeof alerts.complete === \"boolean\" ? alerts.complete : null,", "complete: alerts.complete !== false,"],
+  ["a negative premium believed", "const prem = num(alerts.prem) !== null && alerts.prem >= 0 ? alerts.prem : null;", "const prem = num(alerts.prem);"],
+  ["the warning's width allowed to go negative", "Math.max(0, Math.round(100 * (1 - cover)))", "Math.round(100 * (1 - cover))"],
+  ["a reason that ends in a full stop printed twice", ".replace(/[.\\s]+$/, \"\")", ""],
+  ["the readout's share not the chip's", "pct: node.pct, v: mine.reduce", "pct: Math.round((mine.reduce((s, x) => s + x.v, 0) / net.total) * 100), v: mine.reduce"],
 ];
 for (const [name, from, to] of MUTANTS) {
   ok(SRC.split(from).length === 2, "the planted build changes the module exactly once: " + name);
@@ -351,7 +425,7 @@ const MODEL_CTX = () => {
       const chips = await page.$$eval(".fnw-chip", (els) => els.map((e) => ({ id: e.dataset.id, text: e.innerText.replace(/\s+/g, " ").trim(), label: e.getAttribute("aria-label"), l: parseFloat(e.style.left), t: parseFloat(e.style.top), w: parseFloat(e.style.width), h: parseFloat(e.style.height) })));
       for (const c of NET.columns) for (const n of c.nodes) {
         const chip = chips.find((x) => x.id === n.id);
-        ok(chip && chip.text === n.label + " " + (await fmtMoney(page, n.v)) + " · " + n.pct + "%", w + ": the chip for " + n.id + " prints its label, its premium and its share: " + (chip && chip.text));
+        ok(chip && chip.text === n.label + " " + (await fmtMoney(page, n.v)) + " · " + (n.pct === 0 ? "<1%" : n.pct + "%"), w + ": the chip for " + n.id + " prints its label, its premium and its share: " + (chip && chip.text));
       }
       const paths = await page.$$eval(".fnw-bands path", (els) => els.map((e) => ({ d: e.getAttribute("d"), sw: parseFloat(e.getAttribute("stroke-width")), cls: e.getAttribute("class") })));
       eq(paths.length, NET.bands.reduce((a, l) => a + l.length, 0), w + ": one band for every pair of nodes");
