@@ -47,7 +47,7 @@
   const hourLabel = (m) => F.tick(m);
   const cardKey = (t) => String(t || "").toUpperCase().replace(/[^A-Z0-9.\-]/g, "");
   const tickerHref = (t) => "/flows/ticker/?t=" + encodeURIComponent(cardKey(t));
-  const contractText = (r) => (r.cp === "C" || r.cp === "P" ? r.cp + " " + (n(r.k) === null ? "" : F.compact(n(r.k), n(r.k) % 1 ? 1 : 0)) : "") +
+  const contractText = (r) => (r.cp === "C" || r.cp === "P" ? r.cp + " " + (n(r.k) === null ? "" : F.strike(n(r.k))) : "") +
     (r.exp || r.expiry ? " " + MID + " " + F.day(String(r.exp || r.expiry)) : "");
   const joinKey = (t, cp, k, expiry) => {
     const strike = n(k);

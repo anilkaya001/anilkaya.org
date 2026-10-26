@@ -13,7 +13,7 @@
     }
     return;
   }
-  const { h, F, isNum, DASH, MINUS, fmtSigned, fmtStamp, scoreStrip, glyph } = UI;
+  const { h, F, isNum, DASH, fmtSigned, fmtStamp, scoreStrip, glyph } = UI;
   const C = UI.chart;
 
   const ans = (p) => (p && p.status !== "pending" ? p : null);
@@ -992,14 +992,10 @@
         "on /flows/market/ draws, in basis points per session.");
     }
 
+    const ctsDp = (m, i) => [0, 0, 2, 2, 2][i];
     const cts = (v) => {
       const n = isNum(v);
-      if (n === null) return DASH;
-      const sign = n < 0 ? MINUS : n > 0 ? "+" : "";
-      const a = Math.abs(n);
-      if (a >= 1e6) return sign + (a / 1e6).toFixed(2) + "M";
-      if (a >= 1e3) return sign + (a / 1e3).toFixed(0) + "K";
-      return sign + String(Math.round(a));
+      return n === null ? DASH : F.scaled(n, ctsDp, "", true);
     };
     const netCts = (r) => {
       const c = isNum(r && r.callVolume), p = isNum(r && r.putVolume);

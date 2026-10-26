@@ -26,6 +26,7 @@ function battery(src) {
   eq([fmt.cents(68.1), fmt.cents(-0.5), fmt.cents(null)], ["$68.10", `${MINUS}$0.50`, "—"], "cents");
   eq([fmt.signedWhole(41), fmt.signedWhole(-1234.4), fmt.signedWhole(0), fmt.whole(7015)], ["+$41", `${MINUS}$1,234`, "$0", "$7,015"], "whole");
   eq([fmt.expiryText("2026-11-20"), fmt.expiryText("2026-01-05"), fmt.strikeText(65), fmt.strikeText(62.5), fmt.times(3.12), fmt.times(32.5)], ["Nov 20", "Jan 5", "65", "62.5", "3.1×", "33×"], "text");
+  eq([fmt.money(999499), fmt.money(999500), fmt.money(999949999), fmt.money(999950000), fmt.money(999.5), fmt.money(999.4)], ["$999K", "$1.0M", "$999.9M", "$1.0B", "$1K", "$999"], "money is told in the unit its rounded value belongs to: never 1000K or 1000.0M");
   eq(fmt.trt(Date.parse("2026-10-14T21:52:00Z")), "00:52 TRT", "trt adds three hours");
 
   eq(words.callSay(CHEAP), {
@@ -231,6 +232,8 @@ const MUTANTS = [
   ["sector floor gone", (s) => s.replace("P >= T.sectorFloor", "true")],
   ["no dedupe by id", (s) => s.replace("if (state.seen.has(key)) continue;", "")],
   ["fixture names allowed", (s) => s.replace("if (refuse(r.t)) continue;", "")],
+  ["money keeps 1000K", (s) => s.replace('if (a >= 999.5) return s + "$" + Math.round(a / 1e3) + "K";', 'if (a >= 1e3) return s + "$" + Math.round(a / 1e3) + "K";')],
+  ["money keeps 1000.0M", (s) => s.replace('if (a >= 999.95e6) return s + "$" + (a / 1e9).toFixed(1) + "B";', 'if (a >= 1e9) return s + "$" + (a / 1e9).toFixed(1) + "B";')],
   ["minus sign dropped", (s) => s.replace('var NEG = Object.freeze({ "-1": MINUS,', 'var NEG = Object.freeze({ "-1": "",')],
   ["null read as zero", (s) => s.replace('return x === null ? DASH : (x * 100).toFixed(1);', 'return (x || 0) === 0 ? "0.0" : (x * 100).toFixed(1);')],
   ["eastern offset fixed", (s) => s.replace("return ms >= start && ms < end ? -4 : -5;", "return -5;")],

@@ -39,9 +39,9 @@
     var x = fin(v);
     if (x === null) return DASH;
     var a = Math.abs(x), s = NEG[Math.sign(x)];
-    if (a >= 1e9) return s + "$" + (a / 1e9).toFixed(1) + "B";
-    if (a >= 1e6) return s + "$" + (a / 1e6).toFixed(1) + "M";
-    if (a >= 1e3) return s + "$" + Math.round(a / 1e3) + "K";
+    if (a >= 999.95e6) return s + "$" + (a / 1e9).toFixed(1) + "B";
+    if (a >= 999.5e3) return s + "$" + (a / 1e6).toFixed(1) + "M";
+    if (a >= 999.5) return s + "$" + Math.round(a / 1e3) + "K";
     return s + "$" + Math.round(a);
   }
   function cents(v) {

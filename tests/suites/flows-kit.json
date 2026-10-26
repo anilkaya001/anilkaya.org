@@ -1,1 +1,1 @@
-{"name": "flows-kit", "class": "C", "group": "shard", "timing": false, "medianS": 6.9, "shard": 10, "files": ["flows-kit-render.mjs"], "covers": ["assets/css/base.css","assets/css/flows.css","assets/version.txt","docs/flows-design-system.md","shared/flows-pages.js"]}
+{"name": "flows-kit", "class": "C", "group": "shard", "timing": false, "medianS": 6.9, "shard": 5, "files": ["flows-kit-render.mjs"], "covers": ["assets/css/base.css","assets/css/flows.css","assets/version.txt","docs/flows-design-system.md","shared/flows-pages.js"]}

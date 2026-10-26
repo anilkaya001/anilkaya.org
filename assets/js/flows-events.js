@@ -160,12 +160,11 @@
   }
 
   const raw = (v) => (v ? String(v).replace(/^-/, UI.MINUS) : DASH);
-  const SCALE = [[1e9, "B"], [1e6, "M"], [1e3, "K"]];
+  const threeFigures = (n) => (n >= 100 ? 0 : n >= 10 ? 1 : 2);
   const short = (v) => {
     const t = String(v).trim();
     if (!/^-?\d{5,}$/.test(t)) return raw(v);
-    const x = Number(t), u = SCALE.find((q) => Math.abs(x) >= q[0]);
-    return (x < 0 ? UI.MINUS : "") + (Math.abs(x) / u[0]).toPrecision(3) + u[1];
+    return UI.F.scaled(Number(t), threeFigures, "");
   };
   const cell = (v, why, attrs) => (v ? h("span", { ...attrs, title: String(v) }, short(v)) : h("span", { ...attrs, title: why, "aria-label": "None: " + why }, DASH));
   const key = (...kids) => h("span", { class: "ui-key" }, ...kids);

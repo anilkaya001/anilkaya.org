@@ -2,6 +2,7 @@ import { vnum, isoDay, sessionsBetween } from "./flows-cross.js";
 import { median } from "./flows-stats.js";
 import { askShareRead } from "./flows-tape-stats.js";
 import { opById } from "./flows-vendor-ops.js";
+import { formatScaled } from "./flows-display-round.js";
 import { usableX, exSplit, ETF_TOP } from "./flows-vendor-extras.js";
 
 export const DOSSIER_VERSION = 1;
@@ -198,12 +199,10 @@ export function tokensOf(text) {
   return Math.ceil(String(text).length / 3.7);
 }
 
-function compact(n) {
+export function compact(n) {
   const a = Math.abs(n);
-  const unit = a >= 1e12 ? [1e12, "T"] : a >= 1e9 ? [1e9, "B"] : a >= 1e6 ? [1e6, "M"] : a >= 1e3 ? [1e3, "K"] : null;
-  if (!unit) return null;
-  const x = a / unit[0];
-  return (x >= 100 ? x.toFixed(0) : x >= 10 ? x.toFixed(1) : x.toFixed(2)) + unit[1];
+  if (a < 999.5) return null;
+  return formatScaled(a, (x) => (x >= 100 ? 0 : x >= 10 ? 1 : 2));
 }
 
 function signed(v, text) {
@@ -1248,7 +1247,7 @@ export function buildPositioningPacket(inp) {
   }
   const sv = S && isObj(S.volume) && S.volume.status === "ok" ? S.volume : null;
   if (sv) {
-    rec.fact("shortVolume.ratio", "Share of volume sold short (FINRA)", sv.ratio, "fraction", { grade: xg, note: "a 40-50% baseline is market-making, not short interest; as of " + sv.date });
+    rec.fact("shortVolume.ratio", "Share of volume sold short (FINRA)", sv.ratio, "fraction", { grade: xg, note: "a 40-50% baseline is market-making, not short interest; FINRA-reported volume only, not all trading; as of " + sv.date });
     rec.fact("shortVolume.z", "That ratio against its own last 60 sessions", sv.z, "z", { signed: true, grade: xg, silent: true });
   }
 

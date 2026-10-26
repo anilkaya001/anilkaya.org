@@ -55,36 +55,51 @@ export const STOCK_NOTES = Object.freeze({
     "from a list is not evidence of quiet.",
 });
 
+const CANCELED_SHOWN = 3;
+
 export function shapeStockDarkpool(raw, { cap = STOCK_CAPS.darkpool } = {}) {
   const list = unwrap(raw);
-  if (list === null) return { ...notAList(raw, cap), unpriced: 0 };
-  const rows = [];
+  if (list === null) return { ...notAList(raw, cap), unpriced: 0, canceled: 0 };
+  const live = [];
+  const voided = [];
   let unpriced = 0;
+  let canceled = 0;
   for (const r of list) {
     if (!r || typeof r !== "object") continue;
     const px = num(r.price);
     const size = num(r.size);
     const prem = num(r.premium);
     if (px === null && size === null) continue;
-    if (prem === null) { unpriced++; continue; }
-    rows.push({
+    const row = prem === null ? null : {
       at: str(r.executed_at),
       px, size, prem,
       bid: num(r.nbbo_bid), ask: num(r.nbbo_ask),
       canceled: flag(r.canceled),
-    });
+    };
+    if (flag(r.canceled) === true) { canceled++; if (row) voided.push(row); continue; }
+    if (row === null) { unpriced++; continue; }
+    live.push(row);
   }
-  rows.sort((a, b) => (b.prem - a.prem)
+  const byPremium = (a, b) => (b.prem - a.prem)
     || ((a.at || "") < (b.at || "") ? -1 : (a.at || "") > (b.at || "") ? 1 : 0)
-    || ((b.size ?? -1) - (a.size ?? -1)));
-  const seen = rows.length;
-  const kept = rows.slice(0, cap);
-  return {
+    || ((b.size ?? -1) - (a.size ?? -1));
+  live.sort(byPremium);
+  voided.sort(byPremium);
+  const seen = live.length;
+  const kept = live.slice(0, cap);
+  const out = {
     status: kept.length ? "ok" : "quiet",
-    rows: kept, seen, cap,
+    rows: kept.concat(voided.slice(0, CANCELED_SHOWN)), seen, cap,
     shed: seen - kept.length,
     unpriced,
+    canceled,
   };
+  if (!kept.length && (canceled || unpriced)) {
+    out.reason = canceled && !unpriced
+      ? `all ${canceled} off-exchange print${canceled === 1 ? " was" : "s were"} canceled`
+      : [canceled ? `${canceled} canceled` : null, unpriced ? `${unpriced} carried no premium` : null].filter(Boolean).join(" and ") + ", so none could be ranked";
+  }
+  return out;
 }
 
 export function shapeStockOiChange(raw, { cap = STOCK_CAPS.oiDeltas } = {}) {

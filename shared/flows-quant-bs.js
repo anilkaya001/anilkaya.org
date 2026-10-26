@@ -13,6 +13,8 @@ const INV_SQRT_2PI = 0.3989422804014327;
 const SQRT_2PI = 2.5066282746310002;
 const THRESH = 0.46875;
 
+export const CONTRACT_SHARES = 100;
+
 export const QUANT_BS_VERSION = 1;
 
 function erfSmall(y) {
@@ -174,7 +176,7 @@ export function bsmGreeks(input) {
       thetaPerCalendarDay: theta / 365,
       charmPerCalendarDay: charm / 365,
       vannaPerVolPoint: vanna / 100,
-      dollarGammaPer1pctPerContract: gamma * 100 * S * S * 0.01,
+      dollarGammaPer1pctPerContract: gamma * CONTRACT_SHARES * S * S * 0.01,
     },
   };
 }
@@ -182,12 +184,12 @@ export function bsmGreeks(input) {
 export function dollarGreeks(g, S) {
   if (!g) return null;
   return {
-    delta$: g.delta * 100 * S,
-    gamma$1pct: g.gamma * 100 * S * S * 0.01,
-    vegaPt: g.vega * 100 * 0.01,
-    thetaDay: g.theta * 100 / 365,
-    vannaPt$: g.vanna * 0.01 * 100 * S,
-    charmDay$: g.charm * 100 * S / 365,
+    delta$: g.delta * CONTRACT_SHARES * S,
+    gamma$1pct: g.gamma * CONTRACT_SHARES * S * S * 0.01,
+    vegaPt: g.vega * CONTRACT_SHARES * 0.01,
+    thetaDay: g.theta * CONTRACT_SHARES / 365,
+    vannaPt$: g.vanna * 0.01 * CONTRACT_SHARES * S,
+    charmDay$: g.charm * CONTRACT_SHARES * S / 365,
   };
 }
 
