@@ -192,6 +192,45 @@ for (const t of TICKERS) {
 }
 
 {
+  const asked = async (mod, qs) => {
+    const { log, deps } = scenario();
+    const rows = createRouter(mod.flowsDeskRows(deps));
+    const rc = { request: req("GET", "/x"), env: {}, url: new URL("https://anilkaya.org/api/flows/chain?t=NVDA" + qs), ctx: { tag: "c" }, session: { id: "m" } };
+    const out = await outcome(() => rows.find("/api/flows/chain").handler(rc));
+    return { out, log, key: log.find((l) => l[0] === "serve"), chain: log.find((l) => l[0] === "chain") };
+  };
+  const base = await asked({ flowsDeskRows }, "&strategy=sc");
+  eq(base.key[1], "https://flows-chain.internal/NVDA?strategy=sc&h=0.3&f=0.1", "Short calls is keyed by ticker and by both collateral terms, at their defaults when none are given");
+  eq(base.chain[2], { ticker: "NVDA", strategy: "sc", rankBy: "annualized", limit: 120, terms: { haircut: 0.3, floor: 0.1 }, refresh: false }, "and builds with the terms as fractions");
+  const terms = await asked({ flowsDeskRows }, "&strategy=sc&h=0.6&f=0.2&refresh=1");
+  eq([terms.key[1], terms.key[2], terms.chain[2].terms, terms.chain[2].refresh], ["https://flows-chain.internal/NVDA?strategy=sc&h=0.6&f=0.2", true, { haircut: 0.6, floor: 0.2 }, true], "other terms are another key, and a refresh reaches both the cache and the builder");
+  eq((await asked({ flowsDeskRows }, "&strategy=sc&rank=premium")).key[1], base.key[1], "the rank parameter is no part of a Short calls key: the server ranks on all three conventions");
+  for (const [qs, h, f] of [["&h=0.05", 0.05, 0.1], ["&h=1", 1, 0.1], ["&f=0", 0.3, 0], ["&f=0.5", 0.3, 0.5], ["&h=0.30004", 0.3, 0.1], ["&h=0.30005", 0.3001, 0.1], ["&f=0.04996", 0.3, 0.05]]) {
+    const got = await asked({ flowsDeskRows }, "&strategy=sc" + qs);
+    eq(got.chain && [got.chain[2].terms.haircut, got.chain[2].terms.floor], [h, f], `${qs} is accepted and rounded to four places`);
+  }
+  for (const qs of ["&h=abc", "&h=", "&h=0.0499", "&h=1.0001", "&h=-0.3", "&f=-0.0001", "&f=0.5001", "&f=", "&f=NaN", "&h=0.3&f=9", "&h=1e9"]) {
+    const got = await asked({ flowsDeskRows }, "&strategy=sc" + qs);
+    eq([got.out.threw && got.out.threw.status, got.out.threw && got.out.threw.code, got.log.length], [400, "invalid_terms", 0], `${qs} is 400 invalid_terms before any gate, key or vendor call`);
+  }
+  for (const strategy of ["cc", "csp", "both"]) {
+    const got = await asked({ flowsDeskRows }, `&strategy=${strategy}&h=abc&f=zzz`);
+    ok(got.out.status === 200 && got.chain[2].terms === undefined && got.chain[2].refresh === undefined && !/&h=/.test(got.key[1]), `${strategy} ignores terms it does not use, even malformed ones`);
+  }
+  const mutants = [
+    ["the key drops the terms", [["`${ticker}?strategy=sc&h=${terms.haircut}&f=${terms.floor}`", "`${ticker}?strategy=sc`"]], "&strategy=sc&h=0.6&f=0.2", (g) => !/h=0\.6&f=0\.2$/.test(g.key[1])],
+    ["the terms are not validated", [["if (!inRange(v, limits)) throw HttpError.of(\"invalid_terms\");", ""]], "&strategy=sc&h=0.0499", (g) => g.out.threw === undefined],
+    ["the refresh flag is not handed on", [["terms, refresh: url.searchParams.get(\"refresh\") === \"1\"", "terms, refresh: false"]], "&strategy=sc&refresh=1", (g) => !g.chain || g.chain[2].refresh === false],
+    ["the floor is read from the haircut", [["floor: read(\"f\", SC_DEFAULTS.floor, SC_LIMITS.floor)", "floor: read(\"h\", SC_DEFAULTS.floor, SC_LIMITS.floor)"]], "&strategy=sc&h=0.6&f=0.2", (g) => !g.chain || g.chain[2].terms.floor !== 0.2],
+    ["the terms are not rounded", [["return Math.round(v * 1e4) / 1e4;", "return v;"]], "&strategy=sc&h=0.30004", (g) => !g.chain || g.chain[2].terms.haircut === 0.30004],
+  ];
+  for (const [title, transforms, qs, wrong] of mutants) {
+    const mod = await loadMutated("server/routes/flows-desk.js", transforms);
+    ok(wrong(await asked(mod, qs)), `PLANTED WRONG BUILD: ${title}, and this block sees it`);
+  }
+}
+
+{
   const gateCalls = [];
   const gates = { flows: async (request, env) => { gateCalls.push(request.method); return env.user || null; } };
   const { deps, log } = scenario();

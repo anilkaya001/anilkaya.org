@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "398";
+export const ASSET_VERSION = "399";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -708,7 +708,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="t-ann">Time-value yield, annualised: the bid less any intrinsic value, over the collateral, scaled by 365 over the days to expiry.</p>
       <p data-k="t-pq">Chance the position ends in profit under the risk-neutral density of the card&#39;s smile shape levelled to this contract&#39;s implied volatility, or flat at it where the card lists no smile near the expiry. Not a forecast.</p>
       <p data-k="t-pp">Chance the position ends in profit under the real-world law this name&#39;s card publishes.</p>
-      <p data-k="t-ev">Expected profit per contract sold into the bid, under the real-world law.</p>
+      <p data-k="t-ev">Expected profit per contract sold into the bid, under the real-world law: the card&#39;s published volatility model with the forward as drift. Not a forecast.</p>
       <p data-k="why-q">The engine bundle did not load.</p>
       <p data-k="why-fit">No implied volatility inverts from this contract&#39;s mid.</p>
       <p data-k="why-eng">The engine could not price this line.</p>
@@ -767,14 +767,14 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="sc-frontier-x">Net delta is the position&#39;s exposure to the stock: minus the call&#39;s forward delta for an uncovered call, drawn as a magnitude, or one minus it under Shares held, where the shares add one. Win % (implied) is the risk-neutral chance the call expires worth less than the strike plus the bid collected; it is not a forecast. The yield axis is a square-root scale: equal steps up are equal steps in the square root of the ratio, and its ticks sit on that scale, zero included. A point pinned to the top edge pays more than the axis shows.</p>
       <p data-k="sc-premium">Premium is what the bid pays on the contracts sold: a call sold into the bid, 100 shares a contract. The mid is not used for any figure here. Where a strike is in the money, part of the premium is intrinsic value that assignment takes back. The Premium ÷ collateral figure counts the whole bid, intrinsic value included; the annualised ratio counts only the time value.</p>
       <p data-k="sc-contracts">100 options sold is read as 100 contracts of 100 shares, 10,000 shares in all. To mean 100 option-shares, enter 1.</p>
-      <p data-k="sc-delta">Delta-adjusted collateral = 100 shares × spot × the larger of {h} × the call&#39;s delta and {f}. The first term is the delta-equivalent stock position times a stress rate; the second is a floor so a call with almost no delta still ties up capital. It is a convention, not your broker&#39;s number.</p>
+      <p data-k="sc-delta">Delta-adjusted collateral = 100 shares × spot × the larger of {h} × the call&#39;s delta (read as 0.05 where it is smaller) and {f}. The first term is the delta-equivalent stock position times a stress rate; the second is a floor so a call with almost no delta still ties up capital. It is a convention, not your broker&#39;s number.</p>
       <p data-k="sc-regt">Reg-T style collateral = 100 shares × the larger of 20% of spot less the amount the strike is above spot, and 10% of spot. It leaves out the option&#39;s own value, which the premium you receive pays for.</p>
       <p data-k="sc-shares">Shares held: the collateral is the shares, 100 a contract at spot, and the line is priced as a covered call. The desk cannot see what you hold; the shares are assumed, not bought.</p>
       <p data-k="sc-leaves-out">Left out: your broker&#39;s own rates and per-contract minimums, portfolio margin, broad-index options and leveraged funds, commissions, taxes, the margin a short stock position needs after assignment, and any netting across lines. Each line is sized alone.</p>
       <p data-k="sc-assign">An American-style call can be assigned before expiry, most often just before an ex-dividend date when the dividend is more than the time value left. The engine prices every line as European. Uncovered, assignment sells 100 shares a contract at the strike and leaves you short stock; covered, the shares are called away.</p>
       <p data-k="sc-early">Time value {tv} is below the {div} of dividends the card expects before expiry, so early assignment is a live possibility. The card&#39;s yield is an implied carry and can include more than dividends.</p>
       <p data-k="sc-itm-deep">Deep in the money, a short call behaves like short stock and is most often assigned near expiry or before an ex-dividend date.</p>
-      <p data-k="sc-slice">The server cuts each name to its top 120 calls ranked on the stock price, not on this collateral (time value over the price for the annualised and time-value ranks, the whole bid over the price for Premium ÷ collateral). Under the delta and Reg-T style conventions the calls this collateral ranks highest are the far out-of-the-money ones, which that cut is the most likely to drop, so the frontier and the ranking are drawn over that cut and may omit them.</p>
+      <p data-k="sc-slice">The server ranks every eligible call on this chain under the three collateral conventions and sends the top 25 of each in five expiry windows; the lists below re-rank those. The cut is exact for annualised time value over collateral and for any tenor filter; the other orders rank the rows sent.</p>
       <p data-k="sc-no-delta">No delta: the engine could not price this call. Reg-T style collateral needs no delta.</p>
       <p data-k="sc-no-delta-all">No delta could be read for these lines, so delta-adjusted collateral is withheld; the Reg-T style needs no delta.</p>
       <p data-k="sc-nobad">Contracts must be a whole number from 1 to 100,000.</p>
@@ -850,6 +850,30 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="fwd-engine">The engine prices delta, win % and EV on {g} (the card&#39;s carry), {d} from it.</p>
       <p data-k="fwd-delta">At this strike the gap between the two forwards moves the delta by {x}; the line is priced on the card&#39;s forward, not the chain&#39;s.</p>
       <p data-k="fwd-engine-same">The engine prices delta, win % and EV on {g} (the card&#39;s carry).</p>
+      <p data-k="fwd-par">{f} ± {e}: the chain&#39;s own put-call parity over {n} strikes. Delta, win % and EV are priced on it.</p>
+      <p data-k="fwd-blend">{f} ± {e}: the chain&#39;s put-call parity over {n} strikes, weighed against the card&#39;s carry ({c}). Delta, win % and EV are priced on it.</p>
+      <p data-k="fwd-carry2">{f} ± {e}, the card&#39;s carry: {why}. Delta, win % and EV are priced on it. A borrow fee or a dividend the card lacks would not show.</p>
+      <p data-k="fwd-rate2">{f} ± {e}, the interest rate alone: {why}, and the card holds no carry. Delta, win % and EV are priced on it. A borrow fee or a dividend would not show.</p>
+      <p data-k="fwd-veto">Not confirmed: the options&#39; own pairs sit far from the card&#39;s {f}, too few to price on and too far to ignore, so delta and win % are withheld.</p>
+      <p data-k="fwd-below">Options imply a forward {x} bp below carry: likely a borrow cost or a dividend the card lacks.</p>
+      <p data-k="fwd-above">Options imply a forward {x} bp above carry: the card&#39;s dividend may be too high.</p>
+      <p data-k="fwd-why-0">no clean call-put pair near the money</p>
+      <p data-k="fwd-why-few">only {n} clean pair(s), and three are needed</p>
+      <p data-k="band-pm">The forward is uncertain at this expiry, so delta carries a 95% band of ± {d} and win % of ± {w}.</p>
+      <p data-k="band-dash">Forward uncertain at this expiry (± {x}): delta and win % are not shown.</p>
+      <p data-k="band-veto">Forward uncertain at this expiry: the options market disagrees with the card&#39;s forward and cannot settle it, so delta and win % are not shown.</p>
+      <p data-k="range-in">The neighbouring quotes allow {lo} to {hi}.</p>
+      <p data-k="range-out">Model Win % sits outside the {lo} to {hi} range implied by neighbouring quotes; treat it with caution.</p>
+      <p data-k="range-none">no usable neighbouring quotes</p>
+      <p data-k="range-ee">withheld: the chain shows early-exercise pricing, which the call-side range does not allow for</p>
+      <p data-k="fwd-ee">The chain shows early-exercise pricing: parity falls as the strike rises. The forward is moved away from the carry, call volatility is read from the matching put, and the error is widened.</p>
+      <p data-k="sc-cut">Ranked from {n} eligible calls; {m} sent. Top {k} exact for annualised time value over collateral; other orders rank sent rows only.</p>
+      <p data-k="sc-cut-brief">Ranked from {n} eligible calls; {m} sent.</p>
+      <p data-k="sc-cut-partial">Partial chain: first {n} contracts read (page limit); ranking covers these only and is not exact.</p>
+      <p data-k="sc-cut-budget">Partial chain: the site&#39;s market-data budget ran out after {n} contracts; ranking covers these only and is not exact.</p>
+      <p data-k="sc-why-fwd">The forward is too uncertain at this expiry to size the delta.</p>
+      <p data-k="ev-measure">Expected profit per contract sold into the bid, per share times 100, under the real-world law: the card&#39;s published volatility model with the forward as drift. Not a forecast.</p>
+      <p data-k="ev-implied">On the market&#39;s own pricing the same sale is worth {x} a contract: the bid against the smile&#39;s value, which is the half-spread given up by selling into the bid, plus any fit error.</p>
       <p data-k="sm-ex">Contracts on this expiry outlive the next earnings report — the level here is priced against a jump, not a diffusion.</p>
       <p data-k="sm-ex0">No earnings report falls before this expiry.</p>
       <p data-k="sm-exu">Whether this expiry outlives the next earnings report is not determined: no contract on it survived the sale gates, so nothing on this column was dated.</p>
