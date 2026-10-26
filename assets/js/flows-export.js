@@ -32,8 +32,10 @@
 
   function exportCsv(spec) {
     const at = new Date().toISOString();
+    const stamp = F.stamp(at);
+    const iso = stamp.slice(0, 10) + "T" + stamp.slice(11, 16) + ":" + at.slice(17, 19) + "+03:00";
     save(spec.name + "-" + (spec.asOf || F.trtDay(at)) + ".csv", "text/csv;charset=utf-8", ["﻿", csv(spec.rows, spec.cols, [
-      "Source: " + spec.source + (spec.asOf ? "; as of " + spec.asOf : ""), "Exported " + F.stamp(at) + " (" + at.slice(0, 19) + "Z) from anilkaya.org"])]);
+      "Source: " + spec.source + (spec.asOf ? "; as of " + spec.asOf : ""), "Exported " + stamp + " (" + iso + ") from anilkaya.org"])]);
     UI.announce("CSV downloaded.");
   }
 

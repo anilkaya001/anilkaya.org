@@ -101,12 +101,19 @@ try {
     eq(grid[1][7], "-0.4", "a negative number keeps its ASCII minus: it is a number, not a string a spreadsheet could read as a formula");
     eq(grid[1][0], "1", "rank is numeric");
     ok(/^Source: .*; as of 2026-09-28$/.test(grid[5][0]) && grid[5].slice(1).every((c) => c === ""), `the freshness stamp is the first footer row (${grid[5][0]})`);
-    ok(/^Exported \d{4}-\d{2}-\d{2} \d{2}:\d{2} TRT \(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\) from anilkaya\.org$/.test(grid[6][0]), `and the export instant the second, in Turkiye time with the UTC instant in brackets (${grid[6][0]})`);
+    ok(/^Exported \d{4}-\d{2}-\d{2} \d{2}:\d{2} TRT \(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+03:00\) from anilkaya\.org$/.test(grid[6][0]), `and the export instant the second, in Turkiye time with the same instant as an ISO 8601 string at +03:00 in brackets (${grid[6][0]})`);
+    ok(!/Z\)|UTC/.test(grid[6][0]), "the footer names no other zone");
     await page.clock.setFixedTime(new Date("2026-10-11T22:30:00Z"));
     const [late] = await Promise.all([page.waitForEvent("download"), page.evaluate(() => window.FlowsUI.exportCsv({ name: "x", source: "s", asOf: null, rows: [[1]], cols: [{ label: "v", get: (r) => r[0] }] }))]);
     eq(late.suggestedFilename(), "x-2026-10-12.csv", "an export with no as-of day is named for the Turkiye date, which at 01:30 TRT is already the next day");
     const lateGrid = parseCsv(fs.readFileSync(await late.path(), "utf8").slice(1));
-    eq(lateGrid[lateGrid.length - 1][0], "Exported 2026-10-12 01:30 TRT (2026-10-11T22:30:00Z) from anilkaya.org", "and its footer prints the Turkiye instant with the UTC one in brackets");
+    eq(lateGrid[lateGrid.length - 1][0], "Exported 2026-10-12 01:30 TRT (2026-10-12T01:30:00+03:00) from anilkaya.org", "and its footer prints the Turkiye instant with the same instant at +03:00 in brackets");
+    for (const [utc, file, foot] of [["2026-10-11T20:59:59.600Z", "x-2026-10-11.csv", "Exported 2026-10-11 23:59 TRT (2026-10-11T23:59:59+03:00) from anilkaya.org"], ["2026-10-11T21:00:00.000Z", "x-2026-10-12.csv", "Exported 2026-10-12 00:00 TRT (2026-10-12T00:00:00+03:00) from anilkaya.org"]]) {
+      await page.clock.setFixedTime(new Date(utc));
+      const [edge] = await Promise.all([page.waitForEvent("download"), page.evaluate(() => window.FlowsUI.exportCsv({ name: "x", source: "s", asOf: null, rows: [[1]], cols: [{ label: "v", get: (r) => r[0] }] }))]);
+      const edgeGrid = parseCsv(fs.readFileSync(await edge.path(), "utf8").slice(1));
+      eq([edge.suggestedFilename(), edgeGrid[edgeGrid.length - 1][0]], [file, foot], `at ${utc} the stamp, the ISO form and the file's day truncate together, never round, and agree on the Turkiye day`);
+    }
     ok(!/\b(px|chg|Price)\b/.test(grid[0].join(",")), "the vendor quote (last price, day change) is not among the exported columns");
 
     const cells = ["=1+1", "+1", "-2+3", "@SUM(A1)", "\tcmd", "\rcmd", "\u22123.2%", "plain", "a,b", 'say "hi"', "two\nlines", "", null, undefined, NaN, Infinity, -0.5, 0, 1e21, true];
@@ -189,11 +196,11 @@ try {
     eq(items, ["CSV", "SVG", "PNG"], "the desk offers its lines and its frontier chart");
     const csv = (await download(page, "CSV")).bytes.toString("utf8");
     const grid = parseCsv(csv.slice(1));
-    eq(grid[0], ["Ticker", "Structure", "Expiry", "Chain session", "Days to expiry", "Strike (USD)", "Annualised yield (fraction)", "Collateral (USD)",
+    eq(grid[0], ["Ticker", "Structure", "Expiry", "Chain session", "Days to expiry", "Strike (USD)", "Premium ÷ collateral (fraction)", "Annualised yield (fraction)", "Collateral (USD)",
       "Win probability (implied) (fraction)", "Win probability (real-world) (fraction)", "Expected value, real world (USD)"], "the desk's lines export our own model outputs with their units");
     ok(grid.length >= 1 + 9 + 2, `every priced line is a row (${grid.length - 3})`);
     ok(grid.slice(1, -2).every((r) => r[0] === "NVDA" && /^(covered call|cash-secured put)$/.test(r[1]) && Number.isFinite(Number(r[5]))), "each row is a named structure at a numeric strike");
-    ok(!grid[0].some((c) => /premium|bid|ask/i.test(c)), "and the vendor's quoted premium is not among them");
+    ok(!grid[0].some((c) => /bid|ask|spot|mid\b|quoted|premium(?! ÷ collateral \(fraction\))/i.test(c)) && grid[0].filter((c) => /premium/i.test(c)).length === 1, "and the vendor's quoted premium is not among them: the one premium column is the site's own ratio to the collateral, in a fraction");
     ok(grid.slice(1, -2).every((r) => /^\d{4}-\d{2}-\d{2}$/.test(r[3])), "each line names the session of the chain it was priced from");
     ok(/as of \d{4}-\d{2}-\d{2}/.test(grid[grid.length - 2][0]), `and the footer carries that session as its as-of day (${grid[grid.length - 2][0]})`);
     await page.close();

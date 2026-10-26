@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "391";
+export const ASSET_VERSION = "393";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -733,9 +733,9 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="sm-num">The number in a cell is the vendor&#39;s implied volatility for that contract&#39;s last transaction. It is not the volatility the lines above use for delta, win % and EV, which is inverted from each contract&#39;s mid, so a cell and the same contract&#39;s line need not agree.</p>
       <p data-k="sm-narrow">The columns are too narrow at this width to print a volatility inside each cell, so every cell carries its own in a tooltip instead. It is the vendor&#39;s last-transaction volatility, not the one inverted from the mid that the lines above use.</p>
       <p data-k="sm-nolevel">Those columns carry their quoted volatilities and no shade, and the term-structure line does not bridge them.</p>
-      <p data-k="sc-frontier">Every call on the list that has an engine reading, as a point: annualised premium over collateral up, delta across. Premium is the time value the bid pays; collateral is what the stated convention asks for one contract. The frontier joins the calls no other call beats on both, so a point below it pays less for the same risk. Contracts sold and buying power change the dollars in the list, never the points.</p>
+      <p data-k="sc-frontier">Every call on the list that has an engine reading, as a point: annualised time value over collateral up, delta across. The time value is the bid less any in-the-money value; collateral is what the stated convention asks for one contract. The frontier joins the calls no other call beats on both, so a point below it pays less for the same risk. Contracts sold and buying power change the dollars in the list, never the points.</p>
       <p data-k="sc-frontier-x">Net delta is the position&#39;s exposure to the stock: minus the call&#39;s forward delta for an uncovered call, drawn as a magnitude, or one minus it under Shares held, where the shares add one. Win % (implied) is the risk-neutral chance the call expires worth less than the strike plus the bid collected; it is not a forecast. The yield axis is a square-root scale: equal steps up are equal steps in the square root of the ratio, and its ticks sit on that scale, zero included. A point pinned to the top edge pays more than the axis shows.</p>
-      <p data-k="sc-premium">Premium is what the bid pays on the contracts sold: a call sold into the bid, 100 shares a contract. The mid is not used for any figure here. Where a strike is in the money, part of the premium is intrinsic value that assignment takes back, and every ratio counts only the time value.</p>
+      <p data-k="sc-premium">Premium is what the bid pays on the contracts sold: a call sold into the bid, 100 shares a contract. The mid is not used for any figure here. Where a strike is in the money, part of the premium is intrinsic value that assignment takes back. The Premium ÷ collateral figure counts the whole bid, intrinsic value included; the annualised ratio counts only the time value.</p>
       <p data-k="sc-contracts">100 options sold is read as 100 contracts of 100 shares, 10,000 shares in all. To mean 100 option-shares, enter 1.</p>
       <p data-k="sc-delta">Delta-adjusted collateral = 100 shares × spot × the larger of {h} × the call&#39;s delta and {f}. The first term is the delta-equivalent stock position times a stress rate; the second is a floor so a call with almost no delta still ties up capital. It is a convention, not your broker&#39;s number.</p>
       <p data-k="sc-regt">Reg-T style collateral = 100 shares × the larger of 20% of spot less the amount the strike is above spot, and 10% of spot. It leaves out the option&#39;s own value, which the premium you receive pays for.</p>
@@ -744,7 +744,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="sc-assign">An American-style call can be assigned before expiry, most often just before an ex-dividend date when the dividend is more than the time value left. The engine prices every line as European. Uncovered, assignment sells 100 shares a contract at the strike and leaves you short stock; covered, the shares are called away.</p>
       <p data-k="sc-early">Time value {tv} is below the {div} of dividends the card expects before expiry, so early assignment is a live possibility. The card&#39;s yield is an implied carry and can include more than dividends.</p>
       <p data-k="sc-itm-deep">Deep in the money, a short call behaves like short stock and is most often assigned near expiry or before an ex-dividend date.</p>
-      <p data-k="sc-slice">The server cuts each name to its top 120 calls by time value over the stock price, not over this collateral, so the frontier is drawn over that cut.</p>
+      <p data-k="sc-slice">The server cuts each name to its top 120 calls ranked on the stock price, not on this collateral (time value over the price for the annualised and time-value ranks, the whole bid over the price for Premium ÷ collateral). Under the delta and Reg-T style conventions the calls this collateral ranks highest are the far out-of-the-money ones, which that cut is the most likely to drop, so the frontier and the ranking are drawn over that cut and may omit them.</p>
       <p data-k="sc-no-delta">No delta: the engine could not price this call. Reg-T style collateral needs no delta.</p>
       <p data-k="sc-no-delta-all">No delta could be read for these lines, so delta-adjusted collateral is withheld; the Reg-T style needs no delta.</p>
       <p data-k="sc-nobad">Contracts must be a whole number from 1 to 100,000.</p>
@@ -758,7 +758,20 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="sc-why-bad-terms">The haircut or floor is outside its allowed range.</p>
       <p data-k="sc-fr-aria">Annualised premium over collateral, square-root scale, against {x} for {n} calls. Collateral convention: {conv}.</p>
       <p data-k="sc-plan">{bp} buying power · {a} of {m} lines affordable · best single deployment: {n}× {t} {k} call expiring {e} earns {c} of time value, ties up {d} of collateral under {conv} and leaves {i} idle. Best means the line that earns the most time value within your buying power — not annualised and not risk-adjusted — and counts at most {N} contracts.</p>
-      <p data-k="t-ratio">Time value over collateral for one trip to expiry: the bid less any intrinsic value, over the collateral the stated convention asks. Not a return anyone earns until the call expires out of the money.</p>
+      <p data-k="t-ratio">Premium ÷ collateral: one contract's bid over the collateral the stated convention asks for it, in-the-money value included. Not a return anyone earns until the call expires out of the money; the annualised figure counts only time value.</p>
+      <p data-k="t-pc">Premium ÷ collateral: what one contract's bid pays over the collateral it ties up, gross. A put reserves its strike × 100 in cash; a covered call holds 100 shares at the price shown. In-the-money value is counted and the premium is not netted off the collateral. The annualised figure counts only time value.</p>
+      <p data-k="t-pc-itm">Premium ÷ collateral: most of this premium is in-the-money value that assignment returns, not income, so the figure is muted. It counts the whole bid over the collateral; the annualised figure counts only time value.</p>
+      <p data-k="t-prem">The bid on one contract (100 shares), in dollars and cents. The mid is not used.</p>
+      <p data-k="pc-no-bid">No quotable bid, so there is no premium and no ratio.</p>
+      <p data-k="pc-no-strike">No strike, so a put has no cash to reserve and no ratio.</p>
+      <p data-k="pc-no-spot">No usable price for the underlying, so a covered call has no collateral and no ratio.</p>
+      <p data-k="pc-no-collateral">The collateral comes to nothing here, so no ratio is formed.</p>
+      <p data-k="pc-itm">{x} of the premium is in-the-money value, not time value</p>
+      <p data-k="pc-csp">gross of the premium: the cash reserved is the strike × 100</p>
+      <p data-k="pc-cc">gross of the premium: the collateral is 100 shares at the price shown</p>
+      <p data-k="sc-conv-delta">the collateral is a delta-adjusted model figure, not a broker requirement</p>
+      <p data-k="sc-conv-regt">the Reg-T style collateral is the requirement net of the premium received, so this ratio reads higher than a gross one</p>
+      <p data-k="sc-conv-shares">the collateral is 100 shares at the price shown, assumed held</p>
       <p data-k="t-collat">What the stated convention asks for the contracts shown. See the information button for the formula.</p>
       <p data-k="sm-last">This vendor&#39;s implied volatility is the LAST TRANSACTION&#39;s, not a quote.</p>
       <p data-k="sm-fresh">every cell on this surface is a print from today.</p>
@@ -805,6 +818,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="fwd-rate">the interest rate alone: the chain placed no parity forward for this expiry and the card holds no usable carry.</p>
       <p data-k="fwd-none">this payload did not name a forward for this expiry.</p>
       <p data-k="fwd-engine">The engine prices delta, win % and EV on {g} (the card&#39;s carry), {d} from it.</p>
+      <p data-k="fwd-delta">At this strike the gap between the two forwards moves the delta by {x}; the line is priced on the card&#39;s forward, not the chain&#39;s.</p>
       <p data-k="fwd-engine-same">The engine prices delta, win % and EV on {g} (the card&#39;s carry).</p>
       <p data-k="sm-ex">Contracts on this expiry outlive the next earnings report — the level here is priced against a jump, not a diffusion.</p>
       <p data-k="sm-ex0">No earnings report falls before this expiry.</p>

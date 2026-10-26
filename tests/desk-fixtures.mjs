@@ -7,6 +7,7 @@ import * as QP from "../scripts/flows-quant-pipeline.mjs";
 import * as WORLD from "../shared/flows-quant-world.js";
 import { STATE_STRUCTURES } from "../shared/flows-neuron.js";
 import { midImpliedVol, sigmaMove } from "../shared/flows-premium.js";
+import { centsOfDollars } from "./lib/pc-oracle.mjs";
 
 export const REPO = new URL("../", import.meta.url);
 const DAY = 86400000;
@@ -43,9 +44,11 @@ export function sale({ ticker, spot, asOf, type, strike, expiry, bid, ask, iv = 
   const time = days > 0 ? (extrinsic * 100 / collateral) * (365 / days) : null;
   const breakeven = strategy === "csp" ? strike - bid : spot - bid;
   const sigma = days > 0 ? iv * Math.sqrt(days / 365) : null;
+  const premiumC = Number(centsOfDollars(String(bid))) * 100;
+  const collateralC = Number(centsOfDollars(String(strategy === "csp" ? strike : spot))) * 100;
   const row = {
     symbol: optionSymbol(ticker, expiry, type, strike), ticker, expiry, type, strike, strategy, days,
-    bid, ask: a, mid: (bid + a) / 2, spread: (a - bid) / ((bid + a) / 2), premium, collateral, yieldOnCollateral,
+    bid, ask: a, mid: (bid + a) / 2, spread: (a - bid) / ((bid + a) / 2), premium, collateral, premiumC, collateralC, premiumRatio: premiumC / collateralC, yieldOnCollateral,
     annualized: contract ? time : gross, annualizedIsConvention: true, breakeven,
     cushionSigmas: sigma ? Math.log(spot / breakeven) / sigma : null,
     capSigmas: strategy === "cc" && sigma ? Math.log(strike / spot) / sigma : null,
