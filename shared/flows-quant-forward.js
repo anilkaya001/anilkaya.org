@@ -172,3 +172,27 @@ export function deltaBand({ F, se, K, sigma, T, held, veto = false }) {
   if (h95 <= FWD_LINES.BAND_PM) return { band: "pm", half, reason: null };
   return { band: "dash", half: null, reason: "wide" };
 }
+
+export function quotesByExpiry(rows) {
+  const byExpiry = new Map();
+  for (const r of rows) {
+    let strikes = byExpiry.get(r.expiry);
+    if (!strikes) { strikes = new Map(); byExpiry.set(r.expiry, strikes); }
+    let q = strikes.get(r.strike);
+    if (!q) { q = { K: r.strike, cb: null, ca: null, pb: null, pa: null, putRow: null }; strikes.set(r.strike, q); }
+    if (r.type === "C") { q.cb = r.bid; q.ca = r.ask; } else { q.pb = r.bid; q.pa = r.ask; q.putRow = r; }
+  }
+  const out = new Map();
+  for (const [expiry, strikes] of byExpiry) out.set(expiry, Array.from(strikes.values()).sort((a, b) => a.K - b.K));
+  return out;
+}
+
+export function forwardRecord(expiry, rec) {
+  if (!rec) return { expiry, method: "rate-only", pairs: 0, F: null, src: "rate", se: null };
+  return {
+    expiry, F: rec.F, se: rec.se, src: rec.src, n: rec.n, z: rec.z, gapBp: rec.gapBp, veto: rec.veto,
+    Fc: rec.Fc, seC: rec.seC, qKnown: rec.qKnown, Fpar: rec.Fpar, sePar: rec.sePar, birge: rec.birge, sigmaAtm: rec.sigmaAtm, dDeltaMax: rec.dDeltaMax,
+    T: rec.T, r: rec.r, D: rec.D, pairList: rec.pairs,
+    method: rec.src === "parity" || rec.src === "blend" ? "parity" : rec.src, pairs: rec.n,
+  };
+}

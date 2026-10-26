@@ -10,6 +10,7 @@ import * as FLOWS_NEURON from "./shared/flows-neuron.js";
 import * as FLOWS_SCREEN from "./shared/flows-neuron-screen.js";
 import { sessionsBetween } from "./shared/flows-cross.js";
 import { bookRows, runCardEngine, rankModeOf, engineState, engineStale, QUANT_CARD_VERSION } from "./shared/flows-quant-card.js";
+import { cardCarry } from "./shared/flows-quant-engine.js";
 import { RESET_SAID, aiCapNeurons, aiChain, aiCallSignature, cappedAi, emptyNote, fallbackNote, intradayFloorMs, repliedGuard, retryableGuard, spendShape, thrownThenEmptyNote } from "./shared/flows-ai.js";
 import { COURSE_STAGE_POINTS } from "./shared/course-points.js";
 import { COURSE_BY_ID, COURSE_BY_SLUG, COURSE_TOPICS, SITE_ORIGIN } from "./shared/course-seo.js";
@@ -2359,6 +2360,7 @@ function offMarketChain(list, ivBasis, rankBy) {
     rankedBy: rankBy,
     gates: DEFAULT_GATES,
     forwards: [],
+    fwd: [],
     ivSurface: {
       ...ivSurface([], { ivBasis }),
       reason: "the chain and the underlying's price do not belong to the same moment, so no smile is drawn",
@@ -2420,11 +2422,13 @@ async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit
   }
   const spot = found.spot;
 
+  const cardEngine = deskEngine(cardRead && cardRead.card, Date.now());
   const ranked = found.status === "mismatch"
     ? offMarketChain(rows, "not read: the quotes and the price disagree", rankBy)
     : rankChain(rows, {
       spot, asOf, strategy, rankBy, limit, ticker, readMs, rate: engineRate,
       carry: deskCarry(cardRead && cardRead.card && cardRead.card.engine && cardRead.card.engine.facts, found.status),
+      fwdCarry: cardEngine.status === "ok" ? cardCarry(cardEngine.facts) : null,
     });
 
   return chainEnvelope({ ticker, strategy, spot, asOf, print, found, live, info, cardRead, readMs, ranked, truncated });

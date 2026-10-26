@@ -1,6 +1,7 @@
 import { impliedVolB76, parityForward } from "./flows-quant-bs.js";
 import { closeUtcMs, etDayOf, isSession, shiftDay, yearFraction } from "./flows-quant-time.js";
 import { median } from "./flows-stats.js";
+import { chooseForward, quotesByExpiry, forwardRecord } from "./flows-quant-forward.js";
 
 export function numOrNull(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -352,7 +353,7 @@ const byText = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
 
 export function rankChain(contracts, {
   spot, asOf, gates = {}, rankBy = "annualized", limit = 120, strategy = "both",
-  ticker = null, readMs = null, rate = PRICING_RATE, carry = null,
+  ticker = null, readMs = null, rate = PRICING_RATE, carry = null, fwdCarry = null,
 } = {}) {
   const g = { ...DEFAULT_GATES, ...gates };
   const list = Array.isArray(contracts) ? contracts : [];
@@ -401,6 +402,13 @@ export function rankChain(contracts, {
     return { expiry, method: f.method, pairs: f.pairs, F: f.F };
   });
 
+  const quotes = quotesByExpiry(standing);
+  const fwd = Array.from(new Set(kept.map((p) => p.expiry))).sort().map((expiry) => {
+    const sample = kept.find((p) => p.expiry === expiry);
+    const T = yearsTo(sample, readMs);
+    return forwardRecord(expiry, T > 0 && spot > 0 ? chooseForward({ quotes: quotes.get(expiry), S: spot, r: rate, T, q: fwdCarry }) : null);
+  });
+
   const { divisor, basis } = ivConvention(
     list.map((r) => r && r.implied_volatility),
     { pairs: kept.map((p) => [p.iv, p.ivMid]) });
@@ -415,6 +423,7 @@ export function rankChain(contracts, {
     rankedBy: key,
     gates: g,
     forwards,
+    fwd,
 
     ivSurface: ivSurface(standing, { ivBasis: basis }),
   };

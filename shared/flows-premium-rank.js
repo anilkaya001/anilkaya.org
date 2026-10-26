@@ -4,7 +4,7 @@ import {
 } from "./flows-premium.js";
 import { leanFrame, leanRead, leanDelta } from "./flows-quant-card.js";
 import { cardCarry } from "./flows-quant-engine.js";
-import { chooseForward, deltaBand } from "./flows-quant-forward.js";
+import { chooseForward, deltaBand, quotesByExpiry, forwardRecord } from "./flows-quant-forward.js";
 import { bracketBook } from "./flows-quant-bracket.js";
 import { RANK_BUCKETS, bucketOf, lineCompare } from "./flows-quant-rank.js";
 
@@ -47,20 +47,6 @@ export function leanRows(raw, ticker) {
     if (better(lean, held)) bySymbol.set(sym, lean);
   }
   return { rows: Array.from(bySymbol.values()), shed, dups };
-}
-
-export function quotesByExpiry(rows) {
-  const byExpiry = new Map();
-  for (const r of rows) {
-    let strikes = byExpiry.get(r.expiry);
-    if (!strikes) { strikes = new Map(); byExpiry.set(r.expiry, strikes); }
-    let q = strikes.get(r.strike);
-    if (!q) { q = { K: r.strike, cb: null, ca: null, pb: null, pa: null, putRow: null }; strikes.set(r.strike, q); }
-    if (r.type === "C") { q.cb = r.bid; q.ca = r.ask; } else { q.pb = r.bid; q.pa = r.ask; q.putRow = r; }
-  }
-  const out = new Map();
-  for (const [expiry, strikes] of byExpiry) out.set(expiry, Array.from(strikes.values()).sort((a, b) => a.K - b.K));
-  return out;
 }
 
 export function eligibleCall(c, g, { spot }) {
@@ -202,7 +188,8 @@ export function rankShortCalls(raw, { ticker, spot, readMs, asOfDay, rate, rateM
     if (br) p.br = { s: br.side, lo: round6(br.lo), hi: round6(br.hi) };
     kept.push(p);
   }
-  const forwards = Array.from(new Set(kept.map((p) => p.expiry))).sort().map((expiry) => forwardRecord(expiry, pre.fwdBy.get(expiry)));
+  const fwd = Array.from(new Set(kept.map((p) => p.expiry))).sort().map((expiry) => forwardRecord(expiry, pre.fwdBy.get(expiry)));
+  const forwards = fwd.map((f) => ({ expiry: f.expiry, method: f.method, pairs: f.pairs, F: f.F }));
   const { divisor, basis } = ivConvention(
     (Array.isArray(raw) ? raw : []).map((r) => r && r.implied_volatility),
     { pairs: kept.map((p) => [p.iv, p.ivMid]) });
@@ -224,7 +211,7 @@ export function rankShortCalls(raw, { ticker, spot, readMs, asOfDay, rate, rateM
   };
   return {
     rows: kept, gated: pre.gated, screened: Array.isArray(raw) ? raw.length : 0, priced: pre.cut.nIn, ivBasis: basis,
-    rankedBy: "annualized", gates: g, forwards, ivSurface: ivSurface(standing, { ivBasis: basis }), cut,
+    rankedBy: "annualized", gates: g, forwards, fwd, ivSurface: ivSurface(standing, { ivBasis: basis }), cut,
   };
 }
 
@@ -239,14 +226,4 @@ function shedList(pre, shed) {
   if (ranked > 0) out.push({ why: pre.cut.k < pre.cut.kReq ? "cap" : "rank", n: ranked });
   for (const x of shed) out.push(x);
   return out;
-}
-
-export function forwardRecord(expiry, rec) {
-  if (!rec) return { expiry, method: "rate-only", pairs: 0, F: null, src: "rate", se: null };
-  return {
-    expiry, F: rec.F, se: rec.se, src: rec.src, n: rec.n, z: rec.z, gapBp: rec.gapBp, veto: rec.veto,
-    Fc: rec.Fc, seC: rec.seC, Fpar: rec.Fpar, sePar: rec.sePar, birge: rec.birge, sigmaAtm: rec.sigmaAtm, dDeltaMax: rec.dDeltaMax,
-    T: rec.T, r: rec.r, D: rec.D, pairList: rec.pairs,
-    method: rec.src === "parity" || rec.src === "blend" ? "parity" : rec.src, pairs: rec.n,
-  };
 }
