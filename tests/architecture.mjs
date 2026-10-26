@@ -139,7 +139,7 @@ const LEAVES = {
   "shared/flows-horizon.js": [],
   "shared/flows-vendor-extras.js": ["shared/flows-cross.js", "shared/flows-freshness.js", "shared/flows-vendor-core.js"],
   "shared/flows-dossier.js": ["shared/flows-cross.js", "shared/flows-display-round.js", "shared/flows-stats.js", "shared/flows-tape-stats.js", "shared/flows-vendor-extras.js", "shared/flows-vendor-ops.js"],
-  "shared/flows-neuron-screen.js": ["shared/flows-cross.js", "shared/flows-neuron.js", "shared/flows-quant-structures.js"],
+  "shared/flows-neuron-screen.js": ["shared/flows-cross.js", "shared/flows-horizon.js", "shared/flows-neuron.js", "shared/flows-quant-structures.js"],
   "shared/flows-reading.js": ["shared/flows-ask.js", "shared/flows-dossier.js"],
   "shared/flows-fact-ids.js": ["shared/flows-quant-structures.js"],
 };

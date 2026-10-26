@@ -4,7 +4,6 @@
   const MINUS = "−", DASH = "—";
   const SESSIONS = 252;
   const FLOOR_N = 250;
-  const EVENT_SESSIONS = 21;
   const SQRT_YEAR = Math.sqrt(252);
   const TOP_INTERACTIVE = 60;
   const DOMAIN_Q = 0.995;
@@ -12,7 +11,6 @@
   const PINS = ["SPY", "QQQ"];
   const LINE = "A ranking, not a test: no error rate measured.";
   const CAPTION = "IV as of the previous close.";
-  const APART = "Earnings within 21 sessions: event not separated.";
   const X_LINE = "Across: the move in the name's own typical days.";
   const Y_LINE = "Up: the move as a multiple of the implied day.";
   const SIZE_LINE = "Dot area is market cap; the smallest dot when unknown.";
@@ -20,7 +18,7 @@
   const SIG_Q = 0.1, SIG_MIN_Z = 2;
   const SIG_FLAGGED_LINE = "Beyond the usual for this name, after correcting for how many names were tested.";
   const SIG_PLAIN_LINE = "Not beyond the usual for this name, after correcting for how many were tested.";
-  const SIG_REASONS = { below: "Below 2 typical days: not tested, but counted in the correction.", event: "Earnings within 21 sessions: not tested.", noscale: "No typical day is published, so no test.", nomove: "No usable move is published, so no test.", nocount: "The count of days beyond that is not published, so no test." };
+  const SIG_REASONS = { below: "Below 2 typical days: not tested, but counted in the correction.", noscale: "No typical day is published, so no test.", nomove: "No usable move is published, so no test.", nocount: "The count of days beyond that is not published, so no test." };
   const SIG_INFO_SENTENCES = ["The test asks if today's move is beyond the name's own one-year rate.", "The rate is days beyond 2 or 3 typical days, plus one, over 253.", "So the smallest p is 1 in 253, and few names can pass.", "Every name with a typical day and no earnings is counted in the correction.", "Names are corrected together at a 10% false-discovery rate.", "Big market days move many names at once, so the test can overstate.", "It is a ranking aid, not a forecast."];
   const SIG_FOOT_NONE = "No name could be tested.";
   const PEER_MIN = 10;
@@ -33,10 +31,19 @@
   const MEDIAN_NOTE = "Median is signed, in IV-days.";
   const BEYOND_NOTE = "Beyond 2 counts names more than 2 IV-days from flat, up or down.";
   const SHARE_NOTE = "Share is that count over the sector's names.";
-  const LEFT_OUT_NOTE = "Names reporting within 21 sessions are left out of every row.";
   const PINS_NOTE = "SPY and QQQ are left out by ticker.";
   const WHY_NO_IV = "No implied volatility is published for these names.";
-  const WHY_ALL_EVENT = "Every measured name reports within 21 sessions.";
+  const NO_HORIZON = "Earnings are not separated: this payload does not state the earnings window.";
+  const STALE_HORIZON = "Earnings are not separated: the nightly data is more than two sessions old.";
+  const NO_RD = "Names that just reported are not separated: no report column tonight.";
+  const REPORTED_UNTESTED = "Just reported: not tested.";
+  const REPORTED_APART = "Just reported: event not separated.";
+  const allEvent = (hz) => "Every measured name reports within " + hz + " sessions.";
+  const sessionsText = (hz) => (hz === null || hz === undefined ? "the earnings window" : hz + " sessions");
+  let W = null;
+  const untestedText = () => (W ? "Earnings within " + W.n + " sessions: not tested." : NO_HORIZON);
+  const leftOutText = () => (W ? "Names reporting within " + W.n + " sessions are left out of every row." : NO_HORIZON);
+  const ringText = () => (W ? "ring: earnings within " + W.n + " sessions" : "ring: earnings window not stated");
   const FROZEN_LINE = "Scores held. Resume to apply the latest read.";
   const SHAPE = { up: "▲", dn: "▼", fl: "◆" };
   const TRI = 2 * Math.sqrt(Math.PI / (3 * Math.sqrt(3)));
@@ -87,12 +94,12 @@
   }
 
   function sigOf(x) {
-    const chg = num(x.chg), sig = num(x.sig), ed = num(x.ed);
+    const chg = num(x.chg), sig = num(x.sig);
     if (chg === null || sig === null || !(sig > 0)) return { t: x.t, state: "noscale", z: null, level: null, hits: null, p: null };
     const lm = logMove(chg);
     if (lm === null) return { t: x.t, state: "nomove", z: null, level: null, hits: null, p: null };
     const z = lm / sig;
-    if (ed !== null && ed <= EVENT_SESSIONS) return { t: x.t, state: "event", z, level: null, hits: null, p: null };
+    if (x.event === true) return { t: x.t, state: "event", z, level: null, hits: null, p: null };
     if (Math.abs(lm) < SIG_MIN_Z * sig) return { t: x.t, state: "below", z, level: null, hits: null, p: 1 };
     const level = Math.abs(lm) >= 3 * sig ? 3 : 2;
     const hits = level === 3 ? x.f3 : x.f2;
@@ -146,7 +153,7 @@
   };
   const tenthsOf = (v) => Math.round(v * 1000) + 0;
 
-  function sectorStats(rows) {
+  function sectorStats(rows, hz = null) {
     const by = new Map();
     for (const r of rows) {
       if (!r || PINS.includes(r.t)) continue;
@@ -157,13 +164,12 @@
       const m = ivDays(r.chg, r.iv);
       if (m === null) continue;
       b.measured++;
-      const ed = num(r.ed);
-      if (!(ed !== null && ed <= EVENT_SESSIONS)) b.ms.push(m);
+      if (r.event !== true) b.ms.push(m);
     }
     return [...by.values()].map((b) => {
       const n = b.ms.length;
       const beyond = b.ms.filter((m) => Math.abs(m) > SECTOR_BEYOND).length;
-      return { name: b.name, key: b.key, total: b.total, measured: b.measured, n, apart: b.measured - n, median: n ? med(b.ms) : null, beyond: n ? beyond : null, share: n ? beyond / n : null, why: n ? null : b.measured === 0 ? WHY_NO_IV : WHY_ALL_EVENT };
+      return { name: b.name, key: b.key, total: b.total, measured: b.measured, n, apart: b.measured - n, median: n ? med(b.ms) : null, beyond: n ? beyond : null, share: n ? beyond / n : null, why: n ? null : b.measured === 0 ? WHY_NO_IV : allEvent(hz) };
     }).sort((a, b) => (a.median === null) - (b.median === null) || (b.median === null ? 0 : b.median) - (a.median === null ? 0 : a.median) || cmp(a.name, b.name));
   }
   function shareText(beyond, n) {
@@ -219,7 +225,11 @@
   const coarse = () => matchMedia("(pointer:coarse)").matches;
   const plural = (n, a, b) => n + " " + (n === 1 ? a : b);
 
-  const S = { rows: null, known: new Map(), day: null, generatedAt: null, live: null, frozen: false, frozenAt: null, listHeld: false, listView: "names", dirty: false, model: null, sel: null, dir: null, earn: false, sector: "", hit: [], geo: null, topN: 6 };
+  const S = { rows: null, known: new Map(), day: null, generatedAt: null, live: null, frozen: false, frozenAt: null, listHeld: false, listView: "names", dirty: false, model: null, sel: null, dir: null, earn: false, sector: "", hit: [], geo: null, topN: 6, hz: null, ahead: null, rdOn: false };
+  const earn = (r, hz, j) => { const st = hz !== null && j !== null ? F.earn(r, hz, j) : null; return { state: st, event: st === "reaction" || st === "after" || st === "ahead" }; };
+  const tagText = (x) => (x.state === "reaction" ? "Reaction day" : x.state === "after" ? "Day after report" : "Earnings in " + x.away + (x.away === 1 ? " session" : " sessions"));
+  const eventSaid = (x) => (x.state === "reaction" ? "reported in this session" : x.state === "after" ? "reported in the session before" : "earnings within " + sessionsText(S.hz));
+  const eventNote = (x) => (x.state === "reaction" || x.state === "after" ? REPORTED_APART : W ? W.apart : NO_HORIZON);
   const cards = new Map();
   let cardTimer = 0;
 
@@ -229,12 +239,14 @@
       const c = u.cols[k], sc = u.units[k] && num(u.units[k][1]);
       return Array.isArray(c) && sc ? c.map((x) => (num(x) === null ? null : x / sc)) : null;
     };
-    const chg = col("chg"), iv = col("iv30p"), ed = col("ed"), cap = col("mcap"), sig = col("sig"), f2 = col("f2"), f3 = col("f3");
+    const chg = col("chg"), iv = col("iv30p"), ed = col("ed"), rd = col("rd"), cap = col("mcap"), sig = col("sig"), f2 = col("f2"), f3 = col("f3");
     if (!chg) return null;
+    const hz = F.horizon(u.hz) ? u.hz : null;
+    const un = u.rdBasis && u.rdBasis.unstated ? u.rdBasis.unstated : {};
     const names = Array.isArray(u.sectors) ? u.sectors : [];
     const sec = Array.isArray(u.sec) ? u.sec : [];
     const sector = (i) => (typeof names[sec[i]] === "string" && names[sec[i]] ? names[sec[i]] : null);
-    return { cap: Boolean(cap), rows: u.t.map((t, i) => ({ t, chg: chg[i], iv: iv ? iv[i] : null, ed: ed ? ed[i] : null, sector: sector(i), cap: cap && cap[i] > 0 ? cap[i] : null, sig: sig ? sig[i] : null, f2: f2 ? f2[i] : null, f3: f3 ? f3[i] : null })) };
+    return { cap: Boolean(cap), hz, ahead: u.ahead, rdOn: Boolean(rd), rows: u.t.map((t, i) => { const r = { t, chg: chg[i], iv: iv ? iv[i] : null, ed: ed ? ed[i] : null, rd: rd ? rd[i] : null, rdMax: num(un[t]), sector: sector(i), cap: cap && cap[i] > 0 ? cap[i] : null, sig: sig ? sig[i] : null, f2: f2 ? f2[i] : null, f3: f3 ? f3[i] : null }; return Object.assign(r, earn(r, hz, 0)); }) };
   }
 
   function liveRows() {
@@ -243,17 +255,18 @@
     const ci = s.fields.indexOf("chg"), ii = s.fields.indexOf("iv30p");
     if (ci < 0 || ii < 0) return null;
     const pick = (t, k) => (S.known.has(t) ? S.known.get(t)[k] : null);
-    return { session: s.session, rows: Object.keys(s.rows).map((t) => ({ t, chg: num(s.rows[t][ci]), iv: num(s.rows[t][ii]), ed: pick(t, "ed"), sector: pick(t, "sector"), cap: pick(t, "cap"), sig: pick(t, "sig"), f2: pick(t, "f2"), f3: pick(t, "f3") })) };
+    const j = S.hz === null ? null : F.elapsed(S.day, S.ahead, s.session);
+    return { session: s.session, j, rows: Object.keys(s.rows).map((t) => { const r = { t, chg: num(s.rows[t][ci]), iv: num(s.rows[t][ii]), ed: pick(t, "ed"), rd: pick(t, "rd"), rdMax: pick(t, "rdMax"), sector: pick(t, "sector"), cap: pick(t, "cap"), sig: pick(t, "sig"), f2: pick(t, "f2"), f3: pick(t, "f3") }; return Object.assign(r, earn(r, S.hz, j)); }) };
   }
 
-  function points(rows) {
+  function points(rows, j) {
     const out = [];
     for (const r of rows) {
       const m = ivDays(r.chg, r.iv);
       if (m === null) continue;
       const sig = num(r.sig);
       const ed = num(r.ed);
-      out.push({ t: r.t, chg: r.chg, iv: r.iv, m, a: Math.abs(m), z: sig !== null && sig > 0 && logMove(r.chg) !== null ? logMove(r.chg) / sig : null, sig, f2: num(r.f2), f3: num(r.f3), sector: r.sector || null, cap: r.cap || null, ed, event: ed !== null && ed <= EVENT_SESSIONS });
+      out.push({ t: r.t, chg: r.chg, iv: r.iv, m, a: Math.abs(m), z: sig !== null && sig > 0 && logMove(r.chg) !== null ? logMove(r.chg) / sig : null, sig, f2: num(r.f2), f3: num(r.f3), sector: r.sector || null, cap: r.cap || null, ed, state: r.state, event: r.event === true, away: r.state === "ahead" && ed !== null ? ed - j : null });
     }
     return out;
   }
@@ -264,12 +277,13 @@
   function model() {
     const live = S.live;
     const rows = live ? live.rows : S.rows;
-    const all = points(rows || []);
+    const j = live ? live.j : 0;
+    const all = points(rows || [], j);
     const plotted = all.filter((x) => x.z !== null);
     const pins = plotted.filter((x) => PINS.includes(x.t));
     const sg = sigRun(all, SIG_Q);
     all.forEach((x, i) => { x.sg = sg.items[i]; });
-    return { live, sg, rows: rows || [], sectors: sectorStats(rows || []), all, plotted, pins, dom: domainOf(plotted), capMax: Math.max(0, ...plotted.filter((x) => !PINS.includes(x.t)).map((x) => x.cap || 0)) };
+    return { live, j, sg, rows: rows || [], sectors: sectorStats(rows || [], S.hz), all, plotted, pins, dom: domainOf(plotted), capMax: Math.max(0, ...plotted.filter((x) => !PINS.includes(x.t)).map((x) => x.cap || 0)) };
   }
 
   function lists(M) {
@@ -354,7 +368,7 @@
       const x = d.x, dir = dirOf(x.m), isI = inter.has(x.t) && d.on;
       const R0 = dir === "fl" ? d.r : d.r * TRI;
       if (isI) nInter++;
-      const label = x.t + ", " + (dir === "up" ? "up" : dir === "dn" ? "down" : "flat") + ", " + signed(x.z) + " typical days, " + x.a.toFixed(1) + " times implied" + (x.event ? ", earnings within 21 sessions" : "");
+      const label = x.t + ", " + (dir === "up" ? "up" : dir === "dn" ? "down" : "flat") + ", " + signed(x.z) + " typical days, " + x.a.toFixed(1) + " times implied" + (x.event ? ", " + eventSaid(x) : "");
       if (x.event) s += '<circle class="ring' + (d.on ? "" : " off") + '" data-ring="' + esc(x.t) + '" cx="' + d.px.toFixed(2) + '" cy="' + d.py.toFixed(2) + '" r="' + (R0 + 3).toFixed(2) + '" aria-hidden="true"/>';
       if (isI) s += '<g class="hit" data-t="' + esc(x.t) + '" role="button" tabindex="-1" aria-label="' + esc(label) + '"><circle class="hz" cx="' + d.px.toFixed(2) + '" cy="' + d.py.toFixed(2) + '" r="22.5"/>';
       s += '<path class="pt ' + dir + (d.on ? (isI ? "" : " bg") : " off") + '" data-t="' + esc(x.t) + '" data-r="' + d.r.toFixed(3) + '" data-x="' + d.px.toFixed(2) + '" data-y="' + d.py.toFixed(2) + '" transform="translate(' + d.px.toFixed(2) + " " + d.py.toFixed(2) + ')" d="' + markerPath(dir, d.r) + '"' + (isI ? "" : ' aria-hidden="true"') + (S.sel === x.t ? " data-sel" : "") + "/>";
@@ -381,8 +395,11 @@
     const notes = [];
     if (off > 0) notes.push(plural(off, "name has", "names have") + " no typical day and " + (off === 1 ? "is" : "are") + " listed only.");
     if (clipped > 0) notes.push(plural(clipped, "name is", "names are") + " beyond the axis, drawn at the edge.");
+    if (S.hz === null) notes.push(NO_HORIZON);
+    else if (M.j === null) notes.push(STALE_HORIZON);
+    else if (!S.rdOn) notes.push(NO_RD);
     $("mvFnote").textContent = [X_LINE, Y_LINE, M.capMax > 0 ? SIZE_LINE : "No market cap is published, so every dot is the smallest size.", REF_LINE, ...notes, M.sg.m ? M.sg.flagged + " of " + M.sg.tested + " tested " + (M.sg.flagged === 1 ? "name is" : "names are") + " beyond the usual after correction." : SIG_FOOT_NONE].join(" ");
-    $("mvLegend").innerHTML = '<span><i class="u">▲</i>up</span><span><i class="d">▼</i>down</span><span><i>◆</i>flat</span><span><i>◌</i>ring: earnings within 21 sessions</span><span><i>■</i>pinned index fund</span>';
+    $("mvLegend").innerHTML = '<span><i class="u">▲</i>up</span><span><i class="d">▼</i>down</span><span><i>◆</i>flat</span><span><i>◌</i>' + esc(ringText()) + '</span><span><i>■</i>pinned index fund</span>';
   }
 
   function paintLabels() {
@@ -426,7 +443,7 @@
     const rr = rarityParts(x);
     const how = rr ? rr.text : rarityWhy(x);
     const label = x.t + " " + (dir === "up" ? "up" : dir === "dn" ? "down" : "flat") + " " + signed(x.m) + " IV-days, " + pct(x.chg) + " on the day. " + (rr ? "Days like this: " + rr.text + "." : how);
-    return '<button type="button" class="mv-row" data-t="' + esc(x.t) + '" tabindex="-1" aria-label="' + esc(label) + '" title="' + esc(rr ? rr.text : how) + '"><span class="mv-rk" aria-hidden="true">' + (i + 1) + '</span><span class="mv-tk"><span class="gl ' + toneOf(dir) + '-t">' + SHAPE[dir] + "</span>" + esc(x.t) + '</span><span class="mv-v" data-k="m">' + signed(x.m) + '</span><span class="mv-chg" data-k="chg">' + pct(x.chg) + '</span><span class="mv-chip2" data-k="how">' + (x.event ? "" : rr ? rr.short : DASH) + "</span></button>";
+    return '<button type="button" class="mv-row" data-t="' + esc(x.t) + '" tabindex="-1" aria-label="' + esc(label) + '" title="' + esc(rr ? rr.text : how) + '"><span class="mv-rk" aria-hidden="true">' + (i + 1) + '</span><span class="mv-tk"><span class="gl ' + toneOf(dir) + '-t">' + SHAPE[dir] + "</span>" + esc(x.t) + '</span><span class="mv-v" data-k="m">' + signed(x.m) + '</span><span class="mv-chg" data-k="chg">' + pct(x.chg) + '</span><span class="mv-chip2" data-k="how">' + (x.event ? (x.state === "reaction" ? "Reaction day" : x.state === "after" ? "Day after" : "") : rr ? rr.short : DASH) + "</span></button>";
   }
 
   function paintLists() {
@@ -437,8 +454,10 @@
     const rh = rhOf();
     const apartBox = $("mvApart");
     const nApart = Math.min(3, lt.apart.length);
+    $("mvApartH").textContent = W ? "Earnings within " + W.n + " sessions" : "Earnings window not stated";
+    apartBox.setAttribute("aria-label", "Largest moves among names reporting within " + sessionsText(S.hz));
     apartBox.style.height = (nApart ? nApart * rh : 40) + "px";
-    apartBox.innerHTML = nApart ? lt.apart.slice(0, nApart).map((x, i) => rowHtml(x, i)).join("") : '<p class="mv-empty">' + (S.earn || !M.all.some((x) => x.event) ? "No name matches that reports within 21 sessions." : "No name with a move matches the filters.") + "</p>";
+    apartBox.innerHTML = nApart ? lt.apart.slice(0, nApart).map((x, i) => rowHtml(x, i)).join("") : '<p class="mv-empty">' + (S.earn || !M.all.some((x) => x.event) ? "No name matches that reports within " + sessionsText(S.hz) + "." : "No name with a move matches the filters.") + "</p>";
     $("mvApartNote").textContent = lt.apart.length ? Math.min(3, lt.apart.length) + " of " + lt.apart.length : "";
     const nowBox = $("mvNow");
     const room = Math.floor(nowBox.clientHeight / rh);
@@ -587,7 +606,9 @@
 
   function sigLine(x) {
     const g = x.sg;
-    return g.state === "tested" ? (g.flag ? SIG_FLAGGED_LINE : SIG_PLAIN_LINE) : SIG_REASONS[g.state];
+    if (g.state === "tested") return g.flag ? SIG_FLAGGED_LINE : SIG_PLAIN_LINE;
+    if (g.state === "event") return x.state === "reaction" || x.state === "after" ? REPORTED_UNTESTED : untestedText();
+    return SIG_REASONS[g.state];
   }
   const sigKv = (x) => (x.sg.state === "tested" ? kv("p, own rate", x.sg.p.toFixed(3)) + kv("p, adjusted", x.sg.adj.toFixed(3)) : "");
 
@@ -601,7 +622,7 @@
     const iday = x.iv > 0 ? x.iv / SQRT_YEAR : null;
     const e = cards.get(x.t);
     const cf = e && e.state === "ok" ? e.cf : null;
-    let h = '<div class="mv-rhead"><span class="big">' + esc(x.t) + '</span><span class="mv-st ' + dir + '">' + SHAPE[dir] + " " + pct(x.chg) + '</span>' + (x.event ? '<span class="mv-st ev">Earnings in ' + x.ed + (x.ed === 1 ? " session" : " sessions") + "</span>" : "") + '<span class="why">' + esc(x.sector || "No sector") + " · " + esc(CAPTION) + "</span>" + partsHtml(peerParts(M.rows, x.t)) + '<a class="mv-open" href="' + tickerHref(x.t) + '">Open ticker ↗</a></div>';
+    let h = '<div class="mv-rhead"><span class="big">' + esc(x.t) + '</span><span class="mv-st ' + dir + '">' + SHAPE[dir] + " " + pct(x.chg) + '</span>' + (x.event ? '<span class="mv-st ev">' + esc(tagText(x)) + "</span>" : "") + '<span class="why">' + esc(x.sector || "No sector") + " · " + esc(CAPTION) + "</span>" + partsHtml(peerParts(M.rows, x.t)) + '<a class="mv-open" href="' + tickerHref(x.t) + '">Open ticker ↗</a></div>';
     h += '<div class="mv-rc first"><h3>Against its day</h3>' + kv("Move", SHAPE[dir] + " " + pct(x.chg)) + kv("Typical day", x.sig !== null ? pctText(x.sig) : DASH) + kv("In typical days", x.z !== null ? signed(x.z) : DASH) + kv("Implied day", iday !== null ? pctText(iday) : DASH) + kv("Times implied", x.a.toFixed(1) + "×") + kv("IV-days", signed(x.m)) + "</div>";
     h += '<div class="mv-rc"><h3>How often</h3><span class="say" data-k="say">' + esc(rr ? rr.text.charAt(0).toUpperCase() + rr.text.slice(1) + "." : rarityWhy(x)) + "</span>" + kv("Past 2 typical", x.f2 !== null ? x.f2 + " of 252" : DASH) + kv("Past 3 typical", x.f3 !== null ? x.f3 + " of 252" : DASH) + "</div>";
     if (!e || e.state === "pending") {
@@ -614,7 +635,7 @@
       h += '<div class="mv-rc chart"><h3>21 sessions <span class="tx">' + esc(cf.asOf ? "card " + fday(cf.asOf) : "") + "</span></h3>" + spark(cf, x) + "</div>";
       h += '<div class="mv-rc"><h3>Flows card</h3>' + kv("Conviction", cf.conviction === null ? DASH : cf.conviction + " /100") + kv("IV percentile", cf.ivRank === null ? DASH : String(cf.ivRank)) + kv("Dealer γ book", cf.gammaBook || DASH) + kv("Latest flow", cf.flowP === null || cf.flowP === undefined ? DASH : F.money(cf.flowP, true)) + "</div>";
     }
-    h += '<div class="mv-rc"><h3>How this is tested</h3><span class="sub c" data-k="sig">' + esc(sigLine(x)) + "</span>" + sigKv(x) + (x.event ? '<span class="sub c">' + esc(APART) + "</span>" : "") + "</div>";
+    h += '<div class="mv-rc"><h3>How this is tested</h3><span class="sub c" data-k="sig">' + esc(sigLine(x)) + "</span>" + sigKv(x) + (x.event ? '<span class="sub c">' + esc(eventNote(x)) + "</span>" : "") + "</div>";
     box.innerHTML = h;
     const retry = $("mvRetry");
     if (retry) retry.addEventListener("click", () => { cards.delete(x.t); loadCard(x.t, true); renderSel(); });
@@ -722,7 +743,7 @@
     const rh = rhOf();
     const n = Math.min(rows.length, Math.max(1, Math.floor((innerHeight - 24 - 230) / rh)));
     $("mvSecT").textContent = n === rows.length ? "Sectors, " + rows.length : "Largest " + n + " of " + rows.length + " sectors";
-    $("mvSecP").textContent = [SECTORS_LINE, MEDIAN_NOTE, BEYOND_NOTE, SHARE_NOTE, LEFT_OUT_NOTE, PINS_NOTE].join(" ");
+    $("mvSecP").textContent = [SECTORS_LINE, MEDIAN_NOTE, BEYOND_NOTE, SHARE_NOTE, leftOutText(), PINS_NOTE].join(" ");
     $("mvSecG").innerHTML = rows.slice(0, n).map(secRowHtml).join("");
     for (const b of $("mvSecG").children) b.tabIndex = 0;
     $("mvSecDlg").showModal();
@@ -735,8 +756,7 @@
       "Across: the move in the name's own typical days. A typical day is a robust one-day scale from the last 252 sessions.",
       "Up: the move as a multiple of the implied day. The implied day is prior-close 30-day IV over the square root of 252.",
       "IV-days is the move divided by the implied day. The lists rank by it.",
-      "Dot area is market cap. A triangle points the way the name moved. A ring marks earnings within 21 sessions.",
-      "Names reporting within 21 sessions are ranked apart, because the event is not separated.",
+      "Dot area is market cap. A triangle points the way the name moved. A ring marks earnings within " + sessionsText(S.hz) + ", or a report just made. Those names are ranked apart.",
       "How often counts days in the last year beyond that many typical days. It is never a model probability.",
       REF_LINE,
       SIG_INFO_SENTENCES.join(" "),
@@ -883,11 +903,15 @@
   }
 
   wire();
-  get("/api/flows/universe?cols=t,sec,chg,iv30p,sig,f2,f3,ed,mcap").then((u) => {
+  get("/api/flows/universe?cols=t,sec,chg,iv30p,sig,f2,f3,ed,rd,mcap").then((u) => {
     if (!u) return;
     const got = uniRows(u);
     if (!got) return fail("pending", "The universe is not published yet, so there is nothing to draw.");
     S.rows = got.rows;
+    S.hz = got.hz;
+    S.ahead = got.ahead;
+    S.rdOn = got.rdOn;
+    W = F.horizon(got.hz);
     S.known = new Map(got.rows.map((r) => [r.t, r]));
     S.day = u.sessionDate || null;
     S.generatedAt = typeof u.generatedAt === "string" ? u.generatedAt : null;

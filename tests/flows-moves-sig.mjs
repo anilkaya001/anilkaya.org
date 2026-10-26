@@ -4,11 +4,13 @@ import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import * as REAL from "../shared/flows-moves-sig.js";
+import { earningsInside, HORIZON_SESSIONS } from "../shared/flows-horizon.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = fs.readFileSync(path.join(ROOT, "shared/flows-moves-sig.js"), "utf8");
 const PAGE = fs.readFileSync(path.join(ROOT, "assets/js/flows-moves.js"), "utf8");
 const STATS_URL = pathToFileURL(path.join(ROOT, "shared/flows-stats.js")).href;
+const HORIZON_URL = pathToFileURL(path.join(ROOT, "shared/flows-horizon.js")).href;
 const FORBID = /\b(unusual|alert|alerts|screen|rare|sigma|radar)\b/i;
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -40,6 +42,12 @@ function battery(mod) {
   chk(mod.sigOf(row("D", 2, 0, 0)).state === "tested", "exactly 2 typical days is tested");
   chk(mod.sigOf(row("E", 5, 0, 0, { ed: 21 })).state === "event", "earnings at 21 sessions is refused");
   chk(mod.sigOf(row("E", 5, 0, 0, { ed: 22 })).state === "tested", "earnings at 22 sessions is tested");
+  chk(mod.sigOf(row("E", 5, 0, 0, { ed: null, rd: 0 })).state === "event", "a name that reported on the session is refused");
+  chk(mod.sigOf(row("E", 5, 0, 0, { ed: null, rd: 1 })).state === "event", "and one that reported the session before");
+  chk(mod.sigOf(row("E", 5, 0, 0, { ed: null, rd: 2 })).state === "tested", "but not one that reported two sessions before");
+  chk(mod.sigOf(row("E", 5, 0, 0, { ed: 5, rd: null })).state === "event", "a null rd is no report at all and the date decides");
+  chk(mod.sigOf(row("E", 5, 0, 0, { ed: null, rd: null, rdMax: 2 })).state === "event", "a report of unstated time that may be one session old is refused");
+  chk(mod.sigOf(row("E", 5, 0, 0, { ed: null, rd: null, rdMax: 3 })).state === "tested", "and one that is at least two sessions old is not");
   chk(mod.sigOf(row("F", 5, 0, 0, { sig: null })).state === "noscale", "no scale is refused");
   chk(mod.sigOf(row("G", 5, null, null)).state === "nocount", "no count is refused");
   chk(mod.sigOf(row("G", 5, 253, 253)).state === "nocount", "an impossible count is refused");
@@ -108,12 +116,15 @@ const mulberry32 = (a) => () => {
   const jj = (v) => JSON.parse(JSON.stringify(v));
   for (let trial = 0; trial < 200; trial++) {
     const n = Math.floor(rnd() * 150);
-    const rows = Array.from({ length: n }, (_, i) => row("P" + i, (rnd() - 0.5) * 8, rnd() < 0.1 ? null : Math.floor(rnd() * rnd() * 25), rnd() < 0.1 ? null : Math.floor(rnd() * rnd() * 6), { ed: rnd() < 0.1 ? Math.floor(rnd() * 40) : null, sig: rnd() < 0.05 ? null : 0.005 + rnd() * 0.03, chg: rnd() < 0.03 ? null : undefined }));
+    const rows = Array.from({ length: n }, (_, i) => row("P" + i, (rnd() - 0.5) * 8, rnd() < 0.1 ? null : Math.floor(rnd() * rnd() * 25), rnd() < 0.1 ? null : Math.floor(rnd() * rnd() * 6), { ed: rnd() < 0.1 ? Math.floor(rnd() * 40) : null, rd: rnd() < 0.15 ? Math.floor(rnd() * 4) : null, rdMax: rnd() < 0.05 ? Math.floor(rnd() * 5) : null, sig: rnd() < 0.05 ? null : 0.005 + rnd() * 0.03, chg: rnd() < 0.03 ? null : undefined }));
     for (const r of rows) if (r.chg === undefined || r.chg === null) r.chg = r.chg === null ? null : (rnd() - 0.5) * 0.2;
-    eq(jj(hook.sigRun(rows, hook.SIG_Q)), jj(REAL.sigRun(rows, REAL.SIG_Q)), "the page's copy equals the leaf on " + n + " rows");
+    eq(jj(hook.sigRun(rows.map((r) => ({ ...r, event: earningsInside(r, HORIZON_SESSIONS) === true })), hook.SIG_Q)), jj(REAL.sigRun(rows, REAL.SIG_Q)), "the page's copy equals the leaf on " + n + " rows");
   }
   eq(hook.SIG_Q, REAL.SIG_Q, "and q agrees");
-  for (const s of [REAL.SIG_FLAGGED_LINE, REAL.SIG_PLAIN_LINE, ...Object.values(REAL.SIG_REASONS), ...REAL.SIG_INFO_SENTENCES, REAL.SIG_FOOT_NONE]) ok(PAGE.includes(JSON.stringify(s).slice(1, -1)), "the page carries the leaf's sentence: " + s);
+  for (const s of [REAL.SIG_FLAGGED_LINE, REAL.SIG_PLAIN_LINE, ...Object.values(REAL.SIG_REASONS), ...REAL.SIG_INFO_SENTENCES, REAL.SIG_FOOT_NONE]) {
+    const pieces = s.split(String(HORIZON_SESSIONS)).map((x) => JSON.stringify(x).slice(1, -1));
+    ok(pieces.every((x) => PAGE.includes(x)), "the page carries the leaf's sentence, around the payload's own window: " + s);
+  }
 }
 
 function binom(rnd, n, p) { let k = 0; for (let i = 0; i < n; i++) if (rnd() < p) k++; return k; }
@@ -167,8 +178,9 @@ const MUTANTS = [
   ["no add-one: the raw rate", "p: (hits + 1) / (SIG_SESSIONS + 1)", "p: hits / SIG_SESSIONS"],
   ["no correction: the raw p against q", "const flag = it.state === \"tested\" && bh.reject[i] === true;", "const flag = it.state === \"tested\" && it.p <= q;"],
   ["names below 2 left out of the correction", "return { t: x.t, state: \"below\", z, level: null, hits: null, p: 1 }", "return { t: x.t, state: \"below\", z, level: null, hits: null, p: null }"],
-  ["earnings names tested", "if (ed !== null && ed <= SIG_EVENT_SESSIONS)", "if (false)"],
-  ["the earnings window one session short", "ed <= SIG_EVENT_SESSIONS", "ed < SIG_EVENT_SESSIONS"],
+  ["earnings names tested", "if (earningsInside(x, SIG_EVENT_SESSIONS) === true)", "if (false)"],
+  ["the earnings window one session short", "export const SIG_EVENT_SESSIONS = HORIZON_SESSIONS;", "export const SIG_EVENT_SESSIONS = HORIZON_SESSIONS - 1;"],
+  ["the reaction session ignored", "earningsInside(x, SIG_EVENT_SESSIONS) === true", "(Number.isInteger(x.ed) && x.ed >= 1 && x.ed <= SIG_EVENT_SESSIONS)"],
   ["the two and three typical day counts swapped", "const hits = level === 3 ? x.f3 : x.f2;", "const hits = level === 3 ? x.f2 : x.f3;"],
   ["the level always 2", "const level = Math.abs(lm) >= 3 * sig ? 3 : 2;", "const level = 2;"],
   ["the simple change read as the log return", "const lm = chg > -1 ? Math.log1p(chg) : null;", "const lm = chg;"],
@@ -180,7 +192,7 @@ const MUTANTS = [
 
 for (const [name, from, to] of MUTANTS) {
   ok(SRC.split(from).length === 2, "the planted build changes the leaf exactly once: " + name);
-  const text = SRC.replace(from, to).replace("./flows-stats.js", STATS_URL);
+  const text = SRC.replace(from, to).replace("./flows-stats.js", STATS_URL).replace("./flows-horizon.js", HORIZON_URL);
   const mod = await import("data:text/javascript;base64," + Buffer.from(text).toString("base64"));
   let bad;
   try { bad = battery(mod); } catch (e) { bad = ["threw " + e.message]; }

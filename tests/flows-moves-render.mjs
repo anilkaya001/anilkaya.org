@@ -11,6 +11,8 @@ import * as SIG from "../shared/flows-moves-sig.js";
 import { flowsPageRows, FLOWS_PAGE_SLUGS } from "../server/routes/flows-pages.js";
 import { HttpError } from "../server/http.js";
 import * as FX from "./lib/moves-fixture.mjs";
+import { HORIZON_SESSIONS, horizonWords } from "../shared/flows-horizon.js";
+import { bootUI } from "./lib/ui-boot.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -27,6 +29,7 @@ const FORBID = /\b(unusual|alert|alerts|screen|rare|sigma|radar)\b|\bat (the )?(
 const NOT_BUILT = /\bq\s*(<=|≤|<)|\bNOW\b|\bHawkes\b|1 in [\d,]+ of/;
 const MINUS = "−", DASH = "—";
 const SQRT252 = Math.sqrt(252);
+const carried = (src, sentence) => sentence.split(String(HORIZON_SESSIONS)).every((piece) => src.includes(JSON.stringify(piece).slice(1, -1)));
 const stripHtml = (h) => h.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<svg[\s\S]*?<\/svg>/g, "").replace(/<aside class="ak-dock"[\s\S]*?<\/aside>/, "").replace(/<aside class="fx-side"[\s\S]*?<\/aside>/, "");
 
 const wrangler = fs.readFileSync(path.join(ROOT, "wrangler.toml"), "utf8");
@@ -47,8 +50,10 @@ ok(/^FLOWS_MOVES = "on"$/m.test(wrangler), "the switch ships on: the owner opene
   ok(/data-flows-page="moves"/.test(HTML), "the page owns the one-screen shell hook");
   for (const w of M.HEADER_SENTENCES) ok(M.wordCount(w) <= M.HEADER_WORDS_MAX, "a header sentence stays inside fourteen words: " + w);
   ok(!FORBID.test(M.HEADER_SENTENCES.join(" ")), "and uses none of the forbidden words");
-  for (const w of [M.LINE, M.CAPTION, M.APART, ...M.RADAR_SENTENCES]) ok(JS.includes(JSON.stringify(w).slice(1, -1)), "the controller carries the leaf's sentence: " + w);
-  for (const w of [M.SECTORS_LINE, M.MEDIAN_NOTE, M.BEYOND_NOTE, M.SHARE_NOTE, M.LEFT_OUT_NOTE, M.PINS_NOTE, M.WHY_NO_IV, M.WHY_ALL_EVENT]) ok(JS.includes(JSON.stringify(w).slice(1, -1)), "the controller carries the leaf's sector sentence: " + w);
+  for (const w of [M.LINE, M.CAPTION, ...M.RADAR_SENTENCES]) ok(JS.includes(JSON.stringify(w).slice(1, -1)), "the controller carries the leaf's sentence: " + w);
+  eq(bootUI().F.horizon(HORIZON_SESSIONS).apart, M.APART, "the page kernel prints the leaf's sentence for the earnings window");
+  ok(!JS.includes(M.APART) && !/\b21\b/.test(JS.replace(/<h3>21 sessions<\/h3>|<h3>21 sessions <span|slice\(-21\)/g, "")), "and the controller carries no window of its own");
+  for (const w of [M.SECTORS_LINE, M.MEDIAN_NOTE, M.BEYOND_NOTE, M.SHARE_NOTE, M.LEFT_OUT_NOTE, M.PINS_NOTE, M.WHY_NO_IV, M.WHY_ALL_EVENT]) ok(carried(JS, w), "the controller carries the leaf's sector sentence, around the payload's own window: " + w);
   ok(HTML.includes(M.SECTORS_LINE.replace("'", "&#39;")), "and the served sector box carries the one line that says what the table is");
   ok(JS.includes("const SECTOR_BEYOND = 2;") && M.SECTOR_BEYOND === 2 && JS.includes('const NO_SECTOR = "No sector";') && M.NO_SECTOR === "No sector", "the line at 2 IV-days and the name of the empty sector are shared with the leaf");
   ok(!JS.includes("not yet published") && JS.includes(JSON.stringify(SIG.SIG_FLAGGED_LINE).slice(1, -1)), "the muted note is gone and the test's sentence is carried");
@@ -96,7 +101,7 @@ const model = (rows) => {
     if (!(r.iv > 0)) continue;
     const m = r.chg / (r.iv / SQRT252);
     const z = r.sig > 0 ? Math.log1p(r.chg) / r.sig : null;
-    all.push({ ...r, m, a: Math.abs(m), z, event: r.ed !== null && r.ed <= 21 });
+    all.push({ ...r, m, a: Math.abs(m), z, event: (Number.isInteger(r.ed) && r.ed >= 0 && r.ed <= 21) || (Number.isInteger(r.rd) && r.rd >= 0 && r.rd <= 1) || (Number.isInteger(r.rdMax) && r.rdMax >= 0 && r.rdMax <= 2) });
   }
   const plotted = all.filter((x) => x.z !== null);
   const xmax = Math.min(12, Math.max(3, Math.ceil(quant(plotted.map((x) => Math.abs(x.z))))));
@@ -171,7 +176,7 @@ const chipOf = (full) => (full === null ? DASH : /rarer than 1 in 250/.test(full
       for (let i = 0; i < n; i++) rows.push({ t: "T" + i, chg: q() < 0.06 ? null : Math.round((q() - 0.5) * 0.3 * 1e4) / 1e4, iv: q() < 0.08 ? (q() < 0.5 ? null : 0) : Math.round((0.15 + q() * 0.6) * 1e4) / 1e4, sector: NAMES[Math.floor(q() * 5)], ed: q() < 0.2 ? Math.floor(q() * 40) : null });
       if (q() < 0.6) rows.push({ t: "SPY", chg: 0.5, iv: 0.2, sector: "Alpha", ed: null });
       if (q() < 0.6) rows.push({ t: "QQQ", chg: -0.5, iv: 0.2, sector: "Beta", ed: null });
-      const got = T.sectorStats(rows);
+      const got = T.sectorStats(rows.map((r) => ({ ...r, event: M.eventInside({ ed: r.ed }) })), HORIZON_SESSIONS);
       const want = M.sectorStats(toLeaf(rows));
       worlds++;
       sectors += got.length;
@@ -180,11 +185,14 @@ const chipOf = (full) => (full === null ? DASH : /rarer than 1 in 250/.test(full
       eq(JSON.parse(JSON.stringify(got.map((x) => x.key))), want.map((x) => (x.name === M.NO_SECTOR ? "__none" : x.name)), "and each row carries the key the sector filter uses, in world " + w);
     }
     ok(worlds === 300 && sectors > 600 && empties > 20, "the page's sector table equals the leaf's over " + worlds + " worlds, " + sectors + " sectors and " + empties + " with no median");
-    const edge = (list) => JSON.parse(JSON.stringify(T.sectorStats(list.map((m, i) => ({ t: "E" + i, chg: m, iv: IV, sector: "X", ed: null })))))[0];
+    const edge = (list) => JSON.parse(JSON.stringify(T.sectorStats(list.map((m, i) => ({ t: "E" + i, chg: m, iv: IV, sector: "X", ed: null, event: false })))))[0];
     eq(edge([2, -2]).beyond, 0, "the page: exactly 2 and exactly -2 are not beyond 2");
     eq(edge([2.01]).beyond, 1, "and 2.01 is");
     eq(edge([-2.01]).beyond, 1, "and -2.01");
-    eq(T.sectorStats([{ t: "A", chg: 1, iv: IV, sector: "X", ed: 21 }, { t: "B", chg: 1, iv: IV, sector: "X", ed: 22 }])[0].n, 1, "the page: 21 sessions is inside the earnings window and 22 is not");
+    const flagged = (list, hz = HORIZON_SESSIONS, j = 0) => list.map((r) => ({ ...r, event: M.eventInside(r, hz, j) }));
+    eq(T.sectorStats(flagged([{ t: "A", chg: 1, iv: IV, sector: "X", ed: 21 }, { t: "B", chg: 1, iv: IV, sector: "X", ed: 22 }]), HORIZON_SESSIONS)[0].n, 1, "the page: 21 sessions is inside the earnings window and 22 is not");
+    eq(T.sectorStats(flagged([{ t: "A", chg: 1, iv: IV, sector: "X", ed: null, rd: 1 }, { t: "B", chg: 1, iv: IV, sector: "X", ed: null, rd: 2 }]), HORIZON_SESSIONS)[0].n, 1, "and a name that reacted a session ago is set apart where one that reacted two ago is not");
+    eq(T.sectorStats([{ t: "A", chg: 1, iv: IV, sector: "X", event: true }], 30)[0].why, "Every measured name reports within 30 sessions.", "and the sentence for a sector with nothing left carries the payload's own window");
     for (const [b, n] of [[0, 5], [1, 300], [1, 200], [3, 8], [5, 5], [0, 0], [2, 1], [-1, 5], [1.5, 5]]) eq(T.shareText(b, n), M.shareText(b, n), "the page's share text equals the leaf's for " + b + " of " + n);
   }
   for (const level of [2, 3]) {
@@ -453,7 +461,7 @@ const SEC_STRIPS = { TB1: [1, SEC_IV], TA1: [1, SEC_IV], L1: [2, SEC_IV], L2: [2
 const SEC_BIG = [["SPY", 0.004, 0.16, 90, "Funds", 40 * SEC_T, 0.0065, 14, 3], ...Array.from({ length: 30 }, (_, i) => ["Sec" + String(i).padStart(2, "0"), 0.004 * (i - 14), 0.3, 60, "Sector " + String(i).padStart(2, "0"), 1e10, 0.01, 10, 1]).flatMap((a, i) => [a, ["B" + String(i).padStart(2, "0"), 0.003 * (((i * 7) % 11) - 5), 0.3, 60, a[4], 1e10, 0.01, 10, 1]])];
 
 async function sectorsBlock(browser, js, P, same) {
-  const want = M.sectorStats(DEC.map((r) => ({ t: r.t, chg: r.chg, iv30p: r.iv, ed: r.ed, sector: r.sector })));
+  const want = M.sectorStats(DEC.map((r) => ({ t: r.t, chg: r.chg, iv30p: r.iv, ed: r.ed, rd: r.rd, rdMax: r.rdMax, sector: r.sector })));
   const M1 = model(DEC);
   for (const [w, h, extra] of VIEWPORTS) {
     const phone = w < 900;
@@ -566,7 +574,7 @@ async function sectorsBlock(browser, js, P, same) {
   {
     const list = [["SPY", 0.004, 0.16, 90, "Funds", 40 * SEC_T, 0.0065, 14, 3], ...Array.from({ length: 300 }, (_, i) => ["W" + String(i).padStart(3, "0"), i === 0 ? 0.05 : 0.001, 0.3, 60, "Wide", 1e10, 0.01, 10, 1])];
     const dec = FX.decoded(FX.universe(list));
-    const all = M.sectorStats(dec.map((r) => ({ t: r.t, chg: r.chg, iv30p: r.iv, ed: r.ed, sector: r.sector })));
+    const all = M.sectorStats(dec.map((r) => ({ t: r.t, chg: r.chg, iv30p: r.iv, ed: r.ed, rd: r.rd, rdMax: r.rdMax, sector: r.sector })));
     P(all.length === 1 && all[0].n === 300 && all[0].beyond === 1, "the wide fixture is one sector of 300 names with exactly one beyond 2");
     const { ctx, page, errors } = await mount(browser, 1440, 820, { js, body: FX.universe(list) });
     await page.click('#mvListSeg [data-lv="sectors"]');
@@ -581,7 +589,7 @@ async function sectorsBlock(browser, js, P, same) {
     const phone = w < 900;
     const tag = "30 sectors at " + w + "x" + h;
     const dec = FX.decoded(FX.universe(SEC_BIG));
-    const all = M.sectorStats(dec.map((r) => ({ t: r.t, chg: r.chg, iv30p: r.iv, ed: r.ed, sector: r.sector })));
+    const all = M.sectorStats(dec.map((r) => ({ t: r.t, chg: r.chg, iv30p: r.iv, ed: r.ed, rd: r.rd, rdMax: r.rdMax, sector: r.sector })));
     P(all.length === 30, tag + ": the fixture has 30 sectors and the Funds sector holding only SPY is not one of them");
     const { ctx, page, errors } = await mount(browser, w, h, { context: extra, js, body: FX.universe(SEC_BIG) });
     if (phone) { await page.click('#mvSeg5 [data-v="lists"]'); await page.waitForTimeout(150); }
@@ -666,7 +674,7 @@ async function exercise(browser, js, early, only) {
         P(bad.length === 0, "coarse pointer: every control in view is 44 px " + bad.join(" | "));
       }
       P(errors.length === 0, w + ": no page error " + errors.join(" | "));
-      P(asked.every((a) => /^\/api\/flows\/(universe\?cols=t,sec,chg,iv30p,sig,f2,f3,ed,mcap|card\?t=[A-Z0-9]+)$/.test(a)), w + ": no request beyond the universe projection and cards " + asked.join(","));
+      P(asked.every((a) => /^\/api\/flows\/(universe\?cols=t,sec,chg,iv30p,sig,f2,f3,ed,rd,mcap|card\?t=[A-Z0-9]+)$/.test(a)), w + ": no request beyond the universe projection and cards " + asked.join(","));
       P(asked.filter((a) => a.startsWith("/api/flows/universe")).length === 1, w + ": one universe read");
       await ctx.close();
     }
@@ -746,7 +754,8 @@ async function exercise(browser, js, early, only) {
       }
       const ap = await listRows(page, "mvApart");
       same(ap.map((r) => r.t), apart.slice(0, 3).map((x) => x.t), "names reporting within 21 sessions are ranked apart, three of them");
-      P(ap.every((r) => r.how === ""), "an earnings name carries no rarity chip");
+      const reacted = new Map(apart.map((x) => [x.t, Number.isInteger(x.rd) ? x.rd : null]));
+      P(ap.every((r) => r.how === (reacted.get(r.t) === 0 ? "Reaction day" : reacted.get(r.t) === 1 ? "Day after" : "")), "an earnings name carries no rarity chip, and a name that has reacted says so in its place");
       P((await page.locator("#mvNowNote").innerText()) === now.length + " of " + ranked.length && (await page.locator("#mvApartNote").innerText()) === "3 of " + apart.length, "both notes count");
       P(!(await page.locator("#mvMore").isHidden()), "Show more is offered when the list is longer than the room");
 
@@ -986,6 +995,39 @@ async function exercise(browser, js, early, only) {
     }
 
     {
+      const { ctx, page } = await mount(browser, 1440, 820, { js, now: "2026-10-19T14:05:00Z" });
+      const strips = (rows, session) => page.evaluate(([r, s]) => { window.__strips = { status: "ok", fields: ["chg", "iv30p"], rows: r, session: s }; window.__rtFire(); }, [rows, session]);
+      const LIVE = { EDGE22: [0.14, 0.2], REACT0: [0.11, 0.3], REACT1: [-0.07, 0.3], BIGUP: [0.09, 0.4] };
+      await strips(LIVE, "2026-10-19");
+      await page.waitForTimeout(150);
+      same((await listRows(page, "mvApart")).map((r) => r.t).sort(), ["EDGE22", "REACT0"], "ONE SESSION AFTER THE NIGHTLY a report 22 sessions out is 21 away and set apart, and one that reacted on the nightly's session is the day after");
+      same((await listRows(page, "mvNow")).map((r) => r.t).sort(), ["BIGUP", "REACT1"], "while one that reacted a session before the nightly's has aged out of the window");
+      same((await listRows(page, "mvApart")).filter((r) => r.t === "REACT0").map((r) => r.how), ["Day after"], "and the day after says so in the rarity chip's place");
+      P(!(await page.locator("#mvFnote").innerText()).includes("more than two sessions old"), "with no warning while the nightly is one session old");
+      await strips(LIVE, "2026-10-21");
+      await page.waitForTimeout(150);
+      same((await listRows(page, "mvApart")).map((r) => r.t), [], "THREE SESSIONS AFTER THE NIGHTLY nothing is set apart, since no earnings state is placed that far on");
+      P((await page.locator("#mvFnote").innerText()).includes("Earnings are not separated: the nightly data is more than two sessions old."), "and the foot says so");
+      await ctx.close();
+    }
+
+    {
+      const nowhere = await mount(browser, 1440, 820, { js, body: FX.universe(FX.names(), { hz: null }) });
+      same((await listRows(nowhere.page, "mvApart")).map((r) => r.t), [], "a payload with no earnings window sets nothing apart");
+      P((await nowhere.page.locator("#mvFnote").innerText()).includes("Earnings are not separated: this payload does not state the earnings window."), "and says so in the foot");
+      P((await nowhere.page.locator("#mvApartH").innerText()) === "Earnings window not stated", "and the heading of the earnings list does not name a window");
+      await nowhere.ctx.close();
+    }
+
+    {
+      const wide = await mount(browser, 1440, 820, { js, body: FX.universe(FX.names(), { hz: 30 }) });
+      P((await wide.page.locator("#mvApartH").innerText()) === "Earnings within 30 sessions", "THE HEADING FOLLOWS THE PAYLOAD'S OWN WINDOW");
+      await wide.page.click("#mvInfoBtn");
+      P((await wide.page.locator("#mvInfoB").innerText()).includes("within 30 sessions"), "and the information dialog names it");
+      await wide.ctx.close();
+    }
+
+    {
       const { ctx, page } = await mount(browser, 390, 844, { js, context: VIEWPORTS[2][2] });
       P((await page.locator("#mvSeg5").evaluate((e) => getComputedStyle(e).display)) === "grid", "the phone shows the three-way switch");
       await page.focus('#mvSeg5 [aria-selected="true"]');
@@ -1056,7 +1098,11 @@ const MUTANTS = [
   ["typical days lose their sign", "z: sig !== null && sig > 0 && logMove(r.chg) !== null ? logMove(r.chg) / sig : null", "z: sig !== null && sig > 0 && logMove(r.chg) !== null ? Math.abs(logMove(r.chg)) / sig : null"],
   ["a name with no typical day drawn at zero", "z: sig !== null && sig > 0 && logMove(r.chg) !== null ? logMove(r.chg) / sig : null", "z: sig !== null && sig > 0 && logMove(r.chg) !== null ? logMove(r.chg) / sig : 0"],
   ["dot area linear in market cap", "rMax * Math.sqrt(cap / capMax)", "rMax * (cap / capMax)"],
-  ["the earnings window is one session short", "event: ed !== null && ed <= EVENT_SESSIONS", "event: ed !== null && ed < EVENT_SESSIONS"],
+  ["the earnings window is one session short", "F.earn(r, hz, j) : null; return { state: st,", "F.earn(r, hz - 1, j) : null; return { state: st,"],
+  ["the report-session column ignored", "rd: rd ? rd[i] : null, rdMax: num(un[t])", "rd: null, rdMax: num(un[t])"],
+  ["the unstated-time ages ignored", "rdMax: num(un[t]), sector: sector(i)", "rdMax: null, sector: sector(i)"],
+  ["a live session placed as the nightly's own", "const j = S.hz === null ? null : F.elapsed(S.day, S.ahead, s.session);", "const j = S.hz === null ? null : 0;"],
+  ["the window taken from nowhere", "S.hz = got.hz;", "S.hz = 21;"],
   ["earnings names ranked with the rest", "now: ok.filter((x) => !x.event).sort(byA)", "now: ok.sort(byA)"],
   ["the 1-in-250 floor removed", "SESSIONS / hits > FLOOR_N", "SESSIONS / hits > FLOOR_N * 4"],
   ["the two and three typical day counts swapped", "const hits = level === 3 ? x.f3 : level === 2 ? x.f2 : null;", "const hits = level === 3 ? x.f2 : level === 2 ? x.f3 : null;"],
@@ -1075,8 +1121,8 @@ const MUTANTS = [
   ["no correction: the raw p against the level", "const flag = it.state === \"tested\" && adj[i] <= q;", "const flag = it.state === \"tested\" && it.p <= q;"],
   ["no add-one in the page's rate", "p: (hits + 1) / (SESSIONS + 1) };\n  }\n  function sigRun", "p: hits / SESSIONS };\n  }\n  function sigRun"],
   ["names below 2 left out of the correction", "return { t: x.t, state: \"below\", z, level: null, hits: null, p: 1 };\n    const level", "return { t: x.t, state: \"below\", z, level: null, hits: null, p: null };\n    const level"],
-  ["earnings names tested", "if (ed !== null && ed <= EVENT_SESSIONS) return { t: x.t, state: \"event\"", "if (false) return { t: x.t, state: \"event\""],
-  ["the flagged sentence on every tested name", "return g.state === \"tested\" ? (g.flag ? SIG_FLAGGED_LINE : SIG_PLAIN_LINE)", "return g.state === \"tested\" ? SIG_FLAGGED_LINE"],
+  ["earnings names tested", "if (x.event === true) return { t: x.t, state: \"event\"", "if (false) return { t: x.t, state: \"event\""],
+  ["the flagged sentence on every tested name", "if (g.state === \"tested\") return g.flag ? SIG_FLAGGED_LINE : SIG_PLAIN_LINE;", "if (g.state === \"tested\") return SIG_FLAGGED_LINE;"],
   ["the foot counts the tested as flagged", "M.sg.flagged + \" of \"", "M.sg.tested + \" of \""],
   ["the old muted note back", "<span class=\"sub c\" data-k=\"sig\">' + esc(sigLine(x)) + \"</span>\"", "<span class=\"sub c\" data-k=\"sig\">Significance test: not yet published.</span>\""],
   ["the adjusted p shown as the raw p", "kv(\"p, adjusted\", x.sg.adj.toFixed(3))", "kv(\"p, adjusted\", x.sg.p.toFixed(3))"],
@@ -1104,7 +1150,7 @@ for (const [name, from, to] of MUTANTS) {
 
 const SEC_MUTANTS = [
   ["beyond counts a name exactly on the line", "Math.abs(m) > SECTOR_BEYOND).length;", "Math.abs(m) >= SECTOR_BEYOND).length;"],
-  ["names reporting soon counted in the median", "if (!(ed !== null && ed <= EVENT_SESSIONS)) b.ms.push(m);", "b.ms.push(m);"],
+  ["names reporting soon counted in the median", "if (r.event !== true) b.ms.push(m);", "b.ms.push(m);"],
   ["SPY and QQQ counted in their sector", "if (!r || PINS.includes(r.t)) continue;", "if (!r) continue;"],
   ["a sector with no figures given a median of zero", "median: n ? med(b.ms) : null,", "median: n ? med(b.ms) : 0,"],
   ["ties left in the order the rows came", "|| cmp(a.name, b.name));", ");"],
