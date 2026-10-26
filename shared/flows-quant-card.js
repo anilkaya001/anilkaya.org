@@ -768,7 +768,8 @@ function readContract(f, row, width = true) {
     via = "opposite";
   } else {
     const otm = row.type === "P" ? row.K < f.F : row.K >= f.F;
-    const opp = otm ? null : oppositeQuote(row);
+    const early = row.type === "C" && f.fwd !== null && f.fwd.ee === true;
+    const opp = otm && !early ? null : oppositeQuote(row);
     read = opp ? pricedVol(f, opp.K, opp.type, opp.bid, opp.ask, seed, width) : null;
     if (read) via = "opposite";
     else read = pricedVol(f, row.K, row.type, row.bid, row.ask, seed, width);

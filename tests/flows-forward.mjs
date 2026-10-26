@@ -20,7 +20,7 @@ const rel = (a, b, tol, msg) => near(a, b, tol * Math.max(1, Math.abs(b)), msg);
 const LINES = {
   REL_SPREAD: 0.25, WINDOW: 0.05, WIDEN_MAX: 0.15, WIDEN_PAIRS: 8, MAX_PAIRS: 12, MIN_PAIRS: 3, HALF_CENT: 0.005, RATE_SE: 0.02, BORROW_SE: 0.03,
   DIV_SE_UNKNOWN: 0.015, DIV_SHARE: 0.10, Z_TRUST: 3, VETO_Z: 4, BAND_PLAIN: 0.02, BAND_PM: 0.10, Z95: 1.96, BOUND_FLOOR: 0.51,
-  PUT_DELTA_CUT: 0.30, CALL_DELTA_CUT: 0.70, EEP_SHARE: 0.15, DIV_EEP: 0.5,
+  PUT_DELTA_CUT: 0.30, CALL_DELTA_CUT: 0.70, EEP_SHARE: 0.15, EEP_SHIFT: 0.25, EEP_SD: 0.15, RAMP: 1, CARRY_WEIGHT_MIN: 0.05, SPOT_SE: 0.00015,
 };
 
 const refCarry = ({ S, r, T, q }) => {
@@ -28,7 +28,7 @@ const refCarry = ({ S, r, T, q }) => {
   const F = S * Math.exp((r - (known ? q : 0)) * T);
   const div = known ? 0.10 * Math.abs(Math.exp(r * T) - Math.exp((r - q) * T)) : 0;
   const unk = known ? 0 : 0.015 * T;
-  return { F, se: F * Math.sqrt((0.02 * T) ** 2 + (0.03 * T) ** 2 + div ** 2 + unk ** 2), known };
+  return { F, se: F * Math.sqrt(0.00015 ** 2 + (0.02 * T) ** 2 + (0.03 * T) ** 2 + div ** 2 + unk ** 2), known };
 };
 
 const refParity = (pairs, D) => {
@@ -45,16 +45,34 @@ const refParity = (pairs, D) => {
   const kBar = rows.reduce((a, x) => a + x.K / (x.sigma * x.sigma), 0) / W;
   const stat = Math.sqrt(1 / W) * (birge === null ? 1 : Math.max(1, birge));
   const sys = 0.15 * kBar * (1 - D);
-  return { F, se: Math.sqrt(stat * stat + sys * sys), birge, n };
+  let slopeZ = null;
+  if (n >= 4) {
+    const dk = rows.map((x) => x.K - kBar);
+    const w = rows.map((x) => 1 / (x.sigma * x.sigma));
+    const sxx = dk.reduce((a, d, i) => a + w[i] * d * d, 0);
+    const slope = dk.reduce((a, d, i) => a + w[i] * d * (rows[i].Fi - F), 0) / sxx;
+    const res = dk.reduce((a, d, i) => a + w[i] * (rows[i].Fi - F - slope * d) ** 2, 0);
+    slopeZ = slope * Math.sqrt(sxx) / Math.max(1, Math.sqrt(res / (n - 2)));
+  }
+  return { F, se: Math.sqrt(stat * stat + sys * sys), birge, slopeZ, n };
 };
 
-const refBlend = ({ carry, par, veto }) => {
+const ramp = (x) => Math.min(1, Math.max(0, (x - 2) / 2));
+
+const refBlend = ({ carry, par }) => {
   const z = (par.F - carry.F) / Math.sqrt(par.se ** 2 + carry.se ** 2);
+  const early = ramp(-z) * (par.slopeZ === null ? 1 : ramp(-par.slopeZ));
   const gap = par.F - carry.F;
-  const sePar = z < -3 ? Math.sqrt(par.se ** 2 + (0.5 * gap) ** 2) : par.se;
-  const seC = Math.sqrt(carry.se ** 2 + Math.max(0, gap * gap - sePar * sePar - carry.se * carry.se));
+  const parF = par.F - early * 0.25 * Math.abs(gap);
+  const sePar = early > 0 ? Math.sqrt(par.se ** 2 + (early * 0.15 * gap) ** 2) : par.se;
+  const shifted = parF - carry.F;
+  const seC = Math.sqrt(carry.se ** 2 + Math.max(0, shifted * shifted - sePar * sePar - carry.se * carry.se));
   const wp = 1 / sePar ** 2, wc = 1 / seC ** 2;
-  return { F: (par.F * wp + carry.F * wc) / (wp + wc), se: 1 / Math.sqrt(wp + wc), z, src: Math.abs(z) > 3 ? "parity" : "blend", sePar, seC };
+  return {
+    F: (parF * wp + carry.F * wc) / (wp + wc), se: 1 / Math.sqrt(wp + wc), z, early, sePar, seC,
+    src: wc / (wp + wc) < 0.05 ? "parity" : "blend",
+    ee: z < -3 && par.slopeZ !== null && par.slopeZ < -3,
+  };
 };
 
 const exactQuotes = ({ F, D, T, sigma, strikes, half = 0.005 }) => strikes.map((K) => {
@@ -181,36 +199,65 @@ function battery(mod) {
     const carry = refCarry({ S, r, T, q });
     const strikes = range(96, 104, 0.5);
     const sigma = 0.3;
-    const exact = (F, half = 0.01) => exactQuotes({ F, D, T, sigma, strikes, half });
+    const exact = (F, half = 0.01, ks = strikes) => exactQuotes({ F, D, T, sigma, strikes: ks, half });
+    const american = (F, a, c) => exact(F).map((x) => ({ ...x, pb: x.pb + a + c * (x.K - 100), pa: x.pa + a + c * (x.K - 100) }));
+    const same = (got, want, label) => fail(label, close(got.F, want.F, 1e-9) && close(got.se, want.se, 1e-9) && close(got.sePar, want.sePar, 1e-9) && close(got.seC, want.seC, 1e-9) && got.src === want.src && got.ee === want.ee);
     const clean = mod.chooseForward({ quotes: exact(carry.F), S, r, T, q });
     const par0 = refParity(clean.pairs, D);
     const want0 = refBlend({ carry, par: par0 });
-    fail("a chain that agrees with the carry blends", clean.src === "blend" && Math.abs(clean.z) < 1e-6 && clean.n >= 3);
-    fail("the blend forward and standard error follow the stated weights", close(clean.F, want0.F, 1e-12) && close(clean.se, want0.se, 1e-9));
+    fail("a chain that agrees with the carry sits on it", Math.abs(clean.z) < 1e-6 && clean.n >= 3 && clean.ee === false && close(clean.F, carry.F, 1e-9));
+    same(clean, want0, "a chain that agrees with the carry is the reference blend");
     fail("an agreeing chain leaves the carry's own error alone", close(clean.seC, carry.se, 1e-12));
+    const wide3 = mod.chooseForward({ quotes: exact(carry.F, 0.12, [99.5, 100, 100.5]), S, r, T, q });
+    const wantW = refBlend({ carry, par: refParity(wide3.pairs, D) });
+    fail("three wide pairs leave the carry more than five per cent of the weight and are labelled a blend", wide3.n === 3 && wide3.src === "blend" && wantW.src === "blend");
+    fail("a tight chain leaves the carry under five per cent and is labelled parity", clean.src === "parity" && want0.src === "parity");
     for (const gapBp of [60, 150, -60, -150]) {
       const Ftrue = carry.F * (1 + gapBp / 1e4);
       const rec = mod.chooseForward({ quotes: exact(Ftrue), S, r, T, q });
       const par = refParity(rec.pairs, D);
       const want = refBlend({ carry, par });
-      fail(`a chain ${gapBp} bp from the carry is read as the reference blend`, close(rec.F, want.F, 1e-9) && close(rec.se, want.se, 1e-9) && rec.src === want.src);
+      same(rec, want, `a chain ${gapBp} bp from the carry is read as the reference blend`);
+      fail(`a flat chain ${gapBp} bp from the carry is not an early-exercise chain`, want.early === 0 && rec.ee === false && close(rec.sePar, par.se, 1e-9));
       fail(`the carry's own error grows with the disagreement (${gapBp} bp)`, rec.seC >= carry.se - 1e-12 && close(rec.seC, want.seC, 1e-9));
       fail(`the forward moves to the chain (${gapBp} bp)`, Math.abs(rec.F - Ftrue) < Math.abs(rec.Fc - Ftrue) || Math.abs(gapBp) < 5);
     }
-    const below = mod.chooseForward({ quotes: exact(carry.F * (1 - 0.012)), S, r, T, q });
-    const above = mod.chooseForward({ quotes: exact(carry.F * (1 + 0.012)), S, r, T, q });
-    const parB = refParity(below.pairs, D), parA = refParity(above.pairs, D);
-    fail("a chain well below the carry carries the exercise guard in its standard error", below.z < -3 && close(below.sePar, Math.sqrt(parB.se ** 2 + (0.5 * (parB.F - carry.F)) ** 2), 1e-9));
-    fail("a chain well above it does not", above.z > 3 && close(above.sePar, parA.se, 1e-9));
-    fail("the guard widens the combined error", below.se > above.se * 5);
+    const flatBelow = mod.chooseForward({ quotes: exact(carry.F * (1 - 0.016)), S, r, T, q });
+    const parFlat = refParity(flatBelow.pairs, D);
+    fail("a flat chain far below the carry is a borrow fee or a dividend, not an exercise premium: no shift, no widening, no flag", flatBelow.z < -4 && flatBelow.ee === false && close(flatBelow.sePar, parFlat.se, 1e-9) && close(flatBelow.Fpar, parFlat.F, 1e-12));
+    const parOf = (rec) => refParity(rec.pairs, D);
+    let early = { none: 0, partial: 0, full: 0 }, flagged = 0, unflagged = 0;
+    for (const a of [-1.5, 0, 0.3, 0.6, 0.9, 1.2, 1.8, 2.5, 4]) for (const c of [0, 0.0015, 0.0025, 0.0035, 0.02]) {
+      const rec = mod.chooseForward({ quotes: american(carry.F, a, c), S, r, T, q });
+      const want = refBlend({ carry, par: parOf(rec) });
+      same(rec, want, `the early-exercise ramp and shift are the reference (offset ${a}, slope ${c})`);
+      if (want.early === 0) early.none++; else if (want.early < 1) early.partial++; else early.full++;
+      if (rec.ee) flagged++; else unflagged++;
+      if (want.early > 0) {
+        const par = parOf(rec);
+        fail(`the shift moves the parity forward away from the carry, never toward it (offset ${a}, slope ${c})`, par.F < carry.F && close(rec.Fpar, par.F, 1e-12) && rec.F < carry.F);
+        fail(`the exercise term widens the parity error (offset ${a}, slope ${c})`, rec.sePar > par.se);
+      }
+    }
+    fail("the grid covers no, partial and full early exercise", early.none > 0 && early.partial >= 3 && early.full >= 3 && flagged >= 3 && unflagged >= 3);
+    const strong = mod.chooseForward({ quotes: american(carry.F, 2.5, 0.02), S, r, T, q });
+    fail("a strongly sloped chain far below the carry is flagged as early exercise", strong.ee === true && strong.z < -3 && strong.slopeZ < -3);
+    const slopeOnly = mod.chooseForward({ quotes: american(carry.F, 0, 0.02), S, r, T, q });
+    fail("a slope with the level on the carry is not flagged", slopeOnly.ee === false && slopeOnly.slopeZ < -3 && slopeOnly.z > -1);
+    const levelOnly = mod.chooseForward({ quotes: american(carry.F, 2.5, 0), S, r, T, q });
+    fail("a level far below the carry without a slope is not flagged", levelOnly.ee === false && levelOnly.z < -4 && Math.abs(levelOnly.slopeZ) < 1);
+    const above = mod.chooseForward({ quotes: american(carry.F, -2.5, -0.02), S, r, T, q });
+    fail("a chain above the carry with a positive slope is never shifted or flagged", above.ee === false && above.z > 3 && close(above.sePar, parOf(above).se, 1e-9));
+    const threeStrikes = mod.chooseForward({ quotes: american(carry.F, 2.5, 0.02).filter((x) => [99.5, 100, 100.5].includes(x.K)), S, r, T, q });
+    const wantThree = refBlend({ carry, par: parOf(threeStrikes) });
+    fail("with three pairs there is no slope and the level alone gates the shift, and it is never flagged", threeStrikes.n === 3 && wantThree.early > 0 && threeStrikes.ee === false && threeStrikes.slopeZ === null && close(threeStrikes.F, wantThree.F, 1e-9) && close(threeStrikes.sePar, wantThree.sePar, 1e-9));
     const few = mod.chooseForward({ quotes: exact(carry.F * (1 - 0.02)).filter((x) => x.K === 100 || x.K === 100.5), S, r, T, q });
     fail("two pairs a long way from the carry are a veto", few.n === 2 && few.veto === true && few.src === "carry" && few.F === carry.F);
     const fewAgree = mod.chooseForward({ quotes: exact(carry.F).filter((x) => x.K === 100 || x.K === 100.5), S, r, T, q });
     fail("two pairs that agree are not a veto but are not used", fewAgree.n === 2 && fewAgree.veto === false && fewAgree.src === "carry");
     const twoAt = (zTarget) => {
-      const seStat = refParity(exact(carry.F).filter((x) => x.K === 100 || x.K === 100.5).map((x) => [x.K, x.cb, x.ca, x.pb, x.pa]), D);
       const sv = 1 / Math.sqrt(2 / ((Math.sqrt(2) * 0.01) / (Math.sqrt(3) * D)) ** 2);
-      return mod.chooseForward({ quotes: exact(carry.F + zTarget * Math.sqrt(sv * sv + carry.se * carry.se)).filter((x) => x.K === 100 || x.K === 100.5), S, r, T, q, seStat });
+      return mod.chooseForward({ quotes: exact(carry.F + zTarget * Math.sqrt(sv * sv + carry.se * carry.se)).filter((x) => x.K === 100 || x.K === 100.5), S, r, T, q });
     };
     fail("two pairs at 3.9 sigma are not a veto", twoAt(3.9).veto === false && twoAt(-3.9).veto === false);
     fail("two pairs at 4.1 sigma are", twoAt(4.1).veto === true && twoAt(-4.1).veto === true);
@@ -376,6 +423,57 @@ ok(Object.isFrozen(FWD.FWD_LINES), "the lines are frozen");
 }
 
 {
+  const day = "2026-11-13";
+  const asOfMs = closeUtcMs("2026-10-26") - 3 * 3600 * 1000;
+  const S = 100, r = 0.04, q = 0.015;
+  const Tm = (closeUtcMs(day) - asOfMs) / (365 * 86400000);
+  const D = Math.exp(-r * Tm), Ftrue = S * Math.exp((r - q) * Tm) * 0.99;
+  const callK = 103, putK = 97;
+  const callMid = black76(Ftrue, D, callK, 0.30, Tm, "C"), putMid = black76(Ftrue, D, callK, 0.36, Tm, "P");
+  const base = { expiry: day, asOfMs, spot: S, rate: r, rateMethod: "given", facts: [{ id: "carry.implied", v: q, g: 3 }], expiries: null };
+  const callRow = { K: callK, type: "C", bid: callMid - 0.02, ask: callMid + 0.02, oi: 500, volume: 10, sym: "x", ivSeed: null, opposite: { bid: putMid - 0.02, ask: putMid + 0.02 } };
+  const fwdOf = (ee) => ({ F: Ftrue, se: 0.2, src: "parity", n: 8, ee });
+  const ivOf = (mod, input) => { const fit = mod.contractFit(input); return fit ? { iv: fit.slice.contract.iv, via: fit.slice.contract.via } : null; };
+  const probe = (mod) => {
+    const bad = [];
+    const flagged = ivOf(mod, { ...base, row: callRow, fwd: fwdOf(true) });
+    const plain = ivOf(mod, { ...base, row: callRow, fwd: fwdOf(false) });
+    const absent = ivOf(mod, { ...base, row: callRow, fwd: { F: Ftrue, se: 0.2, src: "parity", n: 8 } });
+    const wantPut = impliedVolB76(Ftrue, D, callK, Tm, putMid, "P", null), wantCall = impliedVolB76(Ftrue, D, callK, Tm, callMid, "C", null);
+    if (!flagged || Math.abs(flagged.iv - wantPut) > 1e-9 || flagged.via !== "opposite") bad.push("flagged call is read from its put");
+    if (!plain || Math.abs(plain.iv - wantCall) > 1e-9 || plain.via !== "own") bad.push("unflagged call is read from itself");
+    if (!absent || Math.abs(absent.iv - wantCall) > 1e-9) bad.push("a record without the flag is unflagged");
+    const ownPutMid = black76(Ftrue, D, putK, 0.33, Tm, "P");
+    const putRow = { K: putK, type: "P", bid: ownPutMid - 0.02, ask: ownPutMid + 0.02, oi: 500, volume: 10, sym: "x", ivSeed: null, opposite: { bid: black76(Ftrue, D, putK, 0.3, Tm, "C") - 0.02, ask: black76(Ftrue, D, putK, 0.3, Tm, "C") + 0.02 } };
+    const wantOwnPut = impliedVolB76(Ftrue, D, putK, Tm, ownPutMid, "P", null);
+    const put = ivOf(mod, { ...base, row: putRow, fwd: fwdOf(true) });
+    if (!put || Math.abs(put.iv - wantOwnPut) > 1e-9 || put.via !== "own") bad.push("a put is always read from itself");
+    const itm = { ...callRow, K: 96, bid: black76(Ftrue, D, 96, 0.3, Tm, "C") - 0.02, ask: black76(Ftrue, D, 96, 0.3, Tm, "C") + 0.02, opposite: { bid: black76(Ftrue, D, 96, 0.3, Tm, "P") - 0.02, ask: black76(Ftrue, D, 96, 0.3, Tm, "P") + 0.02 } };
+    const wantItm = impliedVolB76(Ftrue, D, 96, Tm, black76(Ftrue, D, 96, 0.3, Tm, "P"), "P", null);
+    const itmGot = ivOf(mod, { ...base, row: itm, fwd: fwdOf(false) });
+    if (!itmGot || Math.abs(itmGot.iv - wantItm) > 1e-6 || itmGot.via !== "opposite") bad.push("an in-the-money call is always read from its put");
+    const noOpp = ivOf(mod, { ...base, row: { ...callRow, opposite: null }, fwd: fwdOf(true) });
+    if (!noOpp || Math.abs(noOpp.iv - wantCall) > 1e-9 || noOpp.via !== "own") bad.push("with no put quote the call is read from itself");
+    return bad;
+  };
+  eq(probe(QC), [], "the card reads a flagged call from its put and nothing else differently");
+  const cases = [
+    ["the flag ignored", [["const early = row.type === \"C\" && f.fwd !== null && f.fwd.ee === true;", "const early = false;"]]],
+    ["every call read from its put", [["const early = row.type === \"C\" && f.fwd !== null && f.fwd.ee === true;", "const early = row.type === \"C\";"]]],
+    ["the flag applied to puts too", [["const early = row.type === \"C\" && f.fwd !== null && f.fwd.ee === true;", "const early = f.fwd !== null && f.fwd.ee === true;"]]],
+    ["an unset flag read as set", [["const early = row.type === \"C\" && f.fwd !== null && f.fwd.ee === true;", "const early = row.type === \"C\" && f.fwd !== null && f.fwd.ee !== false;"]]],
+  ];
+  const survived = [];
+  for (const [title, transforms] of cases) {
+    let mod;
+    try { mod = await loadMutated("shared/flows-quant-card.js", transforms); } catch (e) { survived.push(title + " (did not apply: " + e.message.slice(0, 80) + ")"); continue; }
+    if (probe(mod).length === 0) survived.push(title);
+    checks++;
+  }
+  eq(survived, [], `all ${cases.length} planted wrong builds of the put-side read fail the probe`);
+}
+
+{
   const S = 100, r = 0.04, T = 20 / 365, D = Math.exp(-r * T), q = 0.015, sigma = 0.3;
   const F = S * Math.exp((r - q) * T);
   const day = "2026-11-13";
@@ -396,6 +494,7 @@ ok(Object.isFrozen(FWD.FWD_LINES), "the lines are frozen");
 }
 
 {
+  const EARLY = "const early = clamp01((-z - lo) / width) * (par.slopeZ === null ? 1 : clamp01((-par.slopeZ - lo) / width));";
   const mutants = [
     ["Birge ratio dropped", "shared/flows-quant-forward.js", [["const sePure = seStat * (birge === null ? 1 : Math.max(1, birge));", "const sePure = seStat;"]]],
     ["weights not squared", "shared/flows-quant-forward.js", [["const w = 1 / (sigma * sigma);", "const w = 1 / sigma;"]]],
@@ -404,10 +503,29 @@ ok(Object.isFrozen(FWD.FWD_LINES), "the lines are frozen");
     ["half-cent floor missing", "shared/flows-quant-forward.js", [["const hsC = Math.max((p.ca - p.cb) / 2, H), hsP = Math.max((p.pa - p.pb) / 2, H);", "const hsC = (p.ca - p.cb) / 2, hsP = (p.pa - p.pb) / 2;"]]],
     ["exercise term dropped", "shared/flows-quant-forward.js", [["const sys = FWD_LINES.EEP_SHARE * kBar * (1 - D);", "const sys = 0;"]]],
     ["bound floor missing", "shared/flows-quant-forward.js", [["return Math.max(FWD_LINES.BOUND_FLOOR, s) * (se / F) / s;", "return s * (se / F) / s;"]]],
-    ["carry error never grown", "shared/flows-quant-forward.js", [["const seC = Math.sqrt(carry.se * carry.se + Math.max(0, gap * gap - sePar * sePar - carry.se * carry.se));", "const seC = carry.se;"]]],
-    ["exercise guard missing", "shared/flows-quant-forward.js", [["const sePar = z < -L.Z_TRUST ?", "const sePar = false ?"]]],
-    ["exercise guard on both sides", "shared/flows-quant-forward.js", [["const sePar = z < -L.Z_TRUST ?", "const sePar = Math.abs(z) > L.Z_TRUST ?"]]],
-    ["blend weights swapped", "shared/flows-quant-forward.js", [["out.F = (par.F * wp + carry.F * wc) / (wp + wc);", "out.F = (par.F * wc + carry.F * wp) / (wp + wc);"]]],
+    ["carry error never grown", "shared/flows-quant-forward.js", [["const seC = Math.sqrt(carry.se * carry.se + Math.max(0, shifted * shifted - sePar * sePar - carry.se * carry.se));", "const seC = carry.se;"]]],
+    ["early-exercise correction missing", "shared/flows-quant-forward.js", [[EARLY, "const early = 0;"]]],
+    ["early-exercise correction not gated by the slope", "shared/flows-quant-forward.js", [[EARLY, "const early = clamp01((-z - lo) / width);"]]],
+    ["early-exercise correction not gated by the level", "shared/flows-quant-forward.js", [[EARLY, "const early = par.slopeZ === null ? 1 : clamp01((-par.slopeZ - lo) / width);"]]],
+    ["early-exercise correction on both sides", "shared/flows-quant-forward.js", [[EARLY, "const early = clamp01((Math.abs(z) - lo) / width) * (par.slopeZ === null ? 1 : clamp01((-par.slopeZ - lo) / width));"]]],
+    ["early-exercise correction a hard step", "shared/flows-quant-forward.js", [[EARLY, "const early = z < -L.Z_TRUST && (par.slopeZ === null || par.slopeZ < -L.Z_TRUST) ? 1 : 0;"]]],
+    ["early-exercise ramp a hundredth as wide", "shared/flows-quant-forward.js", [["RAMP: 1,", "RAMP: 0.01,"]]],
+    ["parity shifted toward the carry", "shared/flows-quant-forward.js", [["const parF = par.F - early * L.EEP_SHIFT * Math.abs(gap);", "const parF = par.F + early * L.EEP_SHIFT * Math.abs(gap);"]]],
+    ["parity shifted by the signed gap", "shared/flows-quant-forward.js", [["const parF = par.F - early * L.EEP_SHIFT * Math.abs(gap);", "const parF = par.F - early * L.EEP_SHIFT * gap;"]]],
+    ["parity not shifted", "shared/flows-quant-forward.js", [["const parF = par.F - early * L.EEP_SHIFT * Math.abs(gap);", "const parF = par.F;"]]],
+    ["shift a half instead of a quarter", "shared/flows-quant-forward.js", [["EEP_SHIFT: 0.25,", "EEP_SHIFT: 0.5,"]]],
+    ["exercise error not added to the parity error", "shared/flows-quant-forward.js", [["const sePar = early > 0 ? Math.sqrt(par.se * par.se + (early * L.EEP_SD * gap) ** 2) : par.se;", "const sePar = par.se;"]]],
+    ["exercise error not scaled by the ramp", "shared/flows-quant-forward.js", [["(early * L.EEP_SD * gap) ** 2", "(L.EEP_SD * gap) ** 2"]]],
+    ["carry error measured from the unshifted gap", "shared/flows-quant-forward.js", [["Math.max(0, shifted * shifted - sePar * sePar - carry.se * carry.se)", "Math.max(0, gap * gap - sePar * sePar - carry.se * carry.se)"]]],
+    ["label by the size of the disagreement", "shared/flows-quant-forward.js", [["out.src = wc / (wp + wc) < L.CARRY_WEIGHT_MIN ? \"parity\" : \"blend\";", "out.src = Math.abs(z) > L.Z_TRUST ? \"parity\" : \"blend\";"]]],
+    ["label always a blend", "shared/flows-quant-forward.js", [["out.src = wc / (wp + wc) < L.CARRY_WEIGHT_MIN ? \"parity\" : \"blend\";", "out.src = \"blend\";"]]],
+    ["flag without the slope", "shared/flows-quant-forward.js", [["out.ee = z < -L.Z_TRUST && par.slopeZ !== null && par.slopeZ < -L.Z_TRUST;", "out.ee = z < -L.Z_TRUST;"]]],
+    ["flag on the slope alone", "shared/flows-quant-forward.js", [["out.ee = z < -L.Z_TRUST && par.slopeZ !== null && par.slopeZ < -L.Z_TRUST;", "out.ee = par.slopeZ !== null && par.slopeZ < -L.Z_TRUST;"]]],
+    ["slope from three pairs", "shared/flows-quant-forward.js", [["if (n >= 4) {", "if (n >= 3) {"]]],
+    ["slope without the weights", "shared/flows-quant-forward.js", [["sxy += r.w * dk * (r.Fi - F);", "sxy += dk * (r.Fi - F);"]]],
+    ["slope t-statistic without the floor on the residual scale", "shared/flows-quant-forward.js", [["Math.max(1, Math.sqrt(res / (n - 2)))", "Math.sqrt(res / (n - 2))"]]],
+    ["spot error forgotten", "shared/flows-quant-forward.js", [["L.SPOT_SE ** 2 + ", ""]]],
+    ["blend weights swapped", "shared/flows-quant-forward.js", [["out.F = (parF * wp + carry.F * wc) / (wp + wc);", "out.F = (parF * wc + carry.F * wp) / (wp + wc);"]]],
     ["blend error is the smaller of the two", "shared/flows-quant-forward.js", [["out.se = 1 / Math.sqrt(wp + wc);", "out.se = Math.min(sePar, seC);"]]],
     ["veto at half a sigma", "shared/flows-quant-forward.js", [["VETO_Z: 4,", "VETO_Z: 0.5,"]]],
     ["band rounds down", "shared/flows-quant-forward.js", [["Math.ceil(h95 * 100 - 1e-9) / 100", "Math.floor(h95 * 100) / 100"]]],

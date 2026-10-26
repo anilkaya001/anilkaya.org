@@ -21,11 +21,16 @@ export const FWD_LINES = Object.freeze({
   PUT_DELTA_CUT: 0.30,
   CALL_DELTA_CUT: 0.70,
   EEP_SHARE: 0.15,
-  DIV_EEP: 0.5,
+  EEP_SHIFT: 0.25,
+  EEP_SD: 0.15,
+  RAMP: 1,
+  CARRY_WEIGHT_MIN: 0.05,
+  SPOT_SE: 0.00015,
 });
 
 const fin = (v) => typeof v === "number" && Number.isFinite(v);
 const SQRT3 = Math.sqrt(3);
+const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
 export function carryOf({ S, r, T, q }) {
   const known = fin(q);
@@ -33,7 +38,7 @@ export function carryOf({ S, r, T, q }) {
   const L = FWD_LINES;
   const divRel = known ? L.DIV_SHARE * Math.abs(Math.exp(r * T) - Math.exp((r - q) * T)) : 0;
   const unknown = known ? 0 : L.DIV_SE_UNKNOWN * T;
-  const rel = Math.sqrt((L.RATE_SE * T) ** 2 + (L.BORROW_SE * T) ** 2 + divRel ** 2 + unknown ** 2);
+  const rel = Math.sqrt(L.SPOT_SE ** 2 + (L.RATE_SE * T) ** 2 + (L.BORROW_SE * T) ** 2 + divRel ** 2 + unknown ** 2);
   return { F, se: F * rel, known };
 }
 
@@ -107,7 +112,22 @@ export function parityOf(pairs, D) {
   const sys = FWD_LINES.EEP_SHARE * kBar * (1 - D);
   const sePure = seStat * (birge === null ? 1 : Math.max(1, birge));
   const se = Math.sqrt(sePure * sePure + sys * sys);
-  return { F, se, seStat, sePure, sys, birge, n, rows };
+  let slopeZ = null;
+  if (n >= 4) {
+    let sxx = 0, sxy = 0;
+    for (const r of rows) {
+      const dk = r.K - kBar;
+      sxx += r.w * dk * dk;
+      sxy += r.w * dk * (r.Fi - F);
+    }
+    if (sxx > 0) {
+      const slope = sxy / sxx;
+      let res = 0;
+      for (const r of rows) res += r.w * (r.Fi - F - slope * (r.K - kBar)) ** 2;
+      slopeZ = slope * Math.sqrt(sxx) / Math.max(1, Math.sqrt(res / (n - 2)));
+    }
+  }
+  return { F, se, seStat, sePure, sys, birge, slopeZ, n, rows };
 }
 
 export function dDeltaMax(se, F, sigma, T) {
@@ -141,16 +161,22 @@ export function chooseForward({ quotes, S, r, T, q }) {
   }
   const sigPar = sigmaAtm(quotes, par.F, D, T);
   out.sigmaAtm = fin(sigPar) ? sigPar : sig0;
+  const lo = L.Z_TRUST - L.RAMP, width = 2 * L.RAMP;
+  const early = clamp01((-z - lo) / width) * (par.slopeZ === null ? 1 : clamp01((-par.slopeZ - lo) / width));
   const gap = par.F - carry.F;
-  const sePar = z < -L.Z_TRUST ? Math.sqrt(par.se * par.se + (L.DIV_EEP * gap) ** 2) : par.se;
-  out.sePar = sePar;
-  const seC = Math.sqrt(carry.se * carry.se + Math.max(0, gap * gap - sePar * sePar - carry.se * carry.se));
+  const parF = par.F - early * L.EEP_SHIFT * Math.abs(gap);
+  const sePar = early > 0 ? Math.sqrt(par.se * par.se + (early * L.EEP_SD * gap) ** 2) : par.se;
+  const shifted = parF - carry.F;
+  const seC = Math.sqrt(carry.se * carry.se + Math.max(0, shifted * shifted - sePar * sePar - carry.se * carry.se));
   const wp = 1 / (sePar * sePar), wc = 1 / (seC * seC);
-  out.F = (par.F * wp + carry.F * wc) / (wp + wc);
+  out.F = (parF * wp + carry.F * wc) / (wp + wc);
   out.se = 1 / Math.sqrt(wp + wc);
+  out.sePar = sePar;
   out.seC = seC;
-  out.src = Math.abs(z) > L.Z_TRUST ? "parity" : "blend";
+  out.src = wc / (wp + wc) < L.CARRY_WEIGHT_MIN ? "parity" : "blend";
   out.gapBp = (par.F / carry.F - 1) * 1e4;
+  out.ee = z < -L.Z_TRUST && par.slopeZ !== null && par.slopeZ < -L.Z_TRUST;
+  out.slopeZ = par.slopeZ;
   out.dDeltaMax = dDeltaMax(out.se, out.F, out.sigmaAtm, T);
   return out;
 }
@@ -193,7 +219,7 @@ export function forwardRecord(expiry, rec) {
   if (!rec) return { expiry, method: "rate-only", pairs: 0, F: null, src: "rate", se: null };
   return {
     expiry, F: rec.F, se: rec.se, src: rec.src, n: rec.n, z: rec.z, gapBp: rec.gapBp, veto: rec.veto,
-    Fc: rec.Fc, seC: rec.seC, qKnown: rec.qKnown, Fpar: rec.Fpar, sePar: rec.sePar, birge: rec.birge, sigmaAtm: rec.sigmaAtm, dDeltaMax: rec.dDeltaMax,
+    Fc: rec.Fc, seC: rec.seC, qKnown: rec.qKnown, Fpar: rec.Fpar, sePar: rec.sePar, birge: rec.birge, sigmaAtm: rec.sigmaAtm, dDeltaMax: rec.dDeltaMax, ee: rec.ee === true, slopeZ: rec.slopeZ === undefined ? null : rec.slopeZ,
     T: rec.T, r: rec.r, D: rec.D, pairList: rec.pairs,
     method: rec.src === "parity" || rec.src === "blend" ? "parity" : rec.src, pairs: rec.n,
   };

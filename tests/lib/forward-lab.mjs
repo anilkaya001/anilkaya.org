@@ -5,6 +5,7 @@ import { bracketBook } from "../../shared/flows-quant-bracket.js";
 import { americanCRR } from "./crr.mjs";
 
 export const GATE_SPREAD = 0.15;
+export const SPOT_NOISE = 0.00015;
 export const RATE = 0.04;
 export const SPOT = 100;
 export const CARD_YIELD = 0.015;
@@ -77,29 +78,39 @@ export function runCell({ dte, liquidity, regime, trials, seed, steps = 120, imp
   const liq = { ...LIQUIDITY[liquidity], step: dte.step };
   const acc = {
     dte: dte.id, liquidity, regime, trials, src: { carry: 0, blend: 0, parity: 0 }, vetoed: 0, covered: 0, coveredQualified: 0, qualified: 0,
-    errChosen: [], errCarry: [], plain: { n: 0, ok: 0 }, pm: { n: 0, ok: 0 }, dash: 0, rows: 0, bracket: { n: 0, ok: 0, calls: { n: 0, ok: 0 }, puts: { n: 0, ok: 0 } },
-    coveredCarry: 0, withPairs: { plain: { n: 0, ok: 0 }, pm: { n: 0, ok: 0 } }, trialsWithPairs: 0,
+    errChosen: [], errCarry: [], plain: { n: 0, ok: 0 }, pm: { n: 0, ok: 0 }, dash: 0, rows: 0, bracket: { n: 0, ok: 0, suppressed: 0, calls: { n: 0, ok: 0 }, puts: { n: 0, ok: 0 } },
+    errs: [], zbins: { low: { n: 0, ok: 0 }, mid: { n: 0, ok: 0 }, high: { n: 0, ok: 0 } }, chains: { n: 0, bad: 0 }, early: 0, coveredCarry: 0, withPairs: { plain: { n: 0, ok: 0 }, pm: { n: 0, ok: 0 } }, trialsWithPairs: 0,
   };
   for (let t = 0; t < trials; t++) {
     const rng = makeRng(`forward-lab|${dte.id}|${liquidity}|${regime}|${seed}|${t}`);
     const world = worldOf(rng, dte, regime);
     const quotes = quotesOf(rng, world, liq, steps);
-    const rec = impl.chooseForward({ quotes, S: SPOT, r: RATE, T: world.T, q: world.qCard });
+    const seen = SPOT * (1 + SPOT_NOISE * rng.normal());
+    const rec = impl.chooseForward({ quotes, S: seen, r: RATE, T: world.T, q: world.qCard });
     if (onTrial) onTrial(rec, world, quotes);
+    if (rec.ee === true) acc.early++;
     if (rec.n >= FWD.FWD_LINES.MIN_PAIRS) acc.trialsWithPairs++;
     acc.src[rec.src]++;
     if (rec.veto) acc.vetoed++;
-    const carry = impl.carryOf({ S: SPOT, r: RATE, T: world.T, q: world.qCard });
+    const carry = impl.carryOf({ S: seen, r: RATE, T: world.T, q: world.qCard });
     const eC = Math.abs(carry.F - world.F), eF = Math.abs(rec.F - world.F);
     acc.errChosen.push(eF / world.F);
     acc.errCarry.push(eC / world.F);
     if (eF <= 1.96 * rec.se) acc.covered++;
     if (eC <= 1.96 * carry.se) acc.coveredCarry++;
     if (rec.src !== "carry") { acc.qualified++; if (eF <= 1.96 * rec.se) acc.coveredQualified++; }
+    if (rec.n >= FWD.FWD_LINES.MIN_PAIRS && rec.z !== null) {
+      const bin = Math.abs(rec.z) < 1.5 ? "low" : Math.abs(rec.z) <= 3 ? "mid" : "high";
+      acc.zbins[bin].n++;
+      if (eF <= 1.96 * rec.se) acc.zbins[bin].ok++;
+    }
+    let chainBad = false, chainRows = 0;
     for (const q of quotes) {
-      const held = q.K >= rec.F ? "C" : "P";
+      const usable = (b, a) => b > 0 && a >= b && (a - b) / ((a + b) / 2) <= GATE_SPREAD;
+      let held = q.K >= rec.F ? "C" : "P";
+      if (rec.ee === true && held === "C" && usable(q.pb, q.pa)) held = "P";
       const bid = held === "C" ? q.cb : q.pb, ask = held === "C" ? q.ca : q.pa;
-      if (!(bid > 0) || !(ask >= bid) || (ask - bid) / ((ask + bid) / 2) > GATE_SPREAD) continue;
+      if (!usable(bid, ask)) continue;
       const trueDelta = forwardDelta(world.F, q.K, world.vol(q.K), world.T, "C");
       if (!(trueDelta >= 0.05 && trueDelta <= 0.95)) continue;
       const iv = impliedVolB76(rec.F, world.D, q.K, world.T, (bid + ask) / 2, held, null);
@@ -107,12 +118,14 @@ export function runCell({ dte, liquidity, regime, trials, seed, steps = 120, imp
       const delta = forwardDelta(rec.F, q.K, iv, world.T, "C");
       const band = impl.deltaBand({ F: rec.F, se: rec.se, K: q.K, sigma: iv, T: world.T, held, veto: rec.veto });
       const err = Math.abs(delta - trueDelta);
+      acc.errs.push([err, held]);
       acc.rows++;
       const solid = rec.n >= FWD.FWD_LINES.MIN_PAIRS;
-      if (band.band === "plain") { acc.plain.n++; const hit = err <= 0.02 + 1e-12; if (hit) acc.plain.ok++; if (solid) { acc.withPairs.plain.n++; if (hit) acc.withPairs.plain.ok++; } }
-      else if (band.band === "pm") { acc.pm.n++; const hit = err <= band.half + 1e-12; if (hit) acc.pm.ok++; if (solid) { acc.withPairs.pm.n++; if (hit) acc.withPairs.pm.ok++; } }
+      if (band.band === "plain") { acc.plain.n++; const hit = err <= 0.02 + 1e-12; if (hit) acc.plain.ok++; if (solid) { acc.withPairs.plain.n++; chainRows++; if (hit) acc.withPairs.plain.ok++; else chainBad = true; } }
+      else if (band.band === "pm") { acc.pm.n++; const hit = err <= band.half + 1e-12; if (hit) acc.pm.ok++; if (solid) { acc.withPairs.pm.n++; chainRows++; if (hit) acc.withPairs.pm.ok++; else chainBad = true; } }
       else acc.dash++;
     }
+    if (chainRows > 0) { acc.chains.n++; if (chainBad) acc.chains.bad++; }
     {
       const book = bracketBook(quotes, rec.F);
       const h = 1e-3;
@@ -123,6 +136,7 @@ export function runCell({ dte, liquidity, regime, trials, seed, steps = 120, imp
         const B = world.F * Math.exp(k * s);
         const got = book(B);
         if (!got) continue;
+        if (rec.ee === true && got.side === "C") { acc.bracket.suppressed++; continue; }
         let truth;
         if (got.side === "C") truth = -(callPrice(B * (1 + h)) - callPrice(B * (1 - h))) / (2 * B * h);
         else truth = (putPrice(B * (1 + h)) - putPrice(B * (1 - h))) / (2 * B * h);
@@ -175,7 +189,17 @@ export function summarize(acc) {
     pmWithPairs: pct(acc.withPairs.pm.ok, acc.withPairs.pm.n),
     pmWithPairsN: acc.withPairs.pm.n,
     trialsWithPairs: acc.trialsWithPairs,
+    early: pct(acc.early, n),
+    chainsBad: pct(acc.chains.bad, acc.chains.n),
+    chainsN: acc.chains.n,
+    zLow: pct(acc.zbins.low.ok, acc.zbins.low.n),
+    zLowN: acc.zbins.low.n,
+    zMid: pct(acc.zbins.mid.ok, acc.zbins.mid.n),
+    zMidN: acc.zbins.mid.n,
+    zHigh: pct(acc.zbins.high.ok, acc.zbins.high.n),
+    zHighN: acc.zbins.high.n,
     bracketCalls: pct(acc.bracket.calls.ok, acc.bracket.calls.n),
+    bracketSuppressed: pct(acc.bracket.suppressed, acc.bracket.suppressed + acc.bracket.n),
     bracketPuts: pct(acc.bracket.puts.ok, acc.bracket.puts.n),
   };
 }
