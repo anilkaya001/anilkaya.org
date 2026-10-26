@@ -50,7 +50,7 @@ const CEILING_KIB = {
   marketPage: 213 + 293 / 1024 + (213 + 2327 / 1024) - (213) + (213 + 2327 / 1024 + 265 / 1024) - (213 + 2327 / 1024) + (213 + 2327 / 1024 + 265 / 1024 - 939 / 1024) - (213 + 2327 / 1024 + 265 / 1024) + 2322 / 1024 + 846 / 1024 + 846 / 1024 + 9.5 + 442 / 1024 + NN_KERNEL.bytes / 1024 + 191 / 1024 + 300 / 1024,
   networkPage: 125,
   nowPage: 129,
-  unusualPage: 191 + (191 + 2327 / 1024) - (191) + (191 + 2327 / 1024 + 265 / 1024) - (191 + 2327 / 1024) + (191 + 2327 / 1024 + 265 / 1024 - 314 / 1024) - (191 + 2327 / 1024 + 265 / 1024) + 2322 / 1024 + 2000 / 1024 + 1300 / 1024 + 2400 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024 + 700 / 1024,
+  unusualPage: 191 + (191 + 2327 / 1024) - (191) + (191 + 2327 / 1024 + 265 / 1024) - (191 + 2327 / 1024) + (191 + 2327 / 1024 + 265 / 1024 - 314 / 1024) - (191 + 2327 / 1024 + 265 / 1024) + 2322 / 1024 + 2000 / 1024 + 1300 / 1024 + 2400 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024 + 700 / 1024 + 1306 / 1024,
   eventsPage: 155 + 5786 / 1024 + (155 + 5786 / 1024 + 2327 / 1024) - (155 + 5786 / 1024) + (155 + 5786 / 1024 + 2327 / 1024 + 265 / 1024) - (155 + 5786 / 1024 + 2327 / 1024) + 2010 / 1024 + NN_KERNEL.bytes / 1024,
   movesPage: 151 + 5522 / 1024 + 442 / 1024 + 320 / 1024 + 64 / 1024 + NN_KERNEL.bytes / 1024 + MOVES_PARTS.bytes / 1024 + MOVES_SECTORS.bytes / 1024 + 144 / 1024,
   ledgerPage: 82.6 + LEDGER_PAGE.bytes / 1024,
@@ -72,7 +72,7 @@ const GZIP_KIB = {
   marketPage: 76 - 10914 / 1024 + (76 - 10998 / 1024 + 830 / 1024) - (76 - 10998 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) - (76 - 10998 / 1024 + 830 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024 - 322 / 1024) - (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) + 722 / 1024 + 3.3 + 149 / 1024 + NN_KERNEL.gzip / 1024,
   networkPage: 39,
   nowPage: 40.3,
-  unusualPage: 87 - 30788 / 1024 + (87 - 30788 / 1024 + 830 / 1024) - (87 - 30788 / 1024) + (87 - 30788 / 1024 + 830 / 1024 + 101 / 1024) - (87 - 30788 / 1024 + 830 / 1024) + 722 / 1024 + 2000 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + 200 / 1024,
+  unusualPage: 87 - 30788 / 1024 + (87 - 30788 / 1024 + 830 / 1024) - (87 - 30788 / 1024) + (87 - 30788 / 1024 + 830 / 1024 + 101 / 1024) - (87 - 30788 / 1024 + 830 / 1024) + 722 / 1024 + 2000 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + 200 / 1024 + 531 / 1024,
   eventsPage: 34 + 1932 / 1024 + (34 + 1932 / 1024 + 830 / 1024) - (34 + 1932 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (34 + 1932 / 1024 + 830 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024 - 98 / 1024) - (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) + 641 / 1024 + 2000 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
   movesPage: 47.5 + 1122 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + MOVES_PARTS.gzip / 1024 + MOVES_SECTORS.gzip / 1024 + MOVES_PARTS.gzip / 1024 + MOVES_SECTORS.gzip / 1024,
   ledgerPage: 27 + LEDGER_PAGE.gzip / 1024,
@@ -89,9 +89,9 @@ const CSS_KIB = {
   overviewPage: 104 + (779 + 11690) / 1024 + 300 / 1024 + 1700 / 1024 + 15400 / 1024 + 800 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + NN_IDENTITY.overview.bytes / 1024 + HOME_BENTO.cssBytes / 1024,
   sidePage: 102 + 565 / 1024 + 1700 / 1024 + 2400 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   watchPage: 102 + 565 / 1024 + 1700 / 1024 + 2400 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
-  deskPage: 111 + 880 / 1024 + 1700 / 1024 + 8600 / 1024 + (1180 + SKIP_FOCUS.bytes) / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
-  strategyPage: 111 + 880 / 1024 + 1700 / 1024 + 640 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + 32 / 1024,
-  marketPage: 94 + 1263 / 1024 + 1230 / 1024 + 160 / 1024 + 13.4 + 8.5 + 2000 / 1024 + 5.8 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + 842 / 1024 + 160 / 1024,
+  deskPage: 111 + 880 / 1024 + 1700 / 1024 + 8600 / 1024 + (1180 + SKIP_FOCUS.bytes) / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + 63 / 1024,
+  strategyPage: 111 + 880 / 1024 + 1700 / 1024 + 640 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + 32 / 1024 + 69 / 1024,
+  marketPage: 94 + 1263 / 1024 + 1230 / 1024 + 160 / 1024 + 13.4 + 8.5 + 2000 / 1024 + 5.8 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + 842 / 1024 + 160 / 1024 + 41 / 1024,
   networkPage: 96,
   nowPage: 90,
   unusualPage: 113 + 5007 / 1024 + 1700 / 1024 + 6000 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
@@ -108,12 +108,12 @@ const CSS_KIB = {
 
 const CSS_GZIP_KIB = {
   tickerPage: 23 + (64 + 269) / 1024 + 308 / 1024 + 1400 / 1024 + 2900 / 1024 + 2700 / 1024 + 248 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + GLASS_V3_TICKER.gzip / 1024 + NN_FLOWS_CSS.gzip / 1024 + NN_IDENTITY.ticker.gzip / 1024,
-  overviewPage: 23 + (100 + 2592) / 1024 + 400 / 1024 + 2400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + NN_IDENTITY.overview.gzip / 1024 + HOME_BENTO.cssGzip / 1024,
-  sidePage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
-  watchPage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  overviewPage: 23 + (100 + 2592) / 1024 + 400 / 1024 + 2400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + NN_IDENTITY.overview.gzip / 1024 + HOME_BENTO.cssGzip / 1024 + 11 / 1024,
+  sidePage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + 27 / 1024,
+  watchPage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + 27 / 1024,
   deskPage: 24 + 64 / 1024 + 400 / 1024 + 1500 / 1024 + 113 / 1024 + 64 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   strategyPage: 24 + 64 / 1024 + 400 / 1024 - 17 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
-  marketPage: 21 + 206 / 1024 + 2516 / 1024 + 2516 / 1024 + 300 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + 408 / 1024 + 60 / 1024,
+  marketPage: 21 + 206 / 1024 + 2516 / 1024 + 2516 / 1024 + 300 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + 408 / 1024 + 60 / 1024 + 21 / 1024,
   networkPage: 21,
   nowPage: 21,
   unusualPage: 25 + 599 / 1024 + 400 / 1024 + 1800 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
@@ -176,7 +176,7 @@ const judge = (row, bases = BASES) => {
 
 const DEFERRED = {
   tickerPage: { groups: { surface: "/assets/js/flows-ticker-surface.js", movelab: "/assets/js/flows-ticker-movelab.js", network: "/assets/js/flows-ticker-network.js", live: "/assets/js/flows-ticker-live.js", "nn-orb": "/assets/js/flows-nn-orb.js" } },
-  unusualPage: { groups: { net: "/assets/js/flows-net.js", "flow-below": "/assets/js/flows-unusual-below.js" }, modules: ["uaTimelineCard", "uaNamesCard", "uaUrgencyCard", "uaFeedCard", "uaSurpriseCard"] },
+  unusualPage: { groups: { net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js", "flow-below": "/assets/js/flows-unusual-below.js" }, modules: ["uaTimelineCard", "uaNamesCard", "uaUrgencyCard", "uaFeedCard", "uaSurpriseCard"] },
   marketPage: { groups: { floor: "/assets/js/flows-market-floor.js", river: "/assets/js/flows-market-river.js", "market-below": "/assets/js/flows-market-below.js", net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" }, modules: ["mkSectorsCard", "mkGroupsCard", "mkExpiryCard", "mkVolCard", "mkRadarCard", "mkAdvCard", "mkVolumeCard", "mkAgainstCard", "mkMoversCard", "mkOiCard", "mkDarkCard", "mkImpactCard", "mkInsidersCard", "mkSeasonCard"] },
   networkPage: { groups: { net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" } },
   deskPage: { groups: { "desk-calls": "/assets/js/flows-desk-calls.js" } },
@@ -193,8 +193,8 @@ const ORACLE_FILES = ["/assets/js/flows-oracle-core.js", "/assets/js/flows-oracl
 const ORACLE_DEFERRED_KIB = 60;
 const ORACLE_MARKUP_BYTES = 720;
 const DEFERRED_KIB = {
-  tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + NETWORK_GROUP.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
-  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024,
+  tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + NETWORK_GROUP.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + 21 / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024 + 1991 / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
+  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + 26058 / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024,
 };
 const DARK_POOL_TIME = { bytes: 107, why: "lane 2 math audit: the Market page's dark-pool list drops canceled prints, prints its times in TRT through F.time and its prices through F.px, and says how many canceled prints it left out, measured as 58,946 to 59,053 B raw in the deferred flows-market-below.js" };
 DEFERRED_KIB.marketPage += DARK_POOL_TIME.bytes / 1024;

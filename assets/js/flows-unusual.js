@@ -331,20 +331,52 @@
   }
 
   paintNetSlot();
-  if (host.net && UI.defer) {
-    UI.defer("net", { when: "visible", el: host.net, label: "The flow network" }).then(() => {
+  let netMode = null, netTok = 0, netTimer = 0;
+  const NET_3D = { w: 640, h: 300 };
+  const netWant = () => (host.net.clientWidth >= NET_3D.w && host.net.clientHeight >= NET_3D.h ? "3d" : "map");
+  const netSectors = (api) => {
+    fetch("/api/flows/universe", { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then((res) => (res.ok ? res.json() : null)).catch(() => null)
+      .then((u) => { if (api && typeof api.sectors === "function") api.sectors(u); });
+  };
+  const netCss = () => new Promise((done) => {
+    const el = document.querySelector("[data-defer=netmap][data-css]");
+    const href = el && el.dataset.css;
+    if (!href || document.querySelector('link[rel=stylesheet][href="' + href + '"]')) { done(); return; }
+    const l = document.createElement("link");
+    l.rel = "stylesheet";
+    l.href = href;
+    l.onload = l.onerror = () => done();
+    document.head.append(l);
+  });
+  function netApply() {
+    if (!host.net || !UI.defer) return;
+    const want = netWant();
+    if (want === netMode) return;
+    const tok = ++netTok;
+    const label = "The flow network";
+    const load = UI.defer("net", { when: "visible", el: host.net, label }).then(() => (want === "map" ? Promise.all([UI.defer("netmap", { when: "idle", el: host.net, label }), netCss()]) : null));
+    load.then(() => {
       const loaded = window.FlowsUI;
-      if (!loaded || !loaded.net) return;
-      net = loaded.net.mount(host.net, host.net.dataset.ambient === "1" ? { ambient: true } : {});
+      if (tok !== netTok || !loaded || !loaded.net) return;
+      if (want === "map" && !loaded.netMap) return;
+      if (net) { net.destroy(); net = null; }
+      host.net.classList.remove("is-slot", "is-quiet");
+      netMode = want;
+      if (want === "3d") net = loaded.net.mount(host.net, host.net.dataset.ambient === "1" ? { ambient: true, fit: true, barInHead: true } : { fit: true, barInHead: true });
+      else { net = loaded.netMap.mount(host.net, {}); netSectors(net); }
       if (net) net.take(S.alertsKind === "ok" ? S.alerts : null, S.alertsState);
     });
+  }
+  if (host.net && UI.defer) {
+    netApply();
+    if (typeof ResizeObserver === "function") new ResizeObserver(() => { clearTimeout(netTimer); netTimer = setTimeout(netApply, 150); }).observe(host.net);
   }
 
   function takeAlerts(alerts, kind, reason, animate) {
     if (host.net) {
       const full = kind === "ok" && alerts.rows.length > 0;
-      host.net.classList.toggle("is-slot", full);
-      host.net.classList.toggle("is-quiet", !full);
+      if (!net) { host.net.classList.toggle("is-slot", full); host.net.classList.toggle("is-quiet", !full); }
     }
     S.alerts = alerts;
     S.alertsKind = kind;

@@ -19,7 +19,7 @@
   const count = (v) => Math.round(v).toLocaleString("en-US");
   const plural = (k, one, many) => (k === 1 ? one : many);
 
-  const LAYER = { lean: ["Side", "Sector", "Name", "Lean"], dte: ["Side", "Sector", "Name", "Expiry"] };
+  const LAYER = { lean: ["Sector", "Side", "Name", "Lean"], dte: ["Sector", "Side", "Name", "Expiry"] };
   const LEAN_WORD = { bull: "bullish", bear: "bearish", nx: "unsided" };
   const NS = (tag, attrs, ...kids) => {
     const n = document.createElementNS(SVG, tag);
@@ -63,7 +63,7 @@
     parts.push("to " + d.to);
     const bits = [count(d.windows) + plural(d.windows, " window", " windows")];
     if (d.contracts !== null && d.contracts !== undefined) bits.push(count(d.contracts) + plural(d.contracts, " contract", " contracts"));
-    else if (n.layer >= 1 && n.layer <= 2) bits.push("contracts not reported for every window");
+    else if (n.layer === 0 || n.layer === 2) bits.push("contracts not reported for every window");
     bits.push("lean " + LEAN_WORD[dom(n)] + " by convention");
     return { text: parts.join(" — ") + ". " + bits.join(", ") + ".", d };
   }
@@ -127,7 +127,7 @@
       };
       return M.paths.map((p) => {
         const ns = p.ids.map(by);
-        return [ns[0].label, ns[1].full || ns[1].label, ns[2].ticker ? ns[2].label : ns[2].label + " (" + ns[2].members.length + ")", ns[3].label, money(p.v), pct(M.total ? p.v / M.total : 0)];
+        return [ns[0].full || ns[0].label, ns[1].label, ns[2].ticker ? ns[2].label : ns[2].label + " (" + ns[2].members.length + ")", ns[3].label, money(p.v), pct(M.total ? p.v / M.total : 0)];
       });
     }
 
@@ -278,10 +278,10 @@
       const cap = Math.max(4, Math.floor((H - 40) / 30));
       const shown = rows.slice(0, cap);
       const tb = h("div", { class: "nm-tw" }, h("table", { class: "nm-tbl" },
-        h("thead", null, h("tr", null, ["Side", "Sector", "Name", LAYER[mode][3], "Premium", "Share"].map((c, i) => h("th", { scope: "col", class: i > 3 ? "c-num" : null }, c)))),
+        h("thead", null, h("tr", null, ["Sector", "Side", "Name", LAYER[mode][3], "Premium", "Share"].map((c, i) => h("th", { scope: "col", class: i > 3 ? "c-num" : null }, c)))),
         h("tbody", null, shown.map((r) => h("tr", null, r.map((c, i) => h(i === 0 ? "th" : "td", { scope: i === 0 ? "row" : null, class: i > 3 ? "c-num" : null }, c)))))));
       const more = rows.length > shown.length
-        ? h("button", { type: "button", class: "nm-link", "aria-haspopup": "dialog", onclick: () => openList("All " + rows.length + " paths", "Each path runs from a side through a sector and a name to " + LAYER[mode][3].toLowerCase() + ".", { heads: ["Side", "Sector", "Name", LAYER[mode][3], "Premium", "Share"], body: rows }) }, "Show all " + rows.length)
+        ? h("button", { type: "button", class: "nm-link", "aria-haspopup": "dialog", onclick: () => openList("All " + rows.length + " paths", "Each path runs from a sector through a side and a name to " + LAYER[mode][3].toLowerCase() + ".", { heads: ["Sector", "Side", "Name", LAYER[mode][3], "Premium", "Share"], body: rows }) }, "Show all " + rows.length)
         : null;
       stage.replaceChildren(...[tb, more].filter(Boolean));
     }

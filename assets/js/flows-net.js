@@ -20,10 +20,10 @@
   const plural = (k, one, many) => (k === 1 ? one : many);
 
   const SECT = [
-    [/tech/, "tech", "Tech"], [/health/, "health", "Health"], [/financ/, "fin", "Financial"],
-    [/cyclical|discretionary/, "disc", "Cyclical"], [/defensive|staples/, "staples", "Defensive"],
-    [/industr/, "ind", "Industrial"], [/energy/, "energy", "Energy"], [/material/, "mat", "Materials"],
-    [/real estate/, "re", "Real estate"], [/utilit/, "util", "Utilities"], [/communic/, "comm", "Comms"],
+    [/tech/, "tech", "Technology", "Tech"], [/health/, "health", "Health Care", "Health"], [/financ/, "fin", "Financials", "Financial"],
+    [/cyclical|discretionary/, "disc", "Consumer Discretionary", "Cyclical"], [/defensive|staples/, "staples", "Consumer Staples", "Defensive"],
+    [/industr/, "ind", "Industrials", "Industrial"], [/energy/, "energy", "Energy", "Energy"], [/material/, "mat", "Materials", "Materials"],
+    [/real estate/, "re", "Real Estate", "Real est."], [/utilit/, "util", "Utilities", "Utilities"], [/communic/, "comm", "Communication Services", "Comms"],
   ];
   const INDEX_ROOTS = new Set(["SPX", "SPXW", "NDX", "NDXP", "RUT", "RUTW", "VIX", "VIXW", "XSP", "DJX", "MRUT"]);
   const INDEX_FUNDS = new Set(["SPY", "QQQ", "IWM", "DIA"]);
@@ -38,7 +38,7 @@
     if (name === undefined) return unread ? { k: "unread", label: "Sector unread", full: "The universe could not be read", tok: "--sect-none" } : { k: "wait", label: "Sector pending", full: "Sector not read yet", tok: "--sect-none" };
     if (!name) return { k: "none", label: "No sector", full: "No sector in the universe", tok: "--sect-none" };
     const low = String(name).toLowerCase();
-    for (const [re, k, label] of SECT) if (re.test(low)) return { k, label, full: String(name), tok: "--sect-" + k };
+    for (const [re, k, label, short] of SECT) if (re.test(low)) return { k, label, short, full: String(name), tok: "--sect-" + k };
     return { k: "x:" + low, label: String(name).slice(0, 14), full: String(name), tok: "--sect-none" };
   }
 
@@ -52,8 +52,8 @@
   const LEANS = { bull: "Bullish", nx: "Unsided", bear: "Bearish" };
   const LEAN_GLYPH = { bull: "up", bear: "down", nx: "flat" };
   const DTE = { d0: "0DTE", w1: "1–7 days", m1: "8–31 days", far: "32+ days", nx: "No expiry" };
-  const CAPTIONS = { lean: ["Side", "Sector", "Name", "Lean"], dte: ["Side", "Sector", "Name", "Expiry"] };
-  const RESID = { "s:~": 1, "s:none": 2, "s:unread": 3, "s:wait": 4, "n:~": 1 };
+  const CAPTIONS = { lean: ["Sector", "Side", "Name", "Lean"], dte: ["Sector", "Side", "Name", "Expiry"] };
+  const RESID = { "s:idx": 1, "s:fund": 1, "s:~": 2, "s:none": 3, "s:unread": 4, "s:wait": 5, "n:~": 1 };
 
   const ET_DAY = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" });
   const isDay = (d) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}/.test(d);
@@ -100,7 +100,7 @@
     const ranked = [...byName.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1));
     const keepN = new Set((ranked.length <= cap + 1 ? ranked : ranked.slice(0, cap)).map((e) => e[0]));
     const secs = [...bySec.values()].sort((x, y) => y.v - x.v || (x.g.k < y.g.k ? -1 : 1));
-    const keepS = new Set((secs.length > 6 ? secs.slice(0, 5) : secs).map((s) => s.g.k));
+    const keepS = new Set((secs.length > 14 ? secs.slice(0, 13) : secs).map((s) => s.g.k));
 
     const nodes = new Map(), hops = [new Map(), new Map(), new Map()], paths = new Map();
     const node = (id, layer, o2) => {
@@ -112,10 +112,10 @@
       const sid = keepS.has(p.g.k) ? "s:" + p.g.k : "s:~";
       const nid = keepN.has(p.t) ? "n:" + p.t : "n:~";
       const oid = "o:" + (mode === "lean" ? p.lean : p.x);
-      const ids = ["i:" + p.k, sid, nid, oid];
+      const ids = [sid, "i:" + p.k, nid, oid];
       const ns = [
-        node(ids[0], 0, { label: KINDS[p.k].label, lean: KINDS[p.k].lean, kind: p.k }),
-        node(sid, 1, sid === "s:~" ? { label: "Other", tok: "--sect-none" } : { label: p.g.label, full: p.g.full, tok: p.g.tok }),
+        node(sid, 0, sid === "s:~" ? { label: "Other", tok: "--sect-none" } : { label: p.g.label, short: p.g.short, full: p.g.full, tok: p.g.tok }),
+        node(ids[1], 1, { label: KINDS[p.k].label, lean: KINDS[p.k].lean, kind: p.k }),
         node(nid, 2, nid === "n:~" ? { label: "Other names" } : { label: p.t, ticker: p.t, sec: p.g.label }),
         node(oid, 3, mode === "lean" ? { label: LEANS[p.lean], lean: p.lean } : { label: DTE[p.x], bucket: p.x }),
       ];
@@ -124,7 +124,7 @@
         n[p.lean] += p.v;
         if (!n.rows.has(p.r)) { n.rows.add(p.r); if (p.sz === null) n.cx = 1; else n.ct += p.sz; }
       }
-      if (sid === "s:~") ns[1].members.add(p.g.label);
+      if (sid === "s:~") ns[0].members.add(p.g.label);
       if (nid === "n:~") ns[2].members.add(p.t);
       for (let i = 0; i < 3; i++) {
         const key = ids[i] + "|" + ids[i + 1];
@@ -144,7 +144,7 @@
     for (const n of nodes.values()) {
       n.share = total ? n.v / total : 0;
       n.windows = n.rows.size;
-      n.contracts = (n.layer === 1 || n.layer === 2 || (n.layer === 3 && mode === "dte")) && !n.cx && n.ct > 0 ? n.ct : null;
+      n.contracts = (n.layer === 0 || n.layer === 2 || (n.layer === 3 && mode === "dte")) && !n.cx && n.ct > 0 ? n.ct : null;
       n.resid = n.layer === 3 ? (mode === "dte" && n.bucket === "nx" ? 1 : 0) : RESID[n.id] || 0;
       delete n.rows;
       delete n.ct;
@@ -332,6 +332,7 @@
     const legend = h("div", { class: "ui-legend fn-legend" });
     const table = h("div", { class: "fn-paths" });
     host.replaceChildren(lede, bar, stage, scale, legend, table);
+    if (FIT) host.classList.add("fn-fit");
     const ctx = cv.getContext("2d");
 
     const card = host.closest(".ui-mod");
@@ -347,11 +348,12 @@
       const t = head.querySelector(".ui-mod-t");
       if (t) t.after(pill); else head.prepend(pill);
       head.append(seg, about);
+      if (opts.barInHead) { bar.classList.add("is-head"); seg.before(bar); }
     }
 
     const S = { st: { state: "pending", reason: "Reading the flagged windows." }, rows: [], keys: null, readAt: null, session: null };
     const U = { map: null, state: "wait" };
-    let M = null, W = 0, H = 0, dpr = 1, VERT = false, FF = "system-ui, sans-serif";
+    let M = null, W = 0, H = 0, dpr = 1, VERT = false, FF = "system-ui, sans-serif", lgRows = 0;
     const secFn = () => (U.state === "ok" ? (t) => (U.map.has(t) ? U.map.get(t) : null) : () => undefined);
     const N = new Map();
     let E = [], P = [], NL = [], LN = [[], [], [], []], HD = [], ORD = [], PN = 0, CAPN = 0, PB = null, READ = null;
@@ -367,14 +369,14 @@
     const stats = { frames: 0, ms: 0, last: 0, max: 0, ring: [] };
     const PJ = [0, 0, 1, 0], UW = [0, 0, 1];
 
-    const nodeRgb = (d) => (d.resid ? SLATE : d.layer === 1 ? toRgb(UI.cssVar(d.tok || "--sect-none")) : leanRgb(d.bull, d.bear));
+    const nodeRgb = (d) => (d.resid ? SLATE : d.layer === 0 ? toRgb(UI.cssVar(d.tok || "--sect-none")) : leanRgb(d.bull, d.bear));
 
     function nodeChip(n, form) {
       const d = n.d, W1 = "rgba(245,245,247,0.97)", W2 = "rgba(235,235,245,0.68)", W3 = "rgba(235,235,245,0.5)", vt = form === "vert";
       const sub = d.layer === 3 ? pct(d.share) + (vt ? "" : " " + MID + " " + money(d.v)) : money(d.v);
       const gl = d.layer === 3 && d.lean ? { g: LEAN_GLYPH[d.lean], c: d.lean === "bull" ? UP : d.lean === "bear" ? DOWN : BLUE } : null;
       const rank = d.pos ? { t: String(d.pos), f: "500 " + (vt ? 9.5 : 11.5) + "px", c: W3 } : null;
-      const nm = { t: vt && d.id === "n:~" ? "+" + d.members.length + " more" : d.label, f: "600 " + (vt ? 10.5 : 12.5) + "px", c: W1 };
+      const nm = { t: vt && d.id === "n:~" ? "+" + d.members.length + " more" : (vt || W < 1500) && d.short ? d.short : d.label, f: "600 " + (vt ? 10.5 : 12.5) + "px", c: W1 };
       const top = [rank, gl, nm].filter(Boolean), o = { dpr, ff: FF, bg: true, padX: vt ? 4 : 7 };
       if (form === "line") return chip([{ lh: 16, runs: top.concat({ t: sub, f: "400 12px", c: W2 }) }], Object.assign(o, { h: 22 }));
       if (form === "stack") return chip([{ lh: 15, runs: top }, { lh: 13, runs: [{ t: sub, f: "400 11px", c: W2 }] }], Object.assign(o, { h: 32 }));
@@ -427,7 +429,7 @@
     }
 
     function paintLede() {
-      const bits = ["Where flagged option premium is flowing: from the side of the quote it met, through sector and name, to its " + (mode === "lean" ? "lean" : "expiry") +
+      const bits = ["Where flagged option premium is flowing: from the sector, through the side of the quote it met and the name, to its " + (mode === "lean" ? "lean" : "expiry") +
         ", each layer ranked by premium, largest " + (VERT ? "first" : "at the top") + ", leftover buckets last. "];
       if (M && M.windows) {
         bits.push(h("b", null, money(M.total)), " across " + count(M.windows) + " " + plural(M.windows, "window", "windows") + ", ",
@@ -527,6 +529,7 @@
         return h("span", { class: "fn-lg-i", "data-v": v, "data-w": w.toFixed(2) }, c, h("span", null, fmtM(v)));
       });
       scale.replaceChildren(h("span", { class: "fn-lg-g" }, h("span", { class: "fn-lg-t" }, "Sphere area " + MID + " premium"), ...circ), h("span", { class: "fn-lg-g" }, h("span", { class: "fn-lg-t" }, "Band width " + MID + " premium"), ...bands));
+      if (FIT && !VERT && lgRows !== 2 && scale.scrollHeight > scale.clientHeight + 1) { lgRows = 2; requestAnimationFrame(() => { if (!dead) rebuild(); }); }
     }
 
     function size() {
@@ -534,6 +537,7 @@
       VERT = w < 640;
       FF = getComputedStyle(host).fontFamily || FF;
       dpr = Math.min(2, window.devicePixelRatio || 1);
+      if (Math.abs(w - W) > 1) lgRows = 0;
       W = w;
     }
 
@@ -566,29 +570,57 @@
     }
     const gapUnits = (L) => L.length - 1 + (L.some((n, i) => i && n.d.resid && !L[i - 1].d.resid) ? 0.6 : 0);
 
+    function lgH(k) {
+      const d = Math.ceil(nodeR(niceBelow(G.vMax / 1e6) * 1e6, G.vMax, k) * 2 + 2), rows = lgRows || (W < 760 ? 2 : 1);
+      return rows * Math.max(24, d) + (rows - 1) * 8;
+    }
+
     function layout() {
       const vm = G.vMax, ghost = !M;
       const sizes = (k) => { G.k = k; for (const n of NL) n.r = ghost ? 7 * k : nodeR(n.d.v, vm, k); };
       const rMax = (L) => L.reduce((m, n) => Math.max(m, n.r), 0), cMax = (L) => L.reduce((m, n) => Math.max(m, n.chip ? n.chip.w : 0), 0);
-      const tops = 88, tail = 48, margin = W > 900 ? 36 : 22;
+      const margin = W > 900 ? 36 : 22;
+      const gapPx = parseFloat(getComputedStyle(host).rowGap) || 0;
+      const space = FIT && !VERT ? Math.round(stage.clientHeight + (scale.hidden ? 0 : scale.offsetHeight + gapPx)) : 0;
+      const availFor = (k) => Math.max(120, space - (ghost ? 0 : lgH(k) + gapPx));
+      let avail = space ? availFor(1) : 0;
+      let tops = 88, tail = 48;
+      const frame = () => { if (avail) { tops = clamp(Math.round(avail * 0.2), opts.barInHead ? 52 : 88, 88); tail = clamp(Math.round(avail * 0.1), 24, 48); } };
+      frame();
       let base = W >= 1100 ? 1 : W >= 760 ? 0.85 : 0.72;
       const cols = [];
       if (!VERT) {
-        const tries = [["line", base], ["stack", base], ["stack", base * 0.9], ["stack", base * 0.8], ["stack", base * 0.7]];
-        let pick = tries[tries.length - 1];
-        for (const t of tries) {
-          sizes(t[1]);
-          if (!ghost) for (const n of NL) n.chip = nodeChip(n, t[0]);
-          const rm = LN.map(rMax), cw = LN.map(cMax), s0 = (W - 2 * margin - (rm[0] + 8 + cw[0]) - (rm[3] + 8 + cw[3])) / 6;
-          pick = t;
-          if (ghost || [1, 2].every((c) => cw[c] + rm[c] + 8 + rm[c + 1] + 8 <= 2 * s0)) break;
+        const arrange = (b) => {
+          const tries = [["line", b], ["stack", b], ["stack", b * 0.9], ["stack", b * 0.8], ["stack", b * 0.7]];
+          let pick = tries[tries.length - 1];
+          for (const t of tries) {
+            sizes(t[1]);
+            if (!ghost) for (const n of NL) n.chip = nodeChip(n, t[0]);
+            const rm = LN.map(rMax), cw = LN.map(cMax), s0 = (W - 2 * margin - (rm[0] + 8 + cw[0]) - (rm[3] + 8 + cw[3])) / 6;
+            pick = t;
+            if (ghost || [1, 2].every((c) => cw[c] + rm[c] + 8 + rm[c + 1] + 8 <= 2 * s0)) break;
+          }
+          return pick;
+        };
+        const spansOf = (pick) => {
+          const ch = pick[0] === "line" ? 22 : 32;
+          const gaps = LN.map((L) => Math.max(6, ...L.slice(1).map((n, i) => ch + 3 - n.r - L[i].r)));
+          return { gaps, spans: LN.map((L, li) => L.reduce((s, n) => s + 2 * n.r, 0) + gapUnits(L) * gaps[li]) };
+        };
+        let pick = arrange(base), sp = spansOf(pick);
+        if (avail) {
+          for (const f of [0.85, 0.72, 0.6, 0.5, 0.42]) {
+            avail = availFor(G.k); frame();
+            if (tops + Math.max(...sp.spans) + tail <= avail) break;
+            pick = arrange(base * f);
+            sp = spansOf(pick);
+          }
         }
         G.form = pick[0];
-        const ch = G.form === "line" ? 22 : 32, rm = LN.map(rMax), cw = LN.map(cMax);
-        const gaps = LN.map((L) => Math.max(6, ...L.slice(1).map((n, i) => ch + 3 - n.r - L[i].r)));
-        const spans = LN.map((L, li) => L.reduce((s, n) => s + 2 * n.r, 0) + gapUnits(L) * gaps[li]);
+        const rm = LN.map(rMax), cw = LN.map(cMax), gaps = sp.gaps, spans = sp.spans;
+        if (avail) { avail = availFor(G.k); frame(); }
         const need = tops + Math.max(...spans) + tail;
-        H = FIT ? Math.round(clamp(stage.clientHeight || need, 300, 960)) : Math.round(clamp(Math.max(W * 0.42, 520, need), 440, 960));
+        H = FIT ? avail : Math.round(clamp(Math.max(W * 0.42, 520, need), 440, 960));
         G.top = tops; G.bottom = H - tail; G.midY = (G.top + G.bottom) / 2;
         const left = rm[0] + 8 + cw[0], right = rm[3] + 8 + cw[3], s0 = (W - 2 * margin - left - right) / 6;
         G.ox = W / 2 + (left - right) / 2; G.s0 = Math.max(s0, 1); G.oy = G.midY;
@@ -600,7 +632,7 @@
           const ys = stack(L.map((n) => n.r), L.map((n) => !!n.d.resid), G.bottom - G.top, gaps[li], 88);
           L.forEach((n, j) => { n.sx = cols[li].x; n.sy = G.midY + ys[j]; n.tier = 0; });
         });
-        G.hd = cols.map((c) => [c.x, 52]);
+        G.hd = cols.map((c) => [c.x, tops - 36]);
       } else {
         sizes(0.62);
         G.form = "vert";
@@ -610,8 +642,8 @@
           const xs = stack(L.map((n) => n.r), L.map((n) => !!n.d.resid), use, 4, 64).map((x) => W / 2 + x);
           const w = L.map((n) => (n.chip ? n.chip.w : 0));
           const xc = xs.map((x, j) => clamp(x, 2 + w[j] / 2, Math.max(2 + w[j] / 2, W - 2 - w[j] / 2)));
-          let tiers = 3;
-          for (const t of [1, 2]) if (L.every((n, j) => j + t >= L.length || (w[j] + w[j + t]) / 2 + 3 <= xc[j + t] - xc[j])) { tiers = t; break; }
+          let tiers = 4;
+          for (const t of [1, 2, 3]) if (L.every((n, j) => j + t >= L.length || (w[j] + w[j + t]) / 2 + 3 <= xc[j + t] - xc[j])) { tiers = t; break; }
           L.forEach((n, j) => { n.sx = xs[j]; n.tier = j % tiers; });
           const rm = rMax(L);
           rows.push({ rm, up: rm + 28, down: rm + 4 + (ghost ? 0 : tiers * (ch + 2) - 2), tiers });
@@ -628,6 +660,7 @@
       G.cols = cols;
       G.ch = G.form === "line" ? 22 : G.form === "stack" ? 32 : 28;
       if (!FIT) stage.style.height = H + "px";
+      else scale.style.height = !VERT && !ghost ? lgH(G.k) + "px" : "";
       const pw = Math.round(W * dpr), ph = Math.round(H * dpr);
       if (cv.width !== pw || cv.height !== ph) { cv.width = pw; cv.height = ph; }
       const keep = [cam.yaw, cam.pitch];
@@ -681,7 +714,7 @@
         LN = M.layers.map((l) => l.map((d) => N.get(d.id)));
         NL = [...N.values()];
       } else {
-        LN = [4, 6, 6, 3].map((k, li) => Array.from({ length: k }, (_, i) => ({ id: "g" + li + i, d: { layer: li, v: 1, resid: 0 }, layer: li, rk: i, gx: NaN, gy: NaN, cr: 0, hl: 0, dm: 0, tl: 1, born: true, out: [], inn: [], col: SLATE, chip: null })));
+        LN = [6, 4, 6, 3].map((k, li) => Array.from({ length: k }, (_, i) => ({ id: "g" + li + i, d: { layer: li, v: 1, resid: 0 }, layer: li, rk: i, gx: NaN, gy: NaN, cr: 0, hl: 0, dm: 0, tl: 1, born: true, out: [], inn: [], col: SLATE, chip: null })));
         NL = LN.flat();
       }
       G.vMax = vMax || 1;
@@ -1109,7 +1142,7 @@
       const id = focusId || hoverId || pinId;
       let pred = null;
       if (id && N.has(id)) pred = (p) => p.ids.indexOf(id) >= 0;
-      else if (rowLit) pred = (p) => p.ids[0] === "i:" + rowLit.k && (p.ids[2] === "n:" + rowLit.t || (p.ids[2] === "n:~" && N.get("n:~") && N.get("n:~").d.members.indexOf(rowLit.t) >= 0));
+      else if (rowLit) pred = (p) => p.ids[1] === "i:" + rowLit.k && (p.ids[2] === "n:" + rowLit.t || (p.ids[2] === "n:~" && N.get("n:~") && N.get("n:~").d.members.indexOf(rowLit.t) >= 0));
       FOC = !!pred;
       for (const n of NL) n.tl = pred ? 0 : 1;
       for (const e of E) e.tl = pred ? 0 : 1;
@@ -1307,7 +1340,7 @@
       for (const a of ARR) {
         const t = String(a.row.t || "").toUpperCase(), nid = N.has("n:" + t) ? "n:" + t : "n:~";
         for (const q of model([a.row], { out: mode, session: S.session }).paths) {
-          const p = P.find((x) => x.ids[0] === q.ids[0] && x.ids[2] === nid && x.ids[3] === q.ids[3]);
+          const p = P.find((x) => x.ids[1] === q.ids[1] && x.ids[2] === nid && x.ids[3] === q.ids[3]);
           if (!p) continue;
           for (const e of p.e) if (e) { const v = (rate.get(e) || 0) + q.v; rate.set(e, v); if (v > top) top = v; }
         }
@@ -1417,7 +1450,7 @@
         for (const r of fresh) {
           const t = String(r.t || "").toUpperCase(), nid = N.has("n:" + t) ? "n:" + t : "n:~";
           for (const q of model([r], { out: mode, session: S.session }).paths) {
-            const p = P.find((x) => x.ids[0] === q.ids[0] && x.ids[2] === nid && x.ids[3] === q.ids[3]), n = N.get(nid);
+            const p = P.find((x) => x.ids[1] === q.ids[1] && x.ids[2] === nid && x.ids[3] === q.ids[3]), n = N.get(nid);
             if (!p || !n) continue;
             let f = seen.get(nid);
             if (!f) {
@@ -1533,6 +1566,7 @@
         rz = requestAnimationFrame(() => { if (!dead && (Math.abs((stage.clientWidth || 0) - W) > 1 || (FIT && !VERT && Math.abs((stage.clientHeight || 0) - H) > 1))) rebuild(); });
       });
       ro.observe(host);
+      if (FIT) ro.observe(stage);
       undo.push(() => ro.disconnect());
     }
 
@@ -1544,8 +1578,8 @@
       cancelAnimationFrame(fz);
       if (abort) abort.abort();
       for (const f of undo.splice(0)) f();
-      pill.remove(); seg.remove(); about.remove();
-      host.replaceChildren();
+      pill.remove(); seg.remove(); about.remove(); bar.remove();
+      host.replaceChildren(); host.classList.remove("fn-fit");
       NETS.delete(host);
     }
 
