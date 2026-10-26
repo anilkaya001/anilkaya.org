@@ -77,7 +77,7 @@ for (const [route, name] of [["/flows/about/", "about"], ["/flows/glossary/", "g
   const html = await (await call("/flows/about/")).text();
   const NEEDLE = {
     overview: "<strong>Home.</strong>", watch: "(the Watchlist)", long: "<strong>Boards.</strong>", short: "<strong>Boards.</strong>",
-    market: "<strong>Market.</strong>", moves: "<strong>Moves.</strong>", unusual: "<strong>Unusual.</strong>", events: "<strong>Events.</strong>",
+    market: "<strong>Market.</strong>", moves: "<strong>Moves.</strong>", unusual: "<strong>Unusual.</strong>", ledger: "<strong>Ledger.</strong>", events: "<strong>Events.</strong>",
     political: "<strong>Political.</strong>", strategy: "<strong>Strategy, Premium desk and Ask.</strong>", desk: "<strong>Strategy, Premium desk and Ask.</strong>",
   };
   const members = FLOWS_NAV.filter((g) => !g.only).flatMap((g) => g.items.map((i) => i.key)).sort();

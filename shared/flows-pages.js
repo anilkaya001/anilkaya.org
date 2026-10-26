@@ -1,9 +1,10 @@
-export const ASSET_VERSION = "396";
+export const ASSET_VERSION = "397";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
 import { stamp as trtStamp } from "./flows-time.js";
 import { etDayOf, isSession, shiftDay } from "./flows-quant-time.js";
+import { ledgerBody, LEDGER_DESCRIPTION, LEDGER_STYLES, LEDGER_SCRIPTS } from "./flows-page-ledger.js";
 
 export const CALENDAR_BACK_DAYS = 14;
 export const CALENDAR_SESSIONS = 60;
@@ -135,6 +136,7 @@ export const FLOWS_NAV = [
     { key: "market", href: "/flows/market/", label: "Market", glyph: "market" },
     { key: "moves", href: "/flows/moves/", label: "Moves", glyph: "wave" },
     { key: "unusual", href: "/flows/unusual/", label: "Unusual", glyph: "unusual" },
+    { key: "ledger", href: "/flows/ledger/", label: "Ledger", glyph: "levels" },
     { key: "events", href: "/flows/events/", label: "Events", glyph: "cal", count: true },
     { key: "political", href: "/flows/political/", label: "Political", glyph: "hall" },
   ] },
@@ -156,7 +158,7 @@ const TABS = [
   { href: "/flows/", label: "Home", glyph: "home", keys: ["overview"] },
   { href: "/flows/long/", label: "Boards", glyph: "boards", keys: ["long", "short"] },
   { href: "/flows/ticker/", label: "Search", glyph: "search", keys: ["ticker"], search: true },
-  { href: "/flows/market/", label: "Market", glyph: "market", keys: ["market", "moves", "unusual", "events", "political"] },
+  { href: "/flows/market/", label: "Market", glyph: "market", keys: ["market", "moves", "unusual", "ledger", "events", "political"] },
 ];
 
 const railItem = (active) => (it) => {
@@ -446,6 +448,7 @@ export function aboutPage() {
       <li><strong>Market.</strong> The session tide, breadth, sectors, index ETFs, expiries and volatility, with the market-wide feeds.</li>
       <li><strong>Moves.</strong> Every name's move today against its own typical day and against the day its options implied, with how often a move that size has happened in the last year, and each sector&#39;s median move beside the list of names.</li>
       <li><strong>Unusual.</strong> The option windows the vendor flagged, drawn as a flow network from the side of the quote through sector and name to lean, and the contracts trading far above their open interest.</li>
+      <li><strong>Ledger.</strong> The flagged option premium booked as a closed ledger: takers on one side, liquidity providers on the other, so every row and column sums to zero. It sets each sector's share against its market-cap share, with the bounds it can prove.</li>
       <li><strong>Events.</strong> Earnings, economic prints and FDA dates for the coming sessions, with the move each report is priced for.</li>
       <li><strong>Political.</strong> Stocks that members of Congress disclosed buying or selling, in the dollar ranges the filings give, with how late each filing arrives.</li>
       <li><strong>Ticker.</strong> One name's dossier: price against the priced move, the dealer book, volatility, flow and positioning, and a written reading of how they fit together.</li>
@@ -1125,6 +1128,19 @@ export function movesPage({ username = "" } = {}) {
   });
 }
 
+export function ledgerPage({ username = "" } = {}) {
+  return flowsDocument({
+    title: "Premium ledger",
+    description: LEDGER_DESCRIPTION,
+    active: "ledger",
+    username,
+    chrome: false,
+    styles: LEDGER_STYLES,
+    scripts: LEDGER_SCRIPTS,
+    body: ledgerBody(glyph),
+  });
+}
+
 export function unusualPage({ username = "", owner = false } = {}) {
   return `${head("Flows — Unusual activity", "Windows of option activity the vendor flagged, and contracts carrying volume far above their own open interest.", [...FEEDS_CSS, "/assets/css/flows-net.css"])}
 ${shell("Unusual", "unusual", username, `${feedHead("ua", "Unusual")}
@@ -1526,6 +1542,6 @@ export function oracleShell(html, mode, slug) {
 export const FLOWS_PAGES = {
   loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, networkPage, nowPage, deskPage,
   politicalPage,
-  tickerPage, unusualPage, movesPage, statusPage, eventsPage, strategyPage, ASSET_VERSION,
+  tickerPage, unusualPage, movesPage, ledgerPage, statusPage, eventsPage, strategyPage, ASSET_VERSION,
 };
 

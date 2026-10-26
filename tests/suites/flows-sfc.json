@@ -1,0 +1,1 @@
+{"name": "flows-sfc", "class": "N", "group": "shard", "timing": false, "medianS": 50, "shard": 1, "command": "node --disable-warning=ExperimentalWarning flows-sfc.mjs", "files": ["flows-sfc.mjs"], "covers": []}
