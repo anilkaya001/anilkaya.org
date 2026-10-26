@@ -75,26 +75,31 @@ const SHORT = [[/tech/, "Technology"], [/health/, "Health Care"], [/financ/, "Fi
   [/industr/, "Industrials"], [/energy/, "Energy"], [/material/, "Materials"], [/real estate/, "Real Estate"], [/utilit/, "Utilities"], [/communic/, "Communication Services"]];
 function expected(flow, { names = 10 } = {}) {
   const rows = flow.rows.filter((r) => r.prem > 0);
-  const total = rows.reduce((s, r) => s + r.prem, 0);
-  const kinds = { ca: 0, cb: 0, pa: 0, pb: 0, nx: 0 };
-  const byName = new Map(), bySector = new Map();
+  const flagged = rows.reduce((s, r) => s + r.prem, 0);
+  let total = 0;
+  const kinds = { ca: 0, cb: 0, pa: 0, pb: 0 };
+  let noSide = 0;
+  const byName = new Map(), bySector = new Map(), sided = [];
   const secOf = new Map(NAMES.map((x) => [x[0], x[1] ? SHORT.find(([re]) => re.test(x[1].toLowerCase()))[1] : ["SPY", "QQQ", "IWM", "DIA"].includes(x[0]) ? "Index funds" : "No sector"]));
   for (const r of rows) {
     let a = r.askPrem || 0, b = r.bidPrem || 0;
     if (a + b > r.prem) { a *= r.prem / (a + b); b *= r.prem / (a + b); }
     kinds[r.cp === "C" ? "ca" : "pa"] += a;
     kinds[r.cp === "C" ? "cb" : "pb"] += b;
-    kinds.nx += r.prem - a - b;
-    byName.set(r.t, (byName.get(r.t) || 0) + r.prem);
-    bySector.set(secOf.get(r.t), (bySector.get(secOf.get(r.t)) || 0) + r.prem);
+    noSide += Math.max(0, r.prem - a - b);
+    total += a + b;
+    if (!(a + b > 0)) continue;
+    sided.push(r);
+    byName.set(r.t, (byName.get(r.t) || 0) + a + b);
+    bySector.set(secOf.get(r.t), (bySector.get(secOf.get(r.t)) || 0) + a + b);
   }
-  const dte = new Set(rows.map((r) => {
+  const dte = new Set(sided.map((r) => {
     const d = Math.round((Date.parse(r.exp) - Date.parse(SESSION)) / 864e5);
     return d <= 0 ? "d0" : d <= 7 ? "w1" : d <= 31 ? "m1" : "far";
   }));
   return {
-    total, kinds, byName, bySector, windows: rows.length,
-    layers: [bySector.size > 14 ? 14 : bySector.size, Object.values(kinds).filter((v) => v > 0).length, byName.size > names + 1 ? names + 1 : byName.size, 3],
+    total, flagged, noSide, kinds, byName, bySector, windows: rows.length,
+    layers: [bySector.size > 14 ? 14 : bySector.size, Object.values(kinds).filter((v) => v > 0).length, byName.size > names + 1 ? names + 1 : byName.size, (kinds.ca + kinds.pb > 0 ? 1 : 0) + (kinds.cb + kinds.pa > 0 ? 1 : 0)],
     dteOut: dte.size, bull: kinds.ca + kinds.pb, bear: kinds.cb + kinds.pa,
   };
 }
@@ -303,7 +308,7 @@ try {
     await page.waitForTimeout(2000);
     const st = await stats(page);
     deep(st.layers, want.layers, `the four layers carry the node counts the data implies: ${want.layers.join("-")} (sector, side, name, lean)`);
-    const m = await net(page, `const m = net.model(); return { total: m.total, windows: m.windows, lean: m.lean,
+    const m = await net(page, `const m = net.model(); return { total: m.total, flagged: m.flagged, cover: m.cover, windows: m.windows, lean: m.lean,
       layers: m.layers.map((l) => l.map((d) => ({ id: d.id, v: d.v, label: d.label, share: d.share }))),
       edges: m.edges.map((hop) => hop.map((e) => ({ a: e.a, b: e.b, v: e.v }))) };`);
     near(m.total, want.total, "the network's premium is the sum of the flagged windows' premium");
@@ -316,7 +321,14 @@ try {
       for (const [id, v] of out) near(v, m.layers.flat().find((d) => d.id === id).v, `every node's outgoing edges sum to its own premium (${id})`);
     }
     const node = (id) => m.layers.flat().find((d) => d.id === id);
-    for (const k of ["ca", "cb", "pa", "pb", "nx"]) near(node("i:" + k).v, want.kinds[k], `the ${k} input carries exactly that side's premium`);
+    for (const k of ["ca", "cb", "pa", "pb"]) near(node("i:" + k).v, want.kinds[k], `the ${k} input carries exactly that side's premium`);
+    eq(node("i:nx"), undefined, "premium with no stated side is not a node of the side layer");
+    ok(!m.layers.flat().some((d) => /unsided|unattributed|rest/i.test(d.label)), "and no node in any layer is labelled as a bucket of it");
+    near(m.lean.nx, want.noSide, "the premium with no stated side is a count beside the network, never a node");
+    near(m.flagged, want.flagged, "the flagged premium is every window's, sided or not");
+    near(m.cover.share, want.total / want.flagged, "and the sided share is the drawn premium over it");
+    near(m.cover.bullLo, want.bull / want.flagged, "the bullish range starts at the bullish dollars over the flagged premium");
+    near(m.cover.bullHi, (want.flagged - want.bear) / want.flagged, "and ends where every dollar not bearish is bullish");
     near(node("n:NVDA").v, want.byName.get("NVDA"), "a name node carries its own windows' premium");
     near(node("s:tech").v, want.bySector.get("Technology"), "a sector node carries its names' premium");
     near(m.lean.bull, want.bull, "bullish lean is ask-side calls plus bid-side puts");
@@ -342,7 +354,7 @@ try {
 
     const aria = await page.evaluate(() => { const c = document.querySelector("#uaNet canvas"); return { role: c.getAttribute("role"), label: c.getAttribute("aria-label") }; });
     eq(aria.role, "img", "the canvas is an image to assistive technology");
-    ok(/^Flow network of 140 flagged windows carrying \$\d/.test(aria.label) && /Largest paths: NVDA, calls \u00b7 ask side/.test(aria.label) && /leans bullish/.test(aria.label),
+    ok(/^Flow network of 140 flagged windows carrying \$\d/.test(aria.label) && /Largest paths: NVDA, calls \u00b7 ask side/.test(aria.label) && /the lean is bullish \d+–\d+% and bearish \d+–\d+% of \$[\d.]+[KMB]? flagged, with \d+% of it sided/.test(aria.label),
       `and its label states the top flows in words (${aria.label.slice(0, 160)}...)`);
 
     const table = await page.evaluate(() => {
@@ -360,7 +372,7 @@ try {
     eq(table.shown, 5, "five of them visible until the reader asks for all");
     eq(table.first.t, "NVDA", "led by the largest");
     eq(table.first.href, "/flows/ticker/?t=NVDA", "which links to its ticker page");
-    ok(/^(Bullish|Bearish|Unsided)$/.test(table.first.cells[3]), `the lean is a word, never a colour alone (${table.first.cells[3]})`);
+    ok(/^(Bullish|Bearish)$/.test(table.first.cells[3]), `the lean is a word, never a colour alone (${table.first.cells[3]})`);
     await page.click("#uaNet .fn-paths .ui-disclose");
     eq(await page.evaluate(() => [...document.querySelectorAll("#uaNet tbody tr")].filter((r) => !r.hidden).length), 24, "the disclosure shows all of them");
 
@@ -382,7 +394,7 @@ try {
     const nv = await page.evaluate(() => { const a = document.querySelector('#uaNet .fn-hit[data-id="n:NVDA"]'); return { tag: a.tagName, href: a.getAttribute("href"), label: a.getAttribute("aria-label") }; });
     eq(nv.tag, "A", "a name node is a link");
     eq(nv.href, "/flows/ticker/?t=NVDA", "to the ticker page");
-    ok(/^Rank 1, NVDA, Technology: \$[\d.]+M, \d+% of flagged premium, \d+ windows, [\d,]+ contracts\./.test(nv.label), `and names its rank, premium, share and contracts (${nv.label})`);
+    ok(/^Rank 1, NVDA, Technology: \$[\d.]+M, \d+% of sided premium, \d+ windows, [\d,]+ contracts\./.test(nv.label), `and names its rank, premium, share and contracts (${nv.label})`);
 
     await page.evaluate(() => document.activeElement.blur());
     await toStage(page);
@@ -394,14 +406,14 @@ try {
       "HOVERING A NAME lights its whole subgraph (its sector, its sides, its leans) and dims every other name and sector");
     const tip = await page.evaluate(() => { const t = document.querySelector("#uaNet .fn-tip"); return { hidden: t.hidden, text: t.textContent }; });
     ok(/each layer ranked by premium, largest at the top, leftover buckets last\./.test(await page.evaluate(() => document.querySelector("#uaNet .fn-lede").textContent)), "the lede states the ranking rule the screen follows: largest at the top, leftover buckets last");
-    ok(!tip.hidden && /NVDA/.test(tip.text) && /of flagged premium/.test(tip.text) && /Open NVDA/.test(tip.text), `and the tooltip lists its premium and share (${tip.text})`);
+    ok(!tip.hidden && /NVDA/.test(tip.text) && /of sided premium/.test(tip.text) && /Open NVDA/.test(tip.text), `and the tooltip lists its premium and share (${tip.text})`);
     const sizeOf = (pred) => flow.rows.filter(pred).reduce((s, r) => s + r.size, 0).toLocaleString("en-US");
     ok(tip.text.includes(sizeOf((r) => r.t === "NVDA") + " contracts"), `a name's tooltip shows the contracts its windows carry (${sizeOf((r) => r.t === "NVDA")})`);
     await shot(page, "net-1440-hover", "net");
     const tipOf = (id) => page.evaluate((id) => { const el = document.querySelector(`#uaNet .fn-hit[data-id="${id}"]`); el.focus({ preventScroll: true }); const t = document.querySelector("#uaNet .fn-tip").textContent; el.blur(); return t; }, id);
     const techNames = new Set(NAMES.filter((x) => x[1] === "Technology").map((x) => x[0]));
     ok((await tipOf("s:tech")).includes(sizeOf((r) => techNames.has(r.t)) + " contracts"), "a sector's tooltip shows its contracts");
-    for (const id of ["i:ca", "i:nx", "o:bull", "o:bear"]) ok(!/contract/.test(await tipOf(id)), `a side or lean node shows no contracts, which the vendor never splits by side (${id})`);
+    for (const id of ["i:ca", "i:pb", "o:bull", "o:bear"]) ok(!/contract/.test(await tipOf(id)), `a side or lean node shows no contracts, which the vendor never splits by side (${id})`);
     await page.mouse.move(5, 5);
     await litVector(page, ["n:MSFT", "n:NVDA", "s:energy"], [1, 1, 1], "leaving NVDA");
     eq((await net(page, `return net.node("n:MSFT").lit;`)), 1, "leaving the node restores the whole network");
@@ -887,7 +899,7 @@ try {
       const m0 = model([], {});
       return {
         windows: m1.windows, total: m1.total, sums: m1.layers.map(sum), counts: m1.layers.map((l) => l.length),
-        ca: node("i:ca").v, cb: node("i:cb").v, nx: node("i:nx").v, pb: node("i:pb").v, xyz: node("n:XYZ").v, none: node("s:none").label,
+        ca: node("i:ca").v, cb: node("i:cb").v, nx: m1.lean.nx, flagged: m1.flagged, hasNx: Boolean(node("i:nx")), pb: node("i:pb").v, xyz: node("n:XYZ").v, none: node("s:none").label,
         empty: { windows: m0.windows, layers: m0.layers.map((l) => l.length), top: m0.top.length },
         dte: model([{ t: "A", cp: "C", prem: 1, askPrem: 1, exp: "2026-10-06", spanStart: "2026-09-30T01:00:00Z" }], { out: "dte" }).layers[3][0].label,
         ct: (() => {
@@ -908,12 +920,14 @@ try {
       };
     });
     eq(u.windows, 3, "the model counts a window only with a ticker and a positive premium");
-    eq(u.total, 190, "and sums exactly those premiums");
-    deep(u.sums, [190, 190, 190, 190], "every layer conserves the premium on hand-made rows too");
+    eq(u.flagged, 190, "the flagged premium sums exactly those premiums");
+    eq(u.total, 130, "the network draws only the sided part of it");
+    deep(u.sums, [130, 130, 130, 130], "every layer conserves the sided premium on hand-made rows too");
     near(u.ca + u.cb, 100, "an ask and bid that overstate the premium are scaled back to it, not trusted past it");
     near(u.ca, 60, "in proportion (90 and 60 of 150 become 60 and 40)");
-    eq(u.nx, 50 + 10, "a window with no contract side, and premium left between the quotes, go to Unsided");
-    eq(u.pb, 30, "an unstated ask is read as unsided, not as zero bid");
+    eq(u.nx, 50 + 10, "a window with no contract side, and premium left between the quotes, are counted as premium with no stated side");
+    eq(u.hasNx, false, "and are not drawn as a node");
+    eq(u.pb, 30, "an unstated ask leaves its premium without a side, while the stated bid stays a bid");
     eq(u.xyz, 40, "tickers are upper-cased before they are joined");
     eq(u.none, "No sector", "a name the universe does not carry is No sector");
     deep(u.empty, { windows: 0, layers: [0, 0, 0, 0], top: 0 }, "an empty record is an empty model, not an error");

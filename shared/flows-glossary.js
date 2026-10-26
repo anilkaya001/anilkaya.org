@@ -58,6 +58,11 @@ export const GLOSSARY = Object.freeze([
     "Median is signed, in IV-days.",
     "Names reporting within 21 sessions are left out of every row.",
   ] },
+  { key: "sided-coverage", term: "Sided coverage", file: "assets/js/flows-net.js", page: "Unusual", href: "/flows/unusual/", lines: [
+    "Premium with no stated side is not drawn as a node.",
+    "Lean is shown as a range from the sided premium alone.",
+    "Beside it is the share of flagged premium with a stated side.",
+  ] },
   { key: "score", term: "Score", ...BOARDS, lines: [
     "Scores run from −100 to +100 and rank names against every scored name; they are a ranked attention signal, not a return forecast.",
   ] },
