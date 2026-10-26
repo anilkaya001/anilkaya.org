@@ -23,6 +23,10 @@
   const SIG_REASONS = { below: "Below 2 typical days: not tested, but counted in the correction.", event: "Earnings within 30 days: not tested.", noscale: "No typical day is published, so no test.", nocount: "The count of days beyond that is not published, so no test." };
   const SIG_INFO_SENTENCES = ["The test asks if today's move is beyond the name's own one-year rate.", "The rate is days beyond 2 or 3 typical days, plus one, over 253.", "So the smallest p is 1 in 253, and few names can pass.", "Every name with a typical day and no earnings is counted in the correction.", "Names are corrected together at a 10% false-discovery rate.", "Big market days move many names at once, so the test can overstate.", "It is a ranking aid, not a forecast."];
   const SIG_FOOT_NONE = "No name could be tested.";
+  const PEER_MIN = 10;
+  const MAD_SCALE = 1.4826;
+  const PARTS_LABELS = { market: "Market (SPY)", peers: "Peers' median", peersVsMarket: "Peers vs market", nameVsPeers: "Name vs peers", nameVsMarket: "Name vs market" };
+  const PARTS_SENTENCES = ["Parts of the move: market, peers against market, the name against its peers.", "Market is the change in SPY. Peers are the other names in the sector.", "Peers need at least 10 names. SPY and QQQ are never peers.", "The parts add to the move. They are not beta-adjusted.", "Peer spread is 1.48 times the median distance of peers from their median."];
   const FROZEN_LINE = "Scores held. Resume to apply the latest read.";
   const SHAPE = { up: "▲", dn: "▼", fl: "◆" };
   const TRI = 2 * Math.sqrt(Math.PI / (3 * Math.sqrt(3)));
@@ -120,8 +124,48 @@
     return "M0," + s * R + "L" + a + "," + -s * R / 2 + "L" + -a + "," + -s * R / 2 + "Z";
   }
 
+  const med = (v) => {
+    const s = v.slice().sort((a, b) => a - b);
+    const k = s.length >> 1;
+    return s.length % 2 ? s[k] : (s[k - 1] + s[k]) / 2;
+  };
+  const tenthsOf = (v) => Math.round(v * 1000) + 0;
+  function peerParts(rows, t) {
+    const me = rows.find((r) => r.t === t);
+    const chg = me ? num(me.chg) : null;
+    if (chg === null) return null;
+    const spy = t === "SPY" ? null : rows.find((r) => r.t === "SPY");
+    const market = spy ? num(spy.chg) : null;
+    let peers = null, peerWhy = null;
+    if (PINS.includes(t)) peerWhy = "A market reference has no peers.";
+    else if (!me.sector) peerWhy = "No sector, so no peers.";
+    else {
+      const v = [];
+      for (const r of rows) if (r !== me && r.t !== t && !PINS.includes(r.t) && r.sector === me.sector && num(r.chg) !== null) v.push(r.chg);
+      if (v.length < PEER_MIN) peerWhy = v.length + " peers, needs " + PEER_MIN + ".";
+      else {
+        const s = med(v);
+        const d = MAD_SCALE * med(v.map((x) => Math.abs(x - s)));
+        peers = { n: v.length, median: s, spread: d, z: d > 0 ? (chg - s) / d : null };
+      }
+    }
+    const levels = [];
+    if (market !== null) levels.push(["market", PARTS_LABELS.market, market]);
+    if (peers) levels.push(["peers", market !== null ? PARTS_LABELS.peersVsMarket : PARTS_LABELS.peers, peers.median]);
+    const parts = [];
+    if (levels.length) {
+      let from = 0;
+      for (const [key, label, v] of levels) {
+        parts.push({ key, label, tenths: tenthsOf(v) - from });
+        from = tenthsOf(v);
+      }
+      parts.push({ key: "name", label: peers ? PARTS_LABELS.nameVsPeers : PARTS_LABELS.nameVsMarket, tenths: tenthsOf(chg) - from });
+    }
+    return { t, chg, total: tenthsOf(chg), market, peers, peerWhy, parts };
+  }
+
   if (typeof document === "undefined") {
-    globalThis.__MovesTest = Object.freeze({ rarityParts, sigRun, SIG_Q, ivDays, signed, domainOf, radiusOf, markerPath, TRI });
+    globalThis.__MovesTest = Object.freeze({ rarityParts, sigRun, SIG_Q, ivDays, signed, domainOf, radiusOf, markerPath, TRI, peerParts });
     return;
   }
 
@@ -439,6 +483,24 @@
 
   const kv = (k, v) => '<div class="kv"><span>' + esc(k) + "</span><b>" + esc(v) + "</b></div>";
 
+  const signedTenths = (k) => (k < 0 ? MINUS : k > 0 ? "+" : "") + Math.abs(k / 10).toFixed(1) + "%";
+  function partsHtml(P) {
+    if (!P) return "";
+    const sub = (p) => {
+      if (p.key === "peers") return P.peers.n + " peers";
+      if (p.key === "name" && P.peers && P.peers.z !== null) return Math.abs(P.peers.z).toFixed(1) + "× peer spread";
+      return "";
+    };
+    const items = P.parts.map((p) => {
+      const cut = p.label.indexOf(" ");
+      const head = cut < 0 ? p.label : p.label.slice(0, cut), tail = cut < 0 ? "" : p.label.slice(cut);
+      const note = sub(p);
+      return '<span class="mv-pt" data-k="' + p.key + '" title="' + esc(p.label + " " + signedTenths(p.tenths) + (note ? ", " + note : "")) + '"><i>' + esc(head) + (tail ? '<span class="x">' + esc(tail) + "</span>" : "") + '</i><b class="' + toneOf(dirOf(p.tenths)) + '-t">' + signedTenths(p.tenths) + "</b>" + (note ? '<em class="' + (p.key === "peers" ? "n" : "z") + '">' + esc(note) + "</em>" : "") + "</span>";
+    }).join("");
+    const note = P.peers ? "" : '<span class="mv-pn" data-k="why">' + esc(P.peerWhy) + "</span>";
+    return '<span class="mv-parts" role="group" aria-label="Parts of the move" title="' + esc(PARTS_SENTENCES[3]) + '">' + items + note + "</span>";
+  }
+
   function sigLine(x) {
     const g = x.sg;
     return g.state === "tested" ? (g.flag ? SIG_FLAGGED_LINE : SIG_PLAIN_LINE) : SIG_REASONS[g.state];
@@ -455,7 +517,7 @@
     const iday = x.iv > 0 ? x.iv / SQRT_YEAR : null;
     const e = cards.get(x.t);
     const cf = e && e.state === "ok" ? e.cf : null;
-    let h = '<div class="mv-rhead"><span class="big">' + esc(x.t) + '</span><span class="mv-st ' + dir + '">' + SHAPE[dir] + " " + pct(x.chg) + '</span>' + (x.event ? '<span class="mv-st ev">Earnings in ' + x.ed + (x.ed === 1 ? " session" : " sessions") + "</span>" : "") + '<span class="why">' + esc(x.sector || "No sector") + " · " + esc(CAPTION) + '</span><a class="mv-open" href="' + tickerHref(x.t) + '">Open ticker ↗</a></div>';
+    let h = '<div class="mv-rhead"><span class="big">' + esc(x.t) + '</span><span class="mv-st ' + dir + '">' + SHAPE[dir] + " " + pct(x.chg) + '</span>' + (x.event ? '<span class="mv-st ev">Earnings in ' + x.ed + (x.ed === 1 ? " session" : " sessions") + "</span>" : "") + '<span class="why">' + esc(x.sector || "No sector") + " · " + esc(CAPTION) + "</span>" + partsHtml(peerParts(M.rows, x.t)) + '<a class="mv-open" href="' + tickerHref(x.t) + '">Open ticker ↗</a></div>';
     h += '<div class="mv-rc first"><h3>Against its day</h3>' + kv("Move", SHAPE[dir] + " " + pct(x.chg)) + kv("Typical day", x.sig !== null ? pctText(x.sig) : DASH) + kv("In typical days", x.z !== null ? signed(x.z) : DASH) + kv("Implied day", iday !== null ? pctText(iday) : DASH) + kv("Times implied", x.a.toFixed(1) + "×") + kv("IV-days", signed(x.m)) + "</div>";
     h += '<div class="mv-rc"><h3>How often</h3><span class="say" data-k="say">' + esc(rr ? rr.text.charAt(0).toUpperCase() + rr.text.slice(1) + "." : rarityWhy(x)) + "</span>" + kv("Past 2 typical", x.f2 !== null ? x.f2 + " of 252" : DASH) + kv("Past 3 typical", x.f3 !== null ? x.f3 + " of 252" : DASH) + "</div>";
     if (!e || e.state === "pending") {
@@ -580,8 +642,9 @@
       "Names reporting within 30 days are ranked apart, because the event is not separated.",
       "How often counts days in the last year beyond that many typical days. It is never a model probability.",
       REF_LINE,
-      ...SIG_INFO_SENTENCES,
-      "Not built yet: parts of the move, flow clusters and replay.",
+      SIG_INFO_SENTENCES.join(" "),
+      PARTS_SENTENCES.join(" "),
+      "Not built yet: flow clusters and replay.",
     ].map((t, i, a) => '<p' + (i === a.length - 1 ? ' class="q"' : "") + ">" + esc(t) + "</p>").join("");
     $("mvInfoDlg").showModal();
     $("mvInfoX").focus();

@@ -118,6 +118,42 @@ const chipOf = (full) => (full === null ? DASH : /rarer than 1 in 250/.test(full
   vm.runInNewContext(JS, sandbox);
   const T = sandbox.__MovesTest;
   ok(T && typeof T.rarityParts === "function", "the page exposes its pure functions only where there is no document");
+  ok(typeof T.peerParts === "function", "the parts of the move are among them");
+  for (const w of [...M.PARTS_SENTENCES, ...Object.values(M.PARTS_LABELS)]) ok(JS.includes(JSON.stringify(w).slice(1, -1)), "the controller carries the leaf's parts wording: " + w);
+  ok(M.PEER_MIN === 10 && JS.includes("const PEER_MIN = 10;") && M.MAD_SCALE === 1.4826 && JS.includes("const MAD_SCALE = 1.4826;"), "the page and the leaf share the ten-peer floor and the 1.4826 scale of the median absolute deviation");
+  for (const w of M.PARTS_SENTENCES) ok(M.wordCount(w) <= M.HEADER_WORDS_MAX && !FORBID.test(w), "a parts sentence stays inside fourteen words and uses no forbidden word: " + w);
+  {
+    const rnd = (a) => () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    const r = rnd(20261026);
+    const SECS = ["A", "B", "C", null];
+    let worlds = 0, subjects = 0, withPeers = 0, without = 0;
+    for (let w = 0; w < 400; w++) {
+      const rows = [];
+      const n = Math.floor(r() * 120);
+      for (let i = 0; i < n; i++) rows.push({ t: "T" + i, chg: r() < 0.08 ? null : Math.round((r() - 0.5) * 0.2 * 1e4) / 1e4, sector: SECS[Math.floor(r() * 4)] });
+      if (r() < 0.7) rows.push({ t: "SPY", chg: r() < 0.1 ? null : Math.round((r() - 0.5) * 0.04 * 1e4) / 1e4, sector: SECS[Math.floor(r() * 3)] });
+      if (r() < 0.7) rows.push({ t: "QQQ", chg: Math.round((r() - 0.5) * 0.04 * 1e4) / 1e4, sector: SECS[Math.floor(r() * 3)] });
+      worlds++;
+      for (const row of rows) {
+        const a = T.peerParts(rows, row.t);
+        const b = M.partsOf(rows, row.t);
+        subjects++;
+        if (b === null) { eq(a, null, "a name with no change has no parts: " + row.t); continue; }
+        if (b.peers) withPeers++; else without++;
+        eq(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b)), "the page's parts equal the leaf's for " + row.t + " in world " + w);
+        if (b.parts.length) eq(b.parts.reduce((s, p) => s + p.tenths, 0), b.total, "the parts add to the rounded move exactly in world " + w);
+      }
+    }
+    ok(worlds === 400 && subjects > 5000 && withPeers > 300 && without > 300, "the equality held over " + subjects + " subjects, " + withPeers + " with peers and " + without + " without");
+    const world = [{ t: "S", chg: 0.031, sector: "X" }, { t: "SPY", chg: 0.004, sector: "X" }, ...[0.002, 0.005, 0.008, 0.010, 0.012, 0.012, 0.014, 0.016, 0.020, 0.030].map((c, i) => ({ t: "P" + i, chg: c, sector: "X" }))];
+    const hand = T.peerParts(world, "S");
+    eq(JSON.parse(JSON.stringify(hand.parts.map((p) => p.tenths))), [4, 8, 19], "hand worked: market 0.4, peers 0.8 above it, the name 1.9 above its peers");
+    ok(Math.abs(hand.peers.median - 0.012) < 1e-15 && Math.abs(hand.peers.spread - 1.4826 * 0.004) < 1e-12 && Math.abs(hand.peers.z - 0.019 / (1.4826 * 0.004)) < 1e-9, "median 0.012, spread 1.4826 x 0.004 and z 3.2038");
+    eq(T.peerParts(world.filter((x) => x.t !== "P0"), "S").peers, null, "nine peers give none");
+    eq(T.peerParts(world.map((x) => (x.t === "P0" ? { ...x, chg: null } : x)), "S").peerWhy, "9 peers, needs 10.", "a null change is not a peer and is never a zero");
+    eq(T.peerParts([{ t: "S", chg: 0.01, sector: "X" }, ...Array.from({ length: 10 }, (_, i) => ({ t: "P" + i, chg: 0.01, sector: "X" }))], "S").peers.z, null, "a zero spread has no z, not infinity");
+    eq(T.peerParts([{ t: "S", chg: null, sector: "X" }], "S"), null, "a name with no change has no parts");
+  }
   for (const level of [2, 3]) {
     for (let hits = 0; hits <= 252; hits++) {
       const sig = 0.02;
@@ -260,6 +296,105 @@ const railKv = (page) => page.evaluate(() => {
   return { kv: out, big: g(".big"), st: g(".mv-st"), why: g(".why"), say: g('[data-k="say"]'), open: document.querySelector("#mvRail .mv-open") ? document.querySelector("#mvRail .mv-open").getAttribute("href") : null, spark: sp ? sp.getAttribute("points").split(" ").length : 0, text: document.getElementById("mvRail").innerText, dates: Array.from(document.querySelectorAll("#mvRail .mv-dates span"), (e) => e.textContent) };
 });
 
+const PW = (() => {
+  const T = 1e12;
+  const peerChg = [0.002, 0.005, 0.008, 0.010, 0.012, 0.012, 0.014, 0.016, 0.020, 0.030];
+  const rows = [
+    ["SPY", 0.0044, 0.16, 90, "Alpha", 40 * T, 0.0065, 14, 3],
+    ["QQQ", 0.011, 0.22, 90, "Alpha", 20 * T, 0.0085, 11, 2],
+    ["A1", 0.031, 0.30, 60, "Alpha", 1 * T, 0.01, 12, 2],
+    ...peerChg.map((c, i) => ["A_P" + i, c, 0.30, 60, "Alpha", (i + 1) * 1e10, 0.01, 10, 1]),
+    ["B1", -0.020, 0.30, 60, "Beta", 1 * T, 0.01, 12, 2],
+    ...Array.from({ length: 9 }, (_, i) => ["B_P" + i, 0.001 * (i - 4), 0.30, 60, "Beta", (i + 1) * 1e10, 0.01, 10, 1]),
+    ["G1", 0.045, 0.30, 60, "Gamma", 1 * T, 0.01, 12, 2],
+    ...Array.from({ length: 12 }, (_, i) => ["G_P" + i, 0.0005 * (i - 6), 0.30, 60, "Gamma", (i + 1) * 1e10, 0.01, 10, 1]),
+    ["NOSEC", -0.047, 0.30, 60, null, 5e11, 0.01, 12, 2],
+    ["E1", 0.0344, 0.30, 60, "Echo", 1 * T, 0.01, 12, 2],
+    ...[0.001, 0.004, 0.008, 0.011, 0.0126, 0.0126, 0.014, 0.017, 0.02, 0.03].map((c, i) => ["E_P" + i, c, 0.30, 60, "Echo", (i + 1) * 1e10, 0.01, 10, 1]),
+    ["D1", 0.052, 0.30, 60, "Delta", 1 * T, 0.01, 12, 2],
+    ...Array.from({ length: 10 }, (_, i) => ["D_P" + i, 0.001 * (i + 1) - 0.0055, 0.30, 60, "Delta", (i + 1) * 1e10, 0.01, 10, 1]),
+  ];
+  const body = FX.universe(rows);
+  const nulled = new Set(["G_P0", "G_P5", "G_P11"]);
+  body.t.forEach((t, i) => { if (nulled.has(t)) body.cols.chg[i] = null; });
+  const dec = FX.decoded(body).map((r, i) => (body.cols.chg[i] === null ? { ...r, chg: null } : r));
+  return { body, rows: dec };
+})();
+const signedT = (k) => (k < 0 ? MINUS : k > 0 ? "+" : "") + Math.abs(k / 10).toFixed(1) + "%";
+const tenthsOfText = (s) => Math.round(parseFloat(s.replace(MINUS, "-").replace(/[^0-9.+-]/g, "")) * 10);
+const partsRead = (page) => page.evaluate(() => {
+  const q = (s) => document.querySelector("#mvRail " + s);
+  return {
+    items: Array.from(document.querySelectorAll("#mvRail .mv-pt"), (e) => ({ k: e.dataset.k, label: e.querySelector("i").textContent, v: e.querySelector("b").textContent, note: e.querySelector("em") ? e.querySelector("em").textContent : null, title: e.title })),
+    why: q(".mv-pn") ? q(".mv-pn").textContent : null,
+    total: q(".mv-st").textContent,
+    big: q(".big").textContent,
+    fits: Array.from(document.querySelectorAll("#mvRail .mv-parts, #mvRail .why"), (e) => e.scrollWidth <= e.clientWidth + 1),
+    group: q(".mv-parts") ? q(".mv-parts").getAttribute("role") : null,
+  };
+});
+const pickName = async (page, t) => {
+  const d = await dots(page);
+  const p = d.pts.find((q) => q.t === t);
+  if (!p) throw new Error("no dot for " + t);
+  const box = await page.locator("#mvPlot").boundingBox();
+  await page.mouse.click(box.x + p.x, box.y + p.y);
+  await page.waitForTimeout(200);
+};
+const expectParts = (t) => {
+  const r = M.partsOf(PW.rows, t);
+  const items = r.parts.map((p) => ({ k: p.key, label: p.label, v: signedT(p.tenths), note: p.key === "peers" ? r.peers.n + " peers" : p.key === "name" && r.peers && r.peers.z !== null ? Math.abs(r.peers.z).toFixed(1) + "× peer spread" : null }));
+  return { r, items, why: r.peers ? null : r.peerWhy };
+};
+
+async function partsBlock(browser, js, P, same) {
+  for (const [w, h, extra] of [[1440, 820, {}], [1024, 768, {}], [390, 844, { isMobile: true, hasTouch: true, deviceScaleFactor: 2 }]]) {
+    const { ctx, page, errors } = await mount(browser, w, h, { context: extra, js, body: PW.body });
+    if (w < 900) await page.click('#mvSeg5 [data-v="field"]');
+    const order = ["A1", "E1", "B1", "G1", "NOSEC", "D1", "SPY", "QQQ"];
+    for (const t of order) {
+      if (w < 900) await page.click('#mvSeg5 [data-v="field"]');
+      await pickName(page, t);
+      if (w < 900) { await page.click('#mvSeg5 [data-v="detail"]'); await page.waitForTimeout(120); }
+      const got = await partsRead(page);
+      const want = expectParts(t);
+      P(got.big === t, w + ": the drill panel is on " + t + " (" + got.big + ")");
+      same(got.items.map((i) => ({ k: i.k, label: i.label, v: i.v, note: i.note })), want.items, w + " " + t + ": the printed parts are the leaf's parts, to the tenth of a percent");
+      P(got.why === want.why, w + " " + t + ": the reason peers are missing is " + want.why + " (" + got.why + ")");
+      P(got.group === "group", w + " " + t + ": the parts are one named group");
+      if (got.items.length) {
+        const sum = got.items.reduce((a, i) => a + tenthsOfText(i.v), 0);
+        P(sum === tenthsOfText(got.total), w + " " + t + ": the printed parts add to the printed move exactly (" + sum + " vs " + tenthsOfText(got.total) + ")");
+        P(got.items.every((i) => i.title.startsWith(i.label + " ") && i.title.includes(i.v)), w + " " + t + ": every part carries its full label and figure in its title");
+      }
+      if (w >= 900) P(got.fits.every(Boolean), w + " " + t + ": the parts and the caption beside them are not cut off");
+      if (t === "A1") {
+        same(got.items.map((i) => i.v), ["+0.4%", "+0.8%", "+1.9%"], w + ": the worked example: SPY +0.4%, peer median +1.2%, name +3.1% give 0.4, 0.8 and 1.9");
+        same(got.items.map((i) => i.note), [null, "10 peers", "3.2× peer spread"], w + ": ten peers, and 0.019 over 1.4826 x 0.004 is 3.2 peer spreads");
+        P(Math.abs(want.r.peers.z - 0.019 / (1.4826 * 0.004)) < 1e-9 && want.r.peers.median === 0.012, w + ": the leaf's median and z are the hand-worked 0.012 and " + (0.019 / (1.4826 * 0.004)).toFixed(4));
+      }
+      if (t === "E1") {
+        same(got.items.map((i) => i.v), ["+0.4%", "+0.9%", "+2.1%"], w + ": rounding the levels, not the gaps: SPY 0.44 and peers 1.26 are 0.4 and 1.3, so the name's 3.44 leaves 2.1 and the parts add to 3.4");
+        P(tenthsOfText(got.total) === 34, w + ": the printed move is 3.4");
+      }
+      if (t === "B1") same(got.items.map((i) => i.v), ["+0.4%", MINUS + "2.4%"], w + ": nine peers is below the ten needed: the market part and the name against the market remain");
+      if (t === "G1") P(got.why === "9 peers, needs 10." && got.items.length === 2, w + ": three peers with no change are left out, so twelve names make nine and no peer part is drawn");
+      if (t === "NOSEC") P(got.why === "No sector, so no peers." && got.items.length === 2, w + ": a name with no sector has the market part and no peers");
+      if (t === "D1") P(want.r.peers && want.r.peers.n === 10 && got.items.length === 3 && got.why === null, w + ": exactly ten peers is enough");
+      if (t === "SPY") P(got.items.length === 0 && got.why === "A market reference has no peers.", w + ": SPY has no parts, only the reason");
+      if (t === "QQQ") P(got.items.length === 2 && got.why === "A market reference has no peers." && got.items[0].k === "market", w + ": QQQ is read against SPY alone: pins are never peers, though they share a sector with A1");
+      if (t === "A1") {
+        const f = await fit(page);
+        P(f.v && f.h, w + ": the page does not scroll with the longest parts strip (" + f.sh + " of " + f.ih + ")");
+        const cl = await clipped(page);
+        P(cl.length === 0, w + ": nothing clipped with the parts strip " + cl.slice(0, 3).join(" | "));
+      }
+    }
+    P(errors.length === 0, w + ": no page error in the parts block " + errors.join(" | "));
+    await ctx.close();
+  }
+}
+
 const VIEWPORTS = [[1440, 820, {}], [1024, 768, {}], [390, 844, { isMobile: true, hasTouch: true, deviceScaleFactor: 2 }]];
 
 class Stop extends Error {}
@@ -271,6 +406,7 @@ async function exercise(browser, js, early) {
   const ranked = M0.all.filter((x) => !x.event).sort(byA);
   const apart = M0.all.filter((x) => x.event).sort(byA);
   try {
+    await partsBlock(browser, js, P, same);
     for (const [w, h, extra] of VIEWPORTS) {
       const phone = w < 900;
       const { ctx, page, errors, asked } = await mount(browser, w, h, { context: extra, js });
@@ -518,7 +654,8 @@ async function exercise(browser, js, early) {
       P((await railKv(page)).big === ranked[2].t, "choosing a name in the dialog selects it");
       await page.click("#mvInfoBtn");
       const info = await page.locator("#mvInfoB").innerText();
-      P(/Not built yet: parts of the move, flow clusters and replay\./.test(info) && !/a significance test/.test(info), "the info dialog says what is not built");
+      P(/Not built yet: flow clusters and replay\./.test(info) && !/parts of the move, flow clusters/.test(info) && !/a significance test/.test(info), "the info dialog says what is not built, and no longer lists the parts of the move");
+      P(M.PARTS_SENTENCES.every((s) => info.includes(s)), "and explains the parts of the move in the leaf's own sentences");
       for (const w of SIG.SIG_INFO_SENTENCES) P(info.includes(w), "the info dialog states the test's limit: " + w);
       P(info.includes(M.REF_LINE) && !FORBID.test(info) && !NOT_BUILT.test(info), "and holds no forbidden word");
       for (const s of info.split(/(?<=\.)\s+/)) P(M.wordCount(s) <= 14, "an info sentence stays short: " + s.slice(0, 50));
@@ -698,6 +835,16 @@ const MUTANTS = [
   ["the old muted note back", "<span class=\"sub c\" data-k=\"sig\">' + esc(sigLine(x)) + \"</span>\"", "<span class=\"sub c\" data-k=\"sig\">Significance test: not yet published.</span>\""],
   ["the adjusted p shown as the raw p", "kv(\"p, adjusted\", x.sg.adj.toFixed(3))", "kv(\"p, adjusted\", x.sg.p.toFixed(3))"],
   ["a ring on every name", "if (x.event) s += '<circle", "if (true) s += '<circle"],
+  ["the name counted among its own peers", "if (r !== me && r.t !== t && !PINS.includes(r.t) && r.sector === me.sector && num(r.chg) !== null) v.push(r.chg);", "if (!PINS.includes(r.t) && r.sector === me.sector && num(r.chg) !== null) v.push(r.chg);"],
+  ["the mean of the peers instead of the median", "const s = med(v);", "const s = v.reduce((a, b) => a + b, 0) / v.length;"],
+  ["a missing change counted as a zero peer", "r.sector === me.sector && num(r.chg) !== null) v.push(r.chg);", "r.sector === me.sector) v.push(num(r.chg) === null ? 0 : r.chg);"],
+  ["SPY and QQQ counted as peers", "!PINS.includes(r.t) && r.sector === me.sector", "r.sector === me.sector"],
+  ["a floor of five peers", "const PEER_MIN = 10;", "const PEER_MIN = 5;"],
+  ["the name's part rounded apart from the others", "tenths: tenthsOf(chg) - from });", "tenths: tenthsOf(chg - (peers ? peers.median : market)) });"],
+  ["the market read from QQQ", "const spy = t === \"SPY\" ? null : rows.find((r) => r.t === \"SPY\");", "const spy = t === \"SPY\" ? null : rows.find((r) => r.t === \"QQQ\");"],
+  ["the spread without the 1.4826", "z: d > 0 ? (chg - s) / d : null", "z: d > 0 ? (chg - s) / (d / MAD_SCALE) : null"],
+  ["a part printed in hundredths", "Math.abs(k / 10).toFixed(1) + \"%\"", "Math.abs(k / 100).toFixed(1) + \"%\""],
+  ["the parts strip dropped", "+ partsHtml(peerParts(M.rows, x.t)) +", "+ "],
 ];
 for (const [name, from, to] of MUTANTS) {
   ok(JS.split(from).length === 2, "the planted build changes the module exactly once: " + name);
@@ -707,4 +854,4 @@ for (const [name, from, to] of MUTANTS) {
 }
 
 await browser.close();
-console.log(`✓ flows-moves-render: ${checks} assertions — the Moves page in Chromium against a synthetic universe of the real shape, no server and no vendor data: no page scroll, no clipped cell and every dialog inside the viewport at 1440x820, 1024x768 and 390x844 in every panel and filter; each dot at the independent position of its typical days and implied multiple, sized by the square root of market cap, shaped by direction and ringed for earnings; the axes by the 99.5th percentile rule; SPY and QQQ pinned; the lists in IV-days with earnings names ranked apart; every rarity sentence equal to rarityText for all 253 counts at both levels; filters, Freeze and the live roster; the drill panel with a lazy card, a failure and a Retry; the keyboard and a phone tap; TRT; no boundary, q or flagged claim; and ${MUTANTS.length} planted wrong builds that each fail`);
+console.log(`✓ flows-moves-render: ${checks} assertions — the Moves page in Chromium against a synthetic universe of the real shape, no server and no vendor data: no page scroll, no clipped cell and every dialog inside the viewport at 1440x820, 1024x768 and 390x844 in every panel and filter; each dot at the independent position of its typical days and implied multiple, sized by the square root of market cap, shaped by direction and ringed for earnings; the axes by the 99.5th percentile rule; SPY and QQQ pinned; the lists in IV-days with earnings names ranked apart; every rarity sentence equal to rarityText for all 253 counts at both levels; filters, Freeze and the live roster; the drill panel with a lazy card, a failure and a Retry; the keyboard and a phone tap; TRT; the parts of each move (market, the median of at least ten same-sector peers, the name against them) to the tenth of a percent, adding to the printed move; no boundary, q or flagged claim; and ${MUTANTS.length} planted wrong builds that each fail`);

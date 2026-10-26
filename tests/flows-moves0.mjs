@@ -20,6 +20,45 @@ const read = (p) => fs.readFileSync(ROOT + p, "utf8");
 const SQRT252 = 15.874507866387544;
 
 {
+  const px = (t, chg, sector = "X") => ({ t, chg, sector });
+  const base = [0.002, 0.005, 0.008, 0.010, 0.012, 0.012, 0.014, 0.016, 0.020, 0.030].map((c, i) => px("P" + i, c));
+  const world = [px("S", 0.031), px("SPY", 0.004), ...base];
+  const got = M.partsOf(world, "S");
+  deep(got.parts.map((p) => p.tenths), [4, 8, 19], "hand worked: SPY 0.4, the peer median 1.2 is 0.8 above it, the name's 3.1 is 1.9 above that");
+  deep(got.parts.map((p) => p.label), ["Market (SPY)", "Peers vs market", "Name vs peers"], "and the labels say what each gap is");
+  eq(got.total, 31, "the printed move is 3.1");
+  near(got.peers.median, 0.012, 1e-15, "the peer median of ten is the mean of the fifth and sixth: 0.012");
+  near(got.peers.spread, 1.4826 * 0.004, 1e-12, "the spread is 1.4826 times the median absolute deviation 0.004");
+  near(got.peers.z, 0.019 / (1.4826 * 0.004), 1e-9, "z is 0.019 over that spread: 3.2038");
+  eq(got.peers.n, 10, "ten peers");
+  eq(M.partsOf(world.filter((x) => x.t !== "P0"), "S").peers, null, "nine peers is not enough");
+  eq(M.partsOf(world.filter((x) => x.t !== "P0"), "S").peerWhy, "9 peers, needs 10.", "and says how many there were");
+  deep(M.partsOf(world.filter((x) => x.t !== "P0"), "S").parts.map((p) => p.tenths), [4, 27], "with no peers the name is read against the market alone: 0.4, then 2.7");
+  eq(M.partsOf(world.map((x) => (x.t === "P0" ? { ...x, chg: null } : x)), "S").peerWhy, "9 peers, needs 10.", "a null change is not a peer and is never a zero");
+  eq(M.partsOf([...world, px("QQQ", 0.5)], "S").peers.n, 10, "QQQ is never a peer");
+  eq(M.partsOf([...world, px("PX", 0.5, "Y")], "S").peers.n, 10, "nor is a name of another sector");
+  eq(M.partsOf([...world, px("PN", 0.5, null)], "S").peers.n, 10, "nor one with no sector");
+  eq(M.partsOf(world, "SPY").parts.length, 0, "SPY has no parts");
+  eq(M.partsOf(world, "SPY").peerWhy, "A market reference has no peers.", "only the reason");
+  deep(M.partsOf([...world, px("NOSEC", 0.02, null)], "NOSEC").parts.map((p) => p.tenths), [4, 16], "a name with no sector keeps the market part");
+  eq(M.partsOf([...world, px("NOSEC", 0.02, null)], "NOSEC").peerWhy, "No sector, so no peers.", "and says why there are no peers");
+  eq(M.partsOf(world.map((x) => (x.t === "SPY" ? { ...x, chg: null } : x)), "S").parts.length, 2, "with no SPY the parts are the peer median and the name's gap to it");
+  deep(M.partsOf(world.map((x) => (x.t === "SPY" ? { ...x, chg: null } : x)), "S").parts.map((p) => p.label), ["Peers' median", "Name vs peers"], "labelled as such");
+  eq(M.partsOf(world, "NOPE"), null, "an unknown name has none");
+  eq(M.partsOf([px("S", null)], "S"), null, "a name with no change has none");
+  eq(M.partsOf(null, "S"), null, "no rows, no parts");
+  eq(M.partsOf([px("S", 0.01), ...Array.from({ length: 10 }, (_, i) => px("Q" + i, 0.01))], "S").peers.z, null, "a zero spread has no z");
+  const flat = M.partsOf([px("S", -0.0003), px("SPY", 0.0002)], "S");
+  eq(flat.total, 0, "a move that rounds to nothing is a plain zero, not minus zero");
+  eq(flat.parts.reduce((a, p) => a + p.tenths, 0), flat.total, "and the parts still add to it");
+  const drift = M.partsOf([px("S", 0.0344), px("SPY", 0.0044), ...[0.001, 0.004, 0.008, 0.011, 0.0126, 0.0126, 0.014, 0.017, 0.02, 0.03].map((c, i) => px("P" + i, c))], "S");
+  deep(drift.parts.map((p) => p.tenths), [4, 9, 21], "levels are rounded, not gaps: 0.44 and 1.26 are 0.4 and 1.3, so the name's 3.44 leaves 2.1");
+  eq(drift.parts.reduce((a, p) => a + p.tenths, 0), 34, "and the three add to the printed 3.4");
+  for (const sentence of M.PARTS_SENTENCES) ok(M.wordCount(sentence) <= M.HEADER_WORDS_MAX && !M.FORBIDDEN_WORDS.some((w) => new RegExp("\\b" + w + "\\b", "i").test(sentence)), "a parts sentence is short and clean: " + sentence);
+  ok(M.HEADER_SENTENCES.includes(M.PARTS_SENTENCES[0]), "and is held with the other header sentences");
+}
+
+{
   near(M.ivDays(-0.031, 0.35), -0.031 * SQRT252 / 0.35, 1e-12, "the definition worked by hand: chg / (iv30p / sqrt(252))");
   near(M.ivDays(-0.031, 0.35), -1.4062, 5e-4, "chg -3.1% on iv30p 35% is -1.4062 IV-days");
   eq(M.signedIvDays(M.ivDays(-0.031, 0.35)), "−1.4", "and prints as minus 1.4");

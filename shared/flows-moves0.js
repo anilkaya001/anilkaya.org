@@ -186,6 +186,68 @@ export function radarDomain(points) {
   };
 }
 
+export const PEER_MIN = 10;
+
+export const PEER_PINS = Object.freeze(["SPY", "QQQ"]);
+
+export const MAD_SCALE = 1.4826;
+
+export const PARTS_LABELS = Object.freeze({
+  market: "Market (SPY)",
+  peers: "Peers' median",
+  peersVsMarket: "Peers vs market",
+  nameVsPeers: "Name vs peers",
+  nameVsMarket: "Name vs market",
+});
+
+export const PARTS_SENTENCES = Object.freeze([
+  "Parts of the move: market, peers against market, the name against its peers.",
+  "Market is the change in SPY. Peers are the other names in the sector.",
+  "Peers need at least 10 names. SPY and QQQ are never peers.",
+  "The parts add to the move. They are not beta-adjusted.",
+  "Peer spread is 1.48 times the median distance of peers from their median.",
+]);
+
+const tenths = (v) => Math.round(v * 1000) + 0;
+
+export function partsOf(rows, t) {
+  const list = Array.isArray(rows) ? rows : [];
+  const me = list.find((r) => r && r.t === t);
+  const chg = me ? finite(me.chg) : null;
+  if (chg === null) return null;
+  const spy = t === "SPY" ? null : list.find((r) => r && r.t === "SPY");
+  const market = spy ? finite(spy.chg) : null;
+  let peers = null;
+  let peerWhy = null;
+  if (PEER_PINS.includes(t)) peerWhy = "A market reference has no peers.";
+  else if (!me.sector) peerWhy = "No sector, so no peers.";
+  else {
+    const v = list
+      .filter((r) => r && r !== me && r.t !== t && !PEER_PINS.includes(r.t) && r.sector === me.sector)
+      .map((r) => finite(r.chg))
+      .filter((x) => x !== null);
+    if (v.length < PEER_MIN) peerWhy = v.length + " peers, needs " + PEER_MIN + ".";
+    else {
+      const s = median(v);
+      const d = MAD_SCALE * median(v.map((x) => Math.abs(x - s)));
+      peers = { n: v.length, median: s, spread: d, z: d > 0 ? (chg - s) / d : null };
+    }
+  }
+  const levels = [];
+  if (market !== null) levels.push(["market", PARTS_LABELS.market, market]);
+  if (peers) levels.push(["peers", market !== null ? PARTS_LABELS.peersVsMarket : PARTS_LABELS.peers, peers.median]);
+  const parts = [];
+  if (levels.length) {
+    let from = 0;
+    for (const [key, label, v] of levels) {
+      parts.push({ key, label, tenths: tenths(v) - from });
+      from = tenths(v);
+    }
+    parts.push({ key: "name", label: peers ? PARTS_LABELS.nameVsPeers : PARTS_LABELS.nameVsMarket, tenths: tenths(chg) - from });
+  }
+  return { t, chg, total: tenths(chg), market, peers, peerWhy, parts };
+}
+
 export const wordCount = (s) => String(s).trim().split(/\s+/).filter(Boolean).length;
 
 export const VIEW_SENTENCES = Object.freeze([
@@ -194,6 +256,6 @@ export const VIEW_SENTENCES = Object.freeze([
 
 export const RADAR_SENTENCES = Object.freeze([X_LINE, Y_LINE, SIZE_LINE, REF_LINE, FROZEN_LINE]);
 
-export const HEADER_SENTENCES = Object.freeze([LINE, CAPTION, APART, GRADE_NOTE, ...VIEW_SENTENCES, ...RADAR_SENTENCES]);
+export const HEADER_SENTENCES = Object.freeze([LINE, CAPTION, APART, GRADE_NOTE, ...VIEW_SENTENCES, ...RADAR_SENTENCES, ...PARTS_SENTENCES]);
 
 export const registered = isTarget(MOVE_ID);
