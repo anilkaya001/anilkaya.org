@@ -106,7 +106,7 @@ const browser = await launch();
   eq(m.drawn, m.stable, "only pairs that passed in both halves are drawn, one curve each");
   ok(/windows/.test(m.stats) && /bins/.test(m.stats) && /read \d\d:\d\d TRT/.test(m.stats), "the stats line has windows, bins and the read time in TRT: " + m.stats);
   ok(/pass by chance/.test(m.note) && /not a forecast/i.test(m.note), "the note says how many pairs would pass by chance and that it is not a forecast");
-  ok(/(?:fewer than one of these \d+ is expected|up to about \d+ of these \d+ are expected) to pass by chance alone/.test(m.note), "and states it as an upper figure, 6 in 100, which the null grid in flows-lean holds: " + m.note);
+  ok(/(?:fewer than one of these \d+ is expected to pass by chance alone, on average|on average about \d+ of these \d+ would pass by chance alone)\. Not a forecast\./.test(m.note), "and states it as an average, 6 in 100 of the pairs, which the null grid in flows-lean holds: " + m.note);
   await page.click("#mkRelations .rl-seg button[data-l='P']");
   const pm = await page.evaluate(() => ({ note: document.querySelector("#mkRelations .rl-note").textContent, lead: document.querySelector("#mkRelations .rl-read").textContent, drawn: document.querySelectorAll("#mkRelations .rl-edge").length, stable: window.FlowsUI.relations.of(document.getElementById("mkRelations")).model().pairs.P.filter((p) => p.stable).length }));
   ok(/not stock-price moves/.test(pm.note) && /daily closes/.test(pm.note), "THE THIRD RELATION SAYS IT REMOVES THE SHARED FLOW BURST, NOT PRICE MOVES, AND THAT PRICE LAYERS NEED DAILY CLOSES");
@@ -229,7 +229,7 @@ for (const [name, edits] of MUTANTS) {
 
 const PAGE_MUTANTS = [
   ["draws pairs that did not pass", "const { shown } = pairsList();\n      const lit", "const shown = M.pairs[layer];\n      const lit", /drawn/],
-  ["the chance sentence is gone", "\" to pass by chance alone. Not a forecast.\"", "\". Not a forecast.\"", /chance/],
+  ["the chance sentence is gone", "\" would pass by chance alone\")", "\" would be noise\")", /chance/],
 ];
 for (const [name, from, to] of PAGE_MUTANTS) {
   const { context, page } = await openMarket(browser, { patch: { [REL]: [[from, to]] }, alerts: alertsFixture({ n: 220, seed: 5 }) }).catch(() => ({ context: null }));

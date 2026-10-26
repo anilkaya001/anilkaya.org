@@ -152,6 +152,7 @@ function battery(src) {
   eq(kinds(run(sw(5, 7000, 3000), ctxOf()), "sweeps").length, 0, "a sweep burst with 10 per cent of its premium sided is not 'mostly on the ask side'");
   eq(kinds(run(sw(5, 33000, 16000), ctxOf()), "sweeps").length, 0, "nor at 49 per cent sided");
   eq(kinds(run(sw(5, 35000, 15000), ctxOf()), "sweeps").length, 1, "but a half-sided burst with 70 per cent of it on the ask is");
+  eq(kinds(run(sw(5, 33000, 22000), ctxOf()), "sweeps").length, 0, "a 55 per cent sided burst with 60 per cent of that on the ask names no side: both halves of the rule are needed");
 
   const big = (size, prem) => [row("SYO001", 6, { prem, size, k: 65 }), ...Array.from({ length: 4 }, (_, i) => row("SYO001", 20 + i, { prem: 10000, size: 10, k: 70 + i }))];
   eq(kinds(run(big(750, 250000), ctxOf()), "size")[0] && kinds(run(big(750, 250000), ctxOf()), "size")[0].say, "SYO001 has one window of 750 contracts in the 65 call for Nov 20, $250K. That is 5.0× the name's usual large window.", "size words");
