@@ -242,7 +242,7 @@
       UI.gaugeChip({ icon: "unusual", color: "--accent-ink", value: prem ? F.money(prem) : DASH, label: "Premium",
         info: { title: "Flagged premium", lead: "The vendor's total premium across every flagged window in the record.", facts: [["Windows", count(rows.length)]] } }),
       UI.gaugeChip({ icon: "list", color: "--label-2", value: (floor ? "≥" : "") + count(seen ?? rows.length), label: "Windows",
-        info: { title: "Windows", lead: floor ? "The read hit a ceiling, so this count is a floor." : "Flagged windows the record has held.", facts: [["Drawn", count(rows.length)], ["Seen", seen === null ? null : (floor ? "at least " : "") + count(seen)]] } }),
+        info: { title: "Windows", lead: floor ? "The read hit a ceiling, so this count is a floor." : "Flagged windows held.", facts: [["Drawn", count(rows.length)], ["Seen", seen === null ? null : (floor ? "at least " : "") + count(seen)]] } }),
       UI.gaugeChip({ ring: share(call, cpW), color: "--up-mark", value: pct0(share(call, cpW)), label: "Calls",
         info: { title: "Call share", lead: "Call premium as a share of the premium on windows whose contract side could be read." } }),
       UI.gaugeChip({ ring: ask.share, color: "--label-1", value: pct0(ask.share), label: "Ask side",
@@ -315,7 +315,7 @@
     const top = [...by.values()].sort((x, y) => y.v - x.v || (x.t < y.t ? -1 : 1)).slice(0, 8);
     const lean = (e) => {
       const q = (e.up - e.down) / e.v;
-      return e.up + e.down < e.v / 2 ? ["\u2013", "Unsided"] : q >= 0.1 ? ["\u25B2", "Bullish"] : q <= -0.1 ? ["\u25BC", "Bearish"] : ["\u2013", "Mixed"];
+      return e.up + e.down < e.v / 2 ? ["–", "Unsided"] : q >= 0.1 ? ["▲", "Bullish"] : q <= -0.1 ? ["▼", "Bearish"] : ["–", "Mixed"];
     };
     slotEl.replaceChildren(
       h("p", { class: "fn-slot-t" }, "Largest names by flagged premium"),
@@ -353,7 +353,7 @@
       S.alertKeys = new Map();
       for (const r of alerts.rows) { const key = joinKey(r.t, r.cp, r.k, r.exp); if (key) S.alertKeys.set(key, r); }
       S.alertsState = alerts.rows.length ? { state: "ok" }
-        : { state: "quiet", reason: "The vendor's rules flagged nothing in this read. A read taken before the open, of a feed that fills intraday, is expected to be thin, and absence from the vendor's selection is not evidence of a quiet market." };
+        : { state: "quiet", reason: "The vendor's rules flagged nothing in this read. Before the open the feed is thin, and absence from that selection is not evidence of a quiet market." };
     } else {
       S.alertsState = {
         state: kind === "unpublished" ? "pending" : kind === "failed" ? "unavailable" : "withheld",
