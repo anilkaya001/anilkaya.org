@@ -127,7 +127,7 @@
     return pad2(d.getUTCHours()) + ":" + pad2(d.getUTCMinutes()) + " TRT";
   };
 
-  const S = { scope: "all", period: null, w: "table", group: "held", tab: "balance", data: null, seq: 0, beat: null, ff: null, recv: null, recvAt: 0, shownAt: Date.now(), cad: 60000, key: null };
+  const S = { scope: "all", period: null, w: "table", group: "held", tab: "balance", data: null, seq: 0, beat: null, ff: null, recv: null, recvAt: 0, shownAt: Date.now(), cad: 60000, key: null, live: false, updated: null, cell: null };
 
   function readHash() {
     const h = parseHash(location.hash);
@@ -202,10 +202,24 @@
     return steps;
   };
 
+  const cssVar = (el, name, value) => { if (el.style.getPropertyValue(name) !== value) el.style.setProperty(name, value); };
+
+  const setHidden = (el, on) => { if (el.hidden !== on) el.hidden = on; };
+
+  const liveApi = () => {
+    const api = window.FlowsUI && window.FlowsUI.ledgerLive;
+    return api || null;
+  };
+
   const html = (el, markup) => {
     if (el.__h === markup) return false;
+    const api = S.live ? liveApi() : null;
+    if (api) {
+      if (api.morph(el, markup) < 0) return false;
+    } else {
+      el.innerHTML = markup;
+    }
     el.__h = markup;
-    el.innerHTML = markup;
     return true;
   };
 
@@ -288,6 +302,7 @@
       row.cells.forEach((cell, c) => { if (setCell(tds[c], cell, row.label, L.columns[c]) && !quiet) flash(tds[c]); });
     });
     for (const sub of table.querySelectorAll("tr.sub td:first-child")) { attr(sub, "title", L.groupRows.side.hover); put(sub, L.groupRows.side.label); }
+    if (S.cell && S.cell.isConnected && line.dataset.on && S.cell.dataset.m) put(line, S.cell.dataset.m + ": " + S.cell.dataset.x);
     armGrid(table);
   }
 
@@ -295,8 +310,9 @@
     const line = $("sfCellLine");
     const cells = () => [...table.querySelectorAll("tbody tr:not(.sub)")].filter((tr) => tr.getClientRects().length > 0).map((tr) => [...tr.querySelectorAll("td")]);
     const show = (td) => {
-      if (!td) { delete line.dataset.on; if (S.data && S.data.status === "ok") settle(line, fits.get(line) || { steps: [line.dataset.zero || ""], hide: false }); return; }
-      line.dataset.on = "1";
+      if (!td) { S.cell = null; delete line.dataset.on; if (S.data && S.data.status === "ok") settle(line, fits.get(line) || { steps: [line.dataset.zero || ""], hide: false }); return; }
+      S.cell = td;
+      data(line, "on", "1");
       put(line, td.dataset.m + ": " + td.dataset.x);
     };
     const live = (td) => td && td.dataset.m && !td.classList.contains("b");
@@ -414,8 +430,8 @@
     put($("sfViewT"), name);
     const tab = document.querySelector('#sfTabs [data-v="side"]');
     if (tab) put(tab, name);
-    $("sfSide").setAttribute("aria-label", name);
-    for (const b of $("sfView").querySelectorAll("button")) b.setAttribute("aria-pressed", String(b.dataset.w === S.w));
+    attr($("sfSide"), "aria-label", name);
+    for (const b of $("sfView").querySelectorAll("button")) attr(b, "aria-pressed", String(b.dataset.w === S.w));
     const body = $("sfBody");
     let markup, cap, foot;
     if (S.w === "flow") { markup = flowHtml(d.flow); cap = ""; foot = ""; }
@@ -426,10 +442,10 @@
     const sideKey = (S.w === "flow" ? "flow" : kind) + "|" + d.scope.key;
     const before = !quiet && body.dataset.key === sideKey && !body.querySelector("[data-skel]") ? snap(body) : null;
     S.sideHtml = S.w === "flow" ? null : markup;
-    body.dataset.key = sideKey;
+    data(body, "key", sideKey);
     const held = document.activeElement && body.contains(document.activeElement) && document.activeElement.classList.contains("sf-drill") ? document.activeElement.dataset.scope : null;
     if (html(body, markup)) {
-      for (const el of body.querySelectorAll("[data-w]")) el.style.setProperty("--w", el.dataset.w + "px");
+      for (const el of body.querySelectorAll("[data-w]")) cssVar(el, "--w", el.dataset.w + "px");
       if (held !== null) { const back = [...body.querySelectorAll(".sf-drill")].find((b) => b.dataset.scope === held); if (back) back.focus({ preventScroll: true }); }
       if (before) {
         const now = snap(body);
@@ -441,9 +457,9 @@
     }
     fitText($("sfSideCap"), cap ? capSteps(cap) : [""]);
     fitText($("sfFoot"), footSteps(foot), true);
-    body.dataset.kind = S.w === "flow" ? "flow" : kind;
+    data(body, "kind", S.w === "flow" ? "flow" : kind);
     const sideTable = body.querySelector("table.sf-st");
-    if (sideTable && sideTable.tBodies[0]) body.style.setProperty("--n", String(sideTable.tBodies[0].rows.length));
+    if (sideTable && sideTable.tBodies[0]) cssVar(body, "--n", String(sideTable.tBodies[0].rows.length));
     fit();
   }
 
@@ -451,19 +467,23 @@
     const host = $("sfBody");
     const all = $("sfAll");
     const table = host.querySelector("table.sf-st");
-    all.hidden = true;
     S.fitKey = null;
-    if (!table || !table.tBodies[0] || host.clientHeight === 0) return;
-    all.textContent = WORDS.showAll(table.tBodies[0].rows.length);
-    all.hidden = false;
+    if (!table || !table.tBodies[0] || host.clientHeight === 0) { setHidden(all, true); return; }
+    put(all, WORDS.showAll(table.tBodies[0].rows.length));
+    setHidden(all, false);
     const rows = [...table.tBodies[0].rows];
     const foot = table.tFoot && table.tFoot.rows[0];
-    const show = (k) => { rows.forEach((r, i) => r.classList.toggle("cut", i >= k)); host.style.setProperty("--n", String(k)); };
+    const label = (t) => { if (foot) put(foot.cells[0], t); };
+    const show = (k) => { rows.forEach((r, i) => r.classList.toggle("cut", i >= k)); cssVar(host, "--n", String(k)); };
     const over = () => table.getBoundingClientRect().height > host.getBoundingClientRect().height + 0.01;
-    if (foot) foot.cells[0].textContent = WORDS.totalAll;
     show(rows.length);
     let k = rows.length;
-    if (over()) {
+    let tight = over();
+    if (tight) {
+      label(WORDS.totalAll);
+      tight = over();
+    }
+    if (tight) {
       let lo = Math.min(3, rows.length);
       let hi = rows.length - 1;
       while (lo < hi) {
@@ -475,8 +495,8 @@
       show(k);
     }
     const cut = rows.length - k;
-    if (foot && !cut) foot.cells[0].textContent = WORDS.total;
-    all.hidden = cut === 0;
+    label(cut ? WORDS.totalAll : WORDS.total);
+    setHidden(all, cut === 0);
     S.fitKey = host.clientHeight + "x" + host.clientWidth;
   }
 
@@ -676,13 +696,13 @@
     paintPoll();
   }
 
-  function paint(d) {
+  function paint(d, live = false, first = false) {
     const key = d.scope && d.period ? d.scope.key + "|" + d.period.id : null;
-    const quiet = S.key !== key;
+    const quiet = S.key !== key || first;
     S.key = key;
     S.data = d;
-    noteRecv(d.serverNow);
-    root.dataset.state = d.status;
+    if (!live) noteRecv(d.serverNow);
+    data(root, "state", d.status);
     if (d.status === "ok" && !S.painted) {
       S.painted = true;
       root.dataset.ent = "1";
@@ -705,22 +725,30 @@
     paintRead(d);
     paintStrip();
     valve();
-    say(d.scope.line);
+    if (!live) say(d.scope.line);
   }
 
   function freshFrom(res, body) {
     const upd = Number(res.headers.get("X-Payload-Updated")) || null;
+    if (upd) S.updated = upd;
     const f = typeof UI.freshFrom === "function" ? UI.freshFrom(res) : null;
     S.ff = f && f.state ? f : null;
     if (f && f.session) UI.freshness({ ...f.forFreshness(), updatedAt: upd, generatedAt: body && body.period ? body.period.asOf : undefined });
   }
 
-  function load() {
+  function load(o = {}) {
+    const lv = liveApi();
+    if (S.live && lv && lv.active(S.period)) {
+      if (o.fresh) return lv.reload("changed").then(() => S.data);
+      lv.repaint();
+      return Promise.resolve(S.data);
+    }
     const seq = ++S.seq;
     root.dataset.busy = "true";
     const q = new URLSearchParams();
     q.set("scope", S.scope);
     if (S.period) q.set("period", S.period);
+    if (o.v) q.set("v", String(o.v));
     return fetch("/api/flows/ledger?" + q.toString(), { credentials: "same-origin", headers: { Accept: "application/json" } }).then((res) => {
       if (res.status === 401) { location.replace("/flows/"); return null; }
       if (!res.ok) throw new Error("HTTP " + res.status);
@@ -883,15 +911,48 @@
   addEventListener("online", paintPoll);
   addEventListener("offline", paintPoll);
 
+  const stamp = (body) => {
+    const keys = body && body.keys ? body.keys : {};
+    const v = Math.max(0, ...["alerts", "breadth", "flowalerts"].map((k) => (keys[k] && Number(keys[k].updatedAt)) || 0));
+    return v > 0 ? v : null;
+  };
+
+  const bridge = {
+    state: () => ({ scope: S.scope, period: S.period, w: S.w, group: S.group }),
+    paint: (view, first) => { paint(view, true, first); },
+    painted: () => S.data !== null && S.data.status === "ok",
+    setLive: (on) => { S.live = on; },
+    server: () => { S.live = false; return load(); },
+    updated: () => S.updated,
+    serverReadAt: () => {
+      const at = S.data && S.data.period && S.data.period.asOf ? Date.parse(S.data.period.asOf) : NaN;
+      return Number.isFinite(at) ? at : null;
+    },
+    say,
+  };
+
+  function goLive() {
+    if (!document.querySelector('i[data-defer="ledger-live"]') || typeof UI.defer !== "function") return;
+    UI.defer("ledger-live").then(() => {
+      const api = liveApi();
+      if (api) api.attach(bridge);
+    });
+  }
+
   readHash();
   setTab(S.tab);
   say(WORDS.loading);
   load().then((body) => {
+    if (body && body.status === "ok") goLive();
     if (typeof UI.heartbeat !== "function") return;
     S.beat = UI.heartbeat({
       keys: ["alerts", "breadth"], nightly: ["flowalerts"], page: "ledger",
-      onBeat: (b) => { polled(b && b.body ? b.body.serverNow : null, typeof UI.heartbeatInterval === "function" ? UI.heartbeatInterval(b && b.body && b.body.phase ? b.body.phase.phase : null, "ledger", false) : null); },
-      onChange: () => { load(); },
+      onBeat: (b) => {
+        polled(b && b.body ? b.body.serverNow : null, typeof UI.heartbeatInterval === "function" ? UI.heartbeatInterval(b && b.body && b.body.phase ? b.body.phase.phase : null, "ledger", false) : null);
+        const api = liveApi();
+        if (api) api.beat(b);
+      },
+      onChange: (changed, fresh, beat) => { S.updated = stamp(beat); load({ fresh: true, v: S.updated }); },
     });
     return body;
   });

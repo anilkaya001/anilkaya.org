@@ -173,7 +173,7 @@
 .sf-st tbody tr:hover { background: var(--fill-4); }
 .sf-st tbody tr[data-scope] { cursor: pointer; }
 .sf-st tr[aria-current="true"] { background: var(--accent-fill); box-shadow: inset 3px 0 0 var(--accent); }
-.sf-st tr[data-n="0"] th, .sf-st tr[data-n="0"] td { color: var(--label-4); }
+.sf-st tr[data-n="0"] th, .sf-st tr[data-n="0"] td { color: var(--label-3); }
 .sf-st tbody tr[data-k="Index & ETF"] > * { border-top: 1px solid var(--sep-strong); }
 .sf-st td { position: relative; }
 .sf-st td.c-taker { padding-left: 14px; }

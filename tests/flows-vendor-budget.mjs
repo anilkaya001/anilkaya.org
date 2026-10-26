@@ -6,7 +6,9 @@ import { lines, UW_PLANS, RESOURCE_IDS } from "../shared/flows-plan-facts.js";
 import { RT_LIMITS } from "../shared/flows-rt.js";
 import { hubConfig } from "../shared/flows-rt-hub.js";
 import { aiCapNeurons, aiCapCalls } from "../shared/flows-ai.js";
-import { LIVE_BUDGET } from "../shared/flows-live.js";
+import { LIVE_BUDGET, LIVE_KEYS } from "../shared/flows-live.js";
+import { FRESH_CLASSES } from "../shared/flows-freshness.js";
+import { LIVE_LOOP } from "../scripts/flows-legs/live.mjs";
 import { PREMARKET_NEWS } from "../shared/flows-live-worker.js";
 import { BUDGETS } from "../shared/flows-vendor-ops.js";
 
@@ -165,6 +167,35 @@ export function downgradeBreaches(env = {}) {
   eq(aiCapNeurons({}), 30000, "the cap in force is the default of 30,000");
   same(downgradeBreaches({ FLOWS_AI_DAILY_CAP_NEURONS: "9000" }), [], "lowering it to 9,000 clears the checklist");
   same(downgradeBreaches({ FLOWS_AI_DAILY_CAP_CALLS: "3000" }).sort(), ["ai.calls", "ai.neurons"], "a call cap of 3,000 is flagged beside it");
+}
+
+{
+  const LEDGER_FILES = ["shared/flows-ledger-book.js", "shared/flows-ledger-live.js", "shared/flows-ledger-strip.js", "server/routes/flows-ledger.js", "assets/js/flows-sfc-live.js", "assets/js/flows-sfc.js"];
+  for (const file of LEDGER_FILES) {
+    const src = read(file);
+    ok(!/\buwFetch\b|\bvendorUrl\b|UW_API_KEY|UW_BASE|unusualwhales|\bpathFor\(|fetchVendor/.test(src), `${file} names no vendor client, path, key or base: the live ledger makes no vendor call of its own`);
+  }
+  const wire = read("worker.js").split("\n").filter((l) => l.startsWith("flowsLedgerRows("));
+  eq(wire.length, 1, "the Worker mounts the ledger family in one call");
+  ok(wire[0].startsWith("flowsLedgerRows({ store: FLOWS_STORE, ensureFlowsTables, readLiveRows: FLOWS_LIVE.readLiveRows, isOwner: ") && !/uwFetch|fetchVendor|limiter|\bAI\b|ratelimit/i.test(wire[0]), "and hands it a store, the schema bootstrap, the stored-row reader and the owner test: no vendor fetch, no limiter, no model");
+  const glue = read("assets/js/flows-sfc-live.js");
+  same([...glue.matchAll(/rt\.connect\(\{([^}]*)\}\)/g)].map((m) => m[1].replace(/\s+/g, " ").trim()), ['topics: ["fl"], primary: ["fl"]'], "the page asks the rail for the flow topic alone, the topic the Unusual page already demands");
+  ok(/rt\.connect\(\{ topics: \["fl"\] \}\)/.test(read("assets/js/flows-unusual.js")), "which is the same demand, so a second viewer of it adds no poll: the hub polls a topic once for every socket that names it");
+  same(vendorMinuteCeilings({ FLOWS_LEDGER_LIVE: "on" }), vendorMinuteCeilings({}), "FLOWS_LEDGER_LIVE moves no per-minute ceiling: the rail, the limiters, Tier 2 and Tier 1 are what they were");
+  same(vendorMinuteCeilings({ FLOWS_LEDGER_LIVE: "owner" }), vendorMinuteCeilings({}), "owner mode too");
+  eq(vendorMinuteSum({ FLOWS_LEDGER_LIVE: "on" }), 603, "so the sum stays at 603 and the as-built breach of the 500 working line is not one call wider");
+  ok(/^FLOWS_LEDGER_LIVE = "owner"$/m.test(toml), "wrangler.toml ships the live ledger to owners only");
+}
+
+{
+  const keys = ["live:alerts", "live:breadth"];
+  for (const key of keys) {
+    const spec = LIVE_KEYS[key];
+    ok(spec && spec.writer === "actions", `${key} is written by the Tier 2 loop`);
+    ok(LIVE_LOOP.slotMs / 1000 <= spec.cadenceS, `${key}: the loop's ${LIVE_LOOP.slotMs / 1000} s slot is no slower than its class's ${spec.cadenceS} s cadence, so no loop on the ledger's path needs tightening`);
+    ok(spec.cadenceS < FRESH_CLASSES[spec.klass].liveS, `${key}: a read at its cadence is inside its live window`);
+  }
+  ok(5 * 60 === FRESH_CLASSES.market.cadenceS && /"1-59\/5 13-21 \* \* MON-FRI"/.test(toml) && /"3-58\/5 13-21 \* \* MON-FRI"/.test(toml), "and Tier 1 and the focus tick fire every five minutes, the market class's cadence");
 }
 
 {

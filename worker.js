@@ -3007,7 +3007,7 @@ flowsPipelineRows({ store: FLOWS_STORE, ensureFlowsTables, readClock: FLOWS_LIVE
   vendorCalls: (env) => (meterOn(env) ? summarizeCalls(state.vendorMeter.snapshot()) : null) }),
 flowsOpsRows({ ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), meter: () => state.keyCounter }),
 flowsOracleRows({ store: FLOWS_STORE, ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), nightlyFreshHeaders, recallLastGood }),
-flowsLedgerRows({ store: FLOWS_STORE, ensureFlowsTables, readLiveRows: FLOWS_LIVE.readLiveRows }),
+flowsLedgerRows({ store: FLOWS_STORE, ensureFlowsTables, readLiveRows: FLOWS_LIVE.readLiveRows, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsFilmRows(),
 flowsPageRows({ currentFlowsUser, readFlowsSummary: readHomeSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
   scenesOn: (env, username) => {

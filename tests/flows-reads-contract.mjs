@@ -806,9 +806,10 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   const getCoverage = await client(f.D1, { FLOWS_COVERAGE: "on", FLOWS_RT_USERS: FIXTURE_ROSTER[0] });
   const ASK = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const getOwner = await client(f.D1, { FLOWS_RT_USERS: FIXTURE_ROSTER[0], FLOWS_OPS: "on", FLOWS_READY: "on", FLOWS_RT_MODE: "off" });
-  const cost = async (path, { init, vendor = false, owner = false, coverage = false } = {}) => {
+  const getBook = await client(f.D1, { FLOWS_RT_USERS: FIXTURE_ROSTER[0], FLOWS_LEDGER_LIVE: "owner" });
+  const cost = async (path, { init, vendor = false, owner = false, coverage = false, book = false } = {}) => {
     const n = f.trips.length;
-    const r = await (coverage ? getCoverage : owner ? getOwner : vendor ? getVendor : get)(path, init);
+    const r = await (book ? getBook : coverage ? getCoverage : owner ? getOwner : vendor ? getVendor : get)(path, init);
     return { rows: f.rowsRead(n), trips: f.trips.length - n, status: r.res.status };
   };
   const CEILING = [
@@ -832,6 +833,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
     ["/api/flows/ops", 24, { owner: true }],
     ["/api/flows/ops?part=ai", 280, { owner: true }],
     ["/api/flows/ledger", LEDGER_ROW_CEILING],
+    ["/api/flows/ledger?part=book&v=1", LEDGER_ROW_CEILING, { book: true }],
     ["/api/flows/ledger?scope=sector%3AEnergy&period=session", LEDGER_ROW_CEILING],
   ];
   let home = 0;
