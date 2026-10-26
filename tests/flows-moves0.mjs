@@ -648,4 +648,31 @@ await showTab(page, "#mktMovers");
   await browser.close();
 }
 
+{
+  const { applyTransforms, absolutise } = await import("./truth/mutants.mjs");
+  const leafPath = ROOT + "shared/flows-moves0.js";
+  const leafSource = read("shared/flows-moves0.js");
+  const zFailures = (Z) => {
+    const bad = [];
+    const note = (c, m) => { if (!c) bad.push(m); };
+    note(Math.abs(Z(0.097, 0.032) - Math.log(1.097) / 0.032) < 1e-12 && Math.abs(Z(0.097, 0.032) - 2.8931) < 1e-3, "+9.7% on a 3.2% typical day is 2.893 typical days, not 3.03");
+    note(Math.abs(Z(-0.095, 0.032) - Math.log(0.905) / 0.032) < 1e-12 && Math.abs(Z(-0.095, 0.032) + 3.1196) < 1e-3, "-9.5% on a 3.2% typical day is -3.120 typical days, not -2.97");
+    note(Math.abs(Z(Math.expm1(0.05), 0.02) - 2.5) < 1e-12 && Math.abs(Z(Math.expm1(-0.05), 0.02) + 2.5) < 1e-12, "a log move of 2.5 typical days in either direction is plus and minus 2.5");
+    note(Z(0, 0.02) === 0, "a flat day is zero typical days");
+    for (const c of [-1, -1.5, null, undefined, NaN, Infinity, "0.01"]) note(Z(c, 0.02) === null, `a change of ${String(c)} has no log return and no typical days`);
+    for (const s of [0, -0.01, null, undefined, NaN, "0.02"]) note(Z(0.01, s) === null, `a typical day of ${String(s)} gives no typical days`);
+    return bad;
+  };
+  deep(zFailures(M.zOf), [], "the typical days of a move are its log return over the typical day, the scale the nightly counts and the scale itself are on");
+  const mutated = (transforms) => import("data:text/javascript;base64," + Buffer.from(absolutise(applyTransforms(leafSource, transforms, "moves0"), path.dirname(leafPath))).toString("base64"));
+  for (const [why, transforms] of [
+    ["the simple change over the typical day", [["return Math.log1p(c) / s;", "return c / s;"]]],
+    ["the log return with the sign dropped", [["return Math.log1p(c) / s;", "return Math.abs(Math.log1p(c)) / s;"]]],
+    ["a total loss read as a number", [["|| !(c > -1)) return null;", ") return null;"]]],
+  ]) {
+    const leaf = await mutated(transforms);
+    ok(zFailures(leaf.zOf).length > 0, `the typical-days checks fail the planted build "${why}"`);
+  }
+}
+
 console.log(`✓ flows-moves0: ${checks} assertions — the IV-days definition worked by hand, the timing fixture ranked on the previous close's IV in the leaf and on the page, a current-IV build and an implied-move build caught, earnings names ranked apart, absent IV never zero, the median line on the prior-close IV, the copy lint, the owner and member defaults, raw lists kept when the lens is off, the order held under the pointer, and Home's Leaders column`);

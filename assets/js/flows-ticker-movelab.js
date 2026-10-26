@@ -14,6 +14,7 @@
   const PUBLISHED = { 2: "f2", 3: "f3" };
   const UNIVERSE_URL = "/api/flows/universe?cols=ed,f2,f3,sig,t";
   const MULT = "×";
+  const MINUS = "\u2212";
   const WHEN = { premarket: "before the open", afterhours: "after the close", postmarket: "after the close" };
 
   const num = (v) => {
@@ -138,7 +139,7 @@
         count = c.why ? { why: PUBLISHED[k] && r[PUBLISHED[k]] === null ? "No nightly count is published for this name, and " + c.why.charAt(0).toLowerCase() + c.why.slice(1) : c.why } : { hits: c.hits, n: c.n, basis: "card" };
       }
       if (count.hits !== undefined) count.how = frequency(count.hits);
-      out.ladder.push({ k, move, up: spot * (1 + move), down: spot * (1 - move), count });
+      out.ladder.push({ k, move, up: spot * Math.exp(move), down: spot * Math.exp(-move), upPct: Math.expm1(move), downPct: -Math.expm1(-move), count });
     }
     return out;
   }
@@ -168,7 +169,7 @@
         title: "Typical daily move",
         lead: "The size of an ordinary day for " + t + ": 1.4826 times the median absolute deviation of its daily log returns over the last " + SESSIONS + " sessions, published by the nightly run.",
         facts: [["Value", m.sig === null ? null : pctText(m.sig)], ["Window", "the last " + SESSIONS + " sessions, at least " + MIN_RETURNS + " usable"], ["Left out", "report sessions, splits, data breaks and gaps of more than " + MAX_GAP_DAYS + " calendar days"]],
-        notes: ["It is a median-based scale, so one wild day does not move it. Levels are the card's price multiplied by one plus or minus the size, a straight-line step."],
+        notes: ["It is a median-based scale, so one wild day does not move it. The size is a log move, so a level is the card's price multiplied by e raised to plus or minus the size and a close beyond it is a day the ladder counts. A rise and a fall of the same size differ in percent: a size of 12% is a rise of 12.75% or a fall of 11.31%."],
       })));
   }
 
@@ -194,8 +195,8 @@
       return h("li", { class: "ft-ml-row", "data-k": String(row.k) },
         h("h4", { class: "ft-ml-k" }, h("b", null, row.k + MULT), " a typical day ", h("span", { class: "ft-ml-mv" }, "±" + pctText(row.move))),
         h("dl", { class: "ft-ml-lv" },
-          h("div", null, h("dt", null, "Rise to"), h("dd", { "data-tone": "up" }, usd(row.up))),
-          h("div", null, h("dt", null, "Fall to"), h("dd", { "data-tone": "down" }, usd(row.down)))),
+          h("div", null, h("dt", null, "Rise to"), h("dd", { "data-tone": "up" }, usd(row.up), h("small", { class: "ft-ml-pc" }, "+" + pctText(row.upPct)))),
+          h("div", null, h("dt", null, "Fall to"), h("dd", { "data-tone": "down" }, usd(row.down), h("small", { class: "ft-ml-pc" }, MINUS + pctText(row.downPct))))),
         c.hits === undefined
           ? h("p", { class: "ft-ml-n" }, DASH + " ", h("span", { class: "ft-ml-cap" }, c.why))
           : [h("p", { class: "ft-ml-n" }, h("b", null, c.hits + " per " + SESSIONS + " sessions"),

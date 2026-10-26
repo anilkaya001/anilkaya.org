@@ -44,12 +44,14 @@
     return [136, 136, 136];
   }
 
-  function sideOf(r) {
-    const x = UI.F.askSplit(r);
-    if (!x || !x.askStated || !x.bidStated || x.ask === x.bid) return "nx";
-    const askSide = x.ask > x.bid;
-    return r.cp === "C" ? (askSide ? "up" : "down") : (askSide ? "down" : "up");
-  }
+  const sideOf = (r) => {
+    const s = r.cp === "C" || r.cp === "P" ? UI.F.askShare([r]).side : null, c = r.cp === "C";
+    return s === "ask" ? (c ? "up" : "down") : s === "bid" ? (c ? "down" : "up") : "nx";
+  };
+  const splitOf = (r) => {
+    const x = UI.F.askSplit(r), c = r.cp === "C", p = r.cp === "P", up = c ? x.ask : p ? x.bid : 0, down = c ? x.bid : p ? x.ask : 0;
+    return { up, down, nx: r.prem - up - down };
+  };
 
   function model(alerts, o = {}) {
     const rows = alerts && Array.isArray(alerts.rows) ? alerts.rows : [];
@@ -66,12 +68,12 @@
       if (!Number.isFinite(ms)) { dropped++; return; }
       const t = r.t.toUpperCase();
       const lane = FUNDS.has(t) ? FUNDS_LANE : INDEX_ROOTS.has(t) ? INDEX_LANE : !uniOk ? UNREAD_LANE : secOf.get(t) || NONE_LANE;
-      windows.push({ i, t, lane, ms, minute: etMinute(ms), day: etDay(ms), prem: r.prem, side: sideOf(r), cp: r.cp === "P" ? "P" : "C", exp: typeof r.exp === "string" ? r.exp.slice(0, 10) : null, sweep: r.sweep === true, contracts: isNum(r.size) ? r.size : null });
+      windows.push({ i, t, lane, ms, minute: etMinute(ms), day: etDay(ms), prem: r.prem, side: sideOf(r), split: splitOf(r), cp: r.cp === "P" ? "P" : "C", exp: typeof r.exp === "string" ? r.exp.slice(0, 10) : null, sweep: r.sweep === true, contracts: isNum(r.size) ? r.size : null });
     });
     const byLane = new Map();
     for (const w of windows) {
       const l = byLane.get(w.lane) || { name: w.lane, prem: 0, n: 0, up: 0, down: 0, nx: 0 };
-      l.prem += w.prem; l.n++; l[w.side] += w.prem;
+      l.prem += w.prem; l.n++; l.up += w.split.up; l.down += w.split.down; l.nx += w.split.nx;
       byLane.set(w.lane, l);
     }
     const b = o.breadth;
@@ -303,7 +305,7 @@
     const laneLabel = (name) => SHORT[name] || name;
     const windowSentence = (w) => {
       const lane = M.lanes.find((l) => l.name === w.lane);
-      return w.t + MID + laneLabel(w.lane) + MID + trtOf(w.ms) + " TRT" + MID + (w.cp === "C" ? "call" : "put") + (w.side === "nx" ? ", no ask or bid split" : w.side === "up" ? (w.cp === "C" ? " on the ask side" : " on the bid side") : (w.cp === "C" ? " on the bid side" : " on the ask side")) + ", " + SIDE_WORD[w.side] + MID + money(w.prem) + (M.total ? " (" + F.pct(w.prem / M.total, 1) + " of the flagged flow)" : "") + (w.exp ? MID + "expiry " + w.exp : "") + (w.sweep ? MID + "sweep" : "") + (lane && isNum(lane.tide) ? MID + laneLabel(w.lane) + " tide " + moneyS(lane.tide) : "");
+      return w.t + MID + laneLabel(w.lane) + MID + trtOf(w.ms) + " TRT" + MID + (w.cp === "C" ? "call" : "put") + (w.side === "nx" ? ", no clear ask or bid lean" : w.side === "up" ? (w.cp === "C" ? " on the ask side" : " on the bid side") : (w.cp === "C" ? " on the bid side" : " on the ask side")) + ", " + SIDE_WORD[w.side] + MID + money(w.prem) + (M.total ? " (" + F.pct(w.prem / M.total, 1) + " of the flagged flow)" : "") + (w.exp ? MID + "expiry " + w.exp : "") + (w.sweep ? MID + "sweep" : "") + (lane && isNum(lane.tide) ? MID + laneLabel(w.lane) + " tide " + moneyS(lane.tide) : "");
     };
     const laneSentence = (l) => laneLabel(l.name) + " lane" + MID + l.n + (l.n === 1 ? " window" : " windows") + MID + money(l.prem) + " flagged" + (M.total ? " (" + F.pct(l.prem / M.total, 1) + ")" : "") + MID + "bullish " + money(l.up) + ", bearish " + money(l.down) + ", unsided " + money(l.nx) + MID + (isNum(l.tide) ? "net option tide " + moneyS(l.tide) : "no tide: " + (l.tideWhy || "not carried"));
     const sentence = () => {
@@ -530,7 +532,7 @@
       size();
       SC = layout(M, W, H, { phone: W < 640 });
       canvas.setAttribute("aria-label", describe());
-      note.textContent = "Open at the back, last read at the front. A sphere is one vendor-flagged window at its minute in its name's sector lane; area is its premium (the largest, " + money(M.pMax) + "). Green: a call on the ask side or a put on the bid side, bullish by convention; red the reverse; blue when the vendor gave no ask or bid split. The lane floor is the sector's net option tide at that minute" + (M.tideWhy ? " (" + M.tideWhy + ")" : "") + ". Times are TRT." + (M.dropped ? " " + M.dropped + " rows without a time or a premium are not drawn." : "");
+      note.textContent = "Open at the back, last read at the front. A sphere is one vendor-flagged window at its minute in its name's sector lane; area is its premium (the largest, " + money(M.pMax) + "). Green: a call on the ask side or a put on the bid side, bullish by convention, when the vendor sided at least half its premium and at least 65% of that sat on one side; red the reverse; blue when the split is missing, mixed or mostly unsided. A blue sphere still adds its sided dollars to the lane figures in the tables, which split every window's dollars. The lane floor is the sector's net option tide at that minute" + (M.tideWhy ? " (" + M.tideWhy + ")" : "") + ". Times are TRT." + (M.dropped ? " " + M.dropped + " rows without a time or a premium are not drawn." : "");
       paint();
       placeHits();
       paintRead();

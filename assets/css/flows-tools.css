@@ -642,6 +642,8 @@
 }
 .dk-size .ui-split { height: 6px; }
 .dk-plan .ui-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.dk-plan .ui-metrics:has(.ui-metric:nth-child(4)) { grid-template-columns: repeat(4, minmax(0, 1fr)); column-gap: var(--sp-3); }
+.dk-plan .ui-metrics:has(.ui-metric:nth-child(4)) .ui-metric-v { font-size: 17px; }
 .dk-bp { display: flex; flex-direction: column; gap: var(--sp-2); }
 .dk-bp-l { color: var(--label-2); font: var(--t-footnote); }
 .dk-bp-f {
@@ -680,7 +682,7 @@
 .dk-hint { margin: 0; color: var(--label-3); font: var(--t-footnote); }
 .dk-alts { display: flex; flex-direction: column; margin-top: var(--sp-2); }
 .dk-alts-h { padding-bottom: var(--sp-1); color: var(--label-2); font: var(--t-footnote); }
-.dk-alt { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: baseline; gap: var(--sp-3); min-height: 36px; padding-top: 8px; border-top: 1px solid var(--sep); font: var(--t-footnote); font-variant-numeric: tabular-nums; }
+.dk-alt { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: baseline; gap: var(--sp-3); min-height: 36px; padding-top: 8px; border-top: 1px solid var(--sep); font: var(--t-footnote); font-variant-numeric: tabular-nums; }
 .dk-alt > span:first-child { overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
 .dk-alt-d { color: var(--label-3); font: var(--t-caption); }
 .dk-alt b { color: var(--up); font-weight: 600; }
@@ -702,13 +704,13 @@
 .dk-list { display: flex; flex-direction: column; }
 .dk-row, .dk-head {
   display: grid;
-  grid-template-columns: 22px minmax(170px, 1.7fr) repeat(5, minmax(60px, 1fr)) 28px;
+  grid-template-columns: 22px minmax(150px, 1.5fr) minmax(104px, 1.4fr) repeat(5, minmax(58px, 1fr)) 28px;
   align-items: center;
   gap: var(--sp-3);
   font: var(--t-footnote);
   font-variant-numeric: tabular-nums;
 }
-.dk-list.has-col .dk-row, .dk-list.has-col .dk-head { grid-template-columns: 22px minmax(170px, 1.7fr) repeat(5, minmax(60px, 1fr)) minmax(96px, 1.2fr) 28px; }
+.dk-list.has-col .dk-row, .dk-list.has-col .dk-head { grid-template-columns: 22px minmax(150px, 1.5fr) minmax(104px, 1.4fr) repeat(5, minmax(58px, 1fr)) minmax(96px, 1.2fr) 28px; }
 .dk-head {
   position: sticky;
   top: calc(var(--bar-h) + var(--safe-t));
@@ -744,11 +746,18 @@
 .dk-c[data-tone] { color: var(--tone); }
 .dk-c small { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .dk-sub { color: var(--label-3); font: var(--t-caption2); font-style: normal; font-weight: 400; }
+.dk-pc { color: var(--accent-ink); font: var(--t-headline); font-variant-numeric: tabular-nums; }
+.dk-pc[data-tone] { color: var(--tone); }
+.dk-alt-r { color: var(--label-2); font-variant-numeric: tabular-nums; }
 .dk-pq { color: var(--accent-ink); }
 .dk-pp { color: var(--s-orange); }
 .dk-row.is-itm .dk-ann, .dk-c.is-unaffordable { color: var(--label-3); }
 .dk-row > .ui-info { justify-self: end; margin: 0; }
 .dk-row > .ui-info::after { inset: -8px 0; }
+@container mod (min-width: 700.02px) and (max-width: 800px) {
+  .dk-row, .dk-head { grid-template-columns: 22px minmax(128px, 1.4fr) minmax(96px, 1.3fr) repeat(5, minmax(52px, 1fr)) 28px; column-gap: var(--sp-2); }
+  .dk-list.has-col .dk-row, .dk-list.has-col .dk-head { grid-template-columns: 22px minmax(128px, 1.4fr) minmax(96px, 1.3fr) repeat(5, minmax(52px, 1fr)) minmax(80px, 1.1fr) 28px; }
+}
 @container mod (max-width: 700px) {
   .dk-head { display: none; }
   .dk-row, .dk-list.has-col .dk-row { grid-template-columns: 22px minmax(0, 1fr) 28px; row-gap: var(--sp-1); padding-block: var(--sp-3); }
@@ -757,6 +766,9 @@
   .dk-row > .ui-info { grid-column: 3; grid-row: 1; }
   .dk-c { align-items: flex-start; gap: 1px; }
   .dk-sub { display: none; }
+  .dk-pc .dk-sub, .dk-ratio .dk-sub { display: block; }
+  .dk-pc, .dk-ratio { grid-column: span 2; }
+  .dk-list:not(.is-sc) .dk-prem.is-dup { display: none; }
   .dk-c small { position: static; width: auto; height: auto; overflow: visible; clip: auto; color: var(--label-3); font: var(--t-caption2); font-weight: 400; }
 }
 

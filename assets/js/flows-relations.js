@@ -13,7 +13,8 @@
     L: { name: "Lean together", lead: "Net bullish premium per ten minutes: calls on the ask side and puts on the bid side minus the reverse, by convention." },
     P: { name: "Beyond the market", lead: "Active together once the day's shared flow burst is removed from both names." },
   });
-  const DEF = Object.freeze({ binMin: 10, names: 12, minBins: 20, minActive: 4, minWindows: 40, minCorr: 0.3 });
+  const CHANCE = 0.06;
+  const DEF = Object.freeze({ binMin: 10, names: 12, minBins: 20, minActive: 4, minWindows: 40, minCorr: 0.3, minOthers: 4 });
   const isNum = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const money = (v) => F.money(v);
   const SIGNS = { "-1": MINUS, "1": "+", "0": "" }, TONES = { "-1": "neg", "1": "pos", "0": "flat" };
@@ -102,18 +103,20 @@
     }
     const half = Math.floor(B / 2);
     const zs = cand.map((s) => standardise(s.A));
-    const factor = new Array(B).fill(0);
-    for (const z of zs) for (let b = 0; b < B; b++) factor[b] += z[b] / zs.length;
-    base.factor = factor;
+    const sum = new Array(B).fill(0);
+    for (const z of zs) for (let b = 0; b < B; b++) sum[b] += z[b];
+    base.pReason = cand.length - 2 < P.minOthers ? "Beyond the market needs at least " + (P.minOthers + 2) + " names, so that the other names can stand for the market." : null;
     for (const L of ["A", "L", "P"]) {
       const cond = L === "P";
+      if (cond && base.pReason) continue;
       const key = cond ? "A" : L;
       const corr = cond ? (x, y, f) => partial(x, y, f) : (x, y) => pearson(x, y);
       for (let i = 0; i < cand.length; i++) for (let j = i + 1; j < cand.length; j++) {
         const x = cand[i][key], y = cand[j][key];
+        const factor = cond ? sum.map((v, b) => v - zs[i][b] - zs[j][b]) : null;
         const r = corr(x, y, factor);
         const ci = fisher(r, B, cond ? 1 : 0);
-        const r1 = corr(x.slice(0, half), y.slice(0, half), factor.slice(0, half)), r2 = corr(x.slice(half), y.slice(half), factor.slice(half));
+        const r1 = corr(x.slice(0, half), y.slice(0, half), cond ? factor.slice(0, half) : null), r2 = corr(x.slice(half), y.slice(half), cond ? factor.slice(half) : null);
         const sameSign = r1 !== null && r2 !== null && Math.sign(r1) === Math.sign(r) && Math.sign(r2) === Math.sign(r);
         const passed = r !== null && ci !== null && (ci[0] > 0 || ci[1] < 0) && Math.abs(r) >= P.minCorr;
         base.pairs[L].push({ a: cand[i].t, b: cand[j].t, r, lo: ci ? ci[0] : null, hi: ci ? ci[1] : null, n: B, r1, r2, passed, stable: passed && sameSign });
@@ -200,7 +203,7 @@
       const cap = Math.max(3, Math.floor(((listBox.clientHeight || H) - 64) / 36));
       const rows = (sel ? shown.filter((p) => p.a === sel || p.b === sel) : shown);
       const top = rows.slice(0, cap);
-      const head = h("div", { class: "rl-lh" }, shown.length ? shown.length + plural(shown.length, " tested pair", " tested pairs") + " of " + all.length : "No pair passed", sel ? h("button", { type: "button", class: "nm-link", onclick: () => { sel = null; paint(); } }, "Clear " + sel) : null);
+      const head = h("div", { class: "rl-lh" }, shown.length ? shown.length + plural(shown.length, " pair passes", " pairs pass") + ", of " + all.length + " tested" : "None of " + all.length + " tested pairs pass", sel ? h("button", { type: "button", class: "nm-link", onclick: () => { sel = null; paint(); } }, "Clear " + sel) : null);
       const li = top.map((p) => h("button", { type: "button", class: "rl-pair", onclick: () => { sel = sel === p.a ? p.b : p.a; paint(); }, "aria-label": rLine(p) },
         h("span", { class: "rl-pn" }, p.a + " ↔ " + p.b), h("span", { class: "rl-ps", title: secName(p.a) + " / " + secName(p.b) }, secName(p.a) + (secName(p.a) === secName(p.b) ? "" : " / " + secName(p.b))),
         h("span", { class: "rl-pr " + TONES[Math.sign(p.r)] }, sgn(p.r)), h("span", { class: "rl-pi" }, "[" + sgn(p.lo) + ", " + sgn(p.hi) + "]")));
@@ -211,7 +214,7 @@
     const plural = (k, one, many) => (k === 1 ? one : many);
 
     function full(rows) {
-      dlg.replaceChildren(h("div", { class: "nm-dg" }, h("h3", { id: "rlDlgT" }, LAYERS[layer].name + ": " + rows.length + " tested pairs"),
+      dlg.replaceChildren(h("div", { class: "nm-dg" }, h("h3", { id: "rlDlgT" }, LAYERS[layer].name + ": " + rows.length + plural(rows.length, " pair passes", " pairs pass") + ", of " + M.pairs[layer].length + " tested"),
         h("p", null, "Pearson r over " + M.bins + " ten-minute bins, its 95% Fisher interval, and r in each half of the window. Only pairs whose interval excludes zero and holds in both halves are listed."),
         h("div", { class: "nm-dtw" }, h("table", { class: "nm-tbl" },
           h("thead", null, h("tr", null, ["Pair", "Sectors", "r", "95% interval", "First half", "Second half"].map((c, i) => h("th", { scope: "col", class: i > 1 ? "c-num" : null }, c)))),
@@ -237,14 +240,20 @@
       if (!M) return;
       wrap.dataset.state = "ok";
       readEl.style.display = "";
-      ringDraw();
-      listDraw();
+      const held = layer === "P" && M.pReason;
+      if (held) {
+        ringBox.replaceChildren(h("p", { class: "nm-empty", "data-empty": "quiet", role: "status" }, M.pReason));
+        listBox.replaceChildren();
+      } else {
+        ringDraw();
+        listDraw();
+      }
       const { shown } = pairsList();
       stats.textContent = M.windows + " windows · " + M.bins + " bins · " + M.names.length + " names" + (read ? " · read " + F.time(read) : "") + (session ? " · session " + F.day(session) : "");
-      readEl.textContent = (sel ? sel + " (" + secName(sel) + "): " + (shown.filter((p) => p.a === sel || p.b === sel).map((p) => (p.a === sel ? p.b : p.a) + " " + sgn(p.r)).join(", ") || "no tested pair") + ". "
+      readEl.textContent = held ? M.pReason : (sel ? sel + " (" + secName(sel) + "): " + (shown.filter((p) => p.a === sel || p.b === sel).map((p) => (p.a === sel ? p.b : p.a) + " " + sgn(p.r)).join(", ") || "no tested pair") + ". "
         : LAYERS[layer].lead + " ") + shown.length + " of " + M.pairs[layer].length + " pairs pass.";
-      const total = M.pairs[layer].length, chance = Math.max(1, Math.round(total * 0.05));
-      note.textContent = (layer === "P" ? "This removes the day's shared flow burst, not stock-price moves. Price-residual layers need daily closes, which the site does not store. " : "") + "Descriptive, from flagged windows only: a name with no window in a bin counts as zero, and windows arrive in bursts, so the interval is narrower than the truth. Each pair is tested alone at 95%, so about " + chance + " of these " + total + " would pass by chance. Not a forecast.";
+      const total = M.pairs[layer].length, chance = Math.round(total * CHANCE);
+      note.textContent = (layer === "P" ? "This removes the day's shared flow burst, not stock-price moves. Price-residual layers need daily closes, which the site does not store. " : "") + "Descriptive, from flagged windows only: a name with no window in a bin counts as zero, and windows arrive in bursts, so the interval is narrower than the truth. Each pair is tested alone at 95%, so " + (chance < 1 ? "fewer than one of these " + total + " is expected to pass by chance alone, on average" : "on average about " + chance + " of these " + total + " would pass by chance alone") + ". Not a forecast.";
     }
 
     function rebuild() {

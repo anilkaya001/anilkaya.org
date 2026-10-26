@@ -1760,7 +1760,7 @@ try {
     await mount(page, card, { neuron });
     const got = await page.evaluate(() => [...document.querySelectorAll("#ftVerdict .ft-idea")].map((a) => ({ title: (a.querySelector(".ft-idea-t") || {}).textContent, tags: [...a.querySelectorAll(".ui-tag")].map((t) => t.textContent),
       on: a.querySelectorAll(".ui-bars i.is-on").length, legs: a.querySelectorAll(".ft-leg").length, pay: !!a.querySelector(".ft-idea-pay svg"), silent: !!a.querySelector(".ui-silent"), text: a.innerText })));
-    const pc = (v) => (v * 100).toFixed(0) + "%";
+    const pc = (v) => (v >= 0.995 ? ">99%" : v < 0.005 ? "<1%" : Math.round(v * 100) + "%");
     const usd = (v) => (v < 0 ? "−$" : "$") + Math.abs(v).toFixed(Math.abs(v) < 10 ? 2 : 0);
     ok(await page.evaluate(() => [...document.querySelectorAll("#ftVerdict .ft-v-meta .ui-tag")].some((t) => t.textContent === "Harvest rich premium")), "the verdict word the server attached heads the verdict");
     eq(got[0].title, st.family.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase()), "an engine idea is titled by its structure family, read off the card's own structure");
@@ -1803,6 +1803,34 @@ try {
     ok(lead && lead[1] === pc(st.prob.popP), `and the lead idea's real-world chance of profit is the engine's own figure (${lead && lead[1]})`);
     eq(errors.length, 0, `the engine ideas and Two worlds throw nothing (${errors.join("; ")})`);
     await page.close();
+
+    const popLine = TICKER_SRC.split("\n").find((l) => l.includes("const popText = "));
+    ok(!!popLine, "the page has one formatter for a chance of profit");
+    const popBuild = (line) => new Function("num", "DASH", line + "\nreturn popText;")((v) => (typeof v === "number" && Number.isFinite(v) ? v : null), "\u2014");
+    const popFails = (line) => {
+      const f = popBuild(line);
+      const table = [[1, ">99%"], [0.996, ">99%"], [0.995, ">99%"], [0.9949, "99%"], [0.5, "50%"], [0.004, "<1%"], [0.005, "1%"], [0, "<1%"], [NaN, "\u2014"], [null, "\u2014"], [1.2, "\u2014"], [-0.1, "\u2014"]];
+      return table.filter(([v, want]) => f(v) !== want);
+    };
+    eq(popFails(popLine).length, 0, "a chance of profit of 0.995 or more reads >99% and under 0.005 reads <1%: a model probability is never printed as certain or impossible");
+    for (const [why, from, to] of [
+      ["the plain rounding it replaced", "v >= 0.995 ? \">99%\" : v < 0.005 ? \"<1%\" : Math.round(v * 100) + \"%\"", "Math.round(v * 100) + \"%\""],
+      ["the upper edge at 0.999", "v >= 0.995 ?", "v >= 0.999 ?"],
+      ["the lower edge at 0.001", "v < 0.005 ?", "v < 0.001 ?"],
+      ["a probability above one printed", "|| v < 0 || v > 1 ?", "?"],
+    ]) {
+      ok(popLine.includes(from), `the planted build "${why}" targets text that exists`);
+      ok(popFails(popLine.replace(from, to)).length > 0, `and the table fails the planted build "${why}"`);
+    }
+    const edge = clone(full);
+    const eSt = edge.engine.structures.find((x) => new Set((x.legs || []).map((l) => l.expiry)).size === 1) || edge.engine.structures[0];
+    eSt.prob.popQ = 0.9961;
+    eSt.prob.popP = 0.0032;
+    const epage = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+    await mount(epage, edge, { neuron: { status: "ok", scope: edge.ticker, llm: false, engine: true, verdict: null, claims: [], refused: [], summary: "s", ideas: [{ structure: eSt.id, verdict: null, word: null, because: [], grade: 2, from: "engine" }], context: { version: 3, sessionDate: edge.sessionDate, expectedSession: edge.sessionDate, stale: false, coverage: { features: 1, read: 1, quiet: 0, withheld: 0, robust: 1, fair: 0, weak: 0 }, state: null, features: [] } } });
+    const edgeText = await epage.evaluate(() => (document.querySelector("#ftVerdict .ft-idea .ft-slot-v") || {}).innerText || "");
+    ok(/>99%/.test(edgeText) && /<1%/.test(edgeText) && !/100%|\b0%/.test(edgeText), `a 99.61% and a 0.32% chance of profit print as >99% and <1% on the idea card (${edgeText.replace(/\s+/g, " ")})`);
+    await epage.close();
   }
 
   {

@@ -127,21 +127,21 @@ export function liveSay(m) {
   const tail = f.event ? " With a report " + f.event + " sessions away." : "";
   switch (m.kind) {
     case "surge":
-      return T + " options flow is running " + f.k.toFixed(1) + "× its usual pace: " + usdShort(f.premium) + " in the last " + mins(f.minutes) +
-        " minutes, against a typical " + usdShort(f.norm) + " for that long." + tail;
+      return T + " has " + usdShort(f.premium) + " of flagged options flow across " + f.n + " windows in the last " + mins(f.minutes) +
+        " minutes. The bar for this name is " + usdShort(f.bar) + "." + tail;
     case "repeat":
-      return "Someone keeps coming back to the " + strikeLabel(f.strike) + " " + (SIDE_WORD[f.side] || "option") + " for " + dayLabel(f.expiry) + ": " +
-        f.n + " prints in " + mins(f.minutes) + " minutes, " + usdShort(f.premium) + " in all." + tail;
+      return "Flow keeps returning to the " + strikeLabel(f.strike) + " " + (SIDE_WORD[f.side] || "option") + " for " + dayLabel(f.expiry) + ": " +
+        f.n + " flagged windows in " + mins(f.minutes) + " minutes, " + usdShort(f.premium) + " in all." + tail;
     case "flip":
       return T + " flow has turned " + leanWord(f.now) + ", " + pct(Math.abs(f.now)) + "% of sided premium, after a " + leanWord(f.before) +
         " read earlier in the session. " + "Lean is " + CONVENTION + ".";
     case "cluster":
       return "Most of " + T + "'s flow is landing in the " + dayLabel(f.expiry) + " expiry: " + pct(f.share) + "% of " + usdShort(f.premium) + ".";
     case "sweeps":
-      return "Several fast, multi-exchange prints on " + T + " in " + mins(f.minutes) + " minutes, mostly on the ask side. " + usdShort(f.premium) + ".";
+      return T + " has " + f.n + " fast, multi-exchange windows in " + mins(f.minutes) + " minutes, mostly on the ask side. " + usdShort(f.premium) + ".";
     case "size":
-      return "One print on " + T + ": " + f.size.toLocaleString("en-US") + " contracts of the " + strikeLabel(f.strike) + " " + (SIDE_WORD[f.side] || "option") +
-        " for " + dayLabel(f.expiry) + ", " + usdShort(f.premium) + ". That is " + f.k.toFixed(1) + "× the name's usual large print." + tail;
+      return T + " has one window of " + f.size.toLocaleString("en-US") + " contracts in the " + strikeLabel(f.strike) + " " + (SIDE_WORD[f.side] || "option") +
+        " for " + dayLabel(f.expiry) + ", " + usdShort(f.premium) + ". That is " + f.k.toFixed(1) + "× the name's usual large window." + tail;
     case "sector":
       return f.n + " names in " + f.sector + " are all seeing heavy options flow together: " + f.names.join(", ") + ".";
     default:

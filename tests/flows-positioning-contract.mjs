@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { loadMutated } from "./truth/mutants.mjs";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -506,9 +507,30 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   const rows = [mk(1, 100, 80, true, true, "call", 500, 100), mk(2, 300, 60, false, true, "put", 10, 100),
     mk(3, 600, 300, true, false, "call", 50, 100), mk(4, 9e9, 0, true, true, "call", 9, 1, "15:00", "MSFT"),
     mk(5, 9e9, 0, true, true, "call", 9, 1, "12:00"), mk(1, 100, 80, true, true, "call", 500, 100)];
+  rows[0].total_bid_side_prem = "10";
+  rows[1].total_bid_side_prem = "120";
+  rows[2].total_bid_side_prem = "200";
+  rows[5].total_bid_side_prem = "10";
   const a = alertsTape(rows, "aapl", { sessionDate: SESSION, adv: 1e5 });
   eq(a.n, 3, "only this name's alerts inside the session count, each once");
-  near(a.askShare, 0.44, 1e-12, "ask share = ask-side premium over premium");
+  near(a.askShare, Number((440 / 770).toFixed(4)), 1e-12, "ask share = ask-side premium over the premium the vendor sided (ask plus bid), the site's one rule");
+  near(a.sidedShare, 0.77, 1e-12, "and the sided share of the premium is published beside it");
+  const askOnly = alertsTape(rows.map((r) => ({ ...r, total_bid_side_prem: undefined })), "aapl", { sessionDate: SESSION, adv: 1e5 });
+  ok(askOnly.askShare === null && askOnly.sidedShare === null && askOnly.gaps.askShare === "no-sided", "a name whose alerts state no bid side has no ask share, not an ask-over-premium figure that reads as a lean");
+  const thin = alertsTape([{ ...rows[2], total_ask_side_prem: "30", total_bid_side_prem: "60" }], "aapl", { sessionDate: SESSION, adv: 1e5 });
+  near(thin.sidedShare, 0.15, 1e-12, "a window with 15 per cent of its premium sided reports that coverage");
+  near(thin.askShare, Number((1 / 3).toFixed(4)), 1e-12, "and the share of what was sided");
+  for (const [name, transforms] of [
+    ["ask over the whole premium", [['askShare: sided.share === null ? note("askShare", "no-sided") : round(sided.share, 4),', 'askShare: P > 0 ? round(sum(mine.map((a) => a.ask)) / P, 4) : note("askShare", "no-premium"),']]],
+    ["an unstated bid counted as zero", [["bidPrem: a.bidRaw", "bidPrem: a.bidRaw ?? 0"]]],
+    ["coverage not published", [['sidedShare: sided.classified === null ? note("sidedShare", "no-sided") : round(sided.classified, 4),', "sidedShare: null,"]]],
+  ]) {
+    const mod = await loadMutated("shared/flows-positioning.js", transforms);
+    const m = mod.alertsTape(rows, "aapl", { sessionDate: SESSION, adv: 1e5 });
+    const mo = mod.alertsTape(rows.map((r) => ({ ...r, total_bid_side_prem: undefined })), "aapl", { sessionDate: SESSION, adv: 1e5 });
+    const caught = Math.abs(m.askShare - Number((440 / 770).toFixed(4))) > 1e-9 || m.sidedShare !== 0.77 || mo.askShare !== null;
+    ok(caught, `PLANTED WRONG BUILD FAILS THE ASK-SHARE CHECKS: ${name}`);
+  }
   near(a.sweepShare, 0.7, 1e-12, "sweep share is premium-weighted");
   near(a.openingShare, 0.4, 1e-12, "and so is the opening share");
   near(a.callShare, 0.7, 1e-12, "and the call share");
@@ -516,7 +538,8 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   eq(a.dots[0].p, 600, "dots are ranked by premium");
   const live = alertsTape(FX.flowAlerts.data, "SYA101", { sessionDate: SESSION, adv: 1e10 });
   eq(live.n, 1, "the probe alert (start_time epoch-ms, 19:59:55Z) is inside the session");
-  near(live.askShare, Number((2130 / 31862).toFixed(4)), 1e-12, "and its ask share reads from the string fields");
+  near(live.askShare, Number((2130 / 31862).toFixed(4)), 1e-12, "and its ask share reads from the string fields (its sides are the whole premium)");
+  near(live.sidedShare, 1, 1e-12, "and is fully sided");
   eq(live.urgency, 0, "a non-sweep alert adds no urgency even with volume above OI");
   const partial = alertsTape([], "AAPL", { sessionDate: SESSION, complete: false, coverFromM: 300 });
   eq(partial.why, "truncated", "an empty name in a truncated batch is not called quiet for the whole session");

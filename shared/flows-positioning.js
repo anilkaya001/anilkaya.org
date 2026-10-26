@@ -2,6 +2,7 @@ import { gammaFlip } from "./flows-features.js";
 import { PUT_TO_DEALER } from "./flows-variation.js";
 import { parseOptionSymbol } from "./flows-premium.js";
 import { rowsOrNull } from "./flows-rows.js";
+import { askShareRead } from "./flows-tape-stats.js";
 
 export const POSITIONING_VERSION = 1;
 
@@ -1027,6 +1028,8 @@ export function alertsTape(rows, ticker, { sessionDate = null, adv = null, compl
       priced: premRaw !== null,
       prem: premRaw ?? 0,
       ask: vnum(r.total_ask_side_prem) ?? 0,
+      askRaw: vnum(r.total_ask_side_prem),
+      bidRaw: vnum(r.total_bid_side_prem),
       sweep: truthy(r.has_sweep),
       opening: truthy(r.all_opening_trades),
       call: String(r.type || "").toLowerCase() === "call",
@@ -1038,12 +1041,13 @@ export function alertsTape(rows, ticker, { sessionDate = null, adv = null, compl
   const note = (field, code) => { gaps[field] = code; return null; };
   if (!mine.length) {
     return { status: "quiet", why: complete ? "empty" : "truncated", asOf: sessionDate, n: 0, complete, coverFromM,
-      prem: 0, askShare: note("askShare", "no-premium"), sweepShare: note("sweepShare", "no-premium"),
+      prem: 0, askShare: note("askShare", "no-premium"), sidedShare: note("sidedShare", "no-premium"), sweepShare: note("sweepShare", "no-premium"),
       openingShare: note("openingShare", "no-premium"), callShare: note("callShare", "no-premium"),
       urgency: note("urgency", "no-premium"), dots: [], u: { prem: "usd", urgency: "frac" }, gaps };
   }
   if (!mine.some((a) => a.priced)) return silence("unreadable", "malformed");
   const P = sum(mine.map((a) => a.prem));
+  const sided = askShareRead(mine.filter((a) => a.priced).map((a) => ({ prem: a.prem, askPrem: a.askRaw, bidPrem: a.bidRaw })));
   const w = (pred) => (P > 0 ? sum(mine.filter(pred).map((a) => a.prem)) / P : null);
   const A = vnum(adv);
   const urgentPrem = sum(mine.filter((a) => a.sweep && a.volOverOi).map((a) => a.prem));
@@ -1054,7 +1058,8 @@ export function alertsTape(rows, ticker, { sessionDate = null, adv = null, compl
     complete,
     coverFromM,
     prem: usd(P),
-    askShare: P > 0 ? round(sum(mine.map((a) => a.ask)) / P, 4) : note("askShare", "no-premium"),
+    askShare: sided.share === null ? note("askShare", "no-sided") : round(sided.share, 4),
+    sidedShare: sided.classified === null ? note("sidedShare", "no-sided") : round(sided.classified, 4),
     sweepShare: round(w((a) => a.sweep), 4) ?? note("sweepShare", "no-premium"),
     openingShare: round(w((a) => a.opening), 4) ?? note("openingShare", "no-premium"),
     callShare: round(w((a) => a.call), 4) ?? note("callShare", "no-premium"),
@@ -1063,7 +1068,7 @@ export function alertsTape(rows, ticker, { sessionDate = null, adv = null, compl
       m: a.m, p: usd(a.prem), cp: a.call ? "C" : "P", k: a.k, e: a.e,
       a: a.prem > 0 ? round(a.ask / a.prem, 3) : null, sw: a.sweep, op: a.opening,
     })),
-    u: { prem: "usd", askShare: "frac", sweepShare: "frac", openingShare: "frac", callShare: "frac", urgency: "frac",
+    u: { prem: "usd", askShare: "frac", sidedShare: "frac", sweepShare: "frac", openingShare: "frac", callShare: "frac", urgency: "frac",
       coverFromM: "min", m: "min", p: "usd", k: "px", a: "frac" },
     gaps,
   };

@@ -26,7 +26,7 @@ const gov = (over = {}) => D.governor({
   mode: "on", cap: D.DEEPEN.perNightCap, backlog: 700, dayLine: 60000, minuteLine: 500, callsSoFar: 1500, elapsedMs: 70000, ...over,
 });
 
-eq(gov().n, 530, "the shipped cap binds on an ordinary night");
+eq(gov().n, 470, "the shipped cap binds on an ordinary night: 470 names, which with the extras leg's 19 minute baseline and 6.65 s a name fits the 72 minutes of the time share");
 eq(gov().binding, "cap", "and the governor says so");
 eq(gov({ mode: "off" }).n, 0, "the switch off chooses nothing");
 eq(gov({ cap: 0 }).n, 0, "a cap of zero chooses nothing");
@@ -40,11 +40,11 @@ ok(gov({ dailySeen: 40000 }).n < gov().n, "and so does a key that others have al
 eq(gov({ dailySeen: 1000 }).n, gov().n, "a key count under the run's own spend changes nothing");
 eq(gov({ dailySeen: null }).n, gov().n, "and an unread counter is not a reading");
 ok(gov({ dailySeen: 9e9 }).n === 0, "a key over its line chooses nothing");
-eq(gov({ cap: 100000 }).limits.time, 535, "the time term at the shipped deadline is 535 names");
-eq(gov({ cap: 100000 }).limits.calls, 1211, "and the day term, with nothing else spent, is 1,211");
-eq(gov({ cap: 100000, callsSoFar: 0 }).n, 535, "so the deadline, not the day line, bounds an uncapped night");
+eq(gov({ cap: 100000 }).limits.time, 478, "the time term at the shipped deadline is 478 names: (72 minutes less the 19 minute baseline) at 6.65 s a name");
+eq(gov({ cap: 100000 }).limits.calls, 1132, "and the day term, with nothing else spent, is 1,132");
+eq(gov({ cap: 100000, callsSoFar: 0 }).n, 478, "so the deadline, not the day line, bounds an uncapped night");
 eq(gov({ cap: 100000 }).binding, "time", "and the governor says so");
-eq(gov({ backlog: 10000, cap: 100000, elapsedMs: 24 * 60 * 1000 }).limits.time, 443, "a run 24 minutes in has 443 names of time left");
+eq(gov({ backlog: 10000, cap: 100000, elapsedMs: 24 * 60 * 1000 }).limits.time, 433, "a run 24 minutes in has 433 names of time left");
 eq(gov({ cap: 100000 }).n, gov({ cap: D.DEEPEN.hardCap }).n, "no cap lifts the hard cap");
 ok(gov({ dayLine: 20000 }).n < gov().n, "a smaller plan reads fewer names");
 eq(gov({ dayLine: null }).limits.calls, gov({ dayLine: 60000 }).limits.calls, "an unread plan is held to the working line");
@@ -56,22 +56,22 @@ const adv = lines({ FLOWS_UW_PLAN: "advanced" });
 const advGov = (over = {}) => gov({ dayLine: adv["uw.day"].cap, minuteLine: adv["uw.min"].cap, ...over });
 eq([adv["uw.day"].cap, adv["uw.min"].cap], [100_000_000, 500], "THE RECORDED ADVANCED PLAN hands the governor a 100M day line and the 500 working minute line");
 eq(advGov().pace, gov().pace, "THE RAISED DAY LINE DOES NOT RAISE THE PACE: the minute line alone sets it, 400 calls a minute");
-eq([advGov().n, advGov().binding], [530, "cap"], "an ordinary night is still the shipped cap");
-eq([advGov({ cap: 100000, callsSoFar: 0 }).n, advGov({ cap: 100000, callsSoFar: 0 }).binding], [535, "time"], "an uncapped night is still bounded by the deadline");
+eq([advGov().n, advGov().binding], [470, "cap"], "an ordinary night is still the shipped cap");
+eq([advGov({ cap: 100000, callsSoFar: 0 }).n, advGov({ cap: 100000, callsSoFar: 0 }).binding], [478, "time"], "an uncapped night is still bounded by the deadline");
 eq(advGov({ cap: 100000 }).n, gov({ cap: 100000 }).n, "the same uncapped night as on the working line: the deadline, not the day line, sets it");
 ok(gov({ dailySeen: 40000 }).n < advGov({ dailySeen: 40000 }).n, "only a day already spent past about 30,400 calls reads more names than before");
-eq(advGov({ dailySeen: 40000 }).n, 530, "and then no more than the cap");
+eq(advGov({ dailySeen: 40000 }).n, 470, "and then no more than the cap");
 ok((D.DEEPEN.baselineCalls + D.DEEPEN.hardCap * D.DEEPEN.callsPerName) < adv["uw.day"].cap * D.DEEPEN.daySharePct / 1000, "a night at the hard cap is under a thousandth of the plan's day share, so the day term never binds on this plan");
 
 eq(D.deepenMode({}), "on", "an unset switch is on");
 eq(D.deepenMode({ FLOWS_DEEPEN: "off" }), "off", "off is off");
 eq(D.deepenMode({ FLOWS_DEEPEN: " OFF " }), "off", "in any case");
 eq(D.deepenMode({ FLOWS_DEEPEN: "no" }), "on", "anything but off is on");
-eq(D.capFromEnv({}), 530, "no cap variable gives the shipped cap");
+eq(D.capFromEnv({}), 470, "no cap variable gives the shipped cap");
 eq(D.capFromEnv({ FLOWS_DEEPEN_CAP: "12" }), 12, "a cap variable is honoured");
 eq(D.capFromEnv({ FLOWS_DEEPEN_CAP: "0" }), 0, "zero skips the night");
 eq(D.capFromEnv({ FLOWS_DEEPEN_CAP: "99999" }), D.DEEPEN.hardCap, "and is clamped");
-eq(D.capFromEnv({ FLOWS_DEEPEN_CAP: "x" }), 530, "a malformed value falls back");
+eq(D.capFromEnv({ FLOWS_DEEPEN_CAP: "x" }), 470, "a malformed value falls back");
 eq(D.capFromEnv({}, 24), 24, "a caller may give its own default");
 
 const slope = (callModel({ deep: 100 }, CALL_COST).total - callModel({ deep: 0 }, CALL_COST).total) / 100 + CALL_COST.enrich;
@@ -89,7 +89,7 @@ ok(nightlyShare < D.DEEPEN.daySharePct, `a whole night at the shipped cap is ${(
 const nightMs = D.DEEPEN.baselineMs + D.DEEPEN.perNightCap * D.DEEPEN.msPerName;
 ok(nightMs < DEADLINE_MS * D.DEEPEN.timeSharePct, `and ${(nightMs / 60000).toFixed(1)} minutes of the ${(DEADLINE_MS / 60000)} minute deadline`);
 
-eq([D.DEEPEN.perNightCap, D.DEEPEN.hardCap, D.DEEPEN.daySharePct, D.DEEPEN.deadlineMs / 60000], [530, 900, 0.85, 90], "the shipped sizing is 530 a night, 900 at most, 85 per cent of the day line, a 90 minute deadline");
+eq([D.DEEPEN.perNightCap, D.DEEPEN.hardCap, D.DEEPEN.daySharePct, D.DEEPEN.deadlineMs / 60000], [470, 900, 0.85, 90], "the shipped sizing is 470 a night, 900 at most, 85 per cent of the day line, a 90 minute deadline");
 const wf = readFileSync(path.join(ROOT, ".github/workflows/flows-pipeline.yml"), "utf8");
 const timeout = Number((/\n {2}build:\n {4}runs-on: [^\n]+\n {4}timeout-minutes: (\d+)/.exec(wf) || [])[1]);
 ok(timeout >= D.DEEPEN.deadlineMs / 60000 + 20, `the workflow's ${timeout} minute timeout leaves at least 20 minutes after the ${D.DEEPEN.deadlineMs / 60000} minute deadline for the stages that follow it`);

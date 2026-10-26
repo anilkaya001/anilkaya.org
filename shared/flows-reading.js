@@ -1,5 +1,5 @@
 import { KINDS, PRIORITY, renderDossierForModel, dossierFacts, tokensOf } from "./flows-dossier.js";
-import { guardAnswer, numeralsIn } from "./flows-ask.js";
+import { guardAnswer, numeralsIn, FORECAST_ALT, MODAL_ALT, guardText } from "./flows-ask.js";
 
 export const READING_VERSION = 2;
 export const READING_BUDGET_TOKENS = 4200;
@@ -618,8 +618,9 @@ function checkText(text, cap) {
   if (t.length > cap) return bad("length", t.length + " characters against " + cap);
   if (CONTROL.test(t)) return bad("markup", "control or invisible characters");
   if (MARKUP.test(t)) return bad("markup", "markup, a link or a symbol that is not prose");
-  if (ROLE.test(t) || SECOND_PERSON.test(t)) return bad("role", "chat markers, a refusal or direct address");
-  if (ADVICE.test(t)) return bad("advice", "a recommendation");
+  const g = guardText(t);
+  if (ROLE.test(g) || SECOND_PERSON.test(g)) return bad("role", "chat markers, a refusal or direct address");
+  if (ADVICE.test(g)) return bad("advice", "a recommendation");
   return { text: t };
 }
 
@@ -655,7 +656,7 @@ function checkNumbers(text, cited, index) {
     if (unforgiven.length) return bad("invented", unforgiven.join(", "));
     if (labels.length) return bad("mislabeled", labels.join(", "));
   }
-  if (FORECAST_EXTRA.test(text)) return bad("forecast", (FORECAST_EXTRA.exec(text) || [""])[0]);
+  if (FORECAST_EXTRA.test(guardText(text))) return bad("forecast", (FORECAST_EXTRA.exec(guardText(text)) || [""])[0]);
   const facts = unitedNumerals(cited.map((f) => sayOf(f).say).join("\n"));
   for (const u of unitedNumerals(text)) {
     if (!facts.some((f) => f.cls === u.cls && Math.abs(f.n - u.n) < 1e-9)) return bad("unit", u.n + " " + u.cls);
@@ -663,7 +664,7 @@ function checkNumbers(text, cited, index) {
   return null;
 }
 
-const FORECAST_RE = /^(?:will|should|expect\w*|likely|going to|forecast\w*|predict\w*|anticipat\w*|poised|target\w*|odds)$/i;
+const FORECAST_RE = new RegExp("^(?:" + FORECAST_ALT + ")$", "i");
 const MODAL_RE = /^(?:would|could|might|may)$/i;
 
 function checkEntities(text, vocab, ticker) {
@@ -800,7 +801,7 @@ export function vetReading(reply, dossier, tags, opts = {}) {
         const wrong = missing.filter((k) => !packets[k] || packets[k].status === "ok");
         if (wrong.length) return refuse(where, bad("false-unknown", wrong.join(", ")));
         const failure = checkEntities(t.text, vocab, ticker) || checkQuote(t.text, grams) ||
-          (FORECAST_EXTRA.test(t.text) || FORECAST_ANY.test(t.text) ? bad("forecast") : null);
+          (FORECAST_EXTRA.test(guardText(t.text)) || FORECAST_ANY.test(guardText(t.text)) ? bad("forecast") : null);
         if (failure) return refuse(where, failure);
         sections.unknown.push({ text: t.text, missing: [...new Set(missing)] });
       });
@@ -825,7 +826,7 @@ export function vetReading(reply, dossier, tags, opts = {}) {
   return { ok: true, sections, tags: chosen, refused, surviving };
 }
 
-const FORECAST_ANY = /\b(?:will|should|expect\w*|likely|going to|forecast\w*|predict\w*|would|could|might)\b/i;
+const FORECAST_ANY = new RegExp("\\b(?:" + FORECAST_ALT + "|" + MODAL_ALT + ")\\b", "i");
 
 const shortReason = (reason) => {
   const m = /^([a-z]+):/.exec(String(reason || ""));

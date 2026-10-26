@@ -13,8 +13,8 @@
   var STATE_NAME = Object.freeze({ calm: "quiet", watching: "watching live", signal: "has a signal", conflict: "sees two readings that disagree", stale: "resting" });
   var PREF = Object.freeze({ on: 2, quiet: 1, off: 0 });
   var PREF_BY = Object.freeze(["off", "quiet", "on"]);
-  var KIND_LABEL = Object.freeze({ surge: "Heavy flow", repeat: "Same strike again", flip: "Flow turned", cluster: "One expiry", sweeps: "Fast prints", size: "Big print", sector: "Sector together" });
-  var KIND_SHORT = Object.freeze({ surge: "heavy flow", repeat: "same strike again", flip: "flow turned", cluster: "flow in one expiry", sweeps: "fast prints", size: "one big print", sector: "sector together" });
+  var KIND_LABEL = Object.freeze({ surge: "Heavy flow", repeat: "Same strike again", flip: "Flow turned", cluster: "One expiry", sweeps: "Fast windows", size: "Big window", sector: "Sector together" });
+  var KIND_SHORT = Object.freeze({ surge: "heavy flow", repeat: "same strike again", flip: "flow turned", cluster: "flow in one expiry", sweeps: "fast windows", size: "one big window", sector: "sector together" });
   var VERDICT_GLYPH = Object.freeze({ cheap: "▼", rich: "▲" });
   var WHY_TEXT = Object.freeze({
     ok: "Priced from last night's chain.",
@@ -495,7 +495,7 @@
     var msgs = S.msgs.filter(function (m) { return now - m.at <= 60 * MIN; }).sort(function (a, b) { return b.at - a.at; }).slice(0, 6);
     if (msgs.length) { msgs.forEach(function (m) { box.append(msgCard(m)); }); if (S.liveState.quiet > 0) box.append(h("p", { class: "orc-prov" }, "+" + S.liveState.quiet + " more quiet ones")); return box; }
     if (feedLive() || S.lastFlowAt) {
-      box.append(h("p", { class: "orc-quiet" }, feedLive() ? "Watching live. Nothing is running far from its usual pace." : "Quiet. The last flow was at " + K.trt(S.lastFlowAt) + "."));
+      box.append(h("p", { class: "orc-quiet" }, feedLive() ? "Watching live. Nothing has cleared its bar." : "Quiet. The last flow was at " + K.trt(S.lastFlowAt) + "."));
       return box;
     }
     var m = U.freshness && typeof U.freshness.market === "function" ? U.freshness.market() : null;
@@ -573,7 +573,7 @@
     var msgs = S.msgs.filter(function (m) { return now - m.at <= 30 * MIN; }).sort(function (a, b) { return b.strength - a.strength || b.at - a.at; }).slice(0, 3);
     el.replaceChildren(h("span", { class: "orc-band-k" }, "Right now"));
     if (!msgs.length) {
-      el.append(h("span", { class: "orc-band-q" }, feedLive() ? "Watching. Nothing is running far from its usual pace." : S.lastFlowAt ? "Quiet. Last flow " + K.trt(S.lastFlowAt) + "." : "Quiet."));
+      el.append(h("span", { class: "orc-band-q" }, feedLive() ? "Watching. Nothing has cleared its bar." : S.lastFlowAt ? "Quiet. Last flow " + K.trt(S.lastFlowAt) + "." : "Quiet."));
       return;
     }
     msgs.forEach(function (m) {

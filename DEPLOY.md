@@ -2720,7 +2720,7 @@ job that was already running when the Worker was promoted logs two `invalid_key`
 ### 10.5j The weekly monitors
 
 - **The vendor probe** (`.github/workflows/flows-probe.yml`) runs every Sunday at
-  14:23 UTC in `--strict` mode (`FLOWS_PROBE_STRICT=1`), 170 calls. It
+  14:23 UTC in `--strict` mode (`FLOWS_PROBE_STRICT=1`), 180 calls. It
   fails when an operation answers anything but 2xx, except the refusals listed
   under `gated` in `scripts/flows-probe-list.json` (the VIX term structure's
   403 without the volatility add-on, and politician holders' enterprise-only

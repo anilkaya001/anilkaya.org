@@ -428,12 +428,12 @@
         info: () => ({
           title: "Flow bias", state: null,
           lead: ptSilence ? silenceSaid(ptSilence, "the dollar-weighted tilt")
-            : "Net premium over gross premium across the screened universe, weighted by dollars.",
+            : "Net premium over the sum of each name's absolute net premium, across the screened universe.",
           facts: [
             ["By dollars", pct(pt, 1)],
             ["Names equally weighted", bt !== null ? pct(bt, 1) : btSilence ? btSilence[1] : DASH],
-            ["Net call premium", usd(premium.netPositive)],
-            ["Net put premium", usd(premium.netNegative)],
+            ["Net premium, names leaning bullish", usd(premium.netPositive)],
+            ["Net premium, names leaning bearish", usd(premium.netNegative)],
             sessionFact(mDay),
           ],
           notes: [bt !== null && pt !== null && (bt > 0) !== (pt > 0) && bt !== 0 && pt !== 0
@@ -1105,7 +1105,7 @@
   const FK = ["px", "prev", "chg", "net", "lean", "iv30", "iv30p"];
   const IV_YEAR = Math.sqrt(252);
   const IV_EVENT = 21;
-  const IV_APART = "Earnings within 30 days: event not separated.";
+  const IV_APART = "Earnings within 21 sessions: event not separated.";
   const IV_GRADE = "From 30-day IV; no surface.";
   const ivDays = (chg, iv) => { const c = isNum(chg), v = isNum(iv); return c === null || v === null || !(v > 0) ? null : c / (v / IV_YEAR); };
   function ivdIndex(u) {
