@@ -6,9 +6,10 @@ import { chromium } from "playwright";
 
 import {
   buildEvents, eventRow, sessionsToEarnings, calendarDaysTo, ivPathOf,
-  IV_PATH_LABELS, EVENT_ROWS, EVENT_WINDOW_DAYS, EVENTS_NOTES,
+  IV_PATH_LABELS, EVENT_ROWS, EVENTS_NOTES,
 } from "../shared/flows-events.js";
 import { eventsPage } from "../shared/flows-pages.js";
+import { HORIZON_SESSIONS, horizonEnd, previousSession } from "../shared/flows-calendar.js";
 import { horizonMove, TRADING_YEAR } from "../shared/flows-features.js";
 import { EARNINGS_GATE_DAYS, daysToEarnings, screenerTilt } from "../scripts/flows-pipeline.mjs";
 import { nextTradingDay } from "../shared/flows-freshness.js";
@@ -64,7 +65,9 @@ const gateDteFrom = (origin) => (date) =>
   eq(PAYLOAD.gateDays, EARNINGS_GATE_DAYS,
      "the payload republishes the gate width from the pipeline's own constant");
   eq(PAYLOAD.cap, EVENT_ROWS, "and the cap from the module's");
-  eq(PAYLOAD.windowDays, EVENT_WINDOW_DAYS, "and the window from the module's");
+  eq(PAYLOAD.windowSessions, HORIZON_SESSIONS, "and the window, in trading sessions, from the calendar's one horizon");
+  eq(PAYLOAD.windowDays, undefined, "the calendar-day window is gone, because 21 calendar days is about 15 sessions and no longer the horizon");
+  eq(PAYLOAD.through, horizonEnd(previousSession(PAYLOAD.gateOrigin)), "and the payload names the last session the window reaches");
 
   ok(ROWS.every((r) => Number.isInteger(r.dte)),
      `all ${ROWS.length} rows carry an integer dte — CALENDAR days, the gate's unit`);
@@ -367,8 +370,10 @@ const gateDteFrom = (origin) => (date) =>
      "and beyondCap counts what it did not show — a measured zero when it showed everything");
   eq(PAYLOAD.lastShownDate, ROWS.length ? ROWS[ROWS.length - 1].d : null,
      "while lastShownDate is the newest date the drawing can speak for");
-  ok(!ROWS.some((r) => r.dte > PAYLOAD.windowDays),
-     `no published row reports beyond the ${PAYLOAD.windowDays}-CALENDAR-DAY window`);
+  ok(!ROWS.some((r) => r.sdte >= PAYLOAD.windowSessions),
+     `no published row is more than ${PAYLOAD.windowSessions - 1} sessions from the gate's origin, which is ${PAYLOAD.windowSessions} sessions from the session`);
+  ok(!ROWS.some((r) => r.d > PAYLOAD.through),
+     "and none reports after the window's last session");
   ok(!ROWS.some((r) => r.dte === null || r.sdte === null),
      "and none carries a null on either horizon");
 
@@ -376,16 +381,26 @@ const gateDteFrom = (origin) => (date) =>
     { gateOrigin: GATE_ORIGIN });
   eq(straddle.dte, 14, "Wed 26 → Wed Sep 9 is fourteen calendar days");
   eq(straddle.sdte, 9, "and nine trading sessions: Labor Day, Monday Sep 7, is a weekday the exchange is shut");
+  const wide = buildEvents([nameAt("STRADDLE", "2026-09-09"), nameAt("INSIDE", "2026-09-02")],
+    { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE, windowSessions: 10 });
+  deep(wide.rows.map((r) => r.t), ["INSIDE", "STRADDLE"],
+     "a 10-SESSION window keeps a name 14 calendar days out, because Labor Day is not a session: " +
+     "ten sessions from the last completed one, where a bound tested in calendar days would drop it");
   const cut = buildEvents([nameAt("STRADDLE", "2026-09-09"), nameAt("INSIDE", "2026-09-02")],
-    { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE, windowDays: 10 });
-  deep(cut.rows.map((r) => r.t), ["INSIDE"],
-     "a 10-day window EXCLUDES a name 14 calendar days out whose nine SESSIONS would have " +
-     "cleared a bound tested in the wrong unit");
+    { gateOrigin: GATE_ORIGIN, sessionDate: SESSION_DATE, windowSessions: 9 });
+  deep(cut.rows.map((r) => r.t), ["INSIDE"], "and a 9-session window drops it, the tenth session out");
   eq(cut.inWindow, 1, "and does not count it as in the window");
-  eq(cut.rows[0].dte, 7, "while the name that is genuinely inside — seven days — is kept");
-  eq(cut.rows[0].sdte, 5, "at five sessions");
-  ok(cut.rows[0].sdte <= cut.windowDays && cut.rows[0].dte <= cut.windowDays,
-     "the kept name is inside the bound on BOTH horizons, which is the only unambiguous case");
+  eq(cut.rows[0].dte, 7, "while the name that is genuinely inside is kept, seven calendar days out");
+  eq(cut.rows[0].sdte, 5, "at five sessions from the gate's origin");
+  eq(cut.windowSessions, 9, "and the payload says which window it was built on");
+
+  const post = (t, d, when) => ({ row: { ticker: t, close: "100.00", next_earnings_date: d, er_time: when, sector: "Technology" }, tilt: tiltOf() });
+  const edge = buildEvents([post("PRE", "2026-09-23", "premarket"), post("POST", "2026-09-23", "postmarket"), post("UNK", "2026-09-23", "unknown"), post("LATE", "2026-09-24", "premarket")],
+    { gateOrigin: "2026-08-25", sessionDate: "2026-08-24" });
+  deep(edge.rows.map((r) => r.t), ["PRE", "UNK"],
+     "the window is measured to the impact session: before the open on the 21st session out is inside, after the close that day lands on the 22nd and is outside, " +
+     "an unstated time keeps the earlier candidate, and the 22nd is outside");
+  eq(edge.through, "2026-09-23", "the last session of the window is 21 sessions after the last completed one, which is 23 September from 24 August with Labor Day shut");
 
   const far = buildEvents([
     nameAt("D4", "2026-09-04"), nameAt("D1", "2026-08-27"),

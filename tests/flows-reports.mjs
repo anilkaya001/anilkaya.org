@@ -91,26 +91,26 @@ const fixtureOf = (ticker, date, timing, origin = "history") => ({ asOf: "2026-0
 const asOf9 = "2026-03-09";
 {
   const log = [];
-  const a = R.mergeObservations([cal("premarket", "2026-03-09", asOf9, "ZQAL"), new Map([["ZQAL", R.observeHistory([hist("2026-03-09", "unknown")], asOf9)]])], log);
-  eq(R.rdOf(a.get("ZQAL"), asOf9).rd, 0, "tonight's calendar and a history row with no time agree on the day: rd 0");
-  eq(a.get("ZQAL").origin, "calendar", "and the calendar's stated time wins");
+  const a = R.mergeObservations([cal("premarket", "2026-03-09", asOf9, "SYA101"), new Map([["SYA101", R.observeHistory([hist("2026-03-09", "unknown")], asOf9)]])], log);
+  eq(R.rdOf(a.get("SYA101"), asOf9).rd, 0, "tonight's calendar and a history row with no time agree on the day: rd 0");
+  eq(a.get("SYA101").origin, "calendar", "and the calendar's stated time wins");
   eq(log.length, 1, "the disagreement over the time is logged");
   const b = R.mergeLedger(
-    { asOf: "2026-03-06", rows: new Map([["ZQBM", { date: "2026-03-04", timing: "before-open", origin: "calendar", next: null }]]) },
-    new Map([["ZQBM", R.observeHistory([hist("2026-03-05", "premarket")], asOf9)]]),
-    { asOf: asOf9, universe: ["ZQBM"] });
-  eq(b.cells.get("ZQBM").rd, 3, "a calendar entry kept on the ledger beats tonight's history row for the same report one session later: rd 3, where latest-wins gives 2");
+    { asOf: "2026-03-06", rows: new Map([["SYB102", { date: "2026-03-04", timing: "before-open", origin: "calendar", next: null }]]) },
+    new Map([["SYB102", R.observeHistory([hist("2026-03-05", "premarket")], asOf9)]]),
+    { asOf: asOf9, universe: ["SYB102"] });
+  eq(b.cells.get("SYB102").rd, 3, "a calendar entry kept on the ledger beats tonight's history row for the same report one session later: rd 3, where latest-wins gives 2");
   eq(b.log.length, 1, "and the disagreement is logged");
   const c = R.mergeLedger(
-    { asOf: "2026-03-06", rows: new Map([["ZQCN", { date: "2026-03-03", timing: "before-open", origin: "history", next: null }]]) },
-    new Map([["ZQCN", R.observeHistory([hist("2026-03-04", "premarket")], asOf9)]]),
-    { asOf: asOf9, universe: ["ZQCN"] });
-  eq(c.cells.get("ZQCN").rd, 3, "of two history rows for one report the fresh one wins");
+    { asOf: "2026-03-06", rows: new Map([["SYC103", { date: "2026-03-03", timing: "before-open", origin: "history", next: null }]]) },
+    new Map([["SYC103", R.observeHistory([hist("2026-03-04", "premarket")], asOf9)]]),
+    { asOf: asOf9, universe: ["SYC103"] });
+  eq(c.cells.get("SYC103").rd, 3, "of two history rows for one report the fresh one wins");
   const d = R.mergeLedger(
-    { asOf: "2026-03-06", rows: new Map([["ZQDP", { date: "2025-12-04", timing: "before-open", origin: "history", next: "2026-03-06" }]]) },
-    cal("afterhours", "2026-03-06", asOf9, "ZQDP"),
-    { asOf: asOf9, universe: ["ZQDP"], covered: new Set(["2026-03-09"]) });
-  eq(d.cells.get("ZQDP").rd, 0, "a report a quarter later is a new report whatever its source: rd 0");
+    { asOf: "2026-03-06", rows: new Map([["SYD104", { date: "2025-12-04", timing: "before-open", origin: "history", next: "2026-03-06" }]]) },
+    cal("afterhours", "2026-03-06", asOf9, "SYD104"),
+    { asOf: asOf9, universe: ["SYD104"], covered: new Set(["2026-03-09"]) });
+  eq(d.cells.get("SYD104").rd, 0, "a report a quarter later is a new report whatever its source: rd 0");
   eq(d.log.length, 0, "and no disagreement");
 }
 
@@ -129,49 +129,49 @@ const asOf9 = "2026-03-09";
 }
 
 {
-  const u = ["ZQAL", "ZQBM", "ZQCN"];
+  const u = ["SYA101", "SYB102", "SYC103"];
   const prior = {
     asOf: "2026-03-05",
     rows: new Map([
-      ["ZQAL", { date: "2026-03-05", timing: "before-open", origin: "history", next: "2026-06-04" }],
-      ["ZQBM", { date: "2025-12-10", timing: "before-open", origin: "history", next: "2026-03-06" }],
-      ["ZQCN", { date: "2025-12-12", timing: "after-close", origin: "history", next: "2026-03-09" }],
+      ["SYA101", { date: "2026-03-05", timing: "before-open", origin: "history", next: "2026-06-04" }],
+      ["SYB102", { date: "2025-12-10", timing: "before-open", origin: "history", next: "2026-03-06" }],
+      ["SYC103", { date: "2025-12-12", timing: "after-close", origin: "history", next: "2026-03-09" }],
     ]),
   };
   const plan = R.reactionPlan("2026-03-09", prior.asOf);
   const steps = plan.map((s) => ({ ...s, ok: true, cut: s.route === "premarket" && s.day === "2026-03-06" }));
   const cov = R.coveredDays(steps);
   deep([[...cov.covered], cov.cut], [["2026-03-09"], ["2026-03-06"]], "a day whose premarket read came back full is not covered and is named");
-  const fresh = cal("premarket", "2026-03-06", "2026-03-09", "ZQDX");
-  const m = R.mergeLedger(prior, fresh, { asOf: "2026-03-09", universe: u, covered: cov.covered, next: new Map([["ZQAL", "2026-06-04"]]) });
-  eq(m.cells.get("ZQAL").rd, 2, "a report on the stored ledger from 5 March is rd 2 on 9 March");
-  deep(m.cells.get("ZQBM"), { rd: null, why: "unconfirmed" }, "a name whose next report fell on a day whose reads were cut, with no sighting since, is unconfirmed");
-  ok(!m.ledger.rows.has("ZQBM"), "and loses its stale entry");
-  eq(m.cells.get("ZQCN").rd, between("2025-12-15", "2026-03-09"), "a name whose next report fell on a covered day, and was not seen there, keeps its report");
-  const gone = R.mergeLedger(prior, new Map(), { asOf: "2026-03-09", universe: ["ZQAL"], covered: new Set() });
-  deep([...gone.ledger.rows.keys()], ["ZQAL"], "a name that left the universe is dropped from the ledger");
-  const fresh2 = R.mergeLedger(prior, new Map(), { asOf: "2026-03-09", universe: ["ZQAL", "ZQEQ"], covered: new Set() });
-  deep(fresh2.cells.get("ZQEQ"), { rd: null, why: "none" }, "a new name has no report: none");
-  const filled = R.mergeLedger(fresh2.ledger, new Map([["ZQEQ", R.observeHistory([hist("2026-02-26", "postmarket")], "2026-03-09")]]), { asOf: "2026-03-09", universe: ["ZQAL", "ZQEQ"] });
-  eq(filled.cells.get("ZQEQ").rd, between("2026-02-27", "2026-03-09"), "and is filled once a history read sees it, its after-close report of 26 February reacting on the 27th");
-  const noPrior = R.mergeLedger({ asOf: null, rows: new Map() }, new Map(), { asOf: "2026-03-09", universe: ["ZQAL"] });
-  deep(noPrior.cells.get("ZQAL"), { rd: null, why: "none" }, "with no ledger at all nothing is unconfirmed, only unknown");
-  const old = R.mergeLedger({ asOf: "2026-03-05", rows: new Map([["ZQAL", { date: "2025-10-06", timing: "before-open", origin: "history", next: null }]]) }, new Map(), { asOf: "2026-03-09", universe: ["ZQAL"] });
-  deep(old.cells.get("ZQAL"), { rd: null, why: "over" }, "an entry that has aged past 99 sessions is over");
-  ok(!old.ledger.rows.has("ZQAL"), "and is pruned");
+  const fresh = cal("premarket", "2026-03-06", "2026-03-09", "SYD105");
+  const m = R.mergeLedger(prior, fresh, { asOf: "2026-03-09", universe: u, covered: cov.covered, next: new Map([["SYA101", "2026-06-04"]]) });
+  eq(m.cells.get("SYA101").rd, 2, "a report on the stored ledger from 5 March is rd 2 on 9 March");
+  deep(m.cells.get("SYB102"), { rd: null, why: "unconfirmed" }, "a name whose next report fell on a day whose reads were cut, with no sighting since, is unconfirmed");
+  ok(!m.ledger.rows.has("SYB102"), "and loses its stale entry");
+  eq(m.cells.get("SYC103").rd, between("2025-12-15", "2026-03-09"), "a name whose next report fell on a covered day, and was not seen there, keeps its report");
+  const gone = R.mergeLedger(prior, new Map(), { asOf: "2026-03-09", universe: ["SYA101"], covered: new Set() });
+  deep([...gone.ledger.rows.keys()], ["SYA101"], "a name that left the universe is dropped from the ledger");
+  const fresh2 = R.mergeLedger(prior, new Map(), { asOf: "2026-03-09", universe: ["SYA101", "SYE106"], covered: new Set() });
+  deep(fresh2.cells.get("SYE106"), { rd: null, why: "none" }, "a new name has no report: none");
+  const filled = R.mergeLedger(fresh2.ledger, new Map([["SYE106", R.observeHistory([hist("2026-02-26", "postmarket")], "2026-03-09")]]), { asOf: "2026-03-09", universe: ["SYA101", "SYE106"] });
+  eq(filled.cells.get("SYE106").rd, between("2026-02-27", "2026-03-09"), "and is filled once a history read sees it, its after-close report of 26 February reacting on the 27th");
+  const noPrior = R.mergeLedger({ asOf: null, rows: new Map() }, new Map(), { asOf: "2026-03-09", universe: ["SYA101"] });
+  deep(noPrior.cells.get("SYA101"), { rd: null, why: "none" }, "with no ledger at all nothing is unconfirmed, only unknown");
+  const old = R.mergeLedger({ asOf: "2026-03-05", rows: new Map([["SYA101", { date: "2025-10-06", timing: "before-open", origin: "history", next: null }]]) }, new Map(), { asOf: "2026-03-09", universe: ["SYA101"] });
+  deep(old.cells.get("SYA101"), { rd: null, why: "over" }, "an entry that has aged past 99 sessions is over");
+  ok(!old.ledger.rows.has("SYA101"), "and is pruned");
 }
 
 {
   const prior = {
     asOf: "2026-03-09",
     rows: new Map([
-      ["ZQAL", { date: "2026-03-09", timing: "before-open", origin: "calendar", next: null }],
-      ["ZQBM", { date: "2026-02-17", timing: "after-close", origin: "history", next: "2026-04-28" }],
-      ["ZQCN", { date: "2026-03-04", timing: "unknown", origin: "history", next: null }],
+      ["SYA101", { date: "2026-03-09", timing: "before-open", origin: "calendar", next: null }],
+      ["SYB102", { date: "2026-02-17", timing: "after-close", origin: "history", next: "2026-04-28" }],
+      ["SYC103", { date: "2026-03-04", timing: "unknown", origin: "history", next: null }],
     ]),
   };
   const wire = R.encodeLedger(prior);
-  deep(wire, { v: 1, asOf: "2026-03-09", t: ["ZQAL", "ZQBM", "ZQCN"], d: [0, 20, 5], w: [3, 2, 0], n: [null, 50, null] }, "the wire form: sorted tickers, calendar-day offsets back from the ledger's day, a code for time and origin, and the next date as an offset forward");
+  deep(wire, { v: 1, asOf: "2026-03-09", t: ["SYA101", "SYB102", "SYC103"], d: [0, 20, 5], w: [3, 2, 0], n: [null, 50, null] }, "the wire form: sorted tickers, calendar-day offsets back from the ledger's day, a code for time and origin, and the next date as an offset forward");
   deep(R.decodeLedger(JSON.parse(JSON.stringify(wire))), prior, "decodes back to the same rows");
   deep(R.decodeLedger({ ...wire, v: 2 }).rows.size, 0, "a wrong version is empty and never throws");
   eq(R.decodeLedger(null).asOf, null, "null is empty");
@@ -194,6 +194,8 @@ const asOf9 = "2026-03-09";
   eq(R.cellOf(null, "X").why, "none", "no reports at all reads as none");
 }
 
+let planted = 0;
+
 {
   const real = await loadMutated("shared/flows-reports.js", [], { salt: 1 });
   const battery = (m) => {
@@ -210,31 +212,31 @@ const asOf9 = "2026-03-09";
       if (r([hist("2025-10-06", "premarket")], "2026-03-02").rd !== null) return false;
       if (r([hist("2026-02-20", "postmarket", { source: "estimation" })], "2026-03-02").rd !== null) return false;
       const b = m.mergeLedger(
-        { asOf: "2026-03-06", rows: new Map([["Z", { date: "2026-03-04", timing: "before-open", origin: "calendar", next: null }]]) },
-        new Map([["Z", m.observeHistory([hist("2026-03-05", "premarket")], "2026-03-09")]]), { asOf: "2026-03-09", universe: ["Z"] });
-      if (b.cells.get("Z").rd !== 3) return false;
+        { asOf: "2026-03-06", rows: new Map([["SYZ107", { date: "2026-03-04", timing: "before-open", origin: "calendar", next: null }]]) },
+        new Map([["SYZ107", m.observeHistory([hist("2026-03-05", "premarket")], "2026-03-09")]]), { asOf: "2026-03-09", universe: ["SYZ107"] });
+      if (b.cells.get("SYZ107").rd !== 3) return false;
       const plan = m.reactionPlan("2026-03-09", "2026-03-05");
       if (plan.length !== 4 || plan[1].date !== "2026-03-05") return false;
       if (m.reactionPlan("2026-02-17", "2026-02-13")[1].date !== "2026-02-13") return false;
       const cov = m.coveredDays(plan.map((s) => ({ ...s, ok: true, cut: s.day === "2026-03-06" && s.route === "premarket" })));
       if (cov.covered.has("2026-03-06") || !cov.covered.has("2026-03-09")) return false;
-      const prior = { asOf: "2026-03-05", rows: new Map([["Y", { date: "2025-12-10", timing: "before-open", origin: "history", next: "2026-03-06" }]]) };
-      const g = m.mergeLedger(prior, new Map(), { asOf: "2026-03-09", universe: ["Y"], covered: new Set(["2026-03-09"]) });
-      if (g.cells.get("Y").why !== "unconfirmed") return false;
-      const aged = m.mergeLedger({ asOf: "2026-03-05", rows: new Map([["Z", { date: "2025-10-06", timing: "before-open", origin: "history", next: null }]]) }, new Map(), { asOf: "2026-03-09", universe: ["Z"] });
-      if (aged.ledger.rows.has("Z") || aged.cells.get("Z").why !== "over") return false;
-      const w = m.encodeLedger({ asOf: "2026-03-09", rows: new Map([["Z", { date: "2026-02-17", timing: "after-close", origin: "history", next: "2026-04-28" }]]) });
+      const prior = { asOf: "2026-03-05", rows: new Map([["SYY108", { date: "2025-12-10", timing: "before-open", origin: "history", next: "2026-03-06" }]]) };
+      const g = m.mergeLedger(prior, new Map(), { asOf: "2026-03-09", universe: ["SYY108"], covered: new Set(["2026-03-09"]) });
+      if (g.cells.get("SYY108").why !== "unconfirmed") return false;
+      const aged = m.mergeLedger({ asOf: "2026-03-05", rows: new Map([["SYZ107", { date: "2025-10-06", timing: "before-open", origin: "history", next: null }]]) }, new Map(), { asOf: "2026-03-09", universe: ["SYZ107"] });
+      if (aged.ledger.rows.has("SYZ107") || aged.cells.get("SYZ107").why !== "over") return false;
+      const w = m.encodeLedger({ asOf: "2026-03-09", rows: new Map([["SYZ107", { date: "2026-02-17", timing: "after-close", origin: "history", next: "2026-04-28" }]]) });
       if (w.d[0] !== 20 || w.w[0] !== 2 || w.n[0] !== 50) return false;
       const ledger = m.decodeLedger(w);
-      const cw = m.decodeLedger(m.encodeLedger({ asOf: "2026-03-09", rows: new Map([["Z", { date: "2026-03-09", timing: "before-open", origin: "calendar", next: null }]]) }));
-      return ledger.rows.get("Z").date === "2026-02-17" && cw.rows.get("Z").origin === "calendar" && cw.rows.get("Z").timing === "before-open";
+      const cw = m.decodeLedger(m.encodeLedger({ asOf: "2026-03-09", rows: new Map([["SYZ107", { date: "2026-03-09", timing: "before-open", origin: "calendar", next: null }]]) }));
+      return ledger.rows.get("SYZ107").date === "2026-02-17" && cw.rows.get("SYZ107").origin === "calendar" && cw.rows.get("SYZ107").timing === "before-open";
     } catch {
       return false;
     }
   };
   ok(battery(real), "the unmutated copy passes the battery the wrong builds are held to");
   const builds = [
-    ["bmo and amc not recognised", [["bmo: \"before-open\", postmarket: \"after-close\", amc: \"after-close\"", "postmarket: \"after-close\""]]],
+    ["the stated time of a history row ignored", [["observe(row.report_date, timingOf(row.report_time), \"history\", true, asOf)", "observe(row.report_date, \"unknown\", \"history\", true, asOf)"]]],
     ["an estimation row with no figures counted", [["return row.source === \"company\" || (row.actual_eps", "return row.source !== \"\" || (row.actual_eps"]]],
     ["a report after the close counted on its own date", [["const first = impactSession(date, timing === \"after-close\" ? \"postmarket\" : \"premarket\");", "const first = impactSession(date, \"premarket\");"], ["const last = impactSession(date, timing === \"before-open\" ? \"premarket\" : \"postmarket\");", "const last = impactSession(date, \"premarket\");"]]],
     ["latest wins whatever the source", [["if (Math.abs(gap) <= SAME_REPORT && rank(a) !== rank(b)) return rank(a) > rank(b) ? a : b;", ""]]],
@@ -251,6 +253,7 @@ const asOf9 = "2026-03-09";
     ["calendar origin lost on the wire", [["CODES.indexOf(r(k).timing) + (r(k).origin === \"calendar\" ? 2 : 0)", "CODES.indexOf(r(k).timing)"]]],
   ];
   let salt = 2;
+  planted += builds.length;
   for (const [title, transforms] of builds) {
     const bad = await loadMutated("shared/flows-reports.js", transforms, { salt: salt++ });
     ok(!battery(bad), `PLANTED WRONG BUILD, ${title}: the battery fails it`);
@@ -263,7 +266,8 @@ const asOf9 = "2026-03-09";
   const bad2 = await loadMutated("shared/flows-horizon.js", [["if (whole(ed) && ed >= 0 && ed <= j) ages.push(j - ed);", ""]], { salt: 52 });
   eq(bad2.earningsState({ ed: 1, rd: null }, 21, 1), "clear", "PLANTED WRONG BUILD, rd plus the elapsed sessions alone: a name whose next report lands today is not seen");
   eq(state(hz).s({ ed: 1, rd: null }, 21, 1), "reaction", "while the real one tags it");
-  ok(H.RD_MAX === R.RD_RECENT * 19 + 4, "the rd ceiling stays 99");
+  eq(H.RD_MAX, 99, "the rd ceiling is 99: two digits in the universe column");
+  planted += 2;
 }
 
-console.log(`✓ flows-reports: ${checks} assertions — the last report of a name read from history rows and the date-scoped calendars with its impact session (premarket on a Monday, after the close on a Friday, before Thanksgiving and Good Friday, on a Saturday and on Presidents Day), unknown times kept as intervals and never defaulted, rd 99 kept and 100 refused against an independent count, estimation rows refused without a figure, the precedence of a stated time and of the calendar, the ledger's skipped night, cut calendar day, universe churn and wire round trip, and 16 planted wrong builds`);
+console.log(`✓ flows-reports: ${checks} assertions — the last report of a name read from history rows and the date-scoped calendars with its impact session (premarket on a Monday, after the close on a Friday, before Thanksgiving and Good Friday, on a Saturday and on Presidents Day), unknown times kept as intervals and never defaulted, rd 99 kept and 100 refused against an independent count, estimation rows refused without a figure, the precedence of a stated time and of the calendar, the ledger's skipped night, cut calendar day, universe churn and wire round trip, and ${planted} planted wrong builds`);

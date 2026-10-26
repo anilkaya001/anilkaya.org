@@ -1,4 +1,5 @@
 import { impactSession, sessionsBetween, addSessions, covered } from "./flows-calendar.js";
+import { reportTiming } from "./flows-targets.js";
 import { RD_MAX } from "./flows-horizon.js";
 
 export const RD_RECENT = 5;
@@ -10,16 +11,13 @@ export const LIST_MAX = 40;
 export const CALENDAR_LIMIT = 100;
 export const CALENDAR_PAGES = 4;
 
-const TIMINGS = Object.freeze({ premarket: "before-open", bmo: "before-open", postmarket: "after-close", amc: "after-close" });
 const CODES = Object.freeze(["unknown", "before-open", "after-close"]);
 const DAY_MS = 86400000;
 const dayNum = (iso) => Date.parse(iso + "T00:00:00Z") / DAY_MS;
 const isoOf = (n) => new Date(n * DAY_MS).toISOString().slice(0, 10);
 const whole = (v) => Number.isInteger(v);
 
-export function timingOf(raw) {
-  return TIMINGS[typeof raw === "string" ? raw.trim().toLowerCase() : ""] || "unknown";
-}
+export const timingOf = reportTiming;
 
 export function isReport(row) {
   if (!row || typeof row !== "object" || typeof row.report_date !== "string") return false;
@@ -200,4 +198,36 @@ export function coveredDays(steps) {
 export function cellOf(reports, ticker) {
   const c = reports && reports.cells instanceof Map ? reports.cells.get(ticker) : null;
   return c || { rd: null, why: "none" };
+}
+
+export function reportsPayload(ledger, { generatedAt = null, readAt = null } = {}) {
+  const wire = encodeLedger(ledger);
+  const body = { ...wire, sessionDate: ledger.asOf, generatedAt, readAt, names: wire.t.length };
+  return { ...body, bytes: JSON.stringify(body).length };
+}
+
+export function recentReporters(universe, { within = RD_RECENT, max = 8 } = {}) {
+  const head = { within };
+  if (!universe || universe.status !== "ok" || !Array.isArray(universe.t)) return { status: "unavailable", reason: "universe_unavailable", ...head };
+  const rd = universe.cols && universe.cols.rd;
+  if (!Array.isArray(rd)) {
+    const basis = universe.rdBasis || null;
+    return { status: "unavailable", reason: basis && basis.withheld ? "withheld_budget" : "not_published", ...head };
+  }
+  const chg = universe.cols.chg;
+  const scale = universe.units && universe.units.chg ? universe.units.chg[1] : null;
+  const counts = Array.from({ length: within + 1 }, () => 0);
+  const today = [];
+  universe.t.forEach((t, i) => {
+    const r = rd[i];
+    if (!whole(r) || r < 0 || r > within) return;
+    counts[r]++;
+    if (r === 0) today.push([t, Array.isArray(chg) && Number.isFinite(chg[i]) && scale ? chg[i] / scale : null]);
+  });
+  today.sort((a, b) => (b[1] === null ? -1 : a[1] === null ? 1 : Math.abs(b[1]) - Math.abs(a[1])) || (a[0] < b[0] ? -1 : 1));
+  const n = counts.reduce((a, b) => a + b, 0);
+  return {
+    status: n ? "ok" : "quiet", ...(n ? {} : { reason: "none_recent" }), asOf: universe.sessionDate || null, ...head, n, counts,
+    rows: today.slice(0, max).map(([t, c]) => [t, c === null ? null : Math.round(c * 1e4) / 1e4]),
+  };
 }

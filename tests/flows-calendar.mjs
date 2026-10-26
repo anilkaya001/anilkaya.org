@@ -29,7 +29,7 @@ for (let ms = Date.parse(C.CALENDAR_FIRST + "T00:00:00Z"); ms <= Date.parse(C.CA
   ok(p.first <= C.CALENDAR_FIRST && p.last >= C.CALENDAR_LAST, `the fixture covers the whole table, ${p.first} to ${p.last}, so a table that outgrows its oracle fails here`);
   const gen = fs.readFileSync(path.join(HERE, "gen-calendar-fixtures.py"), "utf8");
   eq(createHash("sha256").update(gen).digest("hex"), p.script_sha256, "the committed fixture is the output of the committed generator");
-  ok(/start="2023-06-01", end="2028-12-31"/.test(gen), "the generator passes both bounds to exchange_calendars, whose default end is about a year ahead and would cut 2027 short without a word");
+  ok(/start="2019-06-01", end="2028-12-31"/.test(gen), "the generator passes both bounds to exchange_calendars, whose default end is about a year ahead and would cut 2027 short without a word");
   eq(createHash("sha256").update(C.SESSION_DAYS.join("\n")).digest("hex"), p.sessionsSha256, `the module's ${C.SESSION_DAYS.length} sessions hash to the exchange calendar's list`);
   eq(C.SESSION_DAYS.length, p.sessions, "same count");
 }
@@ -44,7 +44,7 @@ for (let ms = Date.parse(C.CALENDAR_FIRST + "T00:00:00Z"); ms <= Date.parse(C.CA
     eq(C.isSession(d), !weekend && !holidays.has(d), `${d} is a session exactly when it is a weekday the exchange did not close`);
   }
   eq(weekdays - holidays.size, C.SESSION_DAYS.length, "weekdays less exchange holidays is the session count");
-  for (let y = 2024; y <= 2027; y++) {
+  for (let y = 2020; y <= 2027; y++) {
     const mine = [...nyseEarlyCloses(y)].sort();
     const theirs = FIX.earlyCloses.filter((e) => e.d.startsWith(String(y))).map((e) => e.d).sort();
     deep(mine, theirs, `the early closes of ${y} are the exchange's: ${theirs.join(", ")}`);
@@ -55,7 +55,7 @@ for (let ms = Date.parse(C.CALENDAR_FIRST + "T00:00:00Z"); ms <= Date.parse(C.CA
   eq(C.isSession("2027-06-18"), false, "Juneteenth 2027 falls on a Saturday and is observed on Friday 18 June, which is closed");
   eq(C.isSession("2026-04-03"), false, "Good Friday 2026 is closed");
   eq(C.isSession("2026-11-27"), true, "the day after Thanksgiving is a session, an early close");
-  eq(C.isSession("2023-12-29"), null, "a day before the table is not guessed at");
+  eq(C.isSession("2019-12-31"), null, "a day before the table is not guessed at");
   eq(C.isSession("2028-01-03"), null, "nor one after it");
 }
 
@@ -70,7 +70,7 @@ for (let ms = Date.parse(C.CALENDAR_FIRST + "T00:00:00Z"); ms <= Date.parse(C.CA
   eq(C.sessionsBetween("2026-04-02", "2026-04-02"), 0, "and zero for one day");
   eq(C.sessionsBetween("2026-04-02", "2026-04-04"), 0, "a closed day adds nothing");
   eq(C.sessionsBetween("nope", "2026-04-04"), null, "an invalid day is null");
-  eq(C.sessionsBetween("2023-01-03", "2026-04-04"), null, "and so is one outside the table");
+  eq(C.sessionsBetween("2019-01-03", "2026-04-04"), null, "and so is one outside the table");
   for (const d of C.SESSION_DAYS) {
     for (const n of [1, 2, 5, 21, 30]) {
       const to = C.addSessions(d, n);
@@ -93,7 +93,7 @@ for (let ms = Date.parse(C.CALENDAR_FIRST + "T00:00:00Z"); ms <= Date.parse(C.CA
   }
   eq(C.previousSession("2026-04-06"), "2026-04-02", "the session before the Monday after Good Friday is the Thursday");
   eq(C.previousSession("2026-04-04"), "2026-04-02", "and before the Saturday as well");
-  eq(C.previousSession("2024-01-02"), null, "nothing before the table");
+  eq(C.previousSession("2020-01-02"), null, "nothing before the table");
   eq(C.nextSession("2026-11-25"), "2026-11-27", "the session after the day before Thanksgiving skips the holiday");
 }
 
@@ -136,7 +136,7 @@ for (let ms = Date.parse(C.CALENDAR_FIRST + "T00:00:00Z"); ms <= Date.parse(C.CA
   eq(imp("2026-02-16", "premarket").day, "2026-02-17", "so does one dated on Presidents Day");
   eq(imp("2026-03-06", "postmarket").day, "2026-03-09", "after the close on a Friday is the Monday");
   eq(imp("2026-03-02", "premarket").day, "2026-03-02", "before the open on a Monday is that Monday");
-  eq(imp("2023-12-29", "premarket"), null, "outside the table nothing is guessed");
+  eq(imp("2019-12-31", "premarket"), null, "outside the table nothing is guessed");
   eq(imp("2027-12-31", "postmarket"), null, "and an impact past its end is not invented");
   eq(imp("garbage", "premarket"), null, "garbage is null");
   const grid = [];
@@ -299,4 +299,4 @@ const fixtureAgreesRaw = (m) => {
   }
 }
 
-console.log(`✓ flows-calendar: ${checks} assertions — every day of 2024 to 2027 is a session exactly when the exchange_calendars oracle says so, the early closes and holidays agree with the rule tables, sessionsBetween and addSessions agree with the oracle and with each other, the three session counters in the tree agree wherever they are all defined, the impact session of every report date and time (Thanksgiving, Good Friday, Presidents Day, weekends, the 2027 Juneteenth) agrees with the oracle, the boundary tables of the horizon at the Monday, the Thursday before Good Friday and the Wednesday before Thanksgiving give the stated ed, rd and state, the live adjustment is exact, the table is checked against the clock with a 120 day lead, and ${11} planted wrong builds are each refused`);
+console.log(`✓ flows-calendar: ${checks} assertions — every day of 2020 to 2027 is a session exactly when the exchange_calendars oracle says so, the early closes and holidays agree with the rule tables, sessionsBetween and addSessions agree with the oracle and with each other, the three session counters in the tree agree wherever they are all defined, the impact session of every report date and time (Thanksgiving, Good Friday, Presidents Day, weekends, the 2027 Juneteenth) agrees with the oracle, the boundary tables of the horizon at the Monday, the Thursday before Good Friday and the Wednesday before Thanksgiving give the stated ed, rd and state, the live adjustment is exact, the table is checked against the clock with a 120 day lead, and ${11} planted wrong builds are each refused`);

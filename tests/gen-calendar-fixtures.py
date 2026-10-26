@@ -6,9 +6,9 @@ import exchange_calendars as xc
 import pandas as pd
 
 HERE = __file__
-FIRST = "2024-01-01"
+FIRST = "2020-01-01"
 LAST = "2027-12-31"
-cal = xc.get_calendar("XNYS", start="2023-06-01", end="2028-12-31")
+cal = xc.get_calendar("XNYS", start="2019-06-01", end="2028-12-31")
 days = pd.date_range(FIRST, LAST, freq="D")
 iso = lambda d: d.strftime("%Y-%m-%d")
 sessions = [iso(d) for d in cal.sessions_in_range(FIRST, LAST)]

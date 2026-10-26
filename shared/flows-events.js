@@ -1,5 +1,5 @@
 import { horizonMove } from "./flows-features.js";
-import { isTradingDay } from "./flows-freshness.js";
+import { forward, horizonEnd, previousSession, sessionsBetween as calendarBetween, HORIZON_SESSIONS } from "./flows-calendar.js";
 
 const numOrNull = (v) => {
   if (v === null || v === undefined || v === "") return null;
@@ -10,8 +10,6 @@ const round = (v, d) => (v === null ? null : Number(v.toFixed(d)));
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
 export const EVENT_ROWS = 200;
-
-export const EVENT_WINDOW_DAYS = 21;
 
 export function calendarDaysTo(earningsDate, origin) {
   if (!ISO.test(String(earningsDate || "")) || !ISO.test(String(origin || ""))) return null;
@@ -24,16 +22,8 @@ export function calendarDaysTo(earningsDate, origin) {
 
 export function sessionsToEarnings(earningsDate, origin) {
   if (!ISO.test(String(earningsDate || "")) || !ISO.test(String(origin || ""))) return null;
-  const end = Date.parse(earningsDate + "T00:00:00Z");
-  const start = Date.parse(origin + "T00:00:00Z");
-  if (!Number.isFinite(end) || !Number.isFinite(start)) return null;
-  const days = Math.round((end - start) / 86400000);
-  if (days < 0) return null;
-  let sessions = 0;
-  for (let i = 1; i <= days; i++) {
-    if (isTradingDay(new Date(start + i * 86400000).toISOString().slice(0, 10), null)) sessions++;
-  }
-  return sessions;
+  const n = calendarBetween(origin, earningsDate);
+  return n === null || n < 0 ? null : n;
 }
 
 export const IV_PATH_LABELS = Object.freeze(["−1m", "−1w", "−1d", "now"]);
@@ -99,10 +89,19 @@ export function eventRow(row, tilt, {
   };
 }
 
+function wholeDays(rows, cap) {
+  if (rows.length <= cap) return rows;
+  const edge = rows[cap - 1].d;
+  if (rows[cap].d !== edge) return rows.slice(0, cap);
+  let n = cap;
+  while (n > 0 && rows[n - 1].d === edge) n--;
+  return rows.slice(0, n || cap);
+}
+
 export function buildEvents(withTilt, {
   gateOrigin,
   sessionDate = null,
-  windowDays = EVENT_WINDOW_DAYS,
+  windowSessions = HORIZON_SESSIONS,
   cap = EVENT_ROWS,
   stageOf = () => null,
   featuresOf = () => null,
@@ -110,6 +109,8 @@ export function buildEvents(withTilt, {
 } = {}) {
   const rows = [];
   let dated = 0;
+  const asOf = previousSession(gateOrigin) || (calendarBetween(sessionDate, sessionDate) === 0 ? sessionDate : null);
+  const through = asOf ? horizonEnd(asOf) : null;
   for (const entry of Array.isArray(withTilt) ? withTilt : []) {
     if (!entry || !entry.row) continue;
     const row = eventRow(entry.row, entry.tilt, {
@@ -122,12 +123,13 @@ export function buildEvents(withTilt, {
     if (row.d) dated++;
 
     if (row.dte === null) continue;
-    if (row.dte > windowDays) continue;
+    const f = asOf ? forward(row.d, asOf, entry.row.er_time) : null;
+    if (!f || f.ed > windowSessions) continue;
     rows.push(row);
   }
   rows.sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : (a.t < b.t ? -1 : a.t > b.t ? 1 : 0)));
 
-  const shown = rows.slice(0, cap);
+  const shown = wholeDays(rows, cap);
   const byStage = {};
   for (const r of shown) {
     const k = r.st || "unclassified";
@@ -148,7 +150,8 @@ export function buildEvents(withTilt, {
     undated: (Array.isArray(withTilt) ? withTilt.length : 0) - dated,
     universe: Array.isArray(withTilt) ? withTilt.length : 0,
     cap,
-    windowDays,
+    windowSessions,
+    through,
     gateOrigin: gateOrigin || null,
     sessionDate,
     byStage,
@@ -281,12 +284,15 @@ export function fitEvents(payload, maxBytes = EVENTS_PAYLOAD_BUDGET) {
       shedRows: total - n,
     };
   };
+  const edges = [0];
+  for (let i = 1; i < total; i++) if (ordered[i].d !== ordered[i - 1].d) edges.push(i);
+  edges.push(total);
   let lo = 0;
-  let hi = total;
+  let hi = edges.length - 1;
   while (lo < hi) {
     const mid = (lo + hi + 1) >> 1;
-    if (size(build(mid)) <= maxBytes) lo = mid;
+    if (size(build(edges[mid])) <= maxBytes) lo = mid;
     else hi = mid - 1;
   }
-  return build(lo);
+  return build(edges[lo]);
 }

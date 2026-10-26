@@ -31,6 +31,8 @@
   const withList = (el) => { (el.classList.contains("ui-list") ? [el] : [...el.querySelectorAll(".ui-list")]).forEach((l) => l.classList.add("fu-list")); return el; };
   const days = (k) => k + " calendar " + plural(k, "day", "days");
   const sessions = (k) => k + " " + plural(k, "session", "sessions");
+  const windowN = (payload) => (Number.isInteger(payload && payload.windowSessions) && payload.windowSessions > 0 ? payload.windowSessions : null);
+  const windowText = (payload) => (windowN(payload) === null ? null : "Next " + windowN(payload) + " trading sessions" + (ISO.test(String((payload && payload.through) || "")) ? ", through " + weekday(payload.through) + " " + F.day(payload.through) : ""));
   const pct = (v, dp = 1) => (n(v) === null ? DASH : F.pct(n(v), dp));
   const move = (v) => (n(v) === null ? DASH : "±" + F.pct(Math.abs(n(v)), 1));
   const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -304,7 +306,7 @@
         ["Day zero", payload.gateOrigin ? payload.gateOrigin + ", the run's own session date" : null],
         ["Prices", payload.sessionDate ? "closes of " + payload.sessionDate : null],
         ["Gate", n(payload.gateDays) === null ? null : "day 0 to day " + payload.gateDays + ", calendar days"],
-        ["Window", n(payload.windowDays) === null ? null : days(n(payload.windowDays))],
+        ["Window", windowText(payload)],
       ],
       sections: [
         { title: "The gate", lines: [notes.gate, "Every name reporting inside the gate was removed before the board was scored, so the board holds no opinion on any of them. Board names never report inside it by construction; they appear in the Earnings list once their report lies beyond it."] },
@@ -351,8 +353,8 @@
   function paintEarnings(payload, animate) {
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
     if (!rows.length) {
-      const universe = n(payload.universe), wd = n(payload.windowDays);
-      silence(host.earn, { state: "quiet", reason: "No name in the screened universe" + (universe === null ? "" : " of " + universe) + " reports inside the next " + (wd === null ? "window" : days(wd)) + ". That is a measured emptiness — the run read every screener row and found no dated report inside it — and not a missing publish." }, "Earnings", 240);
+      const universe = n(payload.universe), wd = windowN(payload);
+      silence(host.earn, { state: "quiet", reason: "No name in the screened universe" + (universe === null ? "" : " of " + universe) + " reports inside the next " + (wd === null ? "window" : wd + " trading sessions") + ". That is a measured emptiness — the run read every screener row and found no dated report inside it — and not a missing publish." }, "Earnings", 240);
       return;
     }
     const cal = calIndex(payload);
@@ -556,7 +558,7 @@
     const reactSt = blockState(r0, "earnings reaction");
     host.chips.replaceChildren(UI.chips([
       UI.gaugeChip({ icon: "cal", color: "--accent-ink", value: inWindow === null ? String(rows.length) : String(inWindow), label: "Reporting",
-        info: { title: "Reporting", lead: "Names reporting inside the window.", facts: [["Window", n(payload.windowDays) === null ? null : days(n(payload.windowDays))], ["Screened", n(payload.universe) === null ? null : count(payload.universe)], ["Undated", n(payload.undated) === null ? null : count(payload.undated)]] } }),
+        info: { title: "Reporting", lead: "Names reporting inside the window.", facts: [["Window", windowText(payload)], ["Screened", n(payload.universe) === null ? null : count(payload.universe)], ["Undated", n(payload.undated) === null ? null : count(payload.undated)]] } }),
       UI.gaugeChip({ icon: "shield", color: "--label-2", value: gated === null ? DASH : String(gated), label: "Gated",
         info: { title: "Gated", lead: stageOf("gated").what } }),
       UI.gaugeChip({ g: macroN === null ? muted(macroSt) : undefined, icon: "wave", color: "--s-purple", value: macroN === null ? DASH : String(macroN), label: "Macro",
@@ -571,12 +573,12 @@
   function renderStatus(payload) {
     const rows = Array.isArray(payload.rows) ? payload.rows : [];
     const shown = n(payload.shown) ?? rows.length;
-    const inWindow = n(payload.inWindow), universe = n(payload.universe), undated = n(payload.undated), wd = n(payload.windowDays);
+    const inWindow = n(payload.inWindow), universe = n(payload.universe), undated = n(payload.undated), wd = windowN(payload);
     const gated = payload.byStage && typeof payload.byStage === "object" ? n(payload.byStage.gated) ?? 0 : null;
     const cap = n(payload.cap);
     const parts = [];
     parts.push(shown + (inWindow === null || inWindow === shown ? "" : " of " + inWindow) + " " + plural(shown, "name", "names") +
-      " reporting inside the " + (wd === null ? "" : wd + "-day ") + "window" + (universe === null ? "" : ", of " + universe + " screened"));
+      " reporting inside the " + (wd === null ? "" : wd + "-session ") + "window" + (universe === null ? "" : ", of " + universe + " screened"));
     if (gated !== null) parts.push("the board was gated out of scoring " + (gated || "none") + " of them");
     if (undated !== null && undated > 0) parts.push(undated + (universe === null ? "" : " of the " + universe) + " carry no earnings date at all");
     if (cap !== null && inWindow !== null && inWindow > shown) parts.push("the cap holds the list to " + cap);
@@ -597,7 +599,7 @@
   function paintMeta(payload) {
     const bits = [];
     if (ISO.test(String(payload.sessionDate || ""))) bits.push(h("span", null, F.day(payload.sessionDate)));
-    if (n(payload.windowDays) !== null) bits.push(h("span", null, n(payload.windowDays) + "-day window"));
+    if (windowText(payload) !== null) bits.push(h("span", null, windowText(payload)));
     const built = F.stamp(payload.generatedAt);
     if (built) bits.push(h("span", { class: "fe-built" }, "built " + built));
     const stale = h("button", { class: "fd-pill", type: "button", id: "evStale", hidden: S.staleText ? null : true,
