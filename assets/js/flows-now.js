@@ -62,12 +62,10 @@
     return y === YEAR.format(Date.now()) ? DAY.format(d) : DAY.format(d) + " " + y.slice(2);
   }
 
+  const moneyDp = (n, i) => [0, 0, 1, 1, 1][i];
+
   function money(v) {
-    const a = Math.abs(v);
-    if (a >= 999.95e6) return "$" + (v / 1e9).toFixed(1) + "B";
-    if (a >= 999.5e3) return "$" + (v / 1e6).toFixed(1) + "M";
-    if (a >= 1e3) return "$" + Math.round(v / 1e3) + "K";
-    return "$" + Math.round(v);
+    return window.FlowsUI.F.scaled(v, moneyDp, "$");
   }
 
   function sideOf(cp) {

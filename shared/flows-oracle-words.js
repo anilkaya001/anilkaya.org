@@ -1,3 +1,5 @@
+import { formatScaled } from "./flows-display-round.js";
+
 export const MODEL_IMPLIED = "Model-implied, not a quote and not advice. Based on the engine's fitted prices and its own probabilities, under the stated assumptions. No track record yet.";
 
 export const CONVICTION_WORDS = Object.freeze(["No view", "Faint", "Leaning", "Clear"]);
@@ -63,14 +65,8 @@ export function usd(n, digits = 0) {
 export function usdShort(n) {
   if (!finite(n)) return DASH;
   const a = Math.abs(n);
-  const tiers = [[1e9, "B"], [1e6, "M"], [1e3, "K"]];
-  for (const [size, tag] of tiers) {
-    if (a >= size) {
-      const v = a / size;
-      return SIGN_PREFIX[Math.sign(n)] + "$" + (v >= 100 ? v.toFixed(0) : v.toFixed(1)).replace(/\.0$/, "") + tag;
-    }
-  }
-  return usd(n, 0);
+  if (a < 999.5) return usd(n, 0);
+  return SIGN_PREFIX[Math.sign(n)] + formatScaled(a, (x) => (x >= 100 ? 0 : 1), "$").replace(/\.0(?=[KMBT]$)/, "");
 }
 
 export function pct(fraction, digits = 0) {

@@ -164,12 +164,14 @@ export function shapeInsiders(raw, { cap = PULSE_CAPS.insiders } = {}) {
 
 export function shapeDarkpool(raw, { cap = PULSE_CAPS.darkpool } = {}) {
   const rows = [];
+  let canceled = 0;
   for (const r of unwrapRows(raw)) {
     if (!r || typeof r !== "object") continue;
     const t = str(r.ticker);
     const px = num(r.price);
     const size = num(r.size);
     if (!t || (px === null && size === null)) continue;
+    if (flag(r.canceled) === true) { canceled++; continue; }
     rows.push({
       t,
       at: str(r.executed_at),
@@ -186,7 +188,7 @@ export function shapeDarkpool(raw, { cap = PULSE_CAPS.darkpool } = {}) {
   const seen = rows.length;
   const kept = rows.slice(0, cap);
   return { status: kept.length ? "ok" : "quiet", rows: kept, seen, cap, shed: seen - kept.length,
-    rankedBy: "premium" };
+    rankedBy: "premium", canceled };
 }
 
 export function shapeSeasonality(raw, { cap = PULSE_CAPS.seasonality } = {}) {

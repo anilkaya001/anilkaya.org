@@ -1,1 +1,1 @@
-{"name": "launch-readiness", "class": "N", "group": "shard", "timing": false, "medianS": 0.3, "shard": 5, "files": ["launch-readiness.mjs"], "covers": ["schema.sql","shared/session.js","worker.js","wrangler.staging.toml","wrangler.toml"]}
+{"name": "launch-readiness", "class": "N", "group": "shard", "timing": false, "medianS": 0.3, "shard": 7, "files": ["launch-readiness.mjs"], "covers": ["schema.sql","shared/session.js","worker.js","wrangler.staging.toml","wrangler.toml"]}

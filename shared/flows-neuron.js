@@ -3,6 +3,7 @@ import { guardAnswer, numeralsIn } from "./flows-ask.js";
 import { VARIATION_VOTES, VARIATION_LINES } from "./flows-variation.js";
 import { STRUCTURE_BY_ID, AFFINITY, BUCKET_LINES } from "./flows-quant-structures.js";
 import { CLAIM_LINES } from "./flows-fact-ids.js";
+import { formatScaled } from "./flows-display-round.js";
 
 export const NEURON_CONTEXT_VERSION = 6;
 export const NEURON_MAX_IDEAS = 3;
@@ -234,9 +235,10 @@ const okPanel = (p) => p && typeof p === "object" && p.status === "ok";
 const SIDE_WORD = { 1: "bullish", "-1": "bearish", 0: null };
 const WALL_FOR = { 1: "call_wall", "-1": "put_wall" };
 
-function magnitude(v) {
-  const mag = Math.abs(v);
-  return mag >= 1e6 ? (mag / 1e6).toFixed(2) + "M" : mag >= 1e3 ? (mag / 1e3).toFixed(1) + "k" : String(Math.round(mag));
+const MAGNITUDE_DP = Object.freeze([0, 1, 2, 2, 2]);
+
+export function magnitude(v) {
+  return formatScaled(Math.abs(v), (n, i) => MAGNITUDE_DP[i]).replace(/K$/, "k");
 }
 
 const signedMoney = (v) => (v < 0 ? "\u2212$" : "+$") + magnitude(v);

@@ -386,10 +386,13 @@ ok(files.length >= 10,
   const usdS = F.unit.of("moneyCompact", { dp: "short", signed: true });
   const exact = F.unit.of("money");
   const exactS = F.unit.of("money", { signed: true });
+  const CORRECTED = new Map([[0.4, "<$1"], [999.5, "$1K"], [999999, "$1.0M"], [1.2e12, "$1.20T"]]
+    .flatMap(([x, t]) => [[x, t], [-x, MINUS + t]]));
+  const retired = (v, signed) => (CORRECTED.has(v) ? (signed && v > 0 ? "+" : "") + CORRECTED.get(v) : signed ? oldUsdS(v) : oldUsd(v));
   for (const v of GRID) {
-    eq(usd(v), oldUsd(v), `moneyCompact short reproduces the retired K/M/B style at ${v}`);
-    eq(usdS(v), oldUsdS(v), `and its signed form at ${v}`);
-    eq(usd(String(v)), oldUsd(v), `and a quoted numeric reads as the number at ${v}`);
+    eq(usd(v), retired(v, false), `moneyCompact short reproduces the retired K/M/B style at ${v}, except the four figures that style got wrong: a nonzero value below a dollar, 999.5, 999,999 and a trillion`);
+    eq(usdS(v), retired(v, true), `and its signed form at ${v}`);
+    eq(usd(String(v)), retired(v, false), `and a quoted numeric reads as the number at ${v}`);
     eq(exact(v), oldExact(v, false), `money reproduces the retired dollars-and-cents style at ${v}`);
     eq(exactS(v), oldExact(v, true), `and its signed form at ${v}`);
   }
@@ -403,10 +406,14 @@ ok(files.length >= 10,
   eq(F.unit("nowhere", 1), DASH, "an unregistered kind prints the dash rather than throwing");
   eq(F.unit("constructor", 1), DASH, "and a name inherited from Object is not a kind");
   eq(F.unit("pct", "0.3412"), "34.1%", "a quoted fraction reads as the number");
-  eq(F.unit("pct", -0.000001, { dp: 1 }), "0.0%", "a fraction that rounds to zero prints 0.0%, not a signed zero");
+  eq(F.unit("pct", -0, { dp: 1 }), "0.0%", "an exact zero prints 0.0%, not a signed zero");
+  eq(F.unit("pct", -0.000001, { dp: 1 }), MINUS + "<0.1%", "a nonzero fraction that rounds to zero is not printed as zero: it keeps its sign and the last digit as a floor");
+  eq(F.unit("pct", 0.000001, { dp: 1 }), "<0.1%", "and a positive one prints the floor without a plus");
+  eq(F.unit("pct", 0.000001, { dp: 1, signed: true }), "+<0.1%", "and with a requested plus");
   eq(F.unit("pct", -0.0123, { dp: 1 }), MINUS + "1.2%", "a negative percent carries the minus glyph, never a hyphen");
   eq(F.unit("pct", 0.0123, { dp: 1, signed: true }), "+1.2%", "and a signed positive carries a plus");
-  eq(F.unit("signed", -0.004, { dp: 2 }), "0.00", "a number that rounds to zero is not signed");
+  eq(F.unit("signed", -1e-12, { dp: 2 }), "0.00", "float noise below a nano is an exact zero and is not signed");
+  eq(F.unit("signed", -0.004, { dp: 2 }), MINUS + "<0.01", "a nonzero number that rounds to zero prints its floor with its sign");
   eq(F.unit("signed", -1.5, { dp: 1 }), MINUS + "1.5", "and a negative one carries the minus glyph");
   const map = ["1", "2"].map(usd);
   eq(map.join(), "$1,$2", "a short money formatter handed to Array.map ignores the index it is given");

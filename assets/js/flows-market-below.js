@@ -581,19 +581,20 @@
     const host = clear("mkDark");
     if (!host) return;
     const feed = pulse.darkpool;
-    const rows = feed && Array.isArray(feed.rows) ? feed.rows : [];
+    const rows = feed && Array.isArray(feed.rows) ? feed.rows.filter((r) => r && r.canceled !== true) : [];
     if (!feed || feed.status !== "ok" || !rows.length) { host.append(feedSilence(feed, "dark pool prints")); return; }
     const ranked = rows.slice().sort((a, b) => (isNum(b.prem) || 0) - (isNum(a.prem) || 0));
     const top = Math.max(1, isNum(ranked[0] && ranked[0].prem) || 1);
+    const price = (v) => (isNum(v) === null ? DASH : "$" + F.px(isNum(v)));
     host.append(UI.list(ranked.map((r, i) => h("div", { class: "ui-row mk-dprow", role: "listitem" },
-      h("span", { class: "ui-row-m" }, h("b", null, r.t || DASH), h("span", null, (isNum(r.px) === null ? DASH : "$" + isNum(r.px).toFixed(2)) + " · " + grouped(r.size))),
+      h("span", { class: "ui-row-m" }, h("b", null, r.t || DASH), h("span", null, price(r.px) + " · " + grouped(r.size))),
       h("span", { class: "ui-meter" }, h("i", { style: { "--w": ((isNum(r.prem) || 0) / top * 100).toFixed(1) + "%", "--i": String(i), "--c": UI.cssVar("--s-purple") } })),
       h("span", { class: "ui-row-v" }, usd(r.prem)))), { visible: 6, label: "Largest off-exchange prints" }));
-    const hhmm = (iso) => (typeof iso === "string" && iso.length >= 16 ? iso.slice(11, 16) : DASH);
-    const detail = table("Off-exchange equity trades reported to the print feed, as the vendor surfaces them", [["Name"], ["Time", true], ["Price", true], ["Size", true], ["Premium", true]],
-      rows.map((r) => [r.t || DASH, hhmm(r.at), isNum(r.px) === null ? DASH : "$" + isNum(r.px).toFixed(2), grouped(r.size), usd(r.prem)]));
+    const detail = table("Off-exchange equity trades reported to the print feed, as the vendor surfaces them", [["Name"], ["Time (TRT)", true], ["Price", true], ["Size", true], ["Premium", true]],
+      rows.map((r) => [r.t || DASH, F.time(r.at, false), price(r.px), grouped(r.size), usd(r.prem)]));
     const notes = pulse.notes || {};
-    infoInto("mkDarkCard", "dark pool", () => ({ title: "Dark pool", lead: "The largest off-exchange prints by dollar size.", notes: [notes.darkpool, capLine(feed, rows.length, "prints")], node: detail }));
+    const voided = isNum(feed.canceled) ? feed.canceled : 0;
+    infoInto("mkDarkCard", "dark pool", () => ({ title: "Dark pool", lead: "The largest off-exchange prints by dollar size.", notes: [notes.darkpool, capLine(feed, rows.length, "prints"), voided > 0 ? voided + " canceled print" + (voided === 1 ? " is" : "s are") + " left out of this list." : null], node: detail }));
   }
 
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

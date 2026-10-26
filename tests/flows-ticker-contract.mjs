@@ -392,7 +392,7 @@ try {
     eq(r.rows["Strike-sum crossing"], "$101.25", "the strike-sum crossing under its own name");
     eq(r.rows["Zero-gamma level"], "$99.50", "and the zero-gamma level beside it, never merged with it");
     ok(!("Gamma flip" in r.rows), "no row is labelled with the ambiguous 'Gamma flip'");
-    eq(r.rows["Priced move"], "±7.3%", "the priced move");
+    eq(r.rows["Priced move to the end-of-week expiry"], "±7.3%", "the vendor's priced move, labelled with the horizon it is quoted for");
     eq(r.rows["IV rank"], "73.4% · 2026-08-28", "THE RANK IS PICKED BY DATE, NOT BY INDEX — 73.4 on 2026-08-28 is the newest of three shuffled rows");
 
     const edged = clone(base);
@@ -769,10 +769,10 @@ try {
       eq(got.flags, "Screen", "and names its depth in one word");
       eq(got.chips.join(" "), "IV pct IV 30d Dealer γ Earnings Size", "with the five screen readings as hero chips, the universe's one-year IV percentile named pct, never rank");
       eq(got.clipped, 0, `${width}px no chip label is cut off`);
-      eq(got.ranks.join(" "), "IV 30d VRP Term γ / ADV", "and its percentile ranks in the screen beside them, a missing rank left out rather than drawn at zero");
+      eq(got.ranks.join(" "), "IV 30d VRP Term γ$ per 1% / ADV", "and its percentile ranks in the screen beside them, a missing rank left out rather than drawn at zero");
       eq(got.mods.join(" "), "m-screen m-events m-flow", "the grid carries the Screen, the earnings history its card-x holds, and the live prints once it resolves");
       ok(got.verdict, "and no verdict: there is no card for the Neuron to read");
-      ok(["IV 30d", "VRP", "γ / ADV", "RSI", "vs 50d"].every((l) => got.screen.includes(l)) && !got.screen.includes("Short float"),
+      ok(["IV 30d", "VRP", "γ$ per 1% / ADV", "RSI", "vs 50d"].every((l) => got.screen.includes(l)) && !got.screen.includes("Short float"),
          `the Screen draws every column the row carries and none it lacks (${got.screen.join(", ")})`);
       eq(got.waiting, 0, "and nothing on the page waits on a sign");
       const sw = await page.evaluate(sweep);
@@ -1136,13 +1136,15 @@ try {
     const prints = await rowsOf("Prints");
     eq(prints.length, dp.rows.filter((r) => typeof r.prem === "number").length, "the tape draws one row per published priced print");
     ok(prints.every((r) => /^\d{2}:\d{2}$/.test(r.time) || r.time === "—"), `every print carries its time off the tape's own timestamp (${prints[0] && prints[0].time})`);
-    eq(prints.filter((r) => r.tags.includes("cancelled")).length, dp.rows.filter((r) => r.canceled === true && typeof r.prem === "number").length, "exactly the cancelled prints carry the tag, and the tag says what the flag says");
-    const iBoth = dp.rows.findIndex((r) => typeof r.bid === "number" && typeof r.ask === "number");
+    eq(prints.filter((r) => r.tags.includes("canceled")).length, dp.rows.filter((r) => r.canceled === true && typeof r.prem === "number").length, "exactly the canceled prints carry the tag, and the tag says what the flag says");
+    ok(prints.slice(-1)[0].canceled && prints.filter((r) => r.canceled).length === 1 && !prints.slice(0, -1).some((r) => r.canceled), "and a canceled print is listed after every live one, never ranked among them");
+    const listed = dp.rows.filter((r) => r.canceled !== true).concat(dp.rows.filter((r) => r.canceled === true));
+    const iBoth = listed.findIndex((r) => typeof r.bid === "number" && typeof r.ask === "number");
     if (iBoth >= 0) ok(/^\d+\.\d{2} \/ \d+\.\d{2}$/.test(prints[iBoth].quote), `a quoted print carries bid and ask side by side (${prints[iBoth].quote})`);
-    const iNone = dp.rows.findIndex((r) => r.bid === null || r.ask === null);
+    const iNone = listed.findIndex((r) => r.bid === null || r.ask === null);
     if (iNone >= 0) eq(prints[iNone].quote, "—", "a print missing either side of the quote carries the dash, never half a spread");
     const tapeInfo = await modInfo(page, "m-tape");
-    if (dp.shed > 0) ok(tapeInfo.includes(dp.rows.length + " kept of " + dp.seen), `the disclosure states ${dp.rows.length} kept of ${dp.seen}`);
+    if (dp.shed > 0) ok(tapeInfo.includes(dp.rows.filter((r) => r.canceled !== true).length + " kept of " + dp.seen), `the disclosure states ${dp.rows.filter((r) => r.canceled !== true).length} kept of ${dp.seen}`);
     if (dp.unpriced > 0) ok(tapeInfo.includes("+" + dp.unpriced + " unpriced print"), "and counts the unpriced prints out rather than seating them");
     ok(tapeInfo.includes(dp.note.slice(0, 60)), "the payload's own darkpool note is rendered, not paraphrased");
     const ois = await rowsOf("OI");
@@ -2473,6 +2475,14 @@ try {
       window.FlowsUI.closeInfo();
       return t;
     }, label);
+    const chipText = (label) => page.evaluate((label) => {
+      const b = [...document.querySelectorAll("#ftChips .ui-gchip")].find((n) => n.querySelector(".ui-chip-l").textContent === label);
+      if (!b) return null;
+      window.FlowsUI.openInfo(b);
+      const t = document.querySelector("#fxPop").innerText;
+      window.FlowsUI.closeInfo();
+      return t;
+    }, label);
     const engineSummary = (card) => ({ status: "ok", scope: card.ticker, llm: false, model: null, generatedAt: card.generatedAt, engine: true, verdict: null, verdictWord: null, claims: [], refused: [], ideas: [],
       summary: "The engine priced this name. A second sentence.", provenance: "Figures, facts and structures computed by the engine; the summary is deterministic.", context: null });
     for (const [label, hedge] of [["short", "buys rallies and sells dips, which amplifies moves."], ["long", "sells rallies and buys dips, which dampens moves."]]) {
@@ -2481,6 +2491,15 @@ try {
       await mount(page, c);
       eq(await chipLead("Dealer γ"), "Dealers are " + label + " gamma " + DEALER_CLAUSE + ": their hedging " + hedge,
         `the ${label}-gamma chip asserts a hedging direction only on the vendor's convention, and says so in DEALER_CLAUSE's words`);
+    }
+    {
+      const withZero = clone(full);
+      withZero.regime = { ...(withZero.regime || {}), label: "long" };
+      ok(withZero.panels.levels && withZero.panels.levels.zeroGamma && typeof withZero.panels.levels.zeroGamma.px === "number", "the emitted card carries a zero-gamma level");
+      await mount(page, withZero);
+      const facts = await chipText("Dealer γ");
+      ok(/Zero-gamma level/.test(facts || "") && /sign change/.test(facts || ""), `the dealer chip's facts name the zero-gamma level and how many sign changes lie within the grid (${String(facts || "").slice(0, 200)})`);
+      eq(errors.length, 0, "and opening it throws nothing");
     }
     const flat = clone(full);
     flat.regime = { ...(flat.regime || {}), label: null };

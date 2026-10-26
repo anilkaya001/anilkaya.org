@@ -1,3 +1,5 @@
+import { wholePercent } from "./flows-display-round.js";
+
 export const TIERS = Object.freeze(["A", "a", "m", "b", "B", "n"]);
 
 export const SIDE_TAGS = Object.freeze(["ask_side", "bid_side", "mid_side", "no_side"]);
@@ -65,17 +67,50 @@ const words = (v) => {
   return v.toLowerCase().split(/[^a-z0-9_]+/).filter(Boolean);
 };
 
-export function tierOf(price, bid, ask) {
-  const p = num(price);
-  const b = num(bid);
-  const a = num(ask);
-  if (p === null || b === null || a === null || p <= 0 || b < 0 || a <= 0 || a < b) return "n";
-  const mid = (a + b) / 2;
-  if (Math.abs(p - mid) <= EPS) return "m";
-  if (p >= a) return "A";
-  if (p <= b) return "B";
-  return p > mid ? "a" : "b";
+const TICKS_PER_DOLLAR = 1e6;
+
+const OFF_GRID_TICKS = 1e-3;
+
+const offGrid = (v) => {
+  const n = num(v);
+  return n !== null && Math.abs(n * TICKS_PER_DOLLAR - Math.round(n * TICKS_PER_DOLLAR)) > OFF_GRID_TICKS;
+};
+
+const ticksOf = (v) => {
+  const n = num(v);
+  if (n === null) return null;
+  const t = Math.round(n * TICKS_PER_DOLLAR);
+  return Number.isSafeInteger(t) ? t : null;
+};
+
+export const NO_SIDE_WORDS = Object.freeze({
+  "no-price": "no usable price",
+  "no-quote": "no usable quote",
+  "no-offer": "no offer",
+  crossed: "crossed quote",
+  locked: "locked quote, side cannot be told",
+  "off-grid": "a price finer than a millionth of a dollar",
+});
+
+export function readQuote(price, bid, ask) {
+  if (offGrid(price) || offGrid(bid) || offGrid(ask)) return { tier: "n", why: "off-grid" };
+  const p = ticksOf(price);
+  const b = ticksOf(bid);
+  const a = ticksOf(ask);
+  if (p === null || p <= 0) return { tier: "n", why: "no-price" };
+  if (b === null || a === null || b < 0) return { tier: "n", why: "no-quote" };
+  if (a <= 0) return { tier: "n", why: "no-offer" };
+  if (a < b) return { tier: "n", why: "crossed" };
+  if (a === b && p === a) return { tier: "n", why: "locked" };
+  const twice = 2 * p;
+  const sum = a + b;
+  if (twice === sum) return { tier: "m", why: null };
+  if (p >= a) return { tier: "A", why: null };
+  if (p <= b) return { tier: "B", why: null };
+  return { tier: twice > sum ? "a" : "b", why: null };
 }
+
+export const tierOf = (price, bid, ask) => readQuote(price, bid, ask).tier;
 
 export function sideTagOf(tags) {
   const seen = words(tags).filter((t) => SIDE_TAGS.includes(t));
@@ -125,7 +160,7 @@ export function classifyPrint(print, { floor = null } = {}) {
   const ask = num(p.nbbo_ask);
   const size = num(p.size);
   const premium = num(p.premium);
-  const tier = tierOf(price, bid, ask);
+  const { tier, why } = readQuote(price, bid, ask);
   const tag = sideTagOf(p.tags);
   const parity = parityOf(tag, tier);
   const sw = sweepOf(p);
@@ -148,6 +183,7 @@ export function classifyPrint(print, { floor = null } = {}) {
     id: typeof p.id === "string" || typeof p.id === "number" ? p.id : null,
     side,
     tier,
+    why,
     tag,
     parity,
     basis,
@@ -171,7 +207,7 @@ function timeOf(v) {
 
 const blank = () => ({
   n: 0, undated: 0, unpriced: 0, canceled: 0, gross: 0, askPrem: 0, bidPrem: 0, otherPrem: 0,
-  callSigned: 0, putSigned: 0, sweeps: 0, large: 0, multiLeg: 0, excluded: 0, extended: 0, conflicts: 0,
+  callSigned: 0, putSigned: 0, sweeps: 0, large: 0, multiLeg: 0, excluded: 0, extended: 0, conflicts: 0, locked: 0, unquoted: 0,
 });
 
 export function aggregate(prints, { now, windowsS = WINDOWS_S, floor = null } = {}) {
@@ -185,6 +221,7 @@ export function aggregate(prints, { now, windowsS = WINDOWS_S, floor = null } = 
       if ((r.flags & FLAGS.canceled) !== 0) { acc.canceled += 1; continue; }
       acc.n += 1;
       if (r.parity === "disagree") acc.conflicts += 1;
+      if (r.tier === "n") { if (r.why === "locked") acc.locked += 1; else acc.unquoted += 1; }
       if ((r.flags & FLAGS.sweep) !== 0) acc.sweeps += 1;
       if ((r.flags & FLAGS.large) !== 0) acc.large += 1;
       if ((r.flags & FLAGS.multiLeg) !== 0) acc.multiLeg += 1;
@@ -229,7 +266,7 @@ export function askSplit(row) {
   return { ask: a * k, bid: b * k, none: Math.max(0, prem - (a + b) * k), askStated: x !== null, bidStated: y !== null };
 }
 
-const whole = (v) => +(v * 100).toFixed(0);
+const whole = wholePercent;
 
 export function askShare(rows) {
   let ask = 0;
