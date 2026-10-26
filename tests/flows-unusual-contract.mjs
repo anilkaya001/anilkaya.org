@@ -871,7 +871,7 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
     const walk = (dir) => fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : /\.m?js$/.test(e.name) ? [path.join(dir, e.name)] : []));
     const files = [...walk("shared"), ...walk("server"), ...walk("scripts/flows-nightly"), ...walk("scripts/flows-legs"), "worker.js"];
     const named = files.filter((f) => /\b(?:askPrem|bidPrem|total_ask_side_prem|total_bid_side_prem)\b/.test(fs.readFileSync(path.join(ROOT, f), "utf8"))).sort();
-    deep(named, ["scripts/flows-legs/flow-fake.mjs", "scripts/flows-legs/live-fake.mjs", "scripts/flows-nightly/fixtures.mjs", "shared/flows-alerts.js", "shared/flows-live.js", "shared/flows-positioning.js", "shared/flows-tape-stats.js", "shared/flows-vendor-ops.js"],
+    deep(named, ["scripts/flows-legs/flow-fake.mjs", "scripts/flows-legs/live-fake.mjs", "scripts/flows-nightly/fixtures.mjs", "shared/flows-alerts.js", "shared/flows-live.js", "shared/flows-positioning.js", "shared/flows-sides.js", "shared/flows-tape-stats.js", "shared/flows-vendor-ops.js"],
          "NO SHARED MODULE, SERVER FILE OR NIGHTLY LEG BUT THESE READS THE VENDOR'S ASK-SIDE AND BID-SIDE FIELDS: a new reader must be added here on review and use askShareRead, not divide by the premium itself (the ticker's alert card and the dossier did, and printed 30% for a name the Unusual page read at 75% of what the vendor sided)");
     for (const f of ["shared/flows-positioning.js", "shared/flows-dossier.js"]) {
       ok(/askShareRead/.test(fs.readFileSync(path.join(ROOT, f), "utf8")), `${f} takes the alert ask share from askShareRead`);

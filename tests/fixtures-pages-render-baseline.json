@@ -206,6 +206,29 @@
   "overflowPx": 0,
   "targetsUnder24": 0
  },
+ "ledger@320": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0,
+  "targetsUnder44": 1
+ },
+ "ledger@390": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0,
+  "targetsUnder44": 0
+ },
+ "ledger@1440": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0
+ },
  "events@320": {
   "contrast": 0,
   "names": 0,

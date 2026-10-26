@@ -123,6 +123,7 @@ const SPECS = [
   { id: "now", fn: "nowPage", url: "/flows/now/" },
 
   { id: "unusual", fn: "unusualPage", url: "/flows/unusual/" },
+  { id: "ledger", fn: "ledgerPage", url: "/flows/ledger/" },
   { id: "events", fn: "eventsPage", url: "/flows/events/" },
   { id: "moves", fn: "movesPage", url: "/flows/moves/" },
   { id: "political", fn: "politicalPage", url: "/flows/political/" },
