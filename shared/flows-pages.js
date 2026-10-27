@@ -5,6 +5,7 @@ import { RESET_SAID } from "./flows-ai.js";
 import { stamp as trtStamp } from "./flows-time.js";
 import { etDayOf, isSession, shiftDay } from "./flows-quant-time.js";
 import { ledgerBody, LEDGER_DESCRIPTION, LEDGER_STYLES, LEDGER_SCRIPTS } from "./flows-page-ledger.js";
+import { positioningBody, POSITIONING_DESCRIPTION, POSITIONING_STYLES, POSITIONING_SCRIPTS } from "./flows-page-positioning.js";
 import { HORIZON_SESSIONS } from "./flows-horizon.js";
 
 export const CALENDAR_BACK_DAYS = 14;
@@ -1169,6 +1170,19 @@ export function ledgerPage({ username = "", live = false } = {}) {
   });
 }
 
+export function positioningPage({ username = "" } = {}) {
+  return flowsDocument({
+    title: "Positioning",
+    description: POSITIONING_DESCRIPTION,
+    active: "positioning",
+    username,
+    chrome: false,
+    styles: POSITIONING_STYLES,
+    scripts: POSITIONING_SCRIPTS,
+    body: positioningBody(glyph),
+  });
+}
+
 export function unusualPage({ username = "", owner = false } = {}) {
   return `${head("Flows — Unusual activity", "Windows of option activity the vendor flagged, and contracts carrying volume far above their own open interest.", [...FEEDS_CSS, "/assets/css/flows-net.css"])}
 ${shell("Unusual", "unusual", username, `${feedHead("ua", "Unusual")}
@@ -1570,7 +1584,7 @@ export function oracleShell(html, mode, slug) {
 
 export const FLOWS_PAGES = {
   loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, networkPage, nowPage, deskPage,
-  politicalPage,
+  politicalPage, positioningPage,
   tickerPage, unusualPage, movesPage, ledgerPage, statusPage, eventsPage, strategyPage, ASSET_VERSION,
 };
 
