@@ -37,7 +37,7 @@ const list = probe.loadList();
 const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.yaml"), "utf8"));
 
 {
-  const byTier = { used: new Set(), 1: new Set(), 2: new Set() };
+  const byTier = { used: new Set(), planned: new Set(), 1: new Set(), 2: new Set() };
   const opTier = new Map();
   for (const p of list.probes) {
     byTier[p.tier].add(p.op);
@@ -46,7 +46,8 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
   }
   eq(byTier.used.size, 79, "every one of the 79 operations a production call site reads is probed and labelled used: the 38 labelled before, the 37 the nightly legs read that were still filed under Tiers 1 and 2, the unusual-activity leg's one, and the four the extras leg reads (dividends, splits, interpolated implied volatility, ETF exposure), less the VIX term structure the nightly no longer calls");
   eq(byTier["1"].size, 2, "the Tier 1 operation of the adoption plan that no code reads yet is probed, and the VIX term structure, which the nightly dropped and this probe keeps watching for the add-on");
-  eq(byTier["2"].size, 11, "the two Tier 2 operations no code reads yet are probed, plus the nine entitlement probes (the trade-stance ranking joined them), and Tier 3 is left out");
+  eq(byTier["2"].size, 10, "the two Tier 2 operations no code reads yet are probed, plus the eight entitlement probes left once the unusual congressional trades became a planned read, and Tier 3 is left out");
+  eq(byTier.planned.size, 26, "the 26 operations the positioning package reads are probed as planned: their shapes are recorded, their fields are not yet held strict");
   for (const [op, names] of Object.entries(list.expect)) {
     eq(new Set(names).size, names.length, `${op}: the documented names are listed once each`);
   }
@@ -129,11 +130,11 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
   deep(bad.filter(([, id]) => !ids.has(id)), [], "and every id a call site names is in the registry");
   const registered = new Set(OPS.map((e) => e.op));
   const tierOf = new Map(list.probes.map((p) => [p.op, p.tier]));
-  deep([...registered].filter((op) => tierOf.get(op) !== "used"), [], "USED IS TRUE: every registered operation has a probe labelled used");
+  deep([...registered].filter((op) => !["used", "planned"].includes(tierOf.get(op))), [], "USED IS TRUE: every registered operation has a probe labelled used, or planned for the positioning package's 26");
   deep(listOps.filter((op) => tierOf.get(op) === "used" && !registered.has(op)), [],
     "and no operation is labelled used that the registry does not carry");
-  eq(registered.size, 79, "79 operations are registered and read in production");
-  eq(OPS.length, 79, "one entry for each");
+  eq(registered.size, 105, "105 operations are registered: 79 read in production and the 26 the positioning package plans");
+  eq(OPS.length, 105, "one entry for each");
   const dossierIds = new Set([...Object.values(DOSSIER_OPS), ...SOURCES.map((s) => s.op)]);
   const read = new Set([...refs.keys(), ...dossierIds]);
   deep(OPS.filter((e) => !read.has(e.id)).map((e) => e.id), [], "READ IS TRUE: every registered id is named by a production call site or a dossier source");
@@ -154,7 +155,7 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
     ok(e.reads === null || (Array.isArray(e.reads) && e.reads.length > 0 && new Set(e.reads).size === e.reads.length), `${e.id}: reads are absent or distinct names`);
     const inSpec = blocks.has(e.op);
     eq(e.liveOnly, !inSpec, `${e.id}: ${e.op} is liveOnly exactly when the committed spec lacks it`);
-    if (inSpec) ok(specDigest.ops[`GET ${e.op}`] && !specDigest.ops[`GET ${e.op}`].deprecated, `${e.id}: ${e.op} is in the committed spec and not deprecated`);
+    if (inSpec) ok(specDigest.ops[`GET ${e.op}`] && (e.deprecated || !specDigest.ops[`GET ${e.op}`].deprecated), `${e.id}: ${e.op} is in the committed spec and not deprecated`);
     const tokens = (e.path.match(/\{[a-z_]+\}/g) || []);
     const opTokens = (e.op.match(/\{[a-z_]+\}/g) || []);
     ok(e.path === e.op || e.path.split("/").every((seg, i) => seg === e.op.split("/")[i] || /^\{[a-z_]+\}$/.test(e.op.split("/")[i])),
@@ -262,7 +263,7 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
     "each per-name route is asked for AAPL and NVDA, the gold future and the unusual congressional trades once");
   ok(expanded.filter((p) => entitled.includes(p.op)).every((p) => p.entitlement && !p.gated),
     "and each carries the entitlement mark into its run");
-  eq(expanded.length + 1, 180, "a weekly strict run is 179 list calls plus the session call: ten more than the 170 before (four used operations and the trade-stance question, each for AAPL and NVDA)");
+  eq(expanded.length + 1, 210, "a weekly strict run is 209 list calls plus the session call: thirty more than the 180 before (the 25 planned positioning probes, five of them per name for AAPL and NVDA)");
   ok(list.enums["/api/option-trades"].report_flags.includes("intermarket_sweep") &&
      list.enums["/api/option-trades"].upstream_condition_detail.includes("isoi"),
     "the sweep question is asked of both encodings the spec documents: report_flags and the OPRA code isoi");

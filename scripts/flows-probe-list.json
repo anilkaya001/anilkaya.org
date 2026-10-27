@@ -110,7 +110,32 @@
     {"id": "option-stance", "tier": "2", "op": "/api/stock/{ticker}/option-stance", "path": "/api/stock/{t}/option-stance", "query": {"stance": "sell_premium", "limit": "25"}},
     {"id": "volatility-context", "tier": "2", "op": "/api/stock/{ticker}/volatility/context", "path": "/api/stock/{t}/volatility/context"},
     {"id": "futures-stats", "tier": "2", "op": "/api/futures/{contract}/stats", "path": "/api/futures/{gold-front}/stats"},
-    {"id": "congress-unusual", "tier": "2", "op": "/api/congress/unusual-trades", "path": "/api/congress/unusual-trades", "query": {"limit": "50"}}
+    {"id": "congress-unusual", "tier": "planned", "op": "/api/congress/unusual-trades", "path": "/api/congress/unusual-trades", "query": {"limit": "50"}},
+    {"id": "inst-list", "tier": "planned", "op": "/api/institutions", "path": "/api/institutions", "query": {"limit": "100", "order": "total_value", "order_direction": "desc"}},
+    {"id": "inst-latest", "tier": "planned", "op": "/api/institutions/latest_filings", "path": "/api/institutions/latest_filings", "query": {"limit": "100", "order": "filing_date", "order_direction": "desc"}},
+    {"id": "inst-holdings", "tier": "planned", "op": "/api/institution/{name}/holdings", "path": "/api/institution/{name}/holdings", "query": {"limit": "100", "order": "value", "order_direction": "desc"}, "bind": {"name": {"from": "inst-list", "field": "name"}}},
+    {"id": "inst-activity-v1", "tier": "planned", "op": "/api/institution/{name}/activity", "path": "/api/institution/{name}/activity", "query": {"limit": "50"}, "bind": {"name": {"from": "inst-list", "field": "name"}}},
+    {"id": "inst-activity", "tier": "planned", "op": "/api/institution/{name}/activity/v2", "path": "/api/institution/{name}/activity/v2", "query": {"limit": "200"}, "bind": {"name": {"from": "inst-list", "field": "name"}}},
+    {"id": "inst-sectors", "tier": "planned", "op": "/api/institution/{name}/sectors", "path": "/api/institution/{name}/sectors", "query": {"limit": "40"}, "bind": {"name": {"from": "inst-list", "field": "name"}}},
+    {"id": "insider-sector", "tier": "planned", "op": "/api/insider/{sector}/sector-flow", "path": "/api/insider/Technology/sector-flow", "query": {"limit": "120"}},
+    {"id": "insiders", "tier": "planned", "op": "/api/insider/{ticker}", "path": "/api/insider/{t}"},
+    {"id": "insider-bs", "tier": "planned", "op": "/api/stock/{ticker}/insider-buy-sells", "path": "/api/stock/{t}/insider-buy-sells"},
+    {"id": "ftds", "tier": "planned", "op": "/api/shorts/{ticker}/ftds", "path": "/api/shorts/{t}/ftds"},
+    {"id": "short-venues", "tier": "planned", "op": "/api/shorts/{ticker}/volumes-by-exchange", "path": "/api/shorts/{t}/volumes-by-exchange"},
+    {"id": "cg-unusual-tickers", "tier": "planned", "op": "/api/congress/unusual-trades/by-tickers", "path": "/api/congress/unusual-trades/by-tickers", "query": {"tickers": "{tickers}", "limit": "50"}},
+    {"id": "cg-unusual-stats", "tier": "planned", "op": "/api/congress/unusual-trades/stats", "path": "/api/congress/unusual-trades/stats"},
+    {"id": "cg-unusual-chart", "tier": "planned", "op": "/api/congress/unusual-trades/chart-data", "path": "/api/congress/unusual-trades/chart-data"},
+    {"id": "cg-late", "tier": "planned", "op": "/api/congress/late-reports", "path": "/api/congress/late-reports", "query": {"limit": "200"}},
+    {"id": "cg-politicians", "tier": "planned", "op": "/api/congress/politicians", "path": "/api/congress/politicians", "query": {"last_traded_within_months": "6"}},
+    {"id": "cg-trader", "tier": "planned", "op": "/api/congress/congress-trader", "path": "/api/congress/congress-trader", "query": {"limit": "100"}},
+    {"id": "pp-disclosures", "tier": "planned", "op": "/api/politician-portfolios/disclosures", "path": "/api/politician-portfolios/disclosures", "query": {"latest_only": "true"}},
+    {"id": "pp-people", "tier": "planned", "op": "/api/politician-portfolios/people", "path": "/api/politician-portfolios/people"},
+    {"id": "pp-recent", "tier": "planned", "op": "/api/politician-portfolios/recent_trades", "path": "/api/politician-portfolios/recent_trades", "query": {"filter_late_reports": "true", "limit": "200"}},
+    {"id": "pp-portfolio", "tier": "planned", "op": "/api/politician-portfolios/{politician_id}", "path": "/api/politician-portfolios/{pid}", "bind": {"pid": {"from": "pp-people", "field": "id"}}},
+    {"id": "pol-trades", "tier": "planned", "op": "/api/politics/politician/trades", "path": "/api/politics/politician/trades", "query": {"filter_late_reports": "true", "limit": "200"}},
+    {"id": "fec-candidates", "tier": "planned", "op": "/api/politics/fec/candidates", "path": "/api/politics/fec/candidates", "query": {"limit": "100"}},
+    {"id": "fec-companies", "tier": "planned", "op": "/api/politics/fec/companies", "path": "/api/politics/fec/companies", "query": {"limit": "200"}},
+    {"id": "fec-contributions", "tier": "planned", "op": "/api/politics/fec/contributions", "path": "/api/politics/fec/contributions", "query": {"aggregated": "true", "ticker": "{t}"}}
   ],
   "expect": {
     "/api/companies/{ticker}/profile": ["analyst_target_price", "asset_type", "beta", "cik", "country", "currency", "data", "description", "dividend_yield", "ebitda", "eps", "exchange", "industry", "market_cap", "name", "pe_ratio", "peg_ratio", "sector", "shares_outstanding", "ticker", "week_52_high", "week_52_low"],
@@ -222,8 +247,7 @@
     "/api/stock/{ticker}/stock-volume-price-levels",
     "/api/stock/{ticker}/option-stance",
     "/api/stock/{ticker}/volatility/context",
-    "/api/futures/{contract}/stats",
-    "/api/congress/unusual-trades"
+    "/api/futures/{contract}/stats"
   ],
   "enums": {
     "/api/option-trades": {
