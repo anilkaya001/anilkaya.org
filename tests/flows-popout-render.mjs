@@ -18,8 +18,10 @@ const BY_NAME = new Map();
 let TOTAL = 0;
 for (const r of ALERTS.rows) {
   if (!(r.prem > 0)) continue;
-  BY_NAME.set(r.t, (BY_NAME.get(r.t) || 0) + r.prem);
-  TOTAL += r.prem;
+  const sided = (Number(r.askPrem) || 0) + (Number(r.bidPrem) || 0);
+  if (sided > r.prem) continue;
+  BY_NAME.set(r.t, (BY_NAME.get(r.t) || 0) + sided);
+  TOTAL += sided;
 }
 const RANKED = [...BY_NAME.entries()].sort((a, b) => b[1] - a[1]).map((e) => e[0]);
 const SIZES = [[1440, 820, false], [1024, 768, false], [390, 844, true]];
@@ -122,7 +124,7 @@ async function paintProblems({ viewport, coarse = false, patch = null }) {
       return { chips: host.querySelectorAll(".nm-chip").length, total: M ? M.total : null, read: (host.querySelector(".nm-read") || {}).textContent || "",
         names: M ? M.layers[2].filter((n) => n.id !== "n:~").map((n) => n.id.slice(2)) : [] };
     });
-    if (m.total === null || Math.abs(m.total - TOTAL) > 1e-6 * TOTAL) bad.push(tag + ": the network's total " + m.total + " is not the fixture's flagged premium " + TOTAL);
+    if (m.total === null || Math.abs(m.total - TOTAL) > 1e-6 * TOTAL) bad.push(tag + ": the network's total " + m.total + " is not the fixture's sided premium " + TOTAL);
     if (!m.names.length || JSON.stringify(m.names) !== JSON.stringify(RANKED.slice(0, m.names.length))) bad.push(tag + ": the names shown are not the largest by premium, in order");
     if (!m.read.startsWith(RANKED[0])) bad.push(tag + ": the readout at rest is not the largest name, " + RANKED[0] + ": " + m.read.slice(0, 60));
     const s = await shape(page);

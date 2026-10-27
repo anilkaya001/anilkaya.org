@@ -1066,10 +1066,10 @@ export function alertsTape(rows, ticker, { sessionDate = null, adv = null, compl
     urgency: A !== null && A > 0 ? round(urgentPrem / A, 6) : note("urgency", "no-adv"),
     dots: mine.slice().sort((a, b) => b.prem - a.prem || a.t - b.t).slice(0, dots).map((a) => ({
       m: a.m, p: usd(a.prem), cp: a.call ? "C" : "P", k: a.k, e: a.e,
-      a: a.prem > 0 ? round(a.ask / a.prem, 3) : null, sw: a.sweep, op: a.opening,
+      a: a.prem > 0 && a.askRaw !== null ? round(a.askRaw / a.prem, 3) : null, b: a.prem > 0 && a.bidRaw !== null ? round(a.bidRaw / a.prem, 3) : null, sw: a.sweep, op: a.opening,
     })),
     u: { prem: "usd", askShare: "frac", sidedShare: "frac", sweepShare: "frac", openingShare: "frac", callShare: "frac", urgency: "frac",
-      coverFromM: "min", m: "min", p: "usd", k: "px", a: "frac" },
+      coverFromM: "min", m: "min", p: "usd", k: "px", a: "frac", b: "frac" },
     gaps,
   };
 }
