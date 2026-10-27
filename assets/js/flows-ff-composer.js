@@ -41,8 +41,9 @@
     function unscaled(n, unit) { return Number.isInteger(n) ? Number(n + "e" + stepExp(unit)) : null; }
 
     function gridIndex(x, unit) {
-      var n = scaled(x, unit);
-      return n === null ? null : round(n / gridUnits(unit));
+      if (!isNum(x) || !units[unit]) return null;
+      var g = round(Number((x / units[unit].xStep).toPrecision(12)));
+      return g === 0 ? 0 : g;
     }
     function fromGrid(g, unit) { return unscaled(g * gridUnits(unit), unit); }
 
