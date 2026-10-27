@@ -53,7 +53,7 @@
 .nm-dtw { overflow: auto; min-height: 0; }
 .nm-dx { display: flex; justify-content: flex-end; }
 @media (pointer: coarse) { .nm-seg button, .nm-link { min-height: 44px; } }
-@media (max-width: 639px) { .nm-stats { display: none; } .nm-read { -webkit-line-clamp: 6; min-height: 4em; } .nm-bar { gap: 6px; } }
+@media (max-width: 639px) { .nm-stats { display: none; } .nm-read { -webkit-line-clamp: 3; min-height: 3em; } .nm-bar { gap: 6px; } }
 .nm-lgl { display: flex; flex-direction: column; gap: 8px; font: var(--t-footnote); color: var(--label-1); }
 @media (forced-colors: active) { .nm-box { stroke: CanvasText; } .nm-chip.is-sel .nm-box { stroke-width: 3; } }
 @media (prefers-reduced-motion: reduce) { .nm-band { transition: none; } }

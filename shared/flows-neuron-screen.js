@@ -1,6 +1,7 @@
 import { STATE_LINES, STATE_WORD, structuresForState } from "./flows-neuron.js";
 import { BUCKET_LINES } from "./flows-quant-structures.js";
 import { sessionsBetween } from "./flows-cross.js";
+import { HORIZON_SESSIONS } from "./flows-horizon.js";
 
 export const SCREEN_VERSION = 1;
 export const SCREEN_WHY = "no chain read for this name";
@@ -10,7 +11,7 @@ export const SCREEN_SOFT = "a soft tilt, not a signal for one name";
 export const SCREEN_LINES = Object.freeze({
   TRADING_DAYS: 252,
   GAMMA_MATERIAL_ADV: 0.01,
-  EVENT_WINDOW_SESSIONS: 21,
+  EVENT_WINDOW_SESSIONS: HORIZON_SESSIONS,
   TILT_DECISIVE: STATE_LINES.AGGRESSOR_SHARE,
   VRP_RELATIVE: STATE_LINES.VRP_RELATIVE,
   IVP_HIGH: BUCKET_LINES.IV_HIGH * 100,
@@ -139,8 +140,8 @@ export function screenReading(input) {
       key: "event", group: "event", label: "Next earnings report", value: ed,
       text: String(ed), unit: ed === 1 ? "session away" : "sessions away", grade: 1,
       note: eventInside
-        ? "Inside the " + L.EVENT_WINDOW_SESSIONS + " sessions that a 30-day implied volatility spans, so the report is priced into it."
-        : "Beyond the " + L.EVENT_WINDOW_SESSIONS + " sessions that a 30-day implied volatility spans.",
+        ? "Inside the next " + L.EVENT_WINDOW_SESSIONS + " sessions, about the span of a 30-day implied volatility, so the report is priced into it."
+        : "Beyond the next " + L.EVENT_WINDOW_SESSIONS + " sessions, about the span of a 30-day implied volatility.",
     });
   }
 
@@ -273,7 +274,7 @@ export function screenReading(input) {
     noIdeaReason = "Nothing in the screener row implies a state: " + notes.join(", and ") + ".";
   } else if (eventInside) {
     noIdeaCode = "event.window";
-    noIdeaReason = "An earnings report " + ed + " sessions away sits inside the " + L.EVENT_WINDOW_SESSIONS + " sessions any structure spans and inside the implied volatility itself, and a screener row cannot say how it is priced, so no structure family is named.";
+    noIdeaReason = "An earnings report " + ed + " sessions away sits inside the next " + L.EVENT_WINDOW_SESSIONS + " sessions that any structure spans and inside the implied volatility itself, and a screener row cannot say how it is priced, so no structure family is named.";
   } else if (conflicts.length) {
     noIdeaCode = "premium.conflict";
     noIdeaReason = "The readings disagree: " + conflicts.join("; ") + ". No position is the reading until they agree.";

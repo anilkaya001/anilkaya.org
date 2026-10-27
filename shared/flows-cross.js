@@ -1,5 +1,8 @@
 import { isTradingDay } from "./flows-freshness.js";
 import { mean, sampleSd, median as medianOf } from "./flows-stats.js";
+import { forward, horizonEnd, ahead as aheadOf, HORIZON_SESSIONS } from "./flows-calendar.js";
+import { LIVE_ELAPSED_MAX } from "./flows-horizon.js";
+import { basisOf, cellOf } from "./flows-reports.js";
 
 export { mean, sampleSd, medianOf };
 
@@ -303,11 +306,30 @@ export function impliedCorrelation(indexVol, members, { minCoverage = IMPLIED_CO
 
 const round = (v, scale) => (v === null || !Number.isFinite(v) ? null : Math.round(v * scale));
 
+export const ED_UNSTATED_MAX = 200;
+
+export function unstatedAhead(list, sessionDate) {
+  const found = [];
+  for (const r of list) {
+    const f = forward(isoDay(r.next_earnings_date), sessionDate, r.er_time);
+    if (!f || f.certain || f.ed > LIVE_ELAPSED_MAX) continue;
+    found.push([r.ticker, f.ed + 1]);
+  }
+  found.sort((x, y) => x[1] - y[1] || (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
+  const edge = found.length > ED_UNSTATED_MAX ? found[ED_UNSTATED_MAX][1] : null;
+  const kept = edge === null ? found : found.filter((x) => x[1] < edge);
+  const through = edge === null ? LIVE_ELAPSED_MAX : edge - 2;
+  return { map: Object.fromEntries(kept.sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0))), n: found.length, through };
+}
+
 const sessionsToEarnings = (row, ctx) => {
-  const e = isoDay(row.next_earnings_date);
-  if (!e || !ctx.sessionDate) return null;
-  if (e === ctx.sessionDate && /^pre/i.test(String(row.er_time || "").trim())) return null;
-  return sessionsBetween(ctx.sessionDate, e);
+  const f = forward(isoDay(row.next_earnings_date), ctx.sessionDate, row.er_time);
+  return f ? f.ed : null;
+};
+
+const sessionsSinceReport = (row, ctx) => {
+  const rd = cellOf(ctx.reports, row.ticker).rd;
+  return Number.isInteger(rd) ? rd : null;
 };
 
 const iv30Of = (r) => firstPositive(r.volatility_30, r.iv30d, r.volatility);
@@ -385,6 +407,7 @@ export const UNIVERSE_COLUMNS = Object.freeze([
   { key: "f2", unit: "days per 252", scale: 1, prio: 2, get: (r, ctx) => sigmaCell(r, ctx, "f2") },
   { key: "f3", unit: "days per 252", scale: 1, prio: 2, get: (r, ctx) => sigmaCell(r, ctx, "f3") },
   { key: "ed", unit: "sessions", scale: 1, prio: 2, get: (r, ctx) => sessionsToEarnings(r, ctx) },
+  { key: "rd", unit: "sessions", scale: 1, prio: 1, needs: "reports", yields: 3, basis: "rdBasis", get: (r, ctx) => sessionsSinceReport(r, ctx) },
   { key: "rsi", unit: "index100", scale: 1, prio: 3,
     get: (r) => { const v = vnum(r.rsi_14); return v !== null && v >= 0 && v <= 100 ? v : null; } },
   { key: "adx", unit: "index100", scale: 1, prio: 5,
@@ -446,16 +469,19 @@ export function buildUniverse(rows, {
   harvest = null,
   fresh = null,
   sigma = null,
-  columns = UNIVERSE_COLUMNS,
+  reports = null,
+  columns: offered = UNIVERSE_COLUMNS,
   percentiles = UNIVERSE_PERCENTILES,
 } = {}) {
+  const columns = reports ? offered : offered.filter((c) => c.needs !== "reports");
   const list = (Array.isArray(rows) ? rows : [])
     .filter((r) => r && typeof r.ticker === "string" && r.ticker)
     .slice()
     .sort((a, b) => (vnum(b.marketcap) ?? -1) - (vnum(a.marketcap) ?? -1) ||
       (a.ticker < b.ticker ? -1 : a.ticker > b.ticker ? 1 : 0));
   const tiltsBySector = sectorTilts(list);
-  const ctx = { sessionDate, sectorTilts: tiltsBySector, sigma };
+  const ctx = { sessionDate, sectorTilts: tiltsBySector, sigma, reports };
+  const edUnstated = unstatedAhead(list, sessionDate);
   const sectors = [];
   const sectorIndex = new Map();
   const sec = list.map((r) => {
@@ -512,31 +538,57 @@ export function buildUniverse(rows, {
       rule: "cross-sectional z of (iv30d - iv30d_1d) / iv30d_1d, sample sd, tagged x (not own history)",
       v: shockZ.map((z) => round(z, 10)),
     },
+    hz: HORIZON_SESSIONS,
+    through: horizonEnd(sessionDate),
+    ahead: aheadOf(sessionDate),
+    edUnstated: edUnstated.map,
+    edUnstatedN: edUnstated.n,
+    edUnstatedThrough: edUnstated.through,
+    ...(reports ? { rdBasis: basisOf(new Map(list.map((r) => [r.ticker, cellOf(reports, r.ticker)])), { asOf: sessionDate, from: reports.from || null, cutDays: reports.cut || [] }) } : {}),
     shed: [],
     budgetBytes,
   };
 
+  const prioOf = new Map(columns.map((c) => [c.key, c.prio]));
   const byPrio = columns.slice().sort((a, b) => b.prio - a.prio || columns.indexOf(b) - columns.indexOf(a));
-  let bytes = JSON.stringify(payload).length;
-  for (const spec of byPrio) {
-    if (bytes <= budgetBytes) break;
-    if (spec.prio <= 1) break;
-    delete payload.cols[spec.key];
-    delete payload.units[spec.key];
-    delete payload.counts[spec.key];
-    if (payload.pct[spec.key]) delete payload.pct[spec.key];
-    payload.shed.push(spec.key);
-    bytes = JSON.stringify(payload).length;
+  const shedTo = (p) => {
+    let bytes = JSON.stringify(p).length;
+    for (const spec of byPrio) {
+      if (bytes <= budgetBytes) break;
+      if (spec.prio <= 1) break;
+      if (!(spec.key in p.cols)) continue;
+      delete p.cols[spec.key];
+      delete p.units[spec.key];
+      delete p.counts[spec.key];
+      if (p.pct[spec.key]) delete p.pct[spec.key];
+      p.shed.push(spec.key);
+      bytes = JSON.stringify(p).length;
+    }
+  };
+  const yielding = columns.find((c) => c.yields && c.key in payload.cols) || null;
+  const whole = yielding ? structuredClone(payload) : null;
+  shedTo(payload);
+  let out = payload;
+  if (yielding && payload.shed.some((k) => prioOf.get(k) <= yielding.yields)) {
+    delete whole.cols[yielding.key];
+    delete whole.units[yielding.key];
+    delete whole.counts[yielding.key];
+    if (whole[yielding.basis]) whole[yielding.basis] = { ...whole[yielding.basis], withheld: "budget" };
+    shedTo(whole);
+    if (payload.shed.some((k) => prioOf.get(k) <= yielding.yields && !whole.shed.includes(k))) {
+      whole.shed.push(yielding.key);
+      out = whole;
+    }
   }
-  payload.bytes = JSON.stringify(payload).length;
-  if (payload.bytes <= budgetBytes) return payload;
+  out.bytes = JSON.stringify(out).length;
+  if (out.bytes <= budgetBytes) return out;
   const refused = {
-    v: payload.v, generatedAt, sessionDate,
+    v: out.v, generatedAt, sessionDate,
     ...(fresh ? { fresh } : {}),
     status: "unavailable",
     reason: "over_budget",
-    screened: payload.screened, n: payload.n, harvest: payload.harvest, order: payload.order,
-    shed: payload.shed, budgetBytes, overBytes: payload.bytes,
+    screened: out.screened, n: out.n, harvest: out.harvest, order: out.order,
+    shed: out.shed, budgetBytes, overBytes: out.bytes,
   };
   refused.bytes = JSON.stringify(refused).length;
   return refused;
@@ -586,5 +638,15 @@ export function projectUniverse(universe, wanted) {
   out.units = units;
   out.cols = cols;
   out.absent = absent;
+  if (want.includes("ed") || want.includes("rd")) {
+    out.hz = u.hz ?? null;
+    out.through = u.through ?? null;
+    out.ahead = u.ahead ?? null;
+  }
+  if (want.includes("ed")) {
+    out.edUnstated = u.edUnstated ?? null;
+    out.edUnstatedThrough = u.edUnstatedThrough ?? null;
+  }
+  if (want.includes("rd")) out.rdBasis = u.rdBasis ?? null;
   return out;
 }

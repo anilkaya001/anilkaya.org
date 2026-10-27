@@ -6,6 +6,7 @@ import { LIVE_OIDC, actionsIdToken, jwtExpiry } from "../../shared/flows-oidc.js
 import { fixtureHost, fixtureRefusal } from "../../shared/flows-fixture-names.js";
 import { vendorBaseInfo } from "../../shared/flows-vendor-core.js";
 import { tainted } from "../flows-legs/taint.mjs";
+import { wireText } from "../../shared/flows-card-pack.js";
 import { DRY_RUN, LIVE_MODE, EMIT } from "./flags.mjs";
 import { sleep, wireProgress } from "./vendor.mjs";
 
@@ -460,6 +461,7 @@ async function send(key, payload) {
     process.exitCode = 1;
     throw fixtureLeakError(leak, `publish ${key}`);
   }
+  const wire = wireText(key, body, process.env.FLOWS_CARDX_WIRE === "pack");
   let response, refusal = null, heard = null, lastDetail = "";
   for (let attempt = 0; ; attempt++) {
 
@@ -472,7 +474,7 @@ async function send(key, payload) {
       redirect: "error",
 
       headers: await ingestHeaders({ json: true }),
-      body,
+      body: wire,
     },
   ).finally(() => wireProgress.settled());
 

@@ -20,6 +20,7 @@ const GLASS_REBASE = { bytes: 480, gzip: 80, why: "design v3 Lane 1 rebased onto
 const HOME_BENTO = { od: "OD-HOME-BENTO", bytes: 11200, gzip: 2950, cssBytes: 23900, cssGzip: 3450, why: "owner-approved: the Home bento puts every module on one screen at five sizes, which costs the faces (strip, row, glance, sheet), the pager and the net decision in flows-overview.js (+10.8 KB raw, +2.9 KB gzip) and the grid, container-query fit blocks and compact faces in flows-home.css (+23.9 KB raw, +3.5 KB gzip), measured against origin/main"};
 const STATUS_RAISE = { od: "OD-STATUS-1", bytes: 300, deferredBytes: 850, why: "owner-approved: the whole-card counts, per-key caps and readable rail and vendor cards cost 281 B of eager flows-status.js on statusPage, measured against the 115.68 KiB ceiling, and 817 B across the status-panels files, measured against the 179 KiB deferred allowance; the follow-up moves the status painters that only the non-Health tabs use into the status-panels group and deletes this raise" };
 const MOVES_PARTS = { bytes: 3557, gzip: 1005, why: "lane 5: the Moves drill panel prints the parts of a move (market, the median of at least ten same-sector peers, the name against them) in the header strip: peerParts and partsHtml, the five explanatory sentences and the labels in flows-moves.js, which retires the info dialog's line that said parts of the move were not built; measured against main at 161.25 KiB raw and 49.97 KiB gzip of eager JavaScript on movesPage" };
+const MOVES_EARNINGS = { od: "LANE-4", bytes: 3640, gzip: 1027, why: "lane 4: the Moves controller reads the earnings window, the report-session column and the unstated-time ages from the universe payload instead of a literal 21, ages them by the sessions between the nightly and the live roster, sets a name that has just reported apart under a Reaction day or Day after chip, and says in the foot when the payload states no window, the nightly is more than two sessions old or the report column is withheld; a report whose time is not stated is its own state (Report time not stated, chip Time unstated) beside an unplaced state that is never tested, which the carried forward ages (edUnstated, read with the horizon the map is complete through, edUnstatedThrough, by F.later) and the sector medians need, 53,277 to 56,917 B raw and 16,022 to 17,049 B gzip" };
 const MOVES_SECTORS = { bytes: 6927, gzip: 1661, cssBytes: 1422, cssGzip: 173, why: "lane 5: the Moves lists panel gets the Sectors view its own info dialog and leaf sentences described and the radar rebuild dropped: sectorStats and shareText, the row and dialog painters, the keyboard and the switch, and the rules for the table, in flows-moves.js and flows-moves.css; measured against the same files at the commit before it" };
 const SKIP_FOCUS = { bytes: 50, why: "lane 5: the sign-in, About, Glossary and not-found pages open with a skip link to a main that takes focus, and that main draws no outline of its own: one rule in flows.css, which every Flows page carries, and the desk's CSS ceiling had no headroom left" };
 const NETWORK_TICKER = { bytes: 687, why: "lane 5: the ticker builds the Flow network module the dock always named (buildNetwork, 0.7 KB of flows-ticker.js) and defers the group file; the dock button no longer says not built" };
@@ -56,7 +57,7 @@ const CEILING_KIB = {
   nowPage: 129,
   unusualPage: 191 + (191 + 2327 / 1024) - (191) + (191 + 2327 / 1024 + 265 / 1024) - (191 + 2327 / 1024) + (191 + 2327 / 1024 + 265 / 1024 - 314 / 1024) - (191 + 2327 / 1024 + 265 / 1024) + 2322 / 1024 + 2000 / 1024 + 1300 / 1024 + 2400 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024 + 700 / 1024 + 1306 / 1024,
   eventsPage: 155 + 5786 / 1024 + (155 + 5786 / 1024 + 2327 / 1024) - (155 + 5786 / 1024) + (155 + 5786 / 1024 + 2327 / 1024 + 265 / 1024) - (155 + 5786 / 1024 + 2327 / 1024) + 2010 / 1024 + NN_KERNEL.bytes / 1024,
-  movesPage: 151 + 5522 / 1024 + 442 / 1024 + 320 / 1024 + 64 / 1024 + NN_KERNEL.bytes / 1024 + MOVES_PARTS.bytes / 1024 + MOVES_SECTORS.bytes / 1024 + 144 / 1024,
+  movesPage: 151 + 5522 / 1024 + 442 / 1024 + 320 / 1024 + 64 / 1024 + NN_KERNEL.bytes / 1024 + MOVES_PARTS.bytes / 1024 + MOVES_SECTORS.bytes / 1024 + 144 / 1024 + MOVES_EARNINGS.bytes / 1024,
   ledgerPage: 82.6 + LEDGER_PAGE.bytes / 1024,
   politicalPage: 118 + 2010 / 1024 + 700 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024,
   loginPage: 5,
@@ -76,9 +77,9 @@ const GZIP_KIB = {
   marketPage: 76 - 10914 / 1024 + (76 - 10998 / 1024 + 830 / 1024) - (76 - 10998 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) - (76 - 10998 / 1024 + 830 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024 - 322 / 1024) - (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) + 722 / 1024 + 3.3 + 149 / 1024 + NN_KERNEL.gzip / 1024,
   networkPage: 39,
   nowPage: 40.3,
-  unusualPage: 87 - 30788 / 1024 + (87 - 30788 / 1024 + 830 / 1024) - (87 - 30788 / 1024) + (87 - 30788 / 1024 + 830 / 1024 + 101 / 1024) - (87 - 30788 / 1024 + 830 / 1024) + 722 / 1024 + 2000 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + 200 / 1024 + 531 / 1024,
+  unusualPage: 87 - 30788 / 1024 + (87 - 30788 / 1024 + 830 / 1024) - (87 - 30788 / 1024) + (87 - 30788 / 1024 + 830 / 1024 + 101 / 1024) - (87 - 30788 / 1024 + 830 / 1024) + 722 / 1024 + 2000 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + 200 / 1024 + 531 / 1024 + 100 / 1024,
   eventsPage: 34 + 1932 / 1024 + (34 + 1932 / 1024 + 830 / 1024) - (34 + 1932 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (34 + 1932 / 1024 + 830 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024 - 98 / 1024) - (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) + 641 / 1024 + 2000 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
-  movesPage: 47.5 + 1122 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + MOVES_PARTS.gzip / 1024 + MOVES_SECTORS.gzip / 1024 + MOVES_PARTS.gzip / 1024 + MOVES_SECTORS.gzip / 1024,
+  movesPage: 47.5 + 1122 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + MOVES_PARTS.gzip / 1024 + MOVES_SECTORS.gzip / 1024 + MOVES_PARTS.gzip / 1024 + MOVES_SECTORS.gzip / 1024 + MOVES_EARNINGS.gzip / 1024,
   ledgerPage: 27 + LEDGER_PAGE.gzip / 1024,
   politicalPage: 37.5 + 641 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
   loginPage: 3,
@@ -117,7 +118,7 @@ const CSS_GZIP_KIB = {
   watchPage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + 27 / 1024,
   deskPage: 24 + 64 / 1024 + 400 / 1024 + 1500 / 1024 + 113 / 1024 + 64 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   strategyPage: 24 + 64 / 1024 + 400 / 1024 - 17 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
-  marketPage: 21 + 206 / 1024 + 2516 / 1024 + 2516 / 1024 + 300 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + 408 / 1024 + 60 / 1024 + 21 / 1024,
+  marketPage: 21 + 206 / 1024 + 2516 / 1024 + 2516 / 1024 + 300 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + 408 / 1024 + 60 / 1024 + 21 / 1024 + 8 / 1024,
   networkPage: 21,
   nowPage: 21,
   unusualPage: 25 + 599 / 1024 + 400 / 1024 + 1800 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
@@ -142,6 +143,16 @@ for (const name of Object.keys(CEILING_KIB)) {
   if (name !== "eventsPage") CEILING_KIB[name] += FORMAT_CORE.bytes / 1024;
   GZIP_KIB[name] += FORMAT_CORE.gzip / 1024;
 }
+const HORIZON_CORE = { od: "LANE-4", bytes: 1867, gzip: 677, why: "lane 4: flows-ui.js carries the page copy of the earnings state (F.earn, F.earnIn), of the sessions elapsed since the nightly (F.elapsed) and of the window sentence (F.horizon), 72,813 to 74,680 B raw and 23,120 to 23,797 B gzip, because the Moves page, Home's Leaders, Market's Volatility lens and Skyline and the ticker's Move lab each used to carry the number 21 and now read the window and the report-session column from the universe payload; the state has two candidate reaction sessions for a report whose time is not stated (F.later, which reads the carried map of unstated forward reports with the horizon it is complete through, so that a report missing from a cut map is never taken as stated, is 287 B of the 1,867; 337 B are the two-candidate rule and the by-membership elapsed count), and one copy in the kernel, held equal to shared/flows-horizon.js over 218,790 cells by tests/flows-horizon.mjs, replaces five" };
+for (const name of Object.keys(CEILING_KIB)) {
+  if (NO_UI_ROUTES.has(name)) continue;
+  if (name !== "eventsPage") CEILING_KIB[name] += HORIZON_CORE.bytes / 1024;
+  GZIP_KIB[name] += HORIZON_CORE.gzip / 1024;
+}
+const EVENTS_RECENT = { od: "LANE-4", bytes: 4498, gzip: 1127, cssBytes: 379, cssGzip: 46, why: "lane 4: the Events page counts the names whose report moved the price on the reaction session and the one before and the names whose report time is not stated, lists the largest movers among those that reacted on the nightly's session in typical days, names those that reacted two to five sessions ago, says why when the report column is withheld, pending or empty, cut or has no window, and prints its window in sessions through a date (flows-events.js 49,488 to 53,986 B raw and 14,009 to 15,136 B gzip, flows-feeds.css 31,209 to 31,588 B raw and 6,129 to 6,175 B gzip); the raw JavaScript ceiling is held by HELD_RAW_KIB, so only gzip and the sheet rise" };
+GZIP_KIB.eventsPage += EVENTS_RECENT.gzip / 1024;
+CSS_KIB.eventsPage += EVENTS_RECENT.cssBytes / 1024;
+CSS_GZIP_KIB.eventsPage += EVENTS_RECENT.cssGzip / 1024;
 CEILING_KIB.tickerPage += (TICKER_DEALER_LABELS.bytes + TICKER_PRINTS_MOVE.bytes) / 1024;
 GZIP_KIB.tickerPage += (TICKER_DEALER_LABELS.gzip + TICKER_PRINTS_MOVE.gzip) / 1024;
 for (const name of ["sidePage", "watchPage"]) {
@@ -216,11 +227,14 @@ const ORACLE_FILES = ["/assets/js/flows-oracle-core.js", "/assets/js/flows-oracl
 const ORACLE_DEFERRED_KIB = 60;
 const ORACLE_MARKUP_BYTES = 720;
 const DEFERRED_KIB = {
-  tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + NETWORK_GROUP.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + 185 / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024 + DESK_CALLS.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024 + 2155 / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
-  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + 26222 / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024,
+  tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + NETWORK_GROUP.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + 260 / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024 + DESK_CALLS.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024 + 2240 / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
+  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + 26400 / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024,
 };
 const DARK_POOL_TIME = { bytes: 107, why: "lane 2 math audit: the Market page's dark-pool list drops canceled prints, prints its times in TRT through F.time and its prices through F.px, and says how many canceled prints it left out, measured as 58,946 to 59,053 B raw in the deferred flows-market-below.js" };
 DEFERRED_KIB.marketPage += DARK_POOL_TIME.bytes / 1024;
+const HORIZON_DEFERRED = { od: "LANE-4", tickerBytes: 2947, marketBytes: 1261, why: "lane 4: the ticker's Move lab reads the earnings window and the report-session column from the universe, ages them by the sessions elapsed and shows a Reacting today, Reacted one session ago or Report time not stated state, and reads the carried forward ages of unstated report times (flows-ticker-movelab.js 19,302 to 22,249 B), and Market's Skyline and Volatility lens read the same window, column and ages in place of a literal 21 (flows-skyline.js 22,056 to 22,571 B, flows-market-below.js 59,053 to 59,799 B)" };
+DEFERRED_KIB.tickerPage += HORIZON_DEFERRED.tickerBytes / 1024;
+DEFERRED_KIB.marketPage += HORIZON_DEFERRED.marketBytes / 1024;
 
 const FLOOR_BYTES = 1024;
 const EAGER_KERNEL = [
@@ -492,7 +506,7 @@ for (const name of Object.keys(CEILING_KIB)) {
     }
     const core = sizeOf("/assets/js/flows-ui.js"), lib = sizeOf("/assets/js/flows-chart.js");
     console.log("  flows-ui.js " + core + " B, flows-chart.js " + lib + " B");
-    ok(core < 71000 + NN_KERNEL.uiBytes + 64 + FORMAT_CORE.bytes, `flows-ui.js is the core alone (${core} B): the chart library is not in it`);
+    ok(core < 71000 + NN_KERNEL.uiBytes + 64 + FORMAT_CORE.bytes + HORIZON_CORE.bytes, `flows-ui.js is the core alone (${core} B): the chart library is not in it`);
     ok(!/const chart = Object\.freeze|function (drawLine|diverging|heatmap|payoff|sparkline)\(/.test(readFileSync(new URL("assets/js/flows-ui.js", REPO), "utf8")),
        "and none of the chart drawing functions is left behind in the core");
   }

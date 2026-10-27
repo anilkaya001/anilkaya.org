@@ -1,23 +1,23 @@
 import { freshStamp } from "./common.mjs";
 import { compactNumbers } from "../../shared/flows-cross.js";
 import { hasLiveParts, shedNextPart, stubSection } from "../../shared/flows-vendor-extras.js";
+import { servedBytes, wireBytes } from "../../shared/flows-card-pack.js";
 
 export const CARD_X_SCHEMA_VERSION = 1;
 
 export const CARD_X_BUDGET_BYTES = 100 * 1024;
 export const CARD_X_SOFT_BYTES = 60 * 1024;
+export const CARD_X_SERVED_BYTES = Math.floor(0.9 * CARD_X_BUDGET_BYTES);
 
-const STORED_BYTES_FIELD = 99999;
+export const cardXWire = () => process.env.FLOWS_CARDX_WIRE === "pack";
 
-function storedSize(payload) {
-  return Buffer.byteLength(JSON.stringify({ ...payload, bytes: STORED_BYTES_FIELD }));
-}
+export const cardXBytes = (payload) => (cardXWire() ? wireBytes(payload) : servedBytes(payload));
+
+const overSoft = (payload) => cardXBytes(payload) > CARD_X_SOFT_BYTES || servedBytes(payload) > CARD_X_SERVED_BYTES;
 
 function fitSoft(payload) {
-  let bytes = storedSize(payload);
-  while (bytes > CARD_X_SOFT_BYTES && shedNextPart(payload)) {
+  while (overSoft(payload) && shedNextPart(payload)) {
     if (!payload.shed.includes("extras.soft")) payload.shed.push("extras.soft");
-    bytes = storedSize(payload);
   }
 }
 
@@ -100,11 +100,12 @@ export function composeCardXPayload(prior, own, { budgetBytes = CARD_X_BUDGET_BY
 }
 
 export async function publishCardX(store, publish, { generatedAt, sessionDate, readAt, stored = () => null, log = () => {}, skip = new Set() } = {}) {
-  let written = 0, failed = 0, over = 0, largest = 0, kept = 0;
+  let written = 0, failed = 0, over = 0, largest = 0, largestWire = 0, kept = 0;
   for (const t of store.tickers()) {
     if (skip.has(t)) { kept++; continue; }
     const payload = composeCardXPayload(stored("card-x:" + t), cardXPayload(t, store.get(t), { generatedAt, sessionDate, readAt }));
     largest = Math.max(largest, payload.bytes);
+    largestWire = Math.max(largestWire, cardXBytes(payload));
     if (payload.bytes > CARD_X_BUDGET_BYTES) { over++; log(`  card-x ${t}: ${payload.bytes} bytes after shedding, over the cap — not written`); continue; }
     try {
       await publish("card-x:" + t, payload);
@@ -114,5 +115,5 @@ export async function publishCardX(store, publish, { generatedAt, sessionDate, r
       log(`  card-x ${t}: ${error.message}`);
     }
   }
-  return { written, failed, over, largest, kept };
+  return { written, failed, over, largest, largestWire, kept };
 }

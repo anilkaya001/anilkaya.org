@@ -344,6 +344,39 @@
     tick: (m) => { if (typeof m !== "number" || !Number.isFinite(m)) return null; const n = ((Math.floor(m) % 1440) + 1440) % 1440; return two(Math.floor(n / 60)) + ":" + two(n % 60); },
     open: (day) => (dayAt(day) === null ? null : 1470 - nyClock(new Date(day + "T12:00:00Z")).mins),
     compact,
+    earn: (r, hz, j, back = 1) => {
+      const w = Number.isInteger;
+      if (!r || typeof r !== "object" || !w(hz) || hz < 1 || !w(j) || j < 0 || !w(back) || back < 0) return null;
+      const at = (age) => (age === 0 ? "reaction" : age <= back ? "after" : "clear");
+      const two = (x, y) => (x === y ? x : "unstated");
+      const s = [];
+      if (w(r.rd) && r.rd >= 0) s.push(at(r.rd + j));
+      if (w(r.rdMax) && r.rdMax >= 0) s.push(two(at(r.rdMax + j), r.rdMax - 1 + j >= 0 ? at(r.rdMax - 1 + j) : "ahead"));
+      if (w(r.ed) && r.ed >= 0 && r.ed <= j) {
+        const late = w(r.edMax) ? (r.edMax > r.ed ? r.edMax : null) : r.ed === 0 ? 1 : null;
+        const first = at(j - r.ed);
+        s.push(late === null ? first : two(first, late <= j ? at(j - late) : "ahead"));
+      }
+      for (const k of ["reaction", "unstated", "after"]) if (s.includes(k)) return k;
+      if (!w(r.ed) || r.ed < 0) return "undated";
+      return r.ed - j >= 1 && r.ed - j <= hz ? "ahead" : "clear";
+    },
+    later: (map, through, t, ed) => {
+      if (!Number.isInteger(ed) || ed < 0) return null;
+      if (map && typeof map === "object" && Number.isInteger(map[t])) return map[t];
+      return Number.isInteger(through) && ed <= through ? null : ed + 1;
+    },
+    earnIn: (r, hz, j, back) => { const e = F.earn(r, hz, j, back); return e === null ? null : e !== "clear" && e !== "undated"; },
+    elapsed: (asOf, ahead, day, jmax = 2) => {
+      if (!isoDay(asOf) || !isoDay(day) || !Array.isArray(ahead) || !Number.isInteger(jmax)) return null;
+      if (day === asOf) return 0;
+      const n = day < asOf ? 0 : ahead.indexOf(day) + 1;
+      return n > 0 && n <= jmax ? n : null;
+    },
+    horizon: (hz) => {
+      if (!Number.isInteger(hz) || hz < 1) return null;
+      return { n: hz, apart: "Earnings within " + hz + " sessions: event not separated." };
+    },
     askSplit: (r) => {
       const p = isNum(r && r.prem), side = (v) => { v = isNum(r && r[v]); return v !== null && v >= 0 ? v : null; }, x = side("askPrem"), y = side("bidPrem");
       if (p === null || p <= 0) return null;

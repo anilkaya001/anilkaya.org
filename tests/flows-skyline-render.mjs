@@ -9,6 +9,9 @@ import { rarityText } from "../shared/flows-targets.js";
 import { buildUniverse } from "../shared/flows-cross.js";
 import { labelProblems } from "../scripts/approval-checks.mjs";
 import { launch } from "./lib/browser.mjs";
+import { bootUI } from "./lib/ui-boot.mjs";
+import { HORIZON_SESSIONS } from "../shared/flows-horizon.js";
+import { ahead as aheadOf } from "../shared/flows-calendar.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -42,10 +45,14 @@ const ROWS = [
 ];
 const universe = (rows, { scale = true, sectors = SECTORS } = {}) => {
   const u = {
-    status: "ok", sessionDate: "2026-10-09", n: rows.length, t: rows.map((r) => r[0]), sectors, sec: rows.map((r) => r[1]),
+    status: "ok", sessionDate: "2026-10-09", hz: HORIZON_SESSIONS, ahead: aheadOf("2026-10-09"), n: rows.length, t: rows.map((r) => r[0]), sectors, sec: rows.map((r) => r[1]),
     units: { chg: ["fraction", 1e4], iv30p: ["vol", 1e3], ed: ["sessions", 1] },
     cols: { chg: rows.map((r) => Math.round(r[2] * 1e4)), iv30p: rows.map((r) => (r[3] === null ? null : Math.round(r[3] * 1e3))), ed: rows.map((r) => r[4]) },
   };
+  if (rows.some((r) => r[8] !== undefined)) {
+    u.units.rd = ["sessions", 1];
+    u.cols.rd = rows.map((r) => (r[8] === undefined ? null : r[8]));
+  }
   if (scale) {
     u.units.sig = ["fraction", 1e5];
     u.units.f2 = ["days per 252", 1];
@@ -87,7 +94,7 @@ function freqOf(r, event) {
 
 const EXP = ROWS.filter((r) => r[3] !== null && Math.abs(expectM(r[2], r[3])) >= 2).map((r) => {
   const m = expectM(r[2], r[3]);
-  const event = r[4] <= 21;
+  const event = (Number.isInteger(r[4]) && r[4] >= 0 && r[4] <= 21) || (Number.isInteger(r[8]) && r[8] >= 0 && r[8] <= 1);
   return { t: r[0], m, event, ...freqOf(r, event) };
 });
 const BY_T = new Map(EXP.map((e) => [e.t, e]));
@@ -225,7 +232,7 @@ const reveal = async (page) => {
 };
 
 const rungOf = (src) => {
-  const win = {};
+  const win = { FlowsUI: { F: bootUI().F } };
   vm.runInNewContext(src, { window: win, Math, Number, Array, Object, String, Set, Map, JSON, Date, Error });
   const rows = [["UP97", 0, 0.097, 0.2, 40, 0.032, 11, 5], ["DN95", 0, -0.095, 0.2, 40, 0.032, 11, 5], ["UP25", 0, Math.expm1(2.5 * 0.02), 0.2, 40, 0.02, 11, 5],
     ["DN25", 0, Math.expm1(-2.5 * 0.02), 0.2, 40, 0.02, 11, 5], ["UP301", 0, Math.expm1(3.01 * 0.02), 0.2, 40, 0.02, 11, 5], ["UP199", 0, Math.expm1(1.99 * 0.02), 0.2, 40, 0.02, 11, 5]];
@@ -233,6 +240,36 @@ const rungOf = (src) => {
   return Object.fromEntries(md.prisms.map((p) => [p.t, p.often ? p.often.level : 0]));
 };
 const RUNG = { UP97: 2, DN95: 3, UP25: 2, DN25: 2, UP301: 3, UP199: 0 };
+const EVENT_ROWS = [["RD0", 0, 0.097, 0.2, null, 0.032, 11, 5, 0], ["RD1", 0, 0.097, 0.2, null, 0.032, 11, 5, 1], ["RD2", 0, 0.097, 0.2, null, 0.032, 11, 5, 2],
+  ["ED21", 0, 0.097, 0.2, 21, 0.032, 11, 5], ["ED22", 0, 0.097, 0.2, 22, 0.032, 11, 5], ["ED0", 0, 0.097, 0.2, 0, 0.032, 11, 5], ["UNS2", 0, 0.097, 0.2, null, 0.032, 11, 5],
+  ["UNS3", 0, 0.097, 0.2, null, 0.032, 11, 5], ["PLAIN", 0, 0.097, 0.2, 40, 0.032, 11, 5]];
+const EVENT_WANT = { RD0: true, RD1: true, RD2: false, ED21: true, ED22: false, ED0: true, UNS2: true, UNS3: false, PLAIN: false };
+const eventsOf = (src, tweak) => {
+  const win = { FlowsUI: { F: bootUI().F } };
+  vm.runInNewContext(src, { window: win, Math, Number, Array, Object, String, Set, Map, JSON, Date, Error });
+  const u = universe(EVENT_ROWS);
+  u.rdBasis = { unstated: { UNS2: 2, UNS3: 3 } };
+  if (tweak) tweak(u);
+  const md = win.FlowsUI.skyline.model(u);
+  return md ? Object.fromEntries(md.prisms.map((p) => [p.t, p.event])) : null;
+};
+const widen = (u) => { u.hz = 30; };
+const noWindow = (u) => { delete u.hz; };
+eq(eventsOf(SRC), EVENT_WANT, "a name that reacted on the session or the one before is an event, one two sessions before is not, and a report of unstated time is an event when it may be one session old");
+eq(eventsOf(SRC, widen).ED22, true, "the window is the payload's own");
+eq(Object.values(eventsOf(SRC, noWindow)).every((e) => e === false), true, "a payload with no window separates nothing");
+const REAL_WIDE = JSON.stringify(eventsOf(SRC, widen));
+for (const [name, from, to] of [
+  ["the report-session column ignored", "rd: rd ? rd[i] : null", "rd: null"],
+  ["the unstated-time ages ignored", "rdMax: Number.isInteger(unstated[t]) ? unstated[t] : null", "rdMax: null"],
+  ["the date ignored", "F.earnIn({ ed: ed ? ed[i] : null,", "F.earnIn({ ed: null,"],
+  ["a window of 21 hard-coded", "}, u.hz, 0) === true", "}, 21, 0) === true"],
+  ["the reaction session ignored", "}, u.hz, 0) === true", "}, u.hz, 0) === true && !(rd && rd[i] === 0)"],
+]) {
+  ok(SRC.split(from).length === 2, `mutant "${name}" anchors once on the served module`);
+  const bad = SRC.replace(from, to);
+  ok(JSON.stringify(eventsOf(bad)) !== JSON.stringify(EVENT_WANT) || JSON.stringify(eventsOf(bad, widen)) !== REAL_WIDE, `the event answers fail the planted build "${name}"`);
+}
 eq(rungOf(SRC), RUNG, "the rung of a move is read off its log return, the way the nightly counts are: +9.7% on a 3.2% typical day is 2.9 typical days, -9.5% is 3.1");
 ok(Object.keys(rungOf(SRC.replace("const level = lm >= 3 * sig ? 3 : lm >= 2 * sig ? 2 : 0;", "const level = Math.abs(r.chg) >= 3 * sig ? 3 : Math.abs(r.chg) >= 2 * sig ? 2 : 0;"))).some((t) => rungOf(SRC.replace("const level = lm >= 3 * sig ? 3 : lm >= 2 * sig ? 2 : 0;", "const level = Math.abs(r.chg) >= 3 * sig ? 3 : Math.abs(r.chg) >= 2 * sig ? 2 : 0;"))[t] !== RUNG[t]), "and the planted build that reads the rung off the simple change fails that table");
 
@@ -545,7 +582,7 @@ try {
     ["height from the raw change", "h: Math.abs(m),", "h: Math.abs(c) * 100,"],
     ["direction reversed", "dir: m > 0 ? 1 : -1", "dir: m > 0 ? -1 : 1"],
     ["line at 1 IV-day", "const MIN = 2;", "const MIN = 1;"],
-    ["event window ignored", "e <= EVENT", "e <= -1"],
+    ["event window ignored", "}, u.hz, 0) === true", "}, 0, 0) === true"],
     ["drawn height off the scale", ": p.h * unit }", ": Math.sqrt(p.h) * unit }"],
     ["a ticker label on each prism", "g.globalAlpha = 1;\n      g.strokeStyle = c;", "g.fillText(it.t, it.x, it.yt);\n      g.globalAlpha = 1;\n      g.strokeStyle = c;"],
     ["a linear axis labelled log", "const axisFrac = (n) => Math.log10(n) / Math.log10(FLOOR_N);", "const axisFrac = (n) => n / FLOOR_N;"],
