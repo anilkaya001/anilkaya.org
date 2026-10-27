@@ -572,6 +572,7 @@ export function buildMacro(input, { test = false } = {}) {
   const session = input.session;
   const ops = {};
   const note = (op, status, n, why) => { const o = ops[op] || (ops[op] = { status: "ok", n: 0 }); o.n += n || 0; if (status !== "ok") { o.status = status; if (why) o.why = why; } };
+  const lost = (res) => ({ status: res && res.status && res.status !== "ok" ? res.status : "failed", why: res && res.why ? res.why : "failed" });
   const filed = (op, res) => {
     if (!res) { note(op, "failed", 0, "missing"); return null; }
     if (res.status && res.status !== "ok") { note(op, res.status, 0, res.why); return null; }
@@ -582,7 +583,7 @@ export function buildMacro(input, { test = false } = {}) {
   const treasury = {};
   for (const m of MATURITIES) {
     const body = filed("economy", input.treasury && input.treasury[m]);
-    treasury[m] = body ? seriesOf(body) : { status: "failed", why: "failed", points: [] };
+    treasury[m] = body ? seriesOf(body) : { ...lost(input.treasury && input.treasury[m]), points: [] };
   }
   const rates = curve(treasury);
   const ff = (() => {
@@ -595,7 +596,7 @@ export function buildMacro(input, { test = false } = {}) {
   const economy = {};
   for (const ind of INDICATORS) {
     const body = filed("economy", input.economy && input.economy[ind]);
-    if (!body) { economy[ind] = { status: "failed", why: "failed" }; continue; }
+    if (!body) { economy[ind] = lost(input.economy && input.economy[ind]); continue; }
     const s = seriesOf(body);
     const p = periodic(s, { daily: false });
     if (p.status === "ok") {
@@ -608,7 +609,7 @@ export function buildMacro(input, { test = false } = {}) {
   const cseries = {};
   for (const name of [...DAILY_COMMODITIES, ...MONTHLY_COMMODITIES]) {
     const body = filed("commodity", input.commodities && input.commodities[name]);
-    if (!body) { commodities[name] = { status: "failed", why: "failed" }; continue; }
+    if (!body) { commodities[name] = lost(input.commodities && input.commodities[name]); continue; }
     const s = seriesOf(body);
     cseries[name] = s;
     commodities[name] = periodic(s, { daily: DAILY_COMMODITIES.includes(name) });
@@ -619,7 +620,7 @@ export function buildMacro(input, { test = false } = {}) {
   const pairs = {};
   for (const pair of FX_PAIRS) {
     const body = filed("fx-history", input.fx && input.fx[pair]);
-    if (!body) { pairs[pair] = { status: "failed", why: "failed" }; continue; }
+    if (!body) { pairs[pair] = lost(input.fx && input.fx[pair]); continue; }
     const b = barsOf(body);
     if (b.status !== "ok") { pairs[pair] = { status: "withheld", why: b.why }; continue; }
     const st = dailyStats(b.points, { year: 252 });
@@ -633,7 +634,7 @@ export function buildMacro(input, { test = false } = {}) {
   for (const sym of CRYPTO) {
     const hist = filed("digital-history", input.digital && input.digital[sym]);
     const ohlc = filed("crypto-ohlc", input.cryptoOhlc && input.cryptoOhlc[sym]);
-    if (!hist) { crypto[sym] = { status: "failed", why: "failed" }; continue; }
+    if (!hist) { crypto[sym] = lost(input.digital && input.digital[sym]); continue; }
     const b = barsOf(hist);
     if (b.status !== "ok") { crypto[sym] = { status: "withheld", why: b.why }; continue; }
     const st = dailyStats(b.points, { year: 365 });
@@ -668,7 +669,7 @@ export function buildMacro(input, { test = false } = {}) {
 
   const movers = (() => {
     const body = filed("market-movers", input.movers);
-    return body ? moversOf(body) : { status: "failed", why: "failed" };
+    return body ? moversOf(body) : lost(input.movers);
   })();
 
   const sy = +session.slice(0, 4);

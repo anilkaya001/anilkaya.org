@@ -34,7 +34,7 @@ import { runDeepenLedger, runDeepenPlan } from "./flows-nightly/sections/deepen.
 import { pathFor } from "../shared/flows-vendor-ops.js";
 import { processCpuMs, runCompute } from "./flows-nightly/sections/compute.mjs";
 import { runOraclePrep, runOraclePublish } from "./flows-nightly/sections/oracle.mjs";
-import { runMacroStage, runPmSectors } from "./flows-nightly/sections/macro.mjs";
+import { runMacroStage, runPmNames, runPmSectors } from "./flows-nightly/sections/macro.mjs";
 
 export {
   CALL_BUDGET, CALL_COST, CALL_OVERRUN_MARGIN, CHAIN_RESERVE_MS, DEADLINE_MS, DEEP_NAMES, DEEP_RULE,
@@ -282,6 +282,7 @@ async function main() {
   await runAlerts(ctx);
   await runContext(ctx);
   await runCards(ctx);
+  ctx.beforeFocus = () => runPmNames(ctx);
   await runFocus(ctx);
   await runOraclePrep(ctx);
   await runCompute(ctx);

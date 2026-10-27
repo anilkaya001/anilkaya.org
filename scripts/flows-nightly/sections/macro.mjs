@@ -2,7 +2,7 @@ import { DRY_RUN } from "../flags.mjs";
 import { publish, publishedStore, readStored } from "../store.mjs";
 import { poolWidth, runPooled, uw } from "../vendor.mjs";
 import { stampNow } from "../../flows-legs/stamp.mjs";
-import { buildMacro, fitMacro } from "../../../shared/flows-macro.js";
+import { buildMacro, fitMacro, addressFree } from "../../../shared/flows-macro.js";
 import { macroBuildOn, runMacro } from "../../flows-legs/macro.mjs";
 import { makeMacroFakeVendor } from "../../flows-legs/macro-fake.mjs";
 import { pmCapOf, runPrivateNames, runPrivateSectors, sleepingUntil, wakeSession } from "../../flows-legs/private.mjs";
@@ -26,6 +26,7 @@ export async function runMacroStage(ctx) {
     stages.skip(MACRO_STAGE_ID, "FLOWS_MACRO_BUILD is off");
     return;
   }
+  ctx.macroMeta = { build: true, written: false, calls: 0, ops: {} };
   await stages.run(MACRO_STAGE_ID, async () => {
     const generatedAt = stampNow();
     const feed = DRY_RUN ? makeMacroFakeVendor({ sessionDate }) : uw;
@@ -33,13 +34,18 @@ export async function runMacroStage(ctx) {
       uw: feed, session: sessionDate, generatedAt, calendar: calendarOf(ctx), deadline, pool: runPooled, width: poolWidth(2).width,
       log: (line) => console.log(line),
     });
+    ctx.macroMeta = { build: true, written: false, calls: run.calls, ops: Object.fromEntries(Object.entries(run.tally).map(([op, t]) => [op, { n: t.n, bad: t.bad }])) };
     const built = buildMacro(run.input, { test: DRY_RUN });
     const fitted = fitMacro(built);
+    if (!addressFree(fitted.payload)) {
+      ctx.macroMeta.address = true;
+      throw new Error("an address-shaped string is in the macro payload");
+    }
     await publish("macro", fitted.payload);
     const odds = fitted.payload.odds;
     ctx.macroMeta = {
-      calls: run.calls,
-      ops: Object.fromEntries(Object.entries(run.tally).map(([op, t]) => [op, { n: t.n, bad: t.bad }])),
+      ...ctx.macroMeta,
+      written: true,
       odds: { matched: odds.counts.matched, thin: odds.counts.thin },
       pm: { calls: 0, names: 0, sectors: 0 },
       bytes: fitted.bytes,

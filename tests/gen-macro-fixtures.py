@@ -264,7 +264,7 @@ def series_world():
 def movers_body(unit):
     def row(t, price, change):
         frac = change / (price - change)
-        cp = frac if unit == "fraction" else frac * 100
+        cp = frac if unit in ("fraction", "mixed") else frac * 100
         if unit == "mixed" and t.endswith("2"):
             cp = frac * 100
         return {"ticker": t, "price": price, "change": change, "change_percent": round(cp, 5), "volume": 1200000}
@@ -321,7 +321,7 @@ def predictions(kind="matched"):
         resolved = kind == "resolved"
         positions = [{"invested_usd": "%d" % (60000 - i * 4000), "tags": ["bot"] if i % 4 == 0 else [], "smart_score": "1", "user_address": "0x" + ("%02x" % (i + 1)) * 20} for i in range(12)]
         details[aid] = {
-            "market": ok({"data": {"question": c["market"], "question_type": "binary", "outcomes": ["Yes", "No"], "outcome_index": 0, "category": "Finance", "volume": "250000", "end_date": c["resolves"], "closed": resolved, "active": not resolved, "liquidity": "100000", "outcome_assets": [{"asset_id": aid, "label": "Yes", "prices": [{"date": (datetime.date(2026, 10, 27) - datetime.timedelta(days=29 - i)).isoformat(), "price": "%.2f" % (0.5 + i * 0.004)} for i in range(30)]}]}}),
+            "market": ok({"data": {"question": c["market"], "question_type": "binary", "outcomes": ["Yes", "No"], "outcome_index": 0, "category": "Finance", "volume": "250000", "end_date": c["resolves"], "closed": resolved, "active": not resolved, "liquidity": "100000", "outcome_assets": [{"asset_id": aid, "label": "Yes", "prices": [{"date": (datetime.date(2026, 10, 27) - datetime.timedelta(days=29 - i)).isoformat(), "price": "%.3f" % (0.5 + i * 0.004)} for i in range(30)]}]}}),
             "liquidity": ok({"data": {"best_bid": "0.61", "best_ask": "0.63" if not thin else "0.69", "mid_price": "0.62", "spread": "0.02" if not thin else "0.08", "bid_liquidity": "30000", "ask_liquidity": "30000", "total_liquidity": "60000" if not thin else "20000", "timestamp": NOW_ISO, "bids": [], "asks": []}}),
             "positions": ok({"data": positions}),
             "holders": [ok({"data": {"category_scores": [{"category": "Finance", "win_rate": "0.%d" % (55 + j), "num_markets": 30}]}}) for j in range(3)],
@@ -334,6 +334,7 @@ def calendar_rows(kind="matched"):
     rows = [
         {"at": "2026-10-29T18:00:00Z", "day": "2026-10-29", "event": "FOMC Interest Rate Decision", "tag": "fomc"},
         {"at": "2026-10-30T12:30:00Z", "day": "2026-10-30", "event": "Core PCE Price Index", "tag": "pce"},
+        {"at": "2026-10-30T12:30:00Z", "day": "2026-10-30", "event": "Consumer Price Index (CPI)", "tag": "cpi"},
         {"at": "2026-11-06T13:30:00Z", "day": "2026-11-06", "event": "Non-Farm Payrolls", "tag": "nfp"},
     ]
     if kind == "none":
@@ -367,8 +368,10 @@ def pm_world(kind="ok"):
 
 
 def live_world(zone="UTC"):
-    fx_rate = {p: ok({"data": {"rate": 1.0842, "bid": 1.0841, "ask": 1.0843, "from": p[:3], "to": p[3:], "last_refreshed": "2026-10-27 21:35:00", "time_zone": zone}}) for p in PAIRS}
-    crypto_state = {p: ok({"data": {"open_24h": "67000.00", "high_24h": "69000.00", "low_24h": "66500.00", "close_24h": "68000.00", "volume_24h": "12000.5", "timestamp": "2026-10-27T21:35:00Z", "date": None}}) for p in ["BTC-USD", "ETH-USD", "SOL-USD"]}
+    levels = {"EURUSD": 1.0842, "USDJPY": 152.31, "GBPUSD": 1.2893, "USDCHF": 0.8815, "AUDUSD": 0.6634, "USDCAD": 1.3702, "USDCNY": 7.2154, "USDTRY": 34.402}
+    fx_rate = {p: ok({"data": {"rate": levels[p], "bid": levels[p] - 0.0001, "ask": levels[p] + 0.0001, "from": p[:3], "to": p[3:], "last_refreshed": "2026-10-27 21:35:00", "time_zone": zone}}) for p in PAIRS}
+    cl = {"BTC-USD": (67000.0, 68000.0), "ETH-USD": (3350.0, 3412.5), "SOL-USD": (171.2, 168.9)}
+    crypto_state = {p: ok({"data": {"open_24h": "%.2f" % cl[p][0], "high_24h": "%.2f" % (max(cl[p]) * 1.01), "low_24h": "%.2f" % (min(cl[p]) * 0.99), "close_24h": "%.2f" % cl[p][1], "volume_24h": "12000.5", "timestamp": "2026-10-27T21:35:00Z", "date": None}}) for p in ["BTC-USD", "ETH-USD", "SOL-USD"]}
     futures = {p: ok({"data": {"settlement": "5012.25", "settlement_date": SESSION, "open_interest": 2100000, "session_volume": 880000}}) for p in ["ES", "NQ", "RTY", "YM", "ZN", "CL", "GC"]}
     bars = [{"timestamp": "2026-10-27 %02d:00:00" % h, "open": 1.08, "high": 1.09, "low": 1.07, "close": 1.08 + h * 0.0001, "volume": 0} for h in range(8, 22)]
     return {

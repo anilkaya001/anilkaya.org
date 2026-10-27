@@ -8,6 +8,18 @@ import {
 } from "../../shared/flows-private.js";
 import { unwrap } from "../../shared/flows-vendor-core.js";
 
+const PATH = {
+  "pm-search": (p) => pathFor("pm-search", p),
+  "pm-investor": (p) => pathFor("pm-investor", p),
+  "pm-companies": (p) => pathFor("pm-companies", p),
+  "pm-company": (p) => pathFor("pm-company", p),
+  "pm-funding": (p) => pathFor("pm-funding", p),
+  "pm-pricing": (p) => pathFor("pm-pricing", p),
+  "pm-management": (p) => pathFor("pm-management", p),
+  "pm-investors-of": (p) => pathFor("pm-investors-of", p),
+  "pm-investors": (p) => pathFor("pm-investors", p),
+};
+
 export const PM_SWITCH = "FLOWS_PM_CAP";
 
 export const pmCapOf = (env = process.env) => pmCap(env[PM_SWITCH]);
@@ -20,7 +32,7 @@ export function makeGetter({ uw, deadline, budget }) {
     if (state.calls >= budget) return { status: "failed", why: "cap" };
     if (pastDeadline(deadline)) return { status: "failed", why: "deadline" };
     state.calls++;
-    const res = await read(uw, pathFor(op, pathParams || {}), params || {}, { envelope: true });
+    const res = await read(uw, PATH[op](pathParams || {}), params || {}, { envelope: true });
     const slot = state.tally[op] || (state.tally[op] = { n: 0, bad: 0 });
     slot.n++;
     if (res.ok) return { status: "ok", body: res.body };

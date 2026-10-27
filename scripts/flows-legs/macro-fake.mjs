@@ -69,7 +69,7 @@ export function makeMacroFakeVendor({ world = "ok", sessionDate = null, pm = "pm
     if ((m = /^\/api\/predictions\/market\/([^/]+)\/liquidity$/.exec(path))) return answer(p.details[m[1]] && p.details[m[1]].liquidity);
     if ((m = /^\/api\/predictions\/market\/([^/]+)\/positions$/.exec(path))) return answer(p.details[m[1]] && p.details[m[1]].positions);
     if ((m = /^\/api\/predictions\/market\/([^/]+)$/.exec(path))) return answer(p.details[m[1]] && p.details[m[1]].market);
-    if (/^\/api\/predictions\/user\//.test(path)) {
+    if (path.startsWith("/api/predictions/user" + String.fromCharCode(47))) {
       const any = Object.values(p.details)[0];
       return answer(any && any.holders[0]);
     }

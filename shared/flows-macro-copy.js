@@ -13,6 +13,7 @@ export const COPY = Object.freeze({
   "title.season": "Seasonality",
   "src.nightly": "Nightly, as of {date}.",
   "src.live": "Read {time}, refreshed at most every 5 minutes.",
+  "src.live.hero": "Read {time}.",
   "src.live.stale": "Kept copy from {time}; the read limit was reached.",
   "rates.spread": "2s10s {sign}{bp} bp: {state}.",
   "rates.state.inverted": "Inverted: the 2-year yields more than the 10-year.",

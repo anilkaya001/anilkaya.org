@@ -6,6 +6,7 @@ import { stamp as trtStamp } from "./flows-time.js";
 import { etDayOf, isSession, shiftDay } from "./flows-quant-time.js";
 import { ledgerBody, LEDGER_DESCRIPTION, LEDGER_STYLES, LEDGER_SCRIPTS } from "./flows-page-ledger.js";
 import { HORIZON_SESSIONS } from "./flows-horizon.js";
+import { macroBody, MACRO_DESCRIPTION, MACRO_STYLES, MACRO_SCRIPTS, MACRO_DEFER } from "./flows-page-macro.js";
 
 export const CALENDAR_BACK_DAYS = 14;
 export const CALENDAR_SESSIONS = 60;
@@ -84,6 +85,7 @@ const GLYPHS = {
   sidebar: '<rect x="3.5" y="5" width="17" height="14" rx="3"/><path d="M9.5 5v14"/>',
   boards: '<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/>',
   bars: '<path d="M6 18v-3M12 18v-7M18 18V7"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="3.8" ry="9"/><path d="M3 12h18"/>',
 };
 
 const SPRITE = `<svg class="ui-sprite" aria-hidden="true" focusable="false" width="0" height="0">${
@@ -138,6 +140,7 @@ export const FLOWS_NAV = [
     { key: "moves", href: "/flows/moves/", label: "Moves", glyph: "wave" },
     { key: "unusual", href: "/flows/unusual/", label: "Unusual", glyph: "unusual" },
     { key: "ledger", href: "/flows/ledger/", label: "Ledger", glyph: "levels" },
+    { key: "macro", href: "/flows/macro/", label: "Macro", glyph: "globe", gate: "macro" },
     { key: "events", href: "/flows/events/", label: "Events", glyph: "cal", count: true },
     { key: "political", href: "/flows/political/", label: "Political", glyph: "hall" },
   ] },
@@ -159,11 +162,12 @@ const TABS = [
   { href: "/flows/", label: "Home", glyph: "home", keys: ["overview"] },
   { href: "/flows/long/", label: "Boards", glyph: "boards", keys: ["long", "short"] },
   { href: "/flows/ticker/", label: "Search", glyph: "search", keys: ["ticker"], search: true },
-  { href: "/flows/market/", label: "Market", glyph: "market", keys: ["market", "moves", "unusual", "ledger", "events", "political"] },
+  { href: "/flows/market/", label: "Market", glyph: "market", keys: ["market", "moves", "unusual", "ledger", "macro", "events", "political"] },
 ];
 
 const railItem = (active) => (it) => {
   if (it.ownerOnly && it.key !== active) return "";
+  if (it.gate && it.key !== active) return "";
   const on = it.key === active;
   const badge = it.count ? `<span class="rail-count" data-rail-count="${it.key}" hidden></span>` : "";
   return `<a href="${it.href}"${on ? ' class="is-on" aria-current="page"' : ""}>` +
@@ -189,6 +193,18 @@ export function brandMark(href) {
 }
 
 const BRAND_LINK = brandMark(BRAND_MEMBER);
+
+const MACRO_ITEM = FLOWS_NAV.flatMap((g) => g.items).find((it) => it.key === "macro");
+
+export function macroNav(html) {
+  const text = String(html);
+  if (text.includes('href="/flows/macro/"')) return text;
+  const at = text.indexOf('<a href="/flows/ledger/"');
+  if (at < 0) return text;
+  const end = text.indexOf("</a>", at);
+  if (end < 0) return text;
+  return text.slice(0, end + 4) + "\n      " + railItem("")({ ...MACRO_ITEM, gate: undefined }) + text.slice(end + 4);
+}
 
 export function ownerNav(html) {
   let text = String(html);
@@ -1063,7 +1079,7 @@ const feedHead = (key, title) => `
     <p class="fd-meta" id="${key}Meta"></p>
   </header>`;
 
-export function eventsPage({ username = "" } = {}) {
+export function eventsPage({ username = "", odds = false } = {}) {
   return `${head("Flows — Events", "What reports next, what is priced into it, and what else is on the calendar.", FEEDS_CSS)}
 ${shell("Events", "events", username, `${feedHead("ev", "Events")}
   <p class="visually-hidden" id="evStatus" role="status">Loading the calendar…</p>
@@ -1077,7 +1093,7 @@ ${shell("Events", "events", username, `${feedHead("ev", "Events")}
   </div>
   <div class="fd-chips" id="evChips"></div>
 ${feedTabs([["week", "Week", "evWeekCard"], ["earn", "Earnings", "evEarnCard"], ["macro", "Macro", "evMacroCard"], ["fda", "FDA", "evFdaCard"], ["react", "Reaction", "evReactCard"]])}
-  <div class="fd-stage" id="fdStage" data-view="week">
+  <div class="fd-stage" id="fdStage" data-view="week"${odds ? ' data-odds="on"' : ""}>
 ${feedModule("evWeekCard", "Week ahead", `<div class="fd-body" id="evWeek"></div>`, { tab: "week" })}
 ${feedModule("evEarnCard", "Earnings", `<div class="fd-body" id="evEarn"></div>`, { tab: "earn" })}
 ${feedModule("evMacroCard", "Macro", `<div class="fd-body" id="evMacro"></div>`, { tab: "macro" })}
@@ -1169,6 +1185,21 @@ export function ledgerPage({ username = "", live = false } = {}) {
   });
 }
 
+export function macroPage({ username = "", live = false } = {}) {
+  return flowsDocument({
+    title: "Macro",
+    description: MACRO_DESCRIPTION,
+    active: "macro",
+    username,
+    chrome: false,
+    chart: true,
+    styles: MACRO_STYLES,
+    scripts: MACRO_SCRIPTS,
+    body: macroBody(glyph, { live }) + `
+  <i hidden data-defer="macro-charts" data-src="${v(MACRO_DEFER)}"></i>`,
+  });
+}
+
 export function unusualPage({ username = "", owner = false } = {}) {
   return `${head("Flows — Unusual activity", "Windows of option activity the vendor flagged, and contracts carrying volume far above their own open interest.", [...FEEDS_CSS, "/assets/css/flows-net.css"])}
 ${shell("Unusual", "unusual", username, `${feedHead("ua", "Unusual")}
@@ -1213,7 +1244,7 @@ ${UI_CHART_SCRIPTS}
 </html>`;
 }
 
-export function tickerPage({ username = "", scenes = false, now = Date.now() } = {}) {
+export function tickerPage({ username = "", scenes = false, privateLens = false, now = Date.now() } = {}) {
   return flowsDocument({
     title: "Ticker",
     description: "One name's options dossier: price against the priced move, the Neuron verdict with priced structures, and the dealer book, volatility, flow and positioning behind it.",
@@ -1284,7 +1315,8 @@ export function tickerPage({ username = "", scenes = false, now = Date.now() } =
   </div>
   <i hidden data-defer="movelab" data-src="${v("/assets/js/flows-ticker-movelab.js")}" id="ftMoveLab"></i>
   <i hidden data-defer="network" data-src="${v("/assets/js/flows-ticker-network.js")}" data-css="${v("/assets/css/flows-ticker-network.css")}" id="ftNetwork"></i>
-  <i hidden data-defer="live" data-src="${v("/assets/js/flows-ticker-live.js")}" id="ftLive"></i>${scenes ? `
+  <i hidden data-defer="live" data-src="${v("/assets/js/flows-ticker-live.js")}" id="ftLive"></i>${privateLens ? `
+  <i hidden data-defer="private" data-src="${v("/assets/js/flows-ticker-private.js")}" data-css="${v("/assets/css/flows-ticker-private.css")}" id="ftPrivate"></i>` : ""}${scenes ? `
   <i hidden data-defer="surface" data-src="${v("/assets/js/flows-ticker-surface.js")}" id="ftSurface"></i>` : ""}
 `,
   });
@@ -1571,6 +1603,6 @@ export function oracleShell(html, mode, slug) {
 export const FLOWS_PAGES = {
   loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, networkPage, nowPage, deskPage,
   politicalPage,
-  tickerPage, unusualPage, movesPage, ledgerPage, statusPage, eventsPage, strategyPage, ASSET_VERSION,
+  tickerPage, unusualPage, movesPage, ledgerPage, macroPage, statusPage, eventsPage, strategyPage, ASSET_VERSION,
 };
 

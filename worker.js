@@ -3081,9 +3081,9 @@ const macroLiveOn = (env, owner) => {
 };
 
 async function buildMacroNow(env, vf, { part, pair, symbols }) {
-  const call = (id, pathParams, params) => async () => {
+  const call = (pathOf, params) => async () => {
     try {
-      return { status: "ok", body: await vf(pathFor(id, pathParams), params, { deadlineMs: UW_MACRO_DEADLINE_MS }) };
+      return { status: "ok", body: await vf(pathOf(), params, { deadlineMs: UW_MACRO_DEADLINE_MS }) };
     } catch (error) {
       if (error instanceof VendorRefused) throw error;
       const upstream = error && Number.isInteger(error.upstream) ? error.upstream : 0;
@@ -3105,30 +3105,30 @@ async function buildMacroNow(env, vf, { part, pair, symbols }) {
     raws.fx = {};
     raws.crypto = {};
     raws.futures = {};
-    for (const p of FX_PAIRS) jobs.push({ run: call("fx-rate", {}, { from: p.slice(0, 3), to: p.slice(3) }), set: (r) => { raws.fx[p] = r; } });
-    for (const p of BOARD_CRYPTO) jobs.push({ run: call("crypto-state", { pair: p }, {}), set: (r) => { raws.crypto[p] = r; } });
-    for (const p of BOARD_FUTURES) if (symbols && symbols[p]) jobs.push({ run: call("futures-stats", { contract: symbols[p] }, {}), set: (r) => { raws.futures[p] = r; } });
+    for (const p of FX_PAIRS) jobs.push({ run: call(() => pathFor("fx-rate", {}), { from: p.slice(0, 3), to: p.slice(3) }), set: (r) => { raws.fx[p] = r; } });
+    for (const p of BOARD_CRYPTO) jobs.push({ run: call(() => pathFor("crypto-state", { pair: p }), {}), set: (r) => { raws.crypto[p] = r; } });
+    for (const p of BOARD_FUTURES) if (symbols && symbols[p]) jobs.push({ run: call(() => pathFor("futures-stats", { contract: symbols[p] }), {}), set: (r) => { raws.futures[p] = r; } });
     const got = await run(jobs);
     got.forEach((r, i) => jobs[i].set(r));
   } else if (part === "futures") {
-    const jobs = [{ run: call("futures-flow", {}, { limit: 500, include_spreads: "false", products: "ES,NQ,RTY,YM", min_size: 50 }), set: (r) => { raws.flow = r; } }];
+    const jobs = [{ run: call(() => pathFor("futures-flow", {}), { limit: 500, include_spreads: "false", products: "ES,NQ,RTY,YM", min_size: 50 }), set: (r) => { raws.flow = r; } }];
     if (symbols && symbols.ES) {
-      jobs.push({ run: call("futures-trades", { contract: symbols.ES }, { limit: 500 }), set: (r) => { raws.trades = r; } });
-      jobs.push({ run: call("futures-candles", { contract: symbols.ES }, { interval: "5m", range: "1d" }), set: (r) => { raws.candles = r; } });
+      jobs.push({ run: call(() => pathFor("futures-trades", { contract: symbols.ES }), { limit: 500 }), set: (r) => { raws.trades = r; } });
+      jobs.push({ run: call(() => pathFor("futures-candles", { contract: symbols.ES }), { interval: "5m", range: "1d" }), set: (r) => { raws.candles = r; } });
     }
     const got = await run(jobs);
     got.forEach((r, i) => jobs[i].set(r));
   } else if (part === "crypto") {
     const jobs = [
-      { run: call("crypto-ohlc", { pair: "BTC-USD", candle_size: "5m" }, { limit: 288 }), set: (r) => { raws.ohlc = r; } },
-      { run: call("digital-intraday", {}, { symbol: "BTC", market: "USD", interval: "5min" }), set: (r) => { raws.digital = r; } },
-      { run: call("crypto-whales", {}, { limit: 100 }), set: (r) => { raws.whales = r; } },
-      { run: call("crypto-whale-tx", {}, { limit: 100 }), set: (r) => { raws.transfers = r; } },
+      { run: call(() => pathFor("crypto-ohlc", { pair: "BTC-USD", candle_size: "5m" }), { limit: 288 }), set: (r) => { raws.ohlc = r; } },
+      { run: call(() => pathFor("digital-intraday", {}), { symbol: "BTC", market: "USD", interval: "5min" }), set: (r) => { raws.digital = r; } },
+      { run: call(() => pathFor("crypto-whales", {}), { limit: 100 }), set: (r) => { raws.whales = r; } },
+      { run: call(() => pathFor("crypto-whale-tx", {}), { limit: 100 }), set: (r) => { raws.transfers = r; } },
     ];
     const got = await run(jobs);
     got.forEach((r, i) => jobs[i].set(r));
   } else {
-    const [r] = await run([{ run: call("fx-intraday", {}, { from: pair.slice(0, 3), to: pair.slice(3), interval: "60min" }) }]);
+    const [r] = await run([{ run: call(() => pathFor("fx-intraday", {}), { from: pair.slice(0, 3), to: pair.slice(3), interval: "60min" }) }]);
     raws.intraday = r;
   }
   return buildLive(part, raws, { now: Date.now(), symbols, pair, test: vendorRedirected(env) });
@@ -3158,7 +3158,7 @@ flowsLedgerRows({ store: FLOWS_STORE, ensureFlowsTables, readLiveRows: FLOWS_LIV
 flowsMeRows({ store: MEMBER_STORE, flowsStore: FLOWS_STORE, readLiveRows: FLOWS_LIVE.readLiveRows, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsMacroRows({ readServed, passthrough, macroOn, macroLiveOn, serveCachedVendorRead, vendorGate, buildNow: buildMacroNow, nightlyFreshHeaders, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsFilmRows(),
-flowsPageRows({ currentFlowsUser, readFlowsSummary: readHomeSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
+flowsPageRows({ currentFlowsUser, readFlowsSummary: readHomeSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), macroOn, macroLiveOn,
   scenesOn: (env, username) => {
     const mode = String((env && env.FLOWS_SCENES) || "").trim().toLowerCase();
     return mode === "on" || (mode === "owner" && rtIsOwner(rtSwitches(env), username));

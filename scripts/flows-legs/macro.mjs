@@ -6,6 +6,30 @@ import {
 } from "../../shared/flows-macro.js";
 import { unwrap } from "../../shared/flows-vendor-core.js";
 
+const PATH = {
+  "futures-contracts": (p) => pathFor("futures-contracts", p),
+  "economy": (p) => pathFor("economy", p),
+  "commodity": (p) => pathFor("commodity", p),
+  "fx-history": (p) => pathFor("fx-history", p),
+  "digital-history": (p) => pathFor("digital-history", p),
+  "crypto-ohlc": (p) => pathFor("crypto-ohlc", p),
+  "futures-stats": (p) => pathFor("futures-stats", p),
+  "futures-candles": (p) => pathFor("futures-candles", p),
+  "futures-flow": (p) => pathFor("futures-flow", p),
+  "market-movers": (p) => pathFor("market-movers", p),
+  "seasonality-year-month": (p) => pathFor("seasonality-year-month", p),
+  "seasonality-monthly": (p) => pathFor("seasonality-monthly", p),
+  "seasonality-performers": (p) => pathFor("seasonality-performers", p),
+  "pred-unusual": (p) => pathFor("pred-unusual", p),
+  "pred-smart-money": (p) => pathFor("pred-smart-money", p),
+  "pred-whales": (p) => pathFor("pred-whales", p),
+  "pred-insiders": (p) => pathFor("pred-insiders", p),
+  "pred-market": (p) => pathFor("pred-market", p),
+  "pred-liquidity": (p) => pathFor("pred-liquidity", p),
+  "pred-positions": (p) => pathFor("pred-positions", p),
+  "pred-user": (p) => pathFor("pred-user", p),
+};
+
 export const MACRO_BUILD_SWITCH = "FLOWS_MACRO_BUILD";
 
 export const macroBuildOn = (env = process.env) => String(env[MACRO_BUILD_SWITCH] ?? "").trim().toLowerCase() !== "off";
@@ -23,7 +47,7 @@ export async function runMacro({ uw, session, generatedAt, calendar = [], deadli
     if (calls >= cap) return { status: "failed", why: "cap" };
     if (pastDeadline(deadline)) return { status: "failed", why: "deadline" };
     calls++;
-    const res = await read(uw, pathFor(op, pathParams || {}), params || {}, { envelope: true });
+    const res = await read(uw, PATH[op](pathParams || {}), params || {}, { envelope: true });
     const slot = tally[op] || (tally[op] = { n: 0, bad: 0 });
     slot.n++;
     if (res.ok) return { status: "ok", body: res.body };

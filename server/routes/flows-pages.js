@@ -1,5 +1,5 @@
 import { HttpError, redirect } from "../http.js";
-import { FLOWS_PAGES, ownerNav, oracleShell } from "../../shared/flows-pages.js";
+import { FLOWS_PAGES, ownerNav, macroNav, oracleShell } from "../../shared/flows-pages.js";
 import { memberShell } from "../../shared/flows-member-shell.js";
 import { modeOf } from "../../shared/flows-member-state.js";
 import { EXPORT_PAGES, pageHold } from "../../shared/flows-export-build.js";
@@ -38,11 +38,12 @@ const PAGES = Object.freeze([
   { slug: "now", render: (username) => FLOWS_PAGES.nowPage({ username }) },
   { slug: "desk", render: (username) => FLOWS_PAGES.deskPage({ username }) },
   { slug: "strategy", render: (username) => FLOWS_PAGES.strategyPage({ username }) },
-  { slug: "ticker", render: (username, summary, owner, scenes) => FLOWS_PAGES.tickerPage({ username, scenes }) },
+  { slug: "ticker", render: (username, summary, owner, scenes, env, gates) => FLOWS_PAGES.tickerPage({ username, scenes, privateLens: gates.macroOn(env, owner) }) },
   { slug: "moves", gate: "FLOWS_MOVES", render: (username) => FLOWS_PAGES.movesPage({ username }) },
   { slug: "unusual", render: (username, summary, owner) => FLOWS_PAGES.unusualPage({ username, owner }) },
   { slug: "ledger", gate: "FLOWS_LEDGER", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.ledgerPage({ username, live: ledgerLiveOn(env, owner) }) },
-  { slug: "events", render: (username) => FLOWS_PAGES.eventsPage({ username }) },
+  { slug: "macro", open: "macro", render: (username, summary, owner, scenes, env, gates) => FLOWS_PAGES.macroPage({ username, live: gates.macroLiveOn(env, owner) }) },
+  { slug: "events", render: (username, summary, owner, scenes, env, gates) => FLOWS_PAGES.eventsPage({ username, odds: gates.macroOn(env, owner) }) },
   { slug: "political", render: (username) => FLOWS_PAGES.politicalPage({ username }) },
   { slug: "status", ownerOnly: true, render: (username) => FLOWS_PAGES.statusPage({ username }) },
 ]);
@@ -66,7 +67,7 @@ const html = (body) => new Response(body, { status: 200, headers: { "Content-Typ
 const slashed = (slug) => "/flows/" + (slug === "" ? "" : slug + "/");
 
 export function flowsPageRows(deps) {
-  const { currentFlowsUser, readFlowsSummary, isOwner, scenesOn = () => false } = deps;
+  const { currentFlowsUser, readFlowsSummary, isOwner, scenesOn = () => false, macroOn = () => false, macroLiveOn = () => false } = deps;
   const rows = [];
 
   rows.push({
@@ -106,12 +107,14 @@ export function flowsPageRows(deps) {
           const mode = String(env[page.gate] || "owner").trim().toLowerCase();
           if (mode === "off" || (mode !== "on" && !isOwner(env, session.username))) throw HttpError.of("not_found");
         }
+        if (session && page.open === "macro" && !macroOn(env, isOwner(env, session.username))) throw HttpError.of("not_found");
         const summary = session && page.summary ? await readFlowsSummary(env, "board") : null;
         if (!session) return html(FLOWS_PAGES.loginPage());
         const owner = isOwner(env, session.username);
         if (page.ownerOnly && !owner) throw HttpError.of("not_found");
         const slug = page.slug || "overview";
-        const rendered = memberShell(oracleShell(page.render(session.username, summary, owner, scenesOn(env, session.username), env), oracleMode(env, owner), slug), memberOptions(env, owner, slug));
+        const shown = memberShell(oracleShell(page.render(session.username, summary, owner, scenesOn(env, session.username), env, { macroOn, macroLiveOn }), oracleMode(env, owner), slug), memberOptions(env, owner, slug));
+        const rendered = macroOn(env, owner) ? macroNav(shown) : shown;
         return html(owner ? ownerNav(rendered) : rendered);
       },
     });
