@@ -1566,7 +1566,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 219 suites: 165 that need only Node (N), 39 that also
+`tests/suites/` registers 225 suites: 171 that need only Node (N), 39 that also
 need Playwright's Chromium (C) and 15 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1578,45 +1578,46 @@ Confirmed to run with no server and no browser (N):
 contracts                 run                       academy                   approval-frames
 architecture              ci-affected               docs                      ff-a-bench
 ff-a-core                 ff-a-engine               ff-a-grammar              ff-a-stats
-ff-contract               fixture-guard             flows                     flows-ai-broker
-flows-ai-salvage          flows-alert-grid          flows-alerts              flows-basis
-flows-board-hit-render    flows-brief               flows-calendar            flows-calibration
-flows-card-pack           flows-chain-panels        flows-contracts           flows-conviction
-flows-copy-lint           flows-coverage            flows-d1-budget           flows-data-fixes
-flows-deepen              flows-defer-render        flows-desk-audit          flows-desk-calls
-flows-desk-sc             flows-dispatch-check      flows-dispersion          flows-door-v2
-flows-dossier             flows-dossier-reads       flows-engine-budget       flows-evt
-flows-fact-ids            flows-feeds-onescreen     flows-film                flows-flow-below-render
-flows-flow-registry       flows-forward             flows-forward-lab         flows-freshness
-flows-garch               flows-glass-render        flows-guard-lexicon       flows-home-below-render
-flows-home-composition    flows-home-net-render     flows-home-onescreen      flows-horizon
-flows-horizon-lint        flows-lean                flows-ledger              flows-legs
-flows-live                flows-market-below-render flows-market-floor-render flows-market-onescreen
-flows-market-river-render flows-market-visual       flows-meter-worker        flows-mint
-flows-moves-render        flows-moves-sig           flows-net-map-render      flows-neuron
-flows-neuron-screen       flows-nn-render           flows-now-render          flows-oracle
-flows-oracle-core         flows-oracle-home-render  flows-oracle-live         flows-oracle-render
-flows-overlay             flows-payload-shape       flows-permits             flows-pipeline-chaos
-flows-pipeline-mutants    flows-plan-facts          flows-political           flows-political-render
-flows-popout-render       flows-positioning         flows-premium-rank        flows-probe
-flows-public              flows-pulse               flows-quant               flows-quant-audit
-flows-quant-card          flows-read-failures       flows-readers             flows-reading
-flows-reading-worker      flows-reads               flows-ready               flows-record
-flows-registry-contract   flows-relations-render    flows-reports             flows-round
-flows-rt                  flows-scores              flows-sfc                 flows-sfc-render
-flows-sfc-route           flows-sfc-view            flows-sides               flows-sign
-flows-skyline-render      flows-starts              flows-stats               flows-stock
-flows-tape-stats          flows-targets             flows-time                flows-truth
-flows-universe            flows-variation           flows-vendor-budget       flows-vendor-extras
-flows-verdict             flows-vol                 flows-warnings            flows-weight
-flows-ws-probe            lab-write                 launch-readiness          markets
-mastery                   math-darkpool             math-dealer               math-duplicates
-math-format               math-print                math-short                math-sigma
-math-time                 math-units                math-vol                  pipeline
-route-matrix              server-ai                 server-desk               server-desk-sc
-server-ingest             server-kernel             server-log                server-ops
-server-oracle             server-pages              server-router             server-rt
-staging
+ff-b-budget               ff-b-health               ff-b-mutants-routes       ff-b-mutants-store
+ff-b-routes               ff-b-store                ff-contract               fixture-guard
+flows                     flows-ai-broker           flows-ai-salvage          flows-alert-grid
+flows-alerts              flows-basis               flows-board-hit-render    flows-brief
+flows-calendar            flows-calibration         flows-card-pack           flows-chain-panels
+flows-contracts           flows-conviction          flows-copy-lint           flows-coverage
+flows-d1-budget           flows-data-fixes          flows-deepen              flows-defer-render
+flows-desk-audit          flows-desk-calls          flows-desk-sc             flows-dispatch-check
+flows-dispersion          flows-door-v2             flows-dossier             flows-dossier-reads
+flows-engine-budget       flows-evt                 flows-fact-ids            flows-feeds-onescreen
+flows-film                flows-flow-below-render   flows-flow-registry       flows-forward
+flows-forward-lab         flows-freshness           flows-garch               flows-glass-render
+flows-guard-lexicon       flows-home-below-render   flows-home-composition    flows-home-net-render
+flows-home-onescreen      flows-horizon             flows-horizon-lint        flows-lean
+flows-ledger              flows-legs                flows-live                flows-market-below-render
+flows-market-floor-render flows-market-onescreen    flows-market-river-render flows-market-visual
+flows-meter-worker        flows-mint                flows-moves-render        flows-moves-sig
+flows-net-map-render      flows-neuron              flows-neuron-screen       flows-nn-render
+flows-now-render          flows-oracle              flows-oracle-core         flows-oracle-home-render
+flows-oracle-live         flows-oracle-render       flows-overlay             flows-payload-shape
+flows-permits             flows-pipeline-chaos      flows-pipeline-mutants    flows-plan-facts
+flows-political           flows-political-render    flows-popout-render       flows-positioning
+flows-premium-rank        flows-probe               flows-public              flows-pulse
+flows-quant               flows-quant-audit         flows-quant-card          flows-read-failures
+flows-readers             flows-reading             flows-reading-worker      flows-reads
+flows-ready               flows-record              flows-registry-contract   flows-relations-render
+flows-reports             flows-round               flows-rt                  flows-scores
+flows-sfc                 flows-sfc-render          flows-sfc-route           flows-sfc-view
+flows-sides               flows-sign                flows-skyline-render      flows-starts
+flows-stats               flows-stock               flows-tape-stats          flows-targets
+flows-time                flows-truth               flows-universe            flows-variation
+flows-vendor-budget       flows-vendor-extras       flows-verdict             flows-vol
+flows-warnings            flows-weight              flows-ws-probe            lab-write
+launch-readiness          markets                   mastery                   math-darkpool
+math-dealer               math-duplicates           math-format               math-print
+math-short                math-sigma                math-time                 math-units
+math-vol                  pipeline                  route-matrix              server-ai
+server-desk               server-desk-sc            server-ingest             server-kernel
+server-log                server-ops                server-oracle             server-pages
+server-router             server-rt                 staging
 ```
 
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):
