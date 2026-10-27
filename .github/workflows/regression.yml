@@ -152,7 +152,7 @@ jobs:
         working-directory: tests
         run: |
           pin="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync("suites/flows-sfc-firstpaint.json", "utf8")).shard))')"
-          if [ "$pin" = "${{ matrix.shard }}" ]; then npx playwright install --with-deps webkit firefox; fi
+          if [ "$pin" = "${{ matrix.shard }}" ]; then timeout 420 npx playwright install --with-deps webkit firefox || timeout 420 npx playwright install --with-deps webkit firefox; fi
       - name: Check the contracts first
         working-directory: tests
         run: node run.mjs --only contracts
