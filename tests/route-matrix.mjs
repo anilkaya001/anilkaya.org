@@ -60,9 +60,9 @@ const FRESH_PRESENT = ["Read-At", "Live-Until", "Stale-At", "Phase-Ends", "Last-
 
 const FLOWS_API = ["board", "market", "events", "scoretrack", "calib", "dispersion", "meta", "flowalerts", "pulse", "news", "lk", "now", "tape", "political",
   "unusual", "movers", "sectors", "sector-premium", "universe", "regime", "ideas", "focus", "roster", "ai-usage", "summary", "dossier",
-  "live", "brief", "ask", "record", "card", "card-x", "hist", "chain", "strategy", "ingest", "ready", "dispatch-check", "coverage", "ops", "ledger"];
-const FLOWS_PAGES_SLASH = ["", "long", "short", "watch", "market", "network", "now", "history", "desk", "strategy", "ask", "ticker", "unusual", "moves", "ledger", "events", "track", "political", "status", "about", "glossary"];
-const FLOWS_PAGES_BARE = ["long", "short", "desk", "watch", "history", "market", "network", "now", "ticker", "unusual", "moves", "ledger", "events", "track", "political", "status", "strategy", "ask", "about", "glossary"];
+  "live", "brief", "ask", "record", "card", "card-x", "hist", "chain", "strategy", "ingest", "ready", "dispatch-check", "coverage", "ops", "ledger", "positioning"];
+const FLOWS_PAGES_SLASH = ["", "long", "short", "watch", "market", "network", "now", "history", "desk", "strategy", "ask", "ticker", "unusual", "moves", "ledger", "events", "track", "political", "positioning", "status", "about", "glossary"];
+const FLOWS_PAGES_BARE = ["long", "short", "desk", "watch", "history", "market", "network", "now", "ticker", "unusual", "moves", "ledger", "events", "track", "political", "positioning", "status", "strategy", "ask", "about", "glossary"];
 
 const LEGACY = ["/lab/course", "/lab/course.html", "/lab/course/", "/lab/lesson", "/lab/lesson.html", "/lab/lesson/"];
 const SLUGS = Object.keys(COURSE_BY_SLUG);

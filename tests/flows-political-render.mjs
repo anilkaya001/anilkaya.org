@@ -728,13 +728,13 @@ const lateRows = [
   { t: LT[1], side: "sell", lo: 50001, hi: 100000, txn: "2026-08-21", filed: "2026-10-13", lagS: 37, lagD: 53, over45: true, who: "FC", ch: "H", src: "cg" },
   { t: LT[2], side: "buy", lo: 100001, hi: 250000, txn: "2026-08-24", filed: "2026-10-14", lagS: null, lagD: 51, over45: true, who: "FD", ch: "H", src: "cg" },
 ];
-const lateBy = { [LT[0]]: { n: 2, maxS: 38 }, [LT[1]]: { n: 1, maxS: 37 }, [LT[2]]: { n: 1, maxS: null } };
+const lateBy = { [LT[0]]: { n: 2, filers: 2, maxS: 38, medS: 37, who: ["FA", "FB"] }, [LT[1]]: { n: 1, filers: 1, maxS: 37, medS: 37, who: ["FC"] }, [LT[2]]: { n: 1, filers: 1, maxS: null, medS: null, who: ["FD"] } };
 const unusualRows = [
   { id: "u1", t: LT[3], side: "buy", lo: 15001, hi: 50000, txn: "2026-09-09", filed: "2026-09-30", lagS: 15, lagD: 21, over45: false, who: "FA", ch: "H", tags: ["cc", "fp"], r: 0.1, rSpy: 0.04, ex: 0.06 },
   { id: "u2", t: LT[3], side: "sell", lo: 1001, hi: 15000, txn: "2026-09-10", filed: "2026-09-30", lagS: 14, lagD: 20, over45: false, who: "FB", ch: "S", tags: ["other"], r: null, rSpy: null, ex: null },
   { id: "u3", t: LT[1], side: "buy", lo: 50001, hi: 100000, txn: "2026-09-11", filed: "2026-10-01", lagS: 14, lagD: 20, over45: false, who: "FC", ch: "H", tags: ["ul"], r: -0.02, rSpy: 0.03, ex: -0.05 },
 ];
-const unusualBy = { [LT[3]]: { n: 2, tags: ["cc", "fp", "other"], who: ["FA", "FB"] }, [LT[1]]: { n: 1, tags: ["ul"], who: ["FC"] } };
+const unusualBy = { [LT[3]]: { n: 2, tags: ["cc", "fp", "other"], filers: 2 }, [LT[1]]: { n: 1, tags: ["ul"], filers: 1 } };
 const LAYERED = {
   ...PAYLOAD,
   late: { status: "ok", window: { from: "2020-01-10", to: ASOF }, rows: lateRows, byT: lateBy },

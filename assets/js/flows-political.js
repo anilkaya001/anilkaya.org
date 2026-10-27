@@ -845,7 +845,7 @@
       const e = layerReady(d) && d.byT ? d.byT[S.sel] : null;
       if (!e) box.innerHTML += kv("Late filers", esc(layerReady(d) ? LAYER_WHY.quiet : layerReason(d)));
       else {
-        for (const w of e.who) {
+        for (const w of Array.isArray(e.who) ? e.who : []) {
           const f = (d.filers || []).find((x) => x.who === w);
           box.innerHTML += kv(w, f && f.all ? esc(f.late + " of " + f.all + " late this year") : DASH);
         }
@@ -856,7 +856,7 @@
       const e = layerReady(d) && d.byT ? d.byT[S.sel] : null;
       if (!e) box.innerHTML += kv("Flags", esc(layerReady(d) ? LAYER_WHY.quiet : layerReason(d)));
       else {
-        box.innerHTML += kv("Flagged", String(e.n)) + kv("Flags", esc(e.tags.map((c) => TAG_WORD[c] || TAG_WORD.other).join(", ")));
+        box.innerHTML += kv("Flagged", String(e.n)) + kv("Flags", esc((Array.isArray(e.tags) ? e.tags : []).map((c) => TAG_WORD[c] || TAG_WORD.other).join(", ")));
         box.innerHTML += '<div class="sub">' + esc(LAYER_LINE.since) + "</div>";
       }
     } else if (layer === "money") {
