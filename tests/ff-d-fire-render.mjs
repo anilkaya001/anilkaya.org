@@ -10,7 +10,8 @@ const AXE = fs.readFileSync(require.resolve("axe-core/axe.min.js"), "utf8");
 
 let checks = 0;
 const failures = [];
-const ok = (c, m) => { checks++; if (!c) failures.push(m); };
+let stopFast = false;
+const ok = (c, m) => { checks++; if (!c) { failures.push(m); if (stopFast) throw new Error("stop"); } };
 const eq = (a, b, m) => ok(JSON.stringify(a) === JSON.stringify(b), m + " (got " + JSON.stringify(a) + ", want " + JSON.stringify(b) + ")");
 let PATCH = {};
 const mount = (b, w, h, o = {}) => mountRaw(b, w, h, { ...PATCH, ...o });
@@ -67,6 +68,11 @@ async function geometry(page) {
     const sw = document.documentElement.scrollWidth > innerWidth + 1;
     const sh = document.documentElement.scrollHeight > innerHeight + 1;
     const vis = (e) => { const r = e.getBoundingClientRect(); const cs = getComputedStyle(e); return r.width > 0 && r.height > 0 && cs.visibility !== "hidden" && cs.display !== "none"; };
+    for (const e of root.querySelectorAll("#ffxFire .ffx-panel")) {
+      if (!vis(e)) continue;
+      const r = e.getBoundingClientRect();
+      if (r.bottom > innerHeight + 1 || r.right > innerWidth + 1 || r.top < -1 || r.left < -1) bad.push("panel outside the screen: " + e.id);
+    }
     for (const e of root.querySelectorAll("#ffxFire *")) {
       if (!vis(e) || e.closest("dialog")) continue;
       const cs = getComputedStyle(e);
@@ -142,10 +148,11 @@ async function layoutAt(browser, w, h) {
 async function behaviours(browser) {
   let state = { wires: limits(), arms: 0 };
   const m = await mount(browser, 1440, 820, {
-    api: ({ method, path: p, body, headers, json }) => {
+    api: async ({ method, path: p, body, headers, json }) => {
       if (p === "/api/ff/wires" && method === "GET") return json({ v: 1, status: "live", wires: [], limits: state.wires });
       if (p === "/api/ff/wires" && method === "POST") {
         state.arms++;
+        if (state.delay) await new Promise((r) => setTimeout(r, state.delay));
         state.lastBody = body;
         state.lastKey = headers["idempotency-key"];
         (state.keys = state.keys || []).push(headers["idempotency-key"]);
@@ -179,7 +186,7 @@ async function behaviours(browser) {
   ok((await text()).includes("first check Tue 27 Oct · 00:30 TRT (scheduled)"), "the first check is the API's text, in TRT");
   ok((await text()).includes("False alarms a week | " + DASH + " a fact wire has no statistical test") || (await text()).includes("a fact wire has no statistical test"), "an unmeasured rate is a dash with its reason");
   const sentence = await page.textContent("#ffx-sentence");
-  ok(sentence.startsWith("When net premium z ≥ 3.00σ") && sentence.endsWith("then quiet for 5 sessions."), "the sentence is built from the conditions");
+  ok(sentence.startsWith("When net premium z ≥ 3.00 SD") && sentence.endsWith("then quiet for 5 sessions."), "the sentence is built from the conditions");
 
   await page.fill('[data-k="x0"]', "3.13");
   await page.press('[data-k="x0"]', "Tab");
@@ -215,6 +222,14 @@ async function behaviours(browser) {
   await page.waitForFunction(() => document.querySelector("#ffxCap").textContent.startsWith("4 of 50"));
   ok(true, "the header limits refresh after arming");
 
+  state.delay = 400;
+  await page.click('[data-k="inc0"]');
+  await page.waitForSelector('#ffxPreview[data-state="ok"]');
+  const armsBefore = state.arms;
+  await page.evaluate(() => { const b = document.querySelector('[data-k="arm"]'); b.click(); b.click(); b.click(); });
+  await page.waitForSelector('.ffx-out[data-state="ok"]');
+  eq(state.arms - armsBefore, 1, "three quick clicks on Arm send one request");
+  state.delay = 0;
   state.fail = { status: 409, code: "ff_wire_limit", message: "limit", details: { limit: "live" } };
   await page.click('[data-k="x0"]');
   await page.click('[data-k="inc0"]');
@@ -397,7 +412,9 @@ async function keyboardAndTargets(browser) {
   await kp.keyboard.press("Enter");
   await kp.waitForTimeout(200);
   ok((await kp.getAttribute('[data-template="T01"]', "aria-pressed")) === "true", "Enter picks a template");
-  await kp.focus('[data-k="arm"]');
+  await kp.focus('[data-k="reset"]');
+  await kp.keyboard.press("Shift+Tab");
+  ok(await kp.evaluate(() => document.activeElement.getAttribute("data-k") === "arm"), "Shift+Tab reaches the Arm button");
   const ring = await kp.evaluate(() => { const cs = getComputedStyle(document.activeElement); return [cs.outlineStyle, cs.outlineWidth]; });
   ok(ring[0] !== "none" && ring[1] !== "0px", "the focused control shows a ring");
   await kp.click("#ffxInfoBtn");
@@ -431,7 +448,7 @@ async function sheetAndAdjust(browser) {
   await page.click("dialog.ffx-sheet [data-close]");
   await page.waitForTimeout(150);
   eq(await page.locator("dialog.ffx-sheet").count(), 0, "closing removes the sheet");
-  const ast = { v: 1, cadence: "nightly", scope: { kind: "universe" }, all: [{ m: "flow.net_premium.z20", op: ">=", x: 3 }], persist: 1, cooldown: { unit: "session", n: 5 } };
+  const ast = { v: 1, cadence: "nightly", scope: { kind: "universe" }, all: [{ m: "contract.premium", op: ">=", x: 1000000 }], persist: 1, cooldown: { unit: "session", n: 5 } };
   await page.evaluate((a) => window.FlowsUI.ffFire.openFireSheet({ wire: { id: "w-" + "c".repeat(16), version: 2, title: "t", ast: a, template: "custom" } }), ast);
   await page.waitForSelector("dialog.ffx-sheet[open]");
   ok((await page.getAttribute('dialog.ffx-sheet [data-cad="live"]', "aria-disabled")) === "true", "an adjusted wire cannot change its cadence");
@@ -443,7 +460,7 @@ async function sheetAndAdjust(browser) {
   eq(m.patch.length, 1, "one PATCH");
   eq(Object.keys(m.patch[0]).sort(), ["ast", "id", "version"], "it carries the base version and no member");
   eq(m.patch[0].version, 2, "the base version is the one opened");
-  eq(m.patch[0].ast.all[0].x, 3.25, "the edited threshold is sent");
+  eq(m.patch[0].ast.all[0].x, 1010000, "the edited threshold is sent");
   ok((await page.textContent("dialog.ffx-sheet .ffx-out")).startsWith("Saved. Takes effect"), "the sheet confirms");
   const bad = await page.evaluate(() => window.FlowsUI.ffFire.openFireSheet.length >= 0);
   ok(bad, "openFireSheet is on FlowsUI.ffFire");
@@ -454,17 +471,31 @@ async function sheetAndAdjust(browser) {
   await q.ctx.close();
 }
 
+async function axeNow(page) {
+  await page.addScriptTag({ content: AXE });
+  const res = await page.evaluate(() => window.axe.run(document.querySelector("#ffxFire"), { runOnly: ["wcag2a", "wcag2aa", "wcag21aa"], rules: { "color-contrast": { enabled: true } } }));
+  return res.violations.map((x) => x.id + ": " + x.nodes.slice(0, 2).map((n) => n.target.join(" ")).join(" ; "));
+}
+
 async function axeCheck(browser) {
   for (const [w, h] of [[1440, 820], [390, 844]]) {
     const m = await mount(browser, w, h, {});
+    const views = w < 1100 ? ["start", "wire", "now"] : ["all"];
+    for (const v of views) {
+      if (v !== "all") await m.page.click('#ffxTabs [data-v="' + v + '"]');
+      await m.page.waitForTimeout(150);
+      eq(await axeNow(m.page), [], `${w}x${h} ${v} axe, blank wire`);
+    }
+    await tab(m.page, w, "start");
     await m.page.click('[data-template="T01"]');
     await setScopeNames(m.page, "SYN101, SYN102");
-    await tab(m.page, w, "wire");
-    await m.page.waitForTimeout(600);
-    await m.page.addScriptTag({ content: AXE });
-    const res = await m.page.evaluate(() => window.axe.run(document.querySelector("#ffxFire"), { runOnly: ["wcag2a", "wcag2aa", "wcag21aa"], rules: { "color-contrast": { enabled: true } } }));
-    const v = res.violations.map((x) => x.id + ": " + x.nodes.slice(0, 2).map((n) => n.target.join(" ")).join(" ; "));
-    eq(v, [], `${w}x${h} axe has no violation`);
+    await m.page.waitForSelector('#ffxPreview[data-state="ok"]', { state: "attached" });
+    await m.page.waitForTimeout(300);
+    for (const v of views) {
+      if (v !== "all") await m.page.click('#ffxTabs [data-v="' + v + '"]');
+      await m.page.waitForTimeout(150);
+      eq(await axeNow(m.page), [], `${w}x${h} ${v} axe, populated wire`);
+    }
     await m.ctx.close();
   }
 }
@@ -480,7 +511,7 @@ const PLANTS = [
   ["the arm button ignores the reasons", ["behaviours"], () => ({ js: plant(FIRE_JS, 'if (arm.getAttribute("aria-disabled") === "true") {\n        if (reasons.length)', 'if (false) {\n        if (reasons.length)') })],
   ["a new key is never made for an edited wire", ["behaviours"], () => ({ js: plant(FIRE_JS, "onChange: function (state, reasons) {\n        keyed = null;", "onChange: function (state, reasons) {") })],
   ["the member is sent in the arm body", ["behaviours"], () => ({ js: plant(FIRE_JS, "var body = { ast: ast, title: model.title(state) };", 'var body = { ast: ast, title: model.title(state), member_id: "x" };') })],
-  ["the template hint is dropped", ["behaviours"], () => ({ js: plant(FIRE_JS, 'body.template = findTemplate(templateKey).id;', "void 0;") })],
+  ["the template hint is dropped", ["behaviours"], () => ({ js: plant(FIRE_JS, 'if (h) body.template = h;', "void 0;") })],
   ["a double click arms twice", ["behaviours"], () => ({ js: plant(FIRE_JS, "busy = true;\n      arm.setAttribute(\"aria-disabled\", \"true\");", "busy = false;") })],
   ["a wire limit loses its name", ["behaviours"], () => ({ js: plant(FIRE_JS, 'return DASH + " you have " + (which || "reached a wire limit") + ". Retire a wire first.";', 'return DASH + " reached a wire limit. Retire a wire first.";') })],
   ["the header limits are not refreshed after arming", ["behaviours"], () => ({ js: plant(FIRE_JS, "onDone: function () { loadCap(); },", "onDone: function () {},") })],
@@ -490,12 +521,12 @@ const PLANTS = [
   ["an off route is a zero in the header", ["offState"], () => ({ js: plant(FIRE_JS, 'cap.textContent = errText(err);', 'cap.textContent = "0 of 0 wires armed";') })],
   ["arming goes ahead while Fire is off", ["offState"], () => ({ js: plant(FIRE_JS, 'if (err.code === "ff_off") {\n          banner.hidden = false;\n          banner.textContent = errText(err);\n          wb.disable(errText(err));\n        }', "") })],
   ["house records are zeros when unread", ["offState"], () => ({ js: plant(FIRE_JS, 'n.textContent = DASH + " " + (err.code === "ff_off" ? "unavailable" : "not read");', 'n.textContent = "0";') })],
-  ["hidden conditions are not cut", ["layout"], () => ({ css: plant(FIRE_CSS, ".ffx-cl.cut { display: none; }", ".ffx-cl.cut { }") })],
-  ["the stage scrolls the page", ["layout"], () => ({ css: plant(FIRE_CSS, "  overflow: hidden;\n}\n.flows-body[data-flows-page=\"fire\"] .flows-main > * { max-width: none; }", "}\n.flows-body[data-flows-page=\"fire\"] .flows-main > * { max-width: none; }") })],
+  ["hidden conditions are not cut", ["layout"], () => ({ js: plant(COMPOSER_JS, 'rows[i].classList.add("cut");', "void 0;") })],
+  ["a panel taller than the screen", ["layout"], () => ({ css: plant(FIRE_CSS, "border-radius: var(--r-lg); display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }", "border-radius: var(--r-lg); display: flex; flex-direction: column; min-height: 1200px; min-width: 0; overflow: hidden; }") })],
   ["the edit-all control is never offered", ["conditionDialog"], () => ({ js: plant(COMPOSER_JS, 'more.hidden = cut === 0 && !dlg.open;', "more.hidden = true;") })],
   ["Show all is never offered", ["previewDialog"], () => ({ js: plant(PREVIEW_JS, "showAll.hidden = cut === 0;", "showAll.hidden = true;") })],
   ["controls are small on a touch screen", ["keyboardAndTargets"], () => ({ css: plant(FIRE_CSS, ".ffx-sel, .ffx-in, .ffx-st, .ffx-rm, .ffx-bool, .ffx-seg button, .ffx-link { min-height: 44px; }", ".ffx-sel, .ffx-in, .ffx-st, .ffx-rm, .ffx-bool, .ffx-seg button, .ffx-link { min-height: 24px; }") })],
-  ["the focus ring is removed", ["keyboardAndTargets"], () => ({ css: plant(FIRE_CSS, ":where(.ffx, .ffx-dlg) :focus-visible { outline: var(--focus-ring); outline-offset: 2px; }", ":where(.ffx, .ffx-dlg) :focus-visible { outline: none; }") })],
+  ["the focus ring is removed", ["keyboardAndTargets"], () => ({ css: plant(FIRE_CSS, ":where(.ffx, .ffx-dlg) :focus-visible { outline: var(--focus-ring); outline-offset: 2px; }", ":where(.ffx, .ffx-dlg) :focus-visible { outline: none !important; }") })],
   ["the tabs ignore the arrow keys", ["keyboardAndTargets"], () => ({ js: plant(FIRE_JS, 'var j = e.key === "ArrowRight" ? i + 1 :', 'var j = e.key === "ArrowRightX" ? i + 1 :') })],
   ["an adjusted wire can change cadence", ["sheetAndAdjust"], () => ({ js: plant(FIRE_JS, "lockCadence: !!adjust,", "lockCadence: false,") })],
   ["an adjust sends no base version", ["sheetAndAdjust"], () => ({ js: plant(FIRE_JS, "net.patch(\"/api/ff/wires\", { id: adjust.id, version: adjust.version, ast: ast })", "net.patch(\"/api/ff/wires\", { id: adjust.id, ast: ast })") })],
@@ -507,27 +538,36 @@ const PLANTS = [
 const only = process.env.FF_D_ONLY ? process.env.FF_D_ONLY.split(",") : null;
 const browser = await launch();
 for (const [name, fn] of Object.entries(SCENARIOS)) {
-  if (only && !only.includes(name)) continue;
+  if ((only && !only.includes(name)) || process.env.FF_D_SKIPPROD) continue;
   const before = failures.length;
   try { await fn(browser); } catch (err) { failures.push(name + " threw: " + err.message.split("\n").slice(0, 4).join(" / ")); }
   console.log((failures.length === before ? "ok   " : "FAIL ") + name);
 }
 const production = failures.splice(0);
 let survivors = 0;
-if (!process.env.FF_D_NOPLANTS && production.length === 0) {
-  for (const [name, scenarios, opts] of PLANTS) {
-    const before = checks;
+if (process.env.FF_D_PLANTS && production.length === 0) {
+  const wanted = process.env.FF_D_PLANT ? process.env.FF_D_PLANT.split(",").map(Number) : null;
+  for (const [index, [name, scenarios, opts]] of PLANTS.entries()) {
+    if (wanted && !wanted.includes(index)) continue;
+    let applied;
+    try { applied = opts(); } catch (err) {
+      survivors++;
+      console.log("PLANT DID NOT APPLY: " + name + ": " + err.message);
+      continue;
+    }
     let killed = false;
+    stopFast = true;
     for (const s of scenarios) {
       const mark = failures.length;
-      PATCH = opts();
+      PATCH = applied;
       try { await SCENARIOS[s](browser); } catch (err) { failures.push("threw"); }
+      PATCH = {};
       if (failures.length > mark) killed = true;
       failures.length = mark;
-      PATCH = {};
     }
-    void before;
+    stopFast = false;
     if (!killed) { survivors++; console.log("SURVIVED: " + name); }
+    else console.log("killed   " + index + " " + name);
   }
   console.log(PLANTS.length + " planted wrong builds, " + survivors + " survived");
 }

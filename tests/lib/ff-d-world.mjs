@@ -12,6 +12,40 @@ const glyph = (name) => `<svg class="ui-g" aria-hidden="true" focusable="false">
 
 export const registry = fireRegistry();
 
+export const CLIENT_DOUBLE = `(function () {
+  "use strict";
+  var UI = window.FlowsUI;
+  function call(method, path, body, headers) {
+    var h = { Accept: "application/json" };
+    if (body !== undefined) h["Content-Type"] = "application/json";
+    Object.keys(headers || {}).forEach(function (k) { h[k] = headers[k]; });
+    return fetch(path, { method: method, credentials: "same-origin", headers: h, body: body === undefined ? undefined : JSON.stringify(body) }).then(function (res) {
+      return res.json().catch(function () { return null; }).then(function (data) {
+        if (!res.ok) {
+          var e = data && data.error ? data.error : {};
+          var err = new Error(e.message || "The request failed");
+          err.code = e.code || "http_" + res.status;
+          err.status = res.status;
+          err.details = e.details || null;
+          throw err;
+        }
+        return data;
+      });
+    }, function () {
+      var err = new Error("Flows did not answer");
+      err.code = "network";
+      throw err;
+    });
+  }
+  var client = Object.freeze({
+    get: function (p) { return call("GET", p); },
+    post: function (p, b, o) { return call("POST", p, b, o && o.headers); },
+    patch: function (p, b) { return call("PATCH", p, b); },
+  });
+  window.FlowsUI = Object.freeze(Object.assign({}, UI, { ffClient: client }));
+})();
+`;
+
 export function pageHtml(body = fireBody(glyph, registry)) {
   return flowsDocument({ title: "Fire", description: FIRE_DESCRIPTION, active: "fire", username: "test", chrome: false, styles: FIRE_STYLES, scripts: FIRE_SCRIPTS, body });
 }
@@ -79,6 +113,7 @@ export async function mount(browser, w, h, o = {}) {
     const u = new URL(req.url());
     const p = u.pathname;
     if (p.startsWith("/assets/")) {
+      if (p === "/assets/js/flows-ff-client.js" && !o.noClient) return r.fulfill({ contentType: "text/javascript", body: CLIENT_DOUBLE });
       if (o.js && p.endsWith(path.basename(o.js.path))) return r.fulfill({ contentType: "text/javascript", body: o.js.body });
       if (o.css && p.endsWith(path.basename(o.css.path))) return r.fulfill({ contentType: "text/css", body: o.css.body });
       const f = path.join(ROOT, p);

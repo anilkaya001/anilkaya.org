@@ -15,38 +15,20 @@
     try { return JSON.parse(n.textContent); } catch (e) { void e; return null; }
   }
 
-  function failure(res, body) {
-    var e = body && body.error ? body.error : {};
-    var err = new Error(e.message || "The request failed");
-    err.code = e.code || "http_" + res.status;
-    err.status = res.status;
-    err.details = e.details || null;
-    return err;
-  }
-
-  function fetchJson(method, path, body, headers) {
-    var h = { Accept: "application/json" };
-    if (body !== undefined) h["Content-Type"] = "application/json";
-    Object.keys(headers || {}).forEach(function (k) { h[k] = headers[k]; });
-    return fetch(path, { method: method, credentials: "same-origin", headers: h, body: body === undefined ? undefined : JSON.stringify(body) }).then(function (res) {
-      return res.json().catch(function () { return null; }).then(function (data) {
-        if (!res.ok) throw failure(res, data);
-        return data;
-      });
-    }, function () {
-      var err = new Error("Flows did not answer");
-      err.code = "network";
-      throw err;
-    });
+  function missing() {
+    var err = new Error("The Fire client did not load");
+    err.code = "client_missing";
+    return Promise.reject(err);
   }
 
   function client() {
-    var k = UI.ffClient;
+    var k = UI.ffClient || {};
+    var call = function (name, args) { return typeof k[name] === "function" ? k[name].apply(k, args) : missing(); };
     return {
-      get: function (path) { return k && typeof k.get === "function" ? k.get(path) : fetchJson("GET", path); },
-      post: function (path, body, headers) { return k && typeof k.post === "function" ? k.post(path, body, { headers: headers || {} }) : fetchJson("POST", path, body, headers); },
-      patch: function (path, body) { return fetchJson("PATCH", path, body); },
-      plain: function (path) { return fetchJson("GET", path); },
+      get: function (path) { return call("get", [path]); },
+      post: function (path, body, headers) { return call("post", [path, body, { headers: headers || {} }]); },
+      patch: function (path, body) { return call("patch", [path, body]); },
+      plain: function (path) { return call("get", [path]); },
     };
   }
 
@@ -67,6 +49,7 @@
     if (c === "ff_budget_exceeded") return DASH + " the weekly false-alarm budget is spent" + (typeof d.used === "number" && typeof d.max === "number" ? " (" + d.used + " of " + d.max + ")" : "") + ". Loosen or retire a wire.";
     if (c === "ff_off") return DASH + " Fire is unavailable" + (d.reason ? ": " + String(d.reason).replace(/_/g, " ") : "");
     if (c === "ff_version_immutable") return DASH + " this wire changed since you opened it. Reload it and adjust again.";
+    if (c === "client_missing") return DASH + " the Fire client did not load. Reload the page.";
     if (c === "network") return DASH + " Flows did not answer. Nothing was armed. Try again.";
     if (c === "rate_limited") return DASH + " too many changes just now. Try again in a minute.";
     return DASH + " " + String((err && err.message) || "the request failed");
@@ -238,7 +221,6 @@
     var tabs = [].slice.call(document.querySelectorAll("#ffxTabs [role=tab]"));
     var params = new URLSearchParams(location.search);
     var symbol = (params.get("symbol") || "").toUpperCase();
-    var blank = reg.templates[0];
 
     var wb = workbench({
       id: "ffx", registry: reg, composerHost: document.getElementById("ffxComposer"), previewHost: document.getElementById("ffxPreview"),
@@ -338,7 +320,6 @@
     var info = document.getElementById("ffxInfo");
     document.getElementById("ffxInfoBtn").addEventListener("click", function () { info.showModal(); });
     info.addEventListener("click", function (e) { if (e.target === info || (e.target.closest && e.target.closest("[data-close]"))) info.close(); });
-    void blank;
   }
 
   var api = { page: true, openFireSheet: openFireSheet, workbench: workbench, errText: errText };

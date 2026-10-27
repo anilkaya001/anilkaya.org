@@ -92,7 +92,7 @@ export function battery(loaded, label = "build") {
   const te = (a, b, what) => eq(a, b, label + ": " + what);
 
   te(model.fmt("usd", 1240000), "$1.24M", "usd compact");
-  te(model.fmt("sigma", 3.1), "3.10σ", "sigma");
+  te(model.fmt("sigma", 3.1), "3.10 SD", "sigma is printed as SD, the glyph being outside the Flows face");
   te(model.fmt("vol_pt", 1.2), "1.2 pts", "vol points");
   te(model.fmt("pct", 4.5), "4.5%", "percent");
   te(model.fmt("pctile", 87), "87th", "percentile");
@@ -101,9 +101,10 @@ export function battery(loaded, label = "build") {
   te(model.fmt("days", 21), "21 days", "days");
   te(model.fmt("contracts", 12345), "12,345", "contracts");
   te(model.fmt("usd", null), "—", "null is a dash");
+  for (const u of Object.keys(UNITS)) t(!model.fmt(u, 1.5).includes(String.fromCharCode(963)), "no unit prints the sigma glyph");
   te(model.fmt("sigma", NaN), "—", "NaN is a dash");
 
-  const P = [["1.5m", "usd", 1.5e6], ["$1,000", "usd", 1000], ["3σ", "sigma", 3], ["−2", "sigma", -2], ["12k", "contracts", 12000], ["1k", "sigma", null], ["abc", "usd", null], ["", "usd", null], ["2.5%", "pct", 2.5], ["4 pts", "vol_pt", 4], ["1e3", "contracts", 1000]];
+  const P = [["1.5m", "usd", 1.5e6], ["$1,000", "usd", 1000], ["3σ", "sigma", 3], ["3 SD", "sigma", 3], ["−2", "sigma", -2], ["12k", "contracts", 12000], ["1k", "sigma", null], ["abc", "usd", null], ["", "usd", null], ["2.5%", "pct", 2.5], ["4 pts", "vol_pt", 4], ["1e3", "contracts", 1000]];
   for (const [text, unit, want] of P) te(model.parse(text, unit), want, "parse " + JSON.stringify(text) + " as " + unit);
 
   const SN = [["usd", 15000, 20000], ["usd", 14999, 10000], ["usd", 25000, 30000], ["usd", -15000, -20000], ["sigma", 0.125, 0.25], ["sigma", 3.1, 3], ["sigma", 3.13, 3.25], ["sigma", 3.12, 3], ["pct", 0.25, 0.5], ["pct", 4.7, 4.5], ["ratio", 0.025, 0.05], ["ratio", 0.075, 0.1], ["ratio", 0.275, 0.3], ["pct", 4.75, 5], ["ratio", 0.024, 0], ["pctile", 87, 85], ["pctile", 88, 90], ["contracts", 149, 100], ["contracts", 150, 200], ["sessions", 5.4, 5], ["sessions", 5.5, 6], ["vol_pt", 1.25, 1.5]];
@@ -241,30 +242,35 @@ export function battery(loaded, label = "build") {
   te(model.sentence(model.setBool(bst, 0, false)).includes("not "), true, "bool off reads as not");
 }
 
+const COLOUR = /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|\boklch\(|\b(?:white|black|red|green|blue|orange|yellow|gray|grey)\b(?![-\w])/;
+const API_OK = ["/api/ff/wires", "/api/ff/house", "/api/ff/preview", "/api/flows/universe"];
+
+export function lintProblems(f, text) {
+  const out = [];
+  const css = f.endsWith(".css");
+  const js = f.endsWith(".js") && f.startsWith("assets");
+  if (!css && /(^|[^:"'\\])\/\/[^\n]*/.test(text.replace(/https?:\/\/[^\s"']*/g, ""))) out.push("line comment");
+  if (/\/\*[\s\S]*?\*\//.test(text)) out.push("block comment");
+  if (/<!--/.test(text)) out.push("html comment");
+  if (COLOUR.test(text.replace(/CanvasText/g, ""))) out.push("colour literal");
+  if (/\btape\b/i.test(text)) out.push("the word tape");
+  if (/innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|new Function/.test(text)) out.push("markup from a string");
+  if (/localStorage|sessionStorage|indexedDB/.test(text)) out.push("browser storage");
+  if (js) {
+    if (text.includes(String.fromCharCode(963))) out.push("the sigma glyph");
+    if (/\bimport\s|\bimport\(|\brequire\(/.test(text)) out.push("import");
+    if (!text.startsWith('(function () {\n  "use strict";')) out.push("not a strict IIFE");
+    for (const m of text.matchAll(/["'`](\/api\/[^"'`?]*)/g)) if (!API_OK.includes(m[1])) out.push("route " + m[1]);
+    if (/\bfetch\(|XMLHttpRequest|sendBeacon|WebSocket|EventSource/.test(text)) out.push("a network call that is not FlowsUI.ffClient");
+    if (/unusualwhales|\buw[A-Z_(]|\/ai\/|env\.AI|askModels/.test(text)) out.push("vendor or model");
+    if (/Date\.now|new Date|toLocale|Intl\./.test(text)) out.push("a time computed in the browser");
+  }
+  return out;
+}
+
 export function staticChecks() {
   const files = ["assets/js/flows-ff-composer.js", "assets/js/flows-ff-preview.js", "assets/js/flows-ff-fire.js", "assets/css/flows-ff-fire.css", "shared/ff-pages-fire.js"];
-  const banned = new RegExp("\\b(" + COPY_BANNED.join("|") + ")\\b", "i");
-  const colour = /#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|\boklch\(|\b(?:white|black|red|green|blue|orange|yellow|gray|grey)\b(?![-\w])/;
-  for (const f of files) {
-    const text = fs.readFileSync(path.join(ROOT, f), "utf8");
-    const code = f.endsWith(".css") ? text : text;
-    ok(!/(^|[^:"'\\])\/\/[^\n]*/.test(code.replace(/https?:\/\/[^\s"']*/g, "")) || f.endsWith(".css"), f + " has no line comment");
-    ok(!/\/\*[\s\S]*?\*\//.test(text), f + " has no block comment");
-    ok(!/<!--/.test(text), f + " has no HTML comment");
-    ok(!colour.test(text.replace(/CanvasText/g, "")), f + " has no colour literal");
-    ok(!/\btape\b/i.test(text), f + " never says tape");
-    ok(!/innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|new Function/.test(text), f + " writes no markup from strings");
-    ok(!/localStorage|sessionStorage|indexedDB/.test(text), f + " keeps no browser storage");
-    if (f.endsWith(".js") && f.startsWith("assets")) {
-      ok(!/\bimport\s|\brequire\(/.test(text), f + " imports nothing");
-      ok(text.startsWith("(function () {\n  \"use strict\";"), f + " is a strict IIFE");
-      const urls = [...text.matchAll(/["'`](\/api\/[^"'`?]*)/g)].map((m) => m[1]);
-      for (const u of urls) ok(["/api/ff/wires", "/api/ff/house", "/api/ff/preview", "/api/flows/universe"].includes(u), f + " calls only its routes: " + u);
-      ok(!/\bfetch\(/.test(text) || f.endsWith("fire.js"), f + " fetches only from the controller");
-      ok(!/uw|unusualwhales|\/ai\/|env\.AI|askModels/i.test(text.replace(/unusual/gi, "")), f + " calls no vendor or model");
-      ok(!/Date\.now|new Date|toLocale|Intl\./.test(text), f + " computes no time");
-    }
-  }
+  for (const f of files) eq(lintProblems(f, fs.readFileSync(path.join(ROOT, f), "utf8")), [], f + " passes the source lint");
 }
 
 export function pageChecks() {

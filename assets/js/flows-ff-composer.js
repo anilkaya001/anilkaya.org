@@ -70,7 +70,7 @@
       switch (unit) {
         case "usd": return F.scaled(v, compactDp, "$", false);
         case "contracts": return F.int(v, false);
-        case "sigma": return F.px(v, 2) + "σ";
+        case "sigma": return F.px(v, 2) + " SD";
         case "vol_pt": return F.px(v, 1) + " pts";
         case "pct": return F.px(v, 1) + "%";
         case "pctile": return ordinal(Math.round(v));
@@ -93,7 +93,7 @@
     }
 
     function parse(text, unit) {
-      var s = String(text === null || text === undefined ? "" : text).replace(/[\s,$%σ]/g, "").replace(/pts$/i, "").replace(/−/g, "-");
+      var s = String(text === null || text === undefined ? "" : text).replace(/[\s,$%\u03c3]/g, "").replace(/(pts|sd)$/i, "").replace(/−/g, "-");
       if (!s) return null;
       var m = /^([+-]?\d*\.?\d+(?:e[+-]?\d+)?)([kmbt]?)$/i.exec(s);
       if (!m) return null;
@@ -449,7 +449,7 @@
     });
   }
 
-  var UNIT_TAG = { usd: "$", contracts: "contracts", sigma: "σ", vol_pt: "pts", pct: "%", pctile: "pctile", ratio: "ratio", sessions: "sessions", days: "days", bool: "" };
+  var UNIT_TAG = { usd: "$", contracts: "contracts", sigma: "SD", vol_pt: "pts", pct: "%", pctile: "pctile", ratio: "ratio", sessions: "sessions", days: "days", bool: "" };
 
   function el(tag, attrs, kids) {
     var n = document.createElement(tag);
@@ -684,7 +684,6 @@
       var t = e.target;
       var i = t.getAttribute && t.getAttribute("data-i") !== null ? Number(t.getAttribute("data-i")) : null;
       var k = t.getAttribute ? t.getAttribute("data-k") : null;
-      var a = t.closest ? t.closest("[data-a]") : null;
       if (e.type === "click") {
         var btn = t.closest("button");
         if (!btn) return;
@@ -725,7 +724,6 @@
         e.preventDefault();
         commit(model.nudge(state, i, e.key === "ArrowUp" ? 1 : -1, e.shiftKey ? 10 : 1));
       }
-      void a;
     }
     [root, dlg].forEach(function (n) { ["click", "change", "keydown"].forEach(function (ev) { n.addEventListener(ev, handle); }); });
     [namesIn].forEach(function (n) { n.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); n.blur(); } }); });

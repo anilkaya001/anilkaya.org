@@ -35,9 +35,10 @@
     var li = el("li", { class: "ffx-sr", "data-verdict": s.verdict, "data-symbol": s.symbol });
     li.appendChild(el("span", { class: "ffx-sym", text: String(s.symbol || DASH) }));
     li.appendChild(el("span", { class: "ffx-vd", text: s.verdict === "unknown" ? (s.reasonText || DASH + " unknown") : verdict, title: s.verdict === "unknown" ? s.reasonText || "" : "" }));
+    var sd = function (t) { return String(t).replace(/\u03c3/g, " SD"); };
     var detail = (s.clauses || []).map(function (c) {
-      var v = c.valueText === undefined || c.valueText === null ? DASH : c.valueText;
-      return c.label + " " + v + " (needs " + (c.op === ">=" ? "≥" : c.op === "<=" ? "≤" : "=") + " " + c.thresholdText + ")";
+      var v = c.valueText === undefined || c.valueText === null ? DASH : sd(c.valueText);
+      return c.label + " " + v + " (needs " + (c.op === ">=" ? "≥" : c.op === "<=" ? "≤" : "=") + " " + sd(c.thresholdText) + ")";
     }).join(" · ");
     li.appendChild(el("span", { class: "ffx-sd", text: detail, title: detail }));
     return li;

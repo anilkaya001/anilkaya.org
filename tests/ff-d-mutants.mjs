@@ -1,4 +1,4 @@
-import { battery, failures } from "./ff-d-model.mjs";
+import { battery, failures, lintProblems } from "./ff-d-model.mjs";
 import { loadModel } from "./lib/ff-d-model-load.mjs";
 
 const PLANTS = [
@@ -50,5 +50,27 @@ for (const [name, patches] of PLANTS) {
     console.log("SURVIVED: " + name);
   }
 }
-console.log(PLANTS.length + " planted wrong builds, " + survivors + " survived");
+const LINT = [
+  ["a line comment", "x.js", "(function () {\n  \"use strict\";\n  var a = 1; // note\n})();"],
+  ["a block comment", "x.css", "a { color: var(--x); } /* note */"],
+  ["a hex colour", "x.css", "a { color: #fff; }"],
+  ["an rgb colour", "x.css", "a { color: rgb(1, 2, 3); }"],
+  ["a named colour", "x.css", "a { color: red; }"],
+  ["the word tape", "x.js", "(function () {\n  \"use strict\";\n  var t = \"the tape\";\n})();"],
+  ["innerHTML", "assets/js/x.js", "(function () {\n  \"use strict\";\n  e.innerHTML = a;\n})();"],
+  ["browser storage", "assets/js/x.js", "(function () {\n  \"use strict\";\n  localStorage.a = 1;\n})();"],
+  ["a route outside the four", "assets/js/x.js", "(function () {\n  \"use strict\";\n  get(\"/api/flows/chain?t=A\");\n})();"],
+  ["a time computed in the browser", "assets/js/x.js", "(function () {\n  \"use strict\";\n  var n = Date.now();\n})();"],
+  ["a fetch of its own", "assets/js/flows-ff-fire.js", "(function () {\n  \"use strict\";\n  fetch(\"/api/ff/preview\");\n})();"],
+  ["the sigma glyph", "assets/js/x.js", "(function () {\n  \"use strict\";\n  var u = \"3\u03c3\";\n})();"],
+  ["an import", "assets/js/x.js", "(function () {\n  \"use strict\";\n  import(\"./a.js\");\n})();"],
+  ["a script that is not strict", "assets/js/x.js", "(function () {\n  var a = 1;\n})();"],
+];
+for (const [name, file, text] of LINT) {
+  if (lintProblems(file, text).length === 0) {
+    survivors++;
+    console.log("LINT MISSED: " + name);
+  }
+}
+console.log(PLANTS.length + LINT.length + " planted wrong builds, " + survivors + " survived");
 process.exit(survivors ? 1 : 0);
