@@ -1,1 +1,1 @@
-{"name": "lab-write", "class": "N", "group": "shard", "timing": false, "medianS": 0.6, "shard": 10, "files": ["lab-write-contract.mjs"], "covers": ["schema.sql"]}
+{"name": "lab-write", "class": "N", "group": "shard", "timing": false, "medianS": 0.6, "shard": 4, "files": ["lab-write-contract.mjs"], "covers": ["schema.sql"]}

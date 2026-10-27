@@ -1,1 +1,1 @@
-{"name": "flows-contracts", "class": "N", "group": "shard", "timing": false, "medianS": 3, "shard": 5, "command": "node --disable-warning=ExperimentalWarning flows-contracts.mjs", "files": ["flows-contracts.mjs"], "covers": ["scripts/flows-pipeline.mjs"]}
+{"name": "flows-contracts", "class": "N", "group": "shard", "timing": false, "medianS": 3, "shard": 11, "command": "node --disable-warning=ExperimentalWarning flows-contracts.mjs", "files": ["flows-contracts.mjs"], "covers": ["scripts/flows-pipeline.mjs"]}

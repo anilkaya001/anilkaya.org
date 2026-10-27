@@ -1,0 +1,1 @@
+{"name": "ff-d-fire-plants", "class": "N", "group": "shard", "timing": false, "medianS": 110, "shard": 5, "command": "node ff-d-fire-plants.mjs", "files": ["ff-d-fire-plants.mjs"], "covers": ["assets/css/flows-ff-fire.css","assets/js/flows-ff-composer.js","assets/js/flows-ff-fire.js","assets/js/flows-ff-preview.js"]}
