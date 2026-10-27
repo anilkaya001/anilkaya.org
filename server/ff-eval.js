@@ -26,6 +26,7 @@ export const EVAL_SQL = Object.freeze({
     `ORDER BY wire_id, subject LIMIT ${EVAL_LIMITS.states}`,
   hits: `SELECT wire_id, member_id, dedupe_key FROM ff_hit WHERE session = ? LIMIT ${EVAL_LIMITS.hits}`,
   firstLooks: `SELECT wire_id, version, MIN(session) AS session FROM ff_receipt WHERE status = 'evaluated' GROUP BY wire_id, version LIMIT ${EVAL_LIMITS.firstLooks}`,
+  memberSwitches: "SELECT scope, target, state, reason FROM ff_switches WHERE scope = 'member' AND state <> 'on' LIMIT 500",
   houseWire: "INSERT OR IGNORE INTO ff_wire (id, layer, member_id, title, status, status_at, current_version, origin, created_at) VALUES (?, 'house', NULL, ?, 'armed', ?, ?, NULL, ?)",
   houseVersion: "INSERT OR IGNORE INTO ff_wire_version (wire_id, version, template, cadence, scope_kind, control, exp_week, clause_hash, ast_json, ast_hash, sentence, registry_version, effective_session, created_at) " +
     "VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)",
@@ -312,14 +313,15 @@ export function createEvaluator({ store, flowsStore, now = Date.now, mode = (env
 
   async function context(env, cadence, session) {
     const D1 = env.DB;
-    const [armed, states, hits, looks] = await D1.batch([
+    const [armed, states, hits, looks, members] = await D1.batch([
       D1.prepare(EVAL_SQL.armed).bind(cadence),
       D1.prepare(EVAL_SQL.states),
       D1.prepare(EVAL_SQL.hits).bind(session),
       D1.prepare(EVAL_SQL.firstLooks),
+      D1.prepare(EVAL_SQL.memberSwitches),
     ]);
     const sw = await store.switches(env);
-    return { armed: rowsOf(armed), states: rowsOf(states), hits: rowsOf(hits), looks: rowsOf(looks), switches: sw };
+    return { armed: rowsOf(armed), states: rowsOf(states), hits: rowsOf(hits), looks: rowsOf(looks), switches: { ...sw, rows: [...sw.rows, ...rowsOf(members)] } };
   }
 
   async function runWith(env, { cadence, session, snapshot, at, run }) {
