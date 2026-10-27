@@ -158,7 +158,7 @@ export const MUTANTS = [
 
   m("hit-time-from-fired-at", "a hit is timed by when it fired", RECORDS, [["Object.freeze({ ms: row.data_as_of, text: sessionLabelText(clock(row.data_as_of, false), row.session_label) })", "Object.freeze({ ms: row.fired_at, text: sessionLabelText(clock(row.fired_at, false), row.session_label) })"]], ["filters"]),
   m("rarity-inverted", "a rarity is firings over sessions", RECORDS, [["Math.round(record.sessions / record.firings)", "Math.round(record.firings / record.sessions)"]], ["digest"]),
-  m("rarity-without-history", "a rarity is stated from one session of history", RECORDS, [["!(record.sessions >= 20)", "!(record.sessions >= 1)"]], ["receiptsAndRecords"]),
+  m("rarity-without-history", "a rarity is stated from one session of history", RECORDS, [["!(record.sessions >= RARITY_MIN_SESSIONS)", "!(record.sessions >= 1)"]], ["receiptsAndRecords"]),
   m("record-share-unrounded", "a share is printed as a fraction", RECORDS, [["const pct = (x) => Math.round(x * 100) + \"%\";", "const pct = (x) => x + \"%\";"]], ["receiptsAndRecords"]),
   m("derived-block-leaked", "the derived block of the AST reaches the client", RECORDS, [["const { d, ...rest } = body;\n  return rest;", "return body;"]], ["lifecycle"]),
 

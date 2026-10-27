@@ -191,8 +191,10 @@ export function recordView(row, now) {
   });
 }
 
+export const RARITY_MIN_SESSIONS = 20;
+
 export const rarityOf = (record) => {
-  if (!record || !(record.sessions >= 20)) return absent("short_history");
+  if (!record || !(record.sessions >= RARITY_MIN_SESSIONS)) return absent("short_history");
   if (!(record.firings >= 1)) return absent("no_firings");
   const n = Math.max(1, Math.round(record.sessions / record.firings));
   return present(n, "1 in " + n + " sessions");
