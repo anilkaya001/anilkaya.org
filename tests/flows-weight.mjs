@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, statSync, existsSync, appendFileSync, readdirSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import * as PAGES from "../shared/flows-pages.js";
+import { memberShell } from "../shared/flows-member-shell.js";
 
 const REPO = new URL("../", import.meta.url);
 const sizeOf = (src) => statSync(new URL("." + src, REPO)).size;
@@ -161,6 +162,19 @@ for (const name of ["sidePage", "watchPage"]) {
   CEILING_KIB[name] += BOARD_MOVE_LABEL.bytes / 1024;
   GZIP_KIB[name] += BOARD_MOVE_LABEL.gzip / 1024;
 }
+const MEMBER_CSS = { bytes: 1525, gzip: 263, why: "lane 6 member state: flows.css carries the two toolbar buttons the member shell injects (.fx-mem, an icon on a phone and a labelled button from 1100 px), the Watch page's My list action (.fm-act), the disabled export item and the member export menu's width, opaque ground and 44 px size for any coarse pointer, measured as 77,391 to 78,916 B raw and 15,634 to 15,897 B gzip; the action takes the header row's own height so the Watch title and tools do not move when the info button arrives; the dialogs, rows and switch sit in flows-member.css, loaded only when a member opens one" };
+const MEMBER_TICKER_CSS = { bytes: 1145, gzip: 220, why: "lane 6 member state: the ticker's star slot is reserved in the server HTML by two rules in flows-ticker.css (a 44 px inline box of no height beside the title and an absolutely placed button inside it), so the subtitle and flags never move when the star arrives, and the star's own rules (size, hover, focus, pressed fill, a dimmer colour while the list cannot be read, forced colours) sit there too so that the star needs no sheet of its own: the ticker pays 1,145 B raw and 220 B gzip of eager style to save the 8 KB sheet and the 13 KB of dialogs and store that every ticker view used to fetch for it" };
+const MEMBER_EXPORT_JS = { bytes: 1483, gzip: 510, why: "lane 6 member state: FlowsUI.exportMenu adopts a server-rendered details element (opts.el), fills its items from opts.remote with a quota note that a late answer cannot overwrite, keeps an item with aria-disabled instead of disabled, returns focus to the Export button, and no longer prints the text null when an input is missing, adopts the toggle event that opened it by identity so one opening reads the limit once, ties the limited items to the limit line with aria-describedby, measured as 4,630 to 6,113 B raw on the three routes that load flows-export.js" };
+for (const name of Object.keys(CSS_KIB)) {
+  CSS_KIB[name] += MEMBER_CSS.bytes / 1024;
+  CSS_GZIP_KIB[name] += MEMBER_CSS.gzip / 1024;
+}
+CSS_KIB.tickerPage += MEMBER_TICKER_CSS.bytes / 1024;
+CSS_GZIP_KIB.tickerPage += MEMBER_TICKER_CSS.gzip / 1024;
+for (const name of ["deskPage", "sidePage", "watchPage"]) {
+  CEILING_KIB[name] += MEMBER_EXPORT_JS.bytes / 1024;
+  GZIP_KIB[name] += MEMBER_EXPORT_JS.gzip / 1024;
+}
 
 const RATCHET_KIB = { raw: 12, gzip: 3, css: 3, cssGzip: 3 };
 const HELD_RAW_KIB = { eventsPage: 50 };
@@ -206,7 +220,13 @@ const SHARED_DEFERRED = {
   link: { file: "/assets/js/flows-link.js", declared: null },
 };
 const GPU_ONLY = {};
-const SHARED_GROUPS = new Set(["oracle"]);
+const SHARED_GROUPS = new Set(["oracle", "member"]);
+const MEMBER_BOOT_MAX = 2318;
+const MEMBER_CORE_GZIP_MAX = 6 * 1024;
+const MEMBER_GROUP = ["/assets/js/storage.js", "/assets/js/flows-member.js", "/assets/js/flows-member-ui.js"];
+const MEMBER_GROUP_KIB = 75;
+const MEMBER_MARKUP_BYTES = 2400;
+const MEMBER_SLUG = { overviewPage: "overview", sidePage: "long", watchPage: "watch", marketPage: "market", networkPage: "network", nowPage: "now", deskPage: "desk", strategyPage: "strategy", tickerPage: "ticker", movesPage: "moves", unusualPage: "unusual", ledgerPage: "ledger", eventsPage: "events", politicalPage: "political" };
 const ORACLE_FILES = ["/assets/js/flows-oracle-core.js", "/assets/js/flows-oracle.js", "/assets/js/flows-oracle-boot.js"];
 const ORACLE_DEFERRED_KIB = 60;
 const ORACLE_MARKUP_BYTES = 720;
@@ -376,7 +396,7 @@ for (const m of measured) {
 }
 
 {
-  const base = { name: "marketPage", raw: 233434, gzip: 70800, css: 132602, cssGzip: 27457 };
+  const base = { name: "marketPage", raw: 233434, gzip: 70800, css: 132602 + MEMBER_CSS.bytes, cssGzip: 27457 + MEMBER_CSS.gzip };
   eq(judge(base).join("; "), "", "the ledger judge passes today's market route");
   ok(judge({ ...base, gzip: base.gzip + 8 * 1024 }).length > 0,
      "the judge fails a route inflated by 8 KiB of gzip");
@@ -623,6 +643,24 @@ for (const name of Object.keys(CEILING_KIB)) {
       const added = shelled.length - m.html.length;
       ok(added > 0 && added <= ORACLE_MARKUP_BYTES + 400, `${m.name}: the Neuron's placeholder adds ${added} B of markup`);
       eq(PAGES.oracleShell(m.html, "off", "overview"), m.html, `${m.name}: with the switch off the page is untouched`);
+    }
+    const bootBytes = sizeOf("/assets/js/flows-member-boot.js");
+    ok(bootBytes > 0 && bootBytes <= MEMBER_BOOT_MAX, `the member boot weighs ${bootBytes} B, inside its stated ${MEMBER_BOOT_MAX} B, and is the only eager member script`);
+    const memberBytes = MEMBER_GROUP.reduce((a, f) => a + sizeOf(f), 0);
+    ok(memberBytes > 0 && memberBytes <= MEMBER_GROUP_KIB * 1024, `the member files (storage.js, the module and the dialogs) weigh ${memberBytes} B together, inside their stated ${MEMBER_GROUP_KIB} KiB`);
+    const coreGzip = gzipOf("/assets/js/flows-member.js");
+    ok(coreGzip > 0 && coreGzip <= MEMBER_CORE_GZIP_MAX, `the module the ticker's star and the export menu load weighs ${coreGzip} B gzip, inside ${MEMBER_CORE_GZIP_MAX} B: the dialogs and the store load only when a member opens one`);
+    const coreText = read("/assets/js/flows-member.js");
+    ok(!/IEWTStorage\.(?!flowsWatchlist|setFlowsWatchlist|clearFlowsWatchlist|onFlowsWatchlist)/.test(coreText) && !coreText.includes("createElement(\"dialog\")") && !coreText.includes("showModal"), "the module holds no dialog and calls only the watch-list part of the store");
+    ok(sizeOf("/assets/css/flows-member.css") <= 10 * 1024, "the member sheet stays under 10 KiB and rides on the group, not on the page");
+    for (const m of measured) {
+      const slug = MEMBER_SLUG[m.name];
+      if (!slug) continue;
+      ok(!m.html.includes("flows-member"), `${m.name}: the page itself carries no member script or sheet`);
+      const shelled = memberShell(m.html, { slug, on: true, exportOpen: false });
+      const added = shelled.length - m.html.length;
+      ok(added > 0 && added <= MEMBER_MARKUP_BYTES, `${m.name}: the member markup adds ${added} B`);
+      eq(memberShell(m.html, { slug, on: false }), m.html, `${m.name}: with the switch off the page is untouched`);
     }
     const dossier = read("/assets/js/flows-ticker.js");
     ok(!LOADER.test(dossier), "the dossier creates no script element of its own");

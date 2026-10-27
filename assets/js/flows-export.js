@@ -68,19 +68,51 @@
     img.src = url;
   }
 
+  let menus = 0;
+
   function exportMenu(opts) {
-    const list = h("div", { class: "ui-exp-m", role: "group", "aria-label": "Export" });
-    const box = h("details", { class: "ui-exp" }, h("summary", { class: "ui-exp-b" }, "Export"), list);
-    const item = (label, run) => h("button", { type: "button", class: "ui-exp-i", onclick: () => { box.open = false; run(); } }, label);
-    box.addEventListener("toggle", () => {
+    const own = opts.el instanceof Element ? opts.el : null;
+    const list = own ? own.querySelector(".ui-exp-m") : h("div", { class: "ui-exp-m", role: "group", "aria-label": "Export" });
+    const box = own || h("details", { class: "ui-exp" }, h("summary", { class: "ui-exp-b" }, "Export"), list);
+    const item = (label, run, note) => {
+      const b = h("button", { type: "button", class: "ui-exp-i", "aria-describedby": note || null, onclick: () => {
+        if (b.getAttribute("aria-disabled") === "true") return;
+        box.open = false;
+        box.querySelector("summary").focus();
+        run();
+      } }, label);
+      return b;
+    };
+    let seq = 0;
+    const noteId = "uiExpQ" + ++menus;
+    const render = () => {
       if (!box.open) return;
+      const mine = ++seq;
       const spec = opts.csv && opts.csv(), node = opts.svg && opts.svg();
-      list.replaceChildren(spec && spec.rows.length ? item("CSV", () => exportCsv(spec)) : null,
-        node ? item("SVG", () => exportChart(node, opts.name)) : null, node ? item("PNG", () => exportChart(node, opts.name, true)) : null);
+      const remote = opts.remote ? opts.remote() : null;
+      const buttons = remote ? remote.items.map((i) => item(i.label, i.run, i.limited && remote.quota ? noteId : null)) : [];
+      const note = remote ? h("span", { class: "ui-exp-n", id: noteId, role: "status" }, remote.quota ? "Checking your export limit." : remote.note || "") : null;
+      list.replaceChildren(...[...buttons, spec && spec.rows.length ? item("CSV", () => exportCsv(spec)) : null,
+        node ? item("SVG", () => exportChart(node, opts.name)) : null, node ? item("PNG", () => exportChart(node, opts.name, true)) : null,
+        note && note.textContent ? note : null].filter(Boolean));
       if (!list.children.length) list.append(h("span", { class: "ui-exp-n" }, "Nothing to export yet."));
-    });
-    box.addEventListener("keydown", (e) => { if (e.key === "Escape" && box.open) { box.open = false; box.firstChild.focus(); } });
+      if (!remote || !remote.quota) return;
+      Promise.resolve().then(() => remote.quota()).then((q) => {
+        if (mine !== seq || !box.open) return;
+        note.textContent = q.text;
+        remote.items.forEach((i, k) => { if (q.full && i.limited) buttons[k].setAttribute("aria-disabled", "true"); });
+      }, () => { if (mine === seq && box.open) note.textContent = "Exports left: \u2014 (could not check)."; });
+    };
+    box.addEventListener("keydown", (e) => { if (e.key === "Escape" && box.open) { box.open = false; box.querySelector("summary").focus(); } });
     box.addEventListener("focusout", (e) => { if (box.open && !box.contains(e.relatedTarget)) box.open = false; });
+    const seen = new WeakSet();
+    if (opts.event) seen.add(opts.event);
+    box.addEventListener("toggle", (e) => {
+      if (seen.has(e)) return;
+      seen.add(e);
+      render();
+    });
+    if (own) render();
     return box;
   }
 

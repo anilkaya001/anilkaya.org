@@ -518,6 +518,7 @@
     skillOutboxPrefix: "iewt:skill-outbox:v3:",
     preferencesPrefix: "iewt:preferences:v3:",
     projectsPrefix: "iewt:projects:v3:",
+    flowsWatchlistPrefix: "iewt:flows-watchlist:v1:",
     activeOwner: "iewt:activeOwner",
     guideWidth: "iewt:guideW",
     legacyGuideWidth: "iewt:splitW",
@@ -590,12 +591,13 @@
       kind === "skillMastery" ? KEYS.skillMasteryPrefix :
       kind === "skillOutbox" ? KEYS.skillOutboxPrefix :
       kind === "preferences" ? KEYS.preferencesPrefix :
-      kind === "projects" ? KEYS.projectsPrefix : KEYS.syncPrefix;
+      kind === "projects" ? KEYS.projectsPrefix :
+      kind === "flowsWatchlist" ? KEYS.flowsWatchlistPrefix : KEYS.syncPrefix;
     return prefix + encodeURIComponent(owner);
   }
 
   const v3Kind = (kind) => ["stableProgress", "skillMastery", "skillOutbox", "preferences", "projects"].includes(kind);
-  const envelopeVersion = (kind) => v3Kind(kind) ? 3 : FORMAT_VERSION;
+  const envelopeVersion = (kind) => kind === "flowsWatchlist" ? 1 : v3Kind(kind) ? 3 : FORMAT_VERSION;
 
   function cleanGeneration(value, fallback = null) {
     return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : fallback;
@@ -775,7 +777,23 @@
     return { band: value.band, score, total, completedDay, recommendedTopic: value.recommendedTopic };
   }
 
+  const FLOWS_TICKER = /^[A-Z][A-Z0-9.-]{0,9}$/;
+  function cleanFlowsWatchlist(value) {
+    const source = plainObject(value) ? value : {};
+    const names = [];
+    const seen = new Set();
+    for (const raw of Array.isArray(source.names) ? source.names : []) {
+      const name = typeof raw === "string" ? raw.trim().toUpperCase() : "";
+      if (!FLOWS_TICKER.test(name) || seen.has(name)) continue;
+      seen.add(name);
+      names.push(name);
+      if (names.length === 200) break;
+    }
+    return { names: names.sort(), at: source.at == null ? null : safeInteger(source.at, null) };
+  }
+
   function cleanFor(kind, value) {
+    if (kind === "flowsWatchlist") return cleanFlowsWatchlist(value);
     if (kind === "progress") return cleanProgress(value);
     if (kind === "stableProgress") return cleanStableProgress(value);
     if (kind === "gamify") return cleanGamify(value);
@@ -792,6 +810,7 @@
     if (kind === "masteryOutbox" || kind === "skillOutbox") return [];
     if (kind === "placement") return null;
     if (kind === "preferences") return cleanPreferences({});
+    if (kind === "flowsWatchlist") return { names: [], at: null };
     return { points: 0, streak: 0, last: null };
   }
 
@@ -803,7 +822,7 @@
 
     const legacy = owner === ANONYMOUS && (kind === "progress" || kind === "gamify") ? parseRaw(KEYS[kind]) : null;
     const value = cleanFor(kind, legacy ?? emptyFor(kind));
-    writeScoped(kind, value, owner);
+    if (kind !== "flowsWatchlist") writeScoped(kind, value, owner);
     return value;
   }
 
@@ -1037,6 +1056,48 @@
     return writeScoped("placement", value);
   }
 
+  function flowsOwner(ownerId) {
+    const owner = normalizeOwner(ownerId);
+    if (owner === ANONYMOUS) throw new TypeError("A watchlist belongs to a signed-in member");
+    return owner;
+  }
+
+  function flowsWatchlist(ownerId) {
+    return readScoped("flowsWatchlist", flowsOwner(ownerId));
+  }
+
+  function setFlowsWatchlist(ownerId, value) {
+    return writeScoped("flowsWatchlist", value, flowsOwner(ownerId));
+  }
+
+  function clearFlowsWatchlist(ownerId) {
+    removeScoped("flowsWatchlist", flowsOwner(ownerId));
+  }
+
+  function flowsWatchlistSaved(ownerId) {
+    const owner = flowsOwner(ownerId);
+    const key = scopedKey("flowsWatchlist", owner);
+    const namesIn = (raw) => {
+      if (raw == null) return [];
+      try {
+        const envelope = JSON.parse(raw);
+        return plainObject(envelope) && envelope.version === 1 && envelope.owner === owner ? cleanFlowsWatchlist(envelope.value).names : null;
+      } catch { return null; }
+    };
+    let stored;
+    try { stored = localStorage.getItem(key); } catch { return false; }
+    const held = namesIn(memory.get(key));
+    const kept = namesIn(stored);
+    return held !== null && kept !== null && held.length === kept.length && held.every((name, i) => name === kept[i]);
+  }
+
+  function onFlowsWatchlist(ownerId, handler) {
+    const key = scopedKey("flowsWatchlist", flowsOwner(ownerId));
+    const listener = (event) => { if (event.key === key || event.key === null) handler(); };
+    window.addEventListener("storage", listener);
+    return () => window.removeEventListener("storage", listener);
+  }
+
   function syncGeneration(ownerId = publicOwner()) {
     return readSync(normalizeOwner(ownerId));
   }
@@ -1162,6 +1223,11 @@
     setPreferences,
     projects,
     setProjects,
+    flowsWatchlist,
+    setFlowsWatchlist,
+    clearFlowsWatchlist,
+    flowsWatchlistSaved,
+    onFlowsWatchlist,
     placement,
     setPlacement,
     syncGeneration,
