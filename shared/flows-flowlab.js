@@ -87,7 +87,8 @@ const instantMs = (v) => {
   if (typeof v === "number") return Number.isFinite(v) && v > 0 ? (v < 1e12 ? v * 1000 : v) : null;
   if (typeof v !== "string" || !v.trim()) return null;
   const t = v.trim();
-  const iso = t.includes("T") ? t : t.replace(" ", "T");
+  const spaced = t.includes("T") ? t : t.replace(" ", "T");
+  const iso = /[+-]\d{2}$/.test(spaced) ? spaced + ":00" : spaced;
   const ms = Date.parse(/(?:Z|[+-]\d{2}:?\d{2})$/.test(iso) ? iso : iso + "Z");
   return Number.isFinite(ms) ? ms : null;
 };

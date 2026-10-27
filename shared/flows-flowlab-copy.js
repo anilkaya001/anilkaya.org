@@ -185,6 +185,17 @@ export const LABELS = Object.freeze({
   moreIn: "+{n} more {what} in Details",
 });
 
+export const STATE_MAP = Object.freeze({
+  loading: "loading", quiet: "quiet", closed: "closed", throttled: "held", rate_limited: "quota", timeout: "unavailable", failed: "unavailable", plan: "plan",
+  unshaped: "withheld", "no-oi": "partial", "lean-undecided": "partial", "few-prints": "partial", "no-unit": "partial", candidate: "partial",
+  "no-expiry-in-rows": "partial", "min-volume": "partial", "not-optionable": "withheld", off: "withheld",
+});
+
+export const clientCopy = () => ({
+  states: STATES, chips: STATE_CHIPS, stateMap: STATE_MAP, why: WHY_LINES, ranks: RANKS, presets: PRESET_LABELS, labels: LABELS, drill: DRILL,
+  drillTabs: DRILL_TABS, glossary: GLOSSARY_LINES, convention: CONVENTION, session: SESSION_NOTE, empty: EMPTY_TITLES, columns: SCREEN_COLUMNS,
+});
+
 export function fill(text, vars) {
   return String(text).replace(/\{(\w+)\}/g, (m, k) => (Object.hasOwn(vars || {}, k) ? String(vars[k]) : m));
 }

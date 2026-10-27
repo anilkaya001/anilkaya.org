@@ -177,7 +177,7 @@ def build_screener(rng, thin):
         rows.append({
             "ask_side_volume": ask, "avg_price": money(avg), "bid_side_volume": bid, "chain_prev_close": money(avg * 0.9),
             "close": money(avg), "cross_volume": cross, "er_time": "premarket", "expiry": exp, "floor_volume": floor,
-            "high": money(avg * 1.2), "last_fill": "2026-10-23 19:41:12.000000+00", "low": money(avg * 0.8), "mid_volume": mid,
+            "high": money(avg * 1.2), "last_fill": "2026-10-23T19:41:12Z", "low": money(avg * 0.8), "mid_volume": mid,
             "multileg_volume": multi, "next_earnings_date": "2026-11-05", "no_side_volume": none, "open": money(avg * 0.95),
             "open_interest": oi, "option_symbol": sym, "option_type": cp, "premium": money(avg * vol * 100), "sector": "Technology",
             "stock_multi_leg_volume": smulti, "stock_price": money(spot), "strike": money(k), "sweep_volume": sweep,

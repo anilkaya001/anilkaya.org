@@ -214,6 +214,27 @@ function oracleRules(payload, structural) {
   if (!payload.stance || typeof payload.stance !== "object") structural.push({ code: CODES.badShape, path: "stance" });
 }
 
+const FLOWLAB_STATUSES = Object.freeze(["ok", "off", "unshaped", "empty", "plan", "limited", "failed", "timeout", "cap"]);
+
+function flowlabRules(id, payload, structural) {
+  const bad = (path) => structural.push({ code: CODES.badShape, path });
+  if (payload.v !== 1) structural.push({ code: CODES.schemaVersion, path: "v" });
+  if (id === "flowlab-roots") {
+    if (typeof payload.list !== "string") bad("list");
+    if (!Number.isInteger(payload.n) || payload.n < 0) bad("n");
+  } else if (id === "flowlab-venues") {
+    if (!Array.isArray(payload.tickers)) bad("tickers");
+    if (!Array.isArray(payload.codes)) bad("codes");
+  } else if (id === "flowlab-screen") {
+    if (!isObject(payload.presets)) bad("presets");
+    else for (const [name, preset] of Object.entries(payload.presets)) if (!isObject(preset) || (!Array.isArray(preset.rows) && typeof preset.why !== "string")) bad("presets." + name);
+  } else if (id === "flowlab-groups") {
+    if (!isDay(payload.expiry)) bad("expiry");
+    if (!isObject(payload.groups)) bad("groups");
+    else for (const [name, g] of Object.entries(payload.groups)) if (!isObject(g) || !FLOWLAB_STATUSES.includes(g.status)) bad("groups." + name);
+  } else if (!FLOWLAB_STATUSES.includes(payload.status)) bad("status");
+}
+
 export function validate(key, payload, ctx = {}) {
   const p = productOf(key);
   const structural = [];
@@ -249,7 +270,8 @@ export function validate(key, payload, ctx = {}) {
         out.baseOk = read.baseOk;
         out.tier = read.tier;
       }
-    } else if (p.id === "universe") universeRules(payload, structural, flags);
+    } else if (p.id.startsWith("flowlab-")) flowlabRules(p.id, payload, structural);
+    else if (p.id === "universe") universeRules(payload, structural, flags);
     else if (p.id === "roster") rosterRules(payload, structural);
     else if (p.id === "meta") {
       if (!Array.isArray(payload.stages)) structural.push({ code: CODES.badShape, path: "stages" });
