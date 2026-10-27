@@ -97,6 +97,8 @@ jobs:
           FLOWS_DEEPEN: ${{ vars.FLOWS_DEEPEN }}
           FLOWS_EXTRAS: ${{ vars.FLOWS_EXTRAS }}
           FLOWS_EXTRAS_CAP: ${{ vars.FLOWS_EXTRAS_CAP }}
+          FLOWS_VOLDESK_BUILD: ${{ vars.FLOWS_VOLDESK_BUILD }}
+          FLOWS_VOLAUDIT_CAP: ${{ vars.FLOWS_VOLAUDIT_CAP }}
           FLOWS_DEEPEN_CAP: ${{ (github.event_name == 'workflow_dispatch' && inputs.deepen_cap) || vars.FLOWS_DEEPEN_CAP }}
           FLOWS_UW_PLAN: advanced
           GITHUB_TOKEN: ${{ github.token }}

@@ -33,12 +33,12 @@ const PAGES = Object.freeze([
   { slug: "long", from: "long", render: (username) => FLOWS_PAGES.sidePage({ username, side: "long" }) },
   { slug: "short", from: "short", render: (username) => FLOWS_PAGES.sidePage({ username, side: "short" }) },
   { slug: "watch", from: "watch", render: (username) => FLOWS_PAGES.watchPage({ username }) },
-  { slug: "market", render: (username, summary, owner, scenes) => FLOWS_PAGES.marketPage({ username, owner, scenes }) },
+  { slug: "market", render: (username, summary, owner, scenes, env, voldesk) => FLOWS_PAGES.marketPage({ username, owner, scenes, voldesk }) },
   { slug: "network", render: (username) => FLOWS_PAGES.networkPage({ username }) },
   { slug: "now", render: (username) => FLOWS_PAGES.nowPage({ username }) },
   { slug: "desk", render: (username) => FLOWS_PAGES.deskPage({ username }) },
   { slug: "strategy", render: (username) => FLOWS_PAGES.strategyPage({ username }) },
-  { slug: "ticker", render: (username, summary, owner, scenes) => FLOWS_PAGES.tickerPage({ username, scenes }) },
+  { slug: "ticker", render: (username, summary, owner, scenes, env, voldesk) => FLOWS_PAGES.tickerPage({ username, scenes, xcheck: voldesk }) },
   { slug: "moves", gate: "FLOWS_MOVES", render: (username) => FLOWS_PAGES.movesPage({ username }) },
   { slug: "unusual", render: (username, summary, owner) => FLOWS_PAGES.unusualPage({ username, owner }) },
   { slug: "ledger", gate: "FLOWS_LEDGER", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.ledgerPage({ username, live: ledgerLiveOn(env, owner) }) },
@@ -66,7 +66,7 @@ const html = (body) => new Response(body, { status: 200, headers: { "Content-Typ
 const slashed = (slug) => "/flows/" + (slug === "" ? "" : slug + "/");
 
 export function flowsPageRows(deps) {
-  const { currentFlowsUser, readFlowsSummary, isOwner, scenesOn = () => false } = deps;
+  const { currentFlowsUser, readFlowsSummary, isOwner, scenesOn = () => false, voldeskOn = () => false } = deps;
   const rows = [];
 
   rows.push({
@@ -111,7 +111,7 @@ export function flowsPageRows(deps) {
         const owner = isOwner(env, session.username);
         if (page.ownerOnly && !owner) throw HttpError.of("not_found");
         const slug = page.slug || "overview";
-        const rendered = memberShell(oracleShell(page.render(session.username, summary, owner, scenesOn(env, session.username), env), oracleMode(env, owner), slug), memberOptions(env, owner, slug));
+        const rendered = memberShell(oracleShell(page.render(session.username, summary, owner, scenesOn(env, session.username), env, voldeskOn(env, session.username)), oracleMode(env, owner), slug), memberOptions(env, owner, slug));
         return html(owner ? ownerNav(rendered) : rendered);
       },
     });

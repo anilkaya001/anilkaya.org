@@ -480,8 +480,18 @@
     colsEl.append(gCol, vCol, sCol);
     const dockEl = h("div", { class: "ftsf-tabs" });
     const rowEl = h("div", { class: "ftsf-row" }, keyEl);
-    root.append(chipsEl, rowEl, colsEl, dockEl);
+    const xcFlag = document.getElementById("ftSurface");
+    const xcHost = xcFlag && xcFlag.dataset.xcheck ? h("div", { class: "ftxc", id: "ftXcheck", hidden: true }) : null;
+    let xc = null;
+    root.append(chipsEl, rowEl, colsEl, ...(xcHost ? [xcHost] : []), dockEl);
     host.append(root);
+    if (xcHost && UI.defer) {
+      UI.defer("xcheck", { when: "visible", el: xcHost, label: "The engine cross-check" }).then(() => {
+        const api = window.FlowsUI && window.FlowsUI.xcheck;
+        if (dead || !api) return;
+        return api.ready.then(() => { if (!dead) xc = api.mount(xcHost, input.cardX || null, { buttonHost: document.getElementById("ftGReset") }); });
+      });
+    }
 
     const emit = (iso) => document.dispatchEvent(new CustomEvent("ft:expiry", { bubbles: true, detail: { expiry: iso, source: "surface" } }));
     const select = (iso, refocus) => {
@@ -1127,6 +1137,7 @@
     return {
       destroy() {
         dead = true;
+        if (xc) xc.destroy();
         cancelAnimationFrame(M.raf);
         document.removeEventListener("ft:expiry", onExpiry);
         document.removeEventListener("visibilitychange", onVis);

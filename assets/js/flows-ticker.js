@@ -1102,7 +1102,7 @@
   }
 
   function surfaceInput() {
-    return { card: STATE.card, ticker: STATE.card.ticker, expiry: GLANCE.mount && GLANCE.mount.expiry ? GLANCE.mount.expiry() : GLANCE.expiry };
+    return { card: STATE.card, cardX: STATE.cardX, ticker: STATE.card.ticker, expiry: GLANCE.mount && GLANCE.mount.expiry ? GLANCE.mount.expiry() : GLANCE.expiry };
   }
 
   function dropSurface() {

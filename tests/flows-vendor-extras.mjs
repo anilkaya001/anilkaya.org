@@ -37,14 +37,14 @@ const NEW_OPS = ["dividends", "splits", "interpolated-iv", "etf-exposure"];
     same(e.reads.filter((n) => !documented.has(n)), [], `${id}: every name it reads is one the committed spec documents`);
   }
   const stance = list.probes.find((p) => p.id === "option-stance");
-  ok(stance && stance.tier === "2" && list.entitlement.includes(stance.op), "option-stance is asked about weekly as an entitlement question and never read");
+  ok(stance && stance.tier === "used" && !list.entitlement.includes(stance.op), "option-stance is read by the volatility audit, so its weekly probe is labelled used and no longer an entitlement question");
   const sources = [];
   for (const dir of ["shared", "scripts", "server"]) {
     const walk = (d) => fs.readdirSync(path.join(ROOT, d), { withFileTypes: true }).flatMap((en) => (en.isDirectory() ? walk(path.join(d, en.name)) : [path.join(d, en.name)]));
     sources.push(...walk(dir).filter((f) => /\.m?js$/.test(f)));
   }
   const reads = sources.filter((f) => !/flows-vendor-ops\.js$|flows-probe/.test(f) && fs.readFileSync(path.join(ROOT, f), "utf8").includes("option-stance"));
-  same(reads, [], "and no production source names the option-stance operation");
+  same(reads, ["scripts/flows-legs/voldesk-fake.mjs", "scripts/flows-legs/voldesk.mjs"], "and only the volatility audit and its dry-run fake name the option-stance operation");
 
   for (const [id, spec] of Object.entries(X.PARTS)) {
     ok(opById(spec.op), `${id}: its operation is registered`);

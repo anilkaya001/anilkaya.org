@@ -86,6 +86,19 @@ const RAW = [
   { id: "splits", path: "/api/companies/{ticker}/splits", licence: "aggregate", klass: "slow", maxBytes: 32768, reads: ["splits", "effective_date", "split_factor"] },
   { id: "interpolated-iv", path: "/api/stock/{ticker}/interpolated-iv", licence: "derived", klass: "nightly", maxBytes: 32768, reads: ["date", "days", "percentile"] },
   { id: "etf-exposure", path: "/api/etfs/{ticker}/exposure", licence: "aggregate", klass: "slow", maxBytes: 131072, reads: ["etf", "weight", "shares"] },
+  { id: "vix-term", path: "/api/volatility/vix-term-structure", plan: "addon:volatility", licence: "derived", klass: "nightly", maxBytes: 131072, reads: [] },
+  { id: "vol-character-top", path: "/api/volatility/character/top", licence: "derived", klass: "nightly", maxBytes: 131072, reads: [] },
+  { id: "vol-realized", path: "/api/stock/{ticker}/volatility/realized", licence: "derived", klass: "nightly", maxBytes: 65536, reads: ["date", "implied_volatility", "realized_volatility", "price", "unshifted_rv_date"] },
+  { id: "vol-stats", path: "/api/stock/{ticker}/volatility/stats", licence: "derived", klass: "nightly", maxBytes: 8192, reads: ["date", "iv", "iv_high", "iv_low", "rv", "ticker"] },
+  { id: "greeks", path: "/api/stock/{ticker}/greeks", licence: "derived", klass: "nightly", maxBytes: 262144, reads: ["strike", "expiry", "date", "call_delta", "put_delta", "call_gamma", "put_gamma", "call_volatility", "put_volatility"] },
+  { id: "option-chains", path: "/api/stock/{ticker}/option-chains", licence: "quote", klass: "nightly", maxBytes: 4194304, reads: ["option_symbol", "strike", "expires", "option_type", "open_interest", "implied_volatility", "delta", "gamma"] },
+  { id: "atm-chains", path: "/api/stock/{ticker}/atm-chains", licence: "aggregate", klass: "nightly", maxBytes: 65536, reads: ["option_symbol", "expiry", "strike", "option_type", "open_interest", "stock_price", "volume"] },
+  { id: "oi-per-expiry", path: "/api/stock/{ticker}/oi-per-expiry", licence: "aggregate", klass: "nightly", maxBytes: 65536, reads: ["date", "expiry", "call_oi", "put_oi"] },
+  { id: "volume-oi-expiry", path: "/api/stock/{ticker}/option/volume-oi-expiry", licence: "aggregate", klass: "nightly", maxBytes: 65536, reads: ["expires", "oi", "volume"] },
+  { id: "greek-exposure-strike", path: "/api/stock/{ticker}/greek-exposure/strike", licence: "aggregate", klass: "nightly", maxBytes: 262144, reads: ["strike", "call_delta", "put_delta", "call_gex", "put_gex"] },
+  { id: "greek-exposure-strike-expiry", path: "/api/stock/{ticker}/greek-exposure/strike-expiry", licence: "aggregate", klass: "nightly", maxBytes: 131072, reads: ["strike", "expiry", "call_delta", "put_delta", "call_gex", "put_gex"] },
+  { id: "option-stance", path: "/api/stock/{ticker}/option-stance", licence: "derived", klass: "nightly", maxBytes: 131072, reads: ["as_of_date", "data", "option_symbol", "pop", "delta", "iv", "dte", "fit_score", "expires", "option_type", "strike"] },
+  { id: "market-correlations", path: "/api/market/correlations", licence: "derived", klass: "nightly", maxBytes: 65536, reads: ["fst", "snd", "correlation", "rows", "min_date", "max_date"] },
 ];
 
 export const OPS = Object.freeze(RAW.map((e) => Object.freeze({
@@ -124,6 +137,7 @@ export const BUDGETS = Object.freeze({
   tier1: Object.freeze({ window: "13:00-21:00 UTC, Monday to Friday", callsPerTick: 2, focusCallsPerTick: 1, tickMinutes: 5 }),
   tier2: Object.freeze({ window: "09:30-16:25 ET", paceMs: 333, perMinute: 180, maxCallsPerPass: 48 }),
   rail: Object.freeze({ window: "04:00-20:00 ET, trading days, while demanded", perMinute: 240 }),
+  voldesk: Object.freeze({ window: "17:30-17:50 ET", marketCalls: 17, perName: 8, names: 40, maxCalls: 337 }),
   premarketNews: Object.freeze({ window: "04:00-09:30 ET, trading days", everyMin: 30, callsPerFiring: 1, maxFiringsPerDay: 11, perMinute: 1 }),
   ondemand: Object.freeze({ binding: "UW_ONDEMAND", limit: 120, periodS: 60, failsOpen: true }),
 });

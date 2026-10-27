@@ -905,6 +905,20 @@
   }
   syncPop();
 
+  let vdOpened = false;
+  function openVoldesk() {
+    const termHost = $("mkVdTerm");
+    if (vdOpened || !termHost) return;
+    vdOpened = true;
+    const hosts = { term: termHost, termSeg: $("mkVdTermSeg"), ivrv: $("mkVdIvrv"), corr: $("mkVdCorr"), corrSeg: $("mkVdCorrSeg"), char: $("mkVdChar") };
+    Promise.all([
+      optional("/api/flows/voldesk"),
+      UI.defer ? UI.defer("voldesk", { when: "visible", el: $("mkVdTermCard"), label: "The Vol desk" }) : Promise.reject(new Error("no loader")),
+    ]).then(([payload]) => window.FlowsUI.volDesk.ready.then(() => { window.FlowsUI.volDesk.mount(hosts, payload, { now: Date.now() }); })).catch((error) => {
+      for (const host of Object.values(hosts)) if (host && !host.classList.contains("mk-segc")) host.replaceChildren(UI.silent({ state: "unavailable", reason: "The Vol desk did not load: " + (error && error.message ? error.message : "no message") + "." }, "Vol desk", 120));
+    });
+  }
+
   const TABS = [...document.querySelectorAll("#mkTabs [role=tab]")];
   const stage = $("mkStage"), subBar = $("mkSub");
   const subPick = {};
@@ -922,7 +936,7 @@
       m.inert = NARROW.matches && i !== pick;
       if (mods.length < 2) return;
       const title = m.querySelector(".ui-mod-t");
-      subBar.append(h("button", { type: "button", role: "tab", "aria-selected": String(i === pick), "aria-controls": m.id, onclick: () => { subPick[key] = i; buildSub(key); } }, title ? title.textContent : "View " + (i + 1)));
+      subBar.append(h("button", { type: "button", role: "tab", "aria-selected": String(i === pick), "aria-controls": m.id, "aria-label": m.dataset.short && title ? title.textContent : null, onclick: () => { subPick[key] = i; buildSub(key); } }, m.dataset.short || (title ? title.textContent : "View " + (i + 1))));
     });
   }
   function showTab(key, focus, quiet) {
@@ -933,6 +947,7 @@
     for (const p of document.querySelectorAll(".mk-panel")) p.inert = p.dataset.panel !== key;
     buildSub(key);
     if (key === "network") syncPop();
+    if (key === "voldesk") openVoldesk();
     if (focus) t.focus();
     if (!quiet) { try { history.replaceState(null, "", "#view=" + key); } catch (error) { void error; } }
   }

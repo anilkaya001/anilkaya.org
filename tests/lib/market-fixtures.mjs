@@ -111,7 +111,7 @@ export function richAnswer(dir, route, u) {
   }
 }
 
-export async function openMarket(browser, { rich = false, tweak = null, now = RICH_NOW, viewport = { width: 1440, height: 820 }, alerts = alertsFixture(), universe = universeFixture(), alertsStatus = 200, scenes = true, owner = true, reduced = false, coarse = false, patch = null, hash = "", hold = false } = {}) {
+export async function openMarket(browser, { rich = false, tweak = null, now = RICH_NOW, viewport = { width: 1440, height: 820 }, alerts = alertsFixture(), universe = universeFixture(), alertsStatus = 200, scenes = true, owner = true, reduced = false, coarse = false, patch = null, hash = "", hold = false, voldesk = null, voldeskStatus = 200 } = {}) {
   let release = () => {};
   const gate = hold ? new Promise((r) => { release = r; }) : null;
   const context = await browser.newContext({ viewport, reducedMotion: reduced ? "reduce" : "no-preference", hasTouch: coarse, isMobile: coarse });
@@ -121,7 +121,7 @@ export async function openMarket(browser, { rich = false, tweak = null, now = RI
   page.errors = errors;
   const dir = rich ? nightlyEmit() : null;
   if (rich) await page.clock.install({ time: now });
-  const html = PAGES.marketPage({ username: "test", owner, scenes });
+  const html = PAGES.marketPage({ username: "test", owner, scenes, voldesk: voldesk !== null });
   await page.routeWebSocket(/\/api\/rt\/ws/, (ws) => ws.close({ code: 4011, reason: "off" }));
   await page.route("**/*", async (route) => {
     const u = new URL(route.request().url());
@@ -140,6 +140,11 @@ export async function openMarket(browser, { rich = false, tweak = null, now = RI
     if (u.pathname === "/api/flows/flowalerts") {
       if (alertsStatus !== 200) return route.fulfill({ status: alertsStatus, contentType: "application/json", body: "{}" });
       return route.fulfill({ contentType: "application/json", body: JSON.stringify(alerts) });
+    }
+    if (u.pathname === "/api/flows/voldesk") {
+      page.vdRequests = page.vdRequests || [];
+      page.vdRequests.push(u.pathname + u.search);
+      return route.fulfill({ status: voldeskStatus, contentType: "application/json", body: JSON.stringify(voldesk === null ? { status: "pending" } : voldesk) });
     }
     if (u.pathname === "/api/flows/universe") return route.fulfill({ contentType: "application/json", body: JSON.stringify(universe) });
     if (u.pathname.startsWith("/api/flows/")) {
@@ -160,6 +165,8 @@ export async function openMarket(browser, { rich = false, tweak = null, now = RI
 }
 
 export const TABS = ["floor", "session", "tide", "sectors", "indices", "network", "extremes", "relations", "prints", "context"];
+
+export const TABS_VD = ["floor", "session", "tide", "sectors", "indices", "voldesk", "network", "extremes", "relations", "prints", "context"];
 
 export async function showTab(page, selector) {
   const key = await page.evaluate((sel) => {
