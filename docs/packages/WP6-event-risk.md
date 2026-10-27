@@ -67,9 +67,9 @@ ticker page beyond what section 9.4 states, any change to the FF contract (`shar
 | Name | Where | Values | Shipped | Meaning |
 |---|---|---|---|---|
 | `FLOWS_EVENTRISK` | `wrangler.toml` [vars] | `on`, `owner`, `off`; anything else is `owner` | `owner` | `on`: every member; `owner`: owners (`isOwner`, `FLOWS_RT_USERS`) only; `off`: nobody. Closed for a caller: the Events page is served exactly as today (five tabs, no new script), `GET /api/flows/eventrisk` is `404 eventrisk_off` (after the method gate and the session, before any store read), the Fire page has no "From the feed" switch, and the rail refuses the `ht` topic for that caller (section 8.3). |
-| `FLOWS_EVENTRISK_NIGHTLY` | nightly env and `.github/workflows/flows-pipeline.yml` | `off`, anything else on | on | `off`: the `eventrisk` stage is `skipped`, the extras planner plans no `er` part, nothing new is read or published, card-x has no `er` key. |
+| `FLOWS_EVENTRISK_NIGHTLY` | nightly env and `.github/workflows/flows-pipeline.yml` | `off`, anything else on (the workflow passes `off` while the repository variable is unset) | off in the workflow | `off`: the `eventrisk` stage is `skipped`, the extras planner plans no `er` part, nothing new is read or published, card-x has no `er` key. |
 | `FLOWS_EVENTRISK_CAP` | nightly env | integer 0 to 1,000 | unset (400) | Per-night call cap of the `er` card-x parts (section 4.2), separate from `FLOWS_EXTRAS_CAP`. Not an integer or negative: the default; above 1,000: 1,000; 0 plans none. |
-| `FLOWS_EVENTRISK_HALTS` | `wrangler.toml` [vars] | `on`, anything else off | `on` | Whether the hub may join the feed's halt channel. Off: the `ht` topic is refused for everyone and the hub never joins the channel; the Halts view prints its `off` state. |
+| `FLOWS_EVENTRISK_HALTS` | `wrangler.toml` [vars] | `on`, anything else off | `off` until the rail carries the `ht` topic | Whether the hub may join the feed's halt channel. Off: the `ht` topic is refused for everyone and the hub never joins the channel; the Halts view prints its `off` state. |
 
 `shared/flows-er-switch.js` is a leaf that imports nothing and is the only reader of the four names:
 
@@ -80,7 +80,7 @@ ticker page beyond what section 9.4 states, any change to the FF contract (`shar
 - `eventRiskHalts(env)` is `true` only for the trimmed lowercased `on`.
 
 Add the four names to `OPS_SWITCHES` in `server/ops.js` (raw values; none is secret-shaped). Add
-`FLOWS_EVENTRISK = "owner"` and `FLOWS_EVENTRISK_HALTS = "on"` to `wrangler.toml` [vars] after
+`FLOWS_EVENTRISK = "owner"` and `FLOWS_EVENTRISK_HALTS = "off"` to `wrangler.toml` [vars] after
 `FLOWS_EXPORTS`; `wrangler.staging.toml` gets `FLOWS_EVENTRISK = "on"` and `FLOWS_EVENTRISK_HALTS = "off"`
 (staging has no socket). `tests/contracts.mjs` and `tests/staging-contract.mjs` read the files through
 wrangler's reader and must stay green.

@@ -119,6 +119,8 @@ export const PLANNED = Object.freeze([
   Object.freeze({ id: "ops.views", row: "P1-27, P2-03", written: 0, read: 4800, source: "24 rows a minute for 2.5 hours of owner viewing plus ten AI-block reads of 280 plus thirty coverage reads of 48" }),
   Object.freeze({ id: "coverage.view", row: "B1", written: 0, read: 6000, source: "B1 of the pipeline design: the owner's coverage read costs the 2,001-row listing ceiling at worst and about 500 rows in production (167 cards, 167 card-x, about 150 hist, 26 metadata ids), held 60 s in the Cache API, so a dozen reads a day is under 6,000" }),
   Object.freeze({ id: "lab.active-at", row: "P1-71", written: 0, read: 3, source: "PLAN.final.md 5.3: at most 3 rows after the scans are removed" }),
+  Object.freeze({ id: "eventrisk.nightly", row: "WP6", written: 4, read: 4, source: "docs/packages/WP6-event-risk.md 7.5: the eventrisk key nightly and the weekly er-sectors key, each adding one manifest row through the door trigger, and the two prior reads the stage makes through the ingest read path" }),
+  Object.freeze({ id: "eventrisk.view", row: "WP6", written: 0, read: 600, source: "docs/packages/WP6-event-risk.md 7.1: owner reads of one row each (plain, sectors and one name's card-x), a few hundred a day at worst; the quote form reads no row" }),
   Object.freeze({ id: "door.v2", row: "B3", written: 9212, read: 96800, source: "DESIGN.md 2.1 and 12 (B3, warn mode): 2,303 nightly posts (a full deepening night) add one manifest row each through the trigger and read two rows (the key's stored tuple and the universe's name list); the quarantine ring is priced at 2,303 would-have-refused events, each an insert plus its prune and body-clear rows (3), and a brake count of at most 40 rows read" }),
 ]);
 

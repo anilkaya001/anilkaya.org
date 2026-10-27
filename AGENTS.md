@@ -425,7 +425,7 @@ full generated index, and `docs/map-2026-10-05.md` is the frozen system map
 | `shared/flows-columns.js`, `shared/flows-export-format.js`, `shared/flows-export-build.js`, `shared/flows-member-windows.js`, `tests/flows-member-export.mjs`, `tests/lib/member-export-batteries.mjs`, `tests/lib/member-export-world.mjs`, `tests/lib/member-route-batteries.mjs`, `tests/lib/member-route-mutants.mjs` | Member exports (Decision 6), behind `FLOWS_EXPORTS` (`wrangler.toml`, shipped `owner` until the licence questions are answered; `on` opens them to members, anything else is off and a 404 `exports_off`). `shared/flows-columns.js` is the provenance registry: every column is `own` (computed here), `agg` (an aggregate of vendor rows, shown only from three flagged windows) or `vendor` (a field of the vendor's row, sixteen registered so that the builder can refuse them), with the per-page allowlists (Moves, Unusual, Events and Political; no sector page), the holds (`pair_day_change` holds `sig`, `event_date` holds `rd`, `sessions_until`, `contamination` and the Events page, `disclosure_use` holds the Political page) and `FORBIDDEN_PAIRS`, which refuses `sig` and `move_z` live together. `shared/flows-export-format.js` writes the cells (CSV with a byte order mark and CRLF, the em dash for an absent value, formula defanging for text cells only, ratios by half-up BigInt division so that a share is never a float, no negative zero) and `shared/flows-member-windows.js` is the one reader of flagged windows (duplicates by contract and span with the larger premium kept; a record that shed windows, or says nothing about it, is capped). `shared/flows-export-build.js` builds a page from the stored nightly rows only and never reads the vendor: an `asof_trt` stamp that is the oldest source in TRT, `method_version`, the allowlisted columns and an `absent` column listing `key:reason;` for every dash, at most 1,000 rows (a CSV that was cut ends with one note line, "Cut at 1,000 of N rows, in the order of this file. The rest are not in it.", padded to the header's width; a JSON file says it in its `meta`), and a file name dated by the data's TRT day. `POST /api/me/export` takes `{page, format}`, refuses a held page with 403 `export_held` (the 429 body carries `freesAtMs` and the server's own `serverNow`, so a page names the day on the server's clock), allows 50 exports in any rolling 24 hours by an atomic conditional insert (sixty parallel requests from forty-five logged yield five files; the 51st is 429 `export_limit` with the `Retry-After` of the second the oldest ages out) and keeps a member-visible log of page, rows and column names, never a value, for 90 days, which deleting the saved state does not remove. `tests/flows-member-export.mjs` runs the format, columns, windows, calendar, build and route batteries (`tests/lib/member-export-batteries.mjs`, `tests/lib/member-export-world.mjs`, `tests/lib/member-route-batteries.mjs`) on the real modules and on 97 planted wrong builds, the route ones listed in `tests/lib/member-route-mutants.mjs`. |
 | `shared/flows-since.js`, `shared/flows-member-calendar.js`, `tests/flows-member-since.mjs`, `tests/lib/member-since-batteries.mjs` | Since your last visit (Decision 6). `shared/flows-since.js` computes the model on the server (`shared/` is not served to the browser) from the stored nightly rows and the previous visit's last ping, as five groups in a fixed order: new flagged windows (first seen after the visit, with the lean of the pooled windows), moves of 3 typical daily moves or more after rounding to two places (the log return over the name's typical move, marked near a report inside 21 sessions, both ends inclusive), board changes (a score crossing the dead band between the session at the visit and the latest: cleared, flipped or faded), reports that entered the 21-session window and reports dated this session or the next. The states are `first`, `none` (nothing newer than the visit), `quiet`, `some` and `unavailable` (no source loaded); a source that did not load names itself in its own group; at most 1,000 lines a group are kept, the overflow is counted, and a cut group also sends the distinct tickers of the whole group (`names`, about five bytes a name) with the page it lives on (`place`, `href`), so that the browser can match a list the server never reads. `shared/flows-member-calendar.js` is the single import adapter for the session counter and the 21-session horizon, so that the calendar lane can swap it in one place. `GET /api/me/since` reads the member row, four stored keys and the live alerts row (preferred when its session is the nightly's or later) and writes nothing. `tests/flows-member-since.mjs` holds the model to worked answers (`tests/lib/member-since-batteries.mjs`) and the route to a seeded visit history, on 45 planted wrong builds. |
 | `shared/flows-member-shell.js`, `assets/js/flows-member.js`, `assets/js/flows-member-ui.js`, `assets/js/flows-member-boot.js`, `assets/css/flows-member.css`, `tests/flows-member-shell.mjs`, `tests/flows-member-render.mjs`, `tests/lib/member-render-world.mjs`, `tests/lib/member-render-scenarios.mjs`, `tests/lib/member-client-batteries.mjs`, `tests/lib/member-null-guard.mjs`, `docs/member-state.md` | The member state's page half (Decision 6). `memberShell(html, { slug, on, exportOpen, exportsOn })` in `shared/flows-member-shell.js` is the one server touch, wrapped around `oracleShell` in `server/routes/flows-pages.js` (`memberOptions` there decides it from `FLOWS_MEMBER_STATE` and `FLOWS_EXPORTS`, the owner and `pageHold`): for the fifteen allowlisted member pages, and only when each anchor occurs exactly once, it puts two toolbar buttons (Since your last visit, My list) before the freshness pill, the ticker's reserved 44 px star slot after its title, the Watch page's My list action in its module header, a closed Export `details` beside the info button of Moves and Unusual (never Events or Political, which are held), the hidden `#fxMember` root (`data-export` says a menu is drawn, `data-exports` that the switch is on for the member), three defer groups (`member`: `flows-export.js` only when a menu is drawn, then `flows-member.js`; `member-ui`: `flows-member-ui.js` carrying `flows-member.css`; `member-store`: `storage.js` unless the page has it) and the 2 KB `flows-member-boot.js`. Anything else, a second application and a page with a missing or repeated anchor come back unchanged. `flows-member-boot.js` pings `POST /api/me/visit` once a minute while the page is visible (not hidden, not prerendering, stopped for good by a 401 or 404, again on a restored page), loads `flows-member.js` on the first opening of an export menu and, after load, on the ticker page unless Data Saver is on, loads the dialogs as well on a click on a member button, waits for a ping at most three seconds before it opens Since and, when a file has not arrived in fifteen seconds, clears the busy state and says so. `flows-member.js` (about 5.5 KB gzip) adds `FlowsUI.member` (`open`, `exportMenu`, `model`, `state`) and `FlowsUI.memberKit`: the saved-list state and its write queue (a strong If-Match built from the version in the body, one retry after a 412 that recomputes from the fresh list, a rollback), the ticker star (presses on one name merge into one write in flight and one waiting) and the adopted export menu (`FlowsUI.exportMenu({ el, remote, event })`). `flows-member-ui.js` holds the My list dialog (add by paste, remove, a list of 200, the device-only switch through `IEWTStorage`, the offer to save a device copy, copy names, download list and export log, export history, deletion with its own confirmation), the Since dialog (Your names built in the browser from the complete lines and the names of cut groups, fifty more a step) and the export history dialog (the column names behind a disclosure). `storage.js` loads only for a device-only list, for an empty server list when My list opens, and for the device switch and the deletion. Nothing is read from or written to another page's DOM, and no member string reaches the console. `docs/member-state.md` is the runbook (secret, rotation, offboarding, switches, loading, disclosures, the twelve open questions). `tests/flows-member-shell.mjs` holds the shell, `memberOptions`, the privacy scan of the model-facing clients, the storage module's watch-list functions in a `vm` against stores that work, ignore writes, throw and cannot be read (`tests/lib/member-client-batteries.mjs`), the pointer rules of the sheets and the scan that no node-inserting call is handed null (`tests/lib/member-null-guard.mjs`), and plants wrong builds of each (4,485 checks). `tests/flows-member-render.mjs` (Chromium, `page.route` over a stateful fake of `/api/me/*` that sends a weak ETag and accepts only the exact If-Match, no server) runs in three registered parts: `--part=scenarios` the fifty-three scenarios of `tests/lib/member-render-scenarios.mjs` (boot, lazy loading by asset log, the dialogs, modes, deletion, Since, the star and its merging, the export menu and its errors, axe, reduced motion, forced colours, 320 px), `--part=onescreen` the one-screen invariants of Moves, Unusual, Events, Political and Watch at four sizes against the same pages without the shell, the star's layout at four widths and the sidebar, and `--part=mutants` the 75 planted wrong builds that each must fail. |
-| `shared/flows-er-*.js`, `shared/ff-feed-templates.js`, `scripts/flows-legs/eventrisk*.mjs`, `scripts/flows-nightly/sections/eventrisk.mjs`, `server/routes/flows-eventrisk.js`, `assets/js/flows-er.js`, `assets/css/flows-er.css`, `tests/flows-er-*.mjs`, `tests/gen-er-fixtures.py`, `tests/gen-eventrisk-fixtures.py`, `tests/fixtures-er.json`, `tests/fixtures-eventrisk.json`, `tests/lib/er-world.mjs` | The event-risk console: switch leaf, report-risk, issue, policy and halt leaves, the eventrisk and er-sectors keys, the nightly stage and its feed reads, the owner-gated /api/flows/eventrisk route and the Events page views (Risk, New issues, Policy, Halts), with their fixtures and suites. |
+| `shared/flows-er-*.js`, `shared/ff-feed-templates.js`, `scripts/flows-legs/eventrisk*.mjs`, `scripts/flows-nightly/sections/eventrisk.mjs`, `server/routes/flows-eventrisk.js`, `assets/js/flows-er.js`, `assets/css/flows-er.css`, `tests/flows-er-*.mjs`, `tests/gen-er-fixtures.py`, `tests/gen-eventrisk-fixtures.py`, `tests/fixtures-er.json`, `tests/fixtures-eventrisk.json`, `tests/lib/er-world.mjs`, `tests/lib/block-net.cjs` | The event-risk console: switch leaf, report-risk, issue, policy and halt leaves, the eventrisk and er-sectors keys, the nightly stage and its feed reads, the owner-gated /api/flows/eventrisk route and the Events page views (Risk, New issues, Policy, Halts), with their fixtures and suites. |
 <!-- /gen:filemap -->
 
 ## Curriculum and stage contracts
@@ -1572,7 +1572,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 250 suites: 196 that need only Node (N), 39 that also
+`tests/suites/` registers 251 suites: 197 that need only Node (N), 39 that also
 need Playwright's Chromium (C) and 15 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1595,41 +1595,42 @@ flows-copy-lint           flows-coverage            flows-d1-budget           fl
 flows-decisions-closed    flows-deepen              flows-defer-render        flows-desk-audit
 flows-desk-calls          flows-desk-sc             flows-dispatch-check      flows-dispersion
 flows-door-v2             flows-dossier             flows-dossier-reads       flows-engine-budget
-flows-er-leaves           flows-er-render           flows-er-route            flows-er-switch
-flows-evt                 flows-fact-ids            flows-feeds-onescreen     flows-film
-flows-flow-below-render   flows-flow-registry       flows-forward             flows-forward-lab
-flows-freshness           flows-garch               flows-glass-render        flows-guard-lexicon
-flows-home-below-render   flows-home-composition    flows-home-net-render     flows-home-onescreen
-flows-horizon             flows-horizon-lint        flows-lean                flows-ledger
-flows-ledger-book         flows-ledger-live         flows-ledger-live-plants-a flows-ledger-live-plants-b
-flows-ledger-live-render  flows-ledger-live-render-b flows-legs                flows-live
-flows-market-below-render flows-market-floor-render flows-market-onescreen    flows-market-river-render
-flows-market-visual       flows-member-export       flows-member-mutants      flows-member-onescreen
-flows-member-render       flows-member-shell        flows-member-since        flows-member-state
-flows-member-worker       flows-meter-worker        flows-mint                flows-moves-render
-flows-moves-sig           flows-net-map-render      flows-neuron              flows-neuron-screen
-flows-nn-render           flows-now-render          flows-oracle              flows-oracle-core
-flows-oracle-home-render  flows-oracle-live         flows-oracle-render       flows-overlay
-flows-payload-shape       flows-permits             flows-pipeline-chaos      flows-pipeline-mutants
-flows-plan-facts          flows-political           flows-political-render    flows-popout-render
-flows-positioning         flows-premium-rank        flows-probe               flows-public
-flows-pulse               flows-quant               flows-quant-audit         flows-quant-card
-flows-read-failures       flows-readers             flows-reading             flows-reading-worker
-flows-reads               flows-ready               flows-record              flows-registry-contract
-flows-relations-render    flows-reports             flows-round               flows-rt
-flows-scores              flows-sfc                 flows-sfc-render          flows-sfc-route
-flows-sfc-view            flows-sides               flows-sign                flows-skyline-render
-flows-starts              flows-stats               flows-stock               flows-tape-stats
-flows-targets             flows-time                flows-truth               flows-universe
-flows-variation           flows-vendor-budget       flows-vendor-extras       flows-verdict
-flows-vol                 flows-warnings            flows-weight              flows-ws-probe
-lab-write                 launch-readiness          markets                   mastery
-math-darkpool             math-dealer               math-duplicates           math-format
-math-print                math-short                math-sigma                math-time
-math-units                math-vol                  pipeline                  route-matrix
-server-ai                 server-desk               server-desk-sc            server-ingest
-server-kernel             server-log                server-ops                server-oracle
-server-pages              server-router             server-rt                 staging
+flows-er-leaves           flows-er-nightly          flows-er-render           flows-er-route
+flows-er-switch           flows-evt                 flows-fact-ids            flows-feeds-onescreen
+flows-film                flows-flow-below-render   flows-flow-registry       flows-forward
+flows-forward-lab         flows-freshness           flows-garch               flows-glass-render
+flows-guard-lexicon       flows-home-below-render   flows-home-composition    flows-home-net-render
+flows-home-onescreen      flows-horizon             flows-horizon-lint        flows-lean
+flows-ledger              flows-ledger-book         flows-ledger-live         flows-ledger-live-plants-a
+flows-ledger-live-plants-b flows-ledger-live-render  flows-ledger-live-render-b flows-legs
+flows-live                flows-market-below-render flows-market-floor-render flows-market-onescreen
+flows-market-river-render flows-market-visual       flows-member-export       flows-member-mutants
+flows-member-onescreen    flows-member-render       flows-member-shell        flows-member-since
+flows-member-state        flows-member-worker       flows-meter-worker        flows-mint
+flows-moves-render        flows-moves-sig           flows-net-map-render      flows-neuron
+flows-neuron-screen       flows-nn-render           flows-now-render          flows-oracle
+flows-oracle-core         flows-oracle-home-render  flows-oracle-live         flows-oracle-render
+flows-overlay             flows-payload-shape       flows-permits             flows-pipeline-chaos
+flows-pipeline-mutants    flows-plan-facts          flows-political           flows-political-render
+flows-popout-render       flows-positioning         flows-premium-rank        flows-probe
+flows-public              flows-pulse               flows-quant               flows-quant-audit
+flows-quant-card          flows-read-failures       flows-readers             flows-reading
+flows-reading-worker      flows-reads               flows-ready               flows-record
+flows-registry-contract   flows-relations-render    flows-reports             flows-round
+flows-rt                  flows-scores              flows-sfc                 flows-sfc-render
+flows-sfc-route           flows-sfc-view            flows-sides               flows-sign
+flows-skyline-render      flows-starts              flows-stats               flows-stock
+flows-tape-stats          flows-targets             flows-time                flows-truth
+flows-universe            flows-variation           flows-vendor-budget       flows-vendor-extras
+flows-verdict             flows-vol                 flows-warnings            flows-weight
+flows-ws-probe            lab-write                 launch-readiness          markets
+mastery                   math-darkpool             math-dealer               math-duplicates
+math-format               math-print                math-short                math-sigma
+math-time                 math-units                math-vol                  pipeline
+route-matrix              server-ai                 server-desk               server-desk-sc
+server-ingest             server-kernel             server-log                server-ops
+server-oracle             server-pages              server-router             server-rt
+staging
 ```
 
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):
