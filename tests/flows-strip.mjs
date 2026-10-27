@@ -120,12 +120,20 @@ if (cards.length) {
         await page.evaluate(() => { const g = document.getElementById("ftGrid"), l = document.querySelector("#ftDock .ft-dock-a"); if (g && g.hidden && l) { l.click(); window.scrollTo(0, 0); } });
         await page.waitForLoadState("networkidle").catch(() => {});
         await page.waitForTimeout(350);
-        out.push(await page.evaluate(() => {
+        const snap = () => page.evaluate(() => {
           for (const a of document.getAnimations()) { try { a.finish(); } catch {} }
           const parts = [["hero", document.getElementById("ftHero")], ["verdict", document.getElementById("ftVerdict")],
             ...[...document.querySelectorAll("#ftGrid > [id]")].map((m) => [m.id, m])];
-          return parts.map(([k, el]) => [k, el ? el.innerHTML.replace(/ transition: none;/g, "") : null]);
-        }));
+          return parts.map(([k, el]) => [k, el ? el.innerHTML.replace(/ transition: none;/g, "").replace(/data-info="i\d+"/g, 'data-info="i#"') : null]);
+        });
+        let last = JSON.stringify(await snap()), stable = 0;
+        for (let n = 0; n < 80 && stable < 3; n++) {
+          await page.waitForTimeout(150);
+          const now = JSON.stringify(await snap());
+          stable = now === last ? stable + 1 : 0;
+          last = now;
+        }
+        out.push(JSON.parse(last));
       }
       await page.close();
       return { out, errors };
