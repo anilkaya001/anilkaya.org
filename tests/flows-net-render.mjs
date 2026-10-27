@@ -914,7 +914,7 @@ try {
         })(),
         rank: (() => {
           const at = "2026-09-29T15:00:00Z";
-          const m = model([{ t: "Q", prem: 5, exp: "2026-12-18", spanStart: at }, { t: "R", prem: 9, exp: "2026-09-29", spanStart: at }, { t: "S", prem: 9 }, { t: "T", prem: 1, exp: "nope" }, { t: "U", prem: 2 }], { names: 3, sectorOf: (t) => (t === "Q" ? null : "Energy"), out: "dte" });
+          const m = model([{ t: "Q", cp: "C", prem: 5, askPrem: 5, exp: "2026-12-18", spanStart: at }, { t: "R", cp: "C", prem: 9, askPrem: 9, exp: "2026-09-29", spanStart: at }, { t: "S", cp: "C", prem: 9, askPrem: 9 }, { t: "T", cp: "C", prem: 1, askPrem: 1, exp: "nope" }, { t: "U", cp: "C", prem: 2, askPrem: 2 }], { names: 3, sectorOf: (t) => (t === "Q" ? null : "Energy"), out: "dte" });
           return { names: m.layers[2].map((d) => d.label + (d.pos ? "#" + d.pos : "")), sectors: m.layers[0].map((d) => d.label), out: m.layers[3].map((d) => d.label) };
         })(),
       };
@@ -928,7 +928,7 @@ try {
     eq(u.nx, 50 + 10, "a window with no contract side, and premium left between the quotes, are counted as premium with no stated side");
     eq(u.hasNx, false, "and are not drawn as a node");
     eq(u.pb, 30, "an unstated ask leaves its premium without a side, while the stated bid stays a bid");
-    eq(u.xyz, 40, "tickers are upper-cased before they are joined");
+    eq(u.xyz, 30, "tickers are upper-cased before they are joined, and only the stated bid of that window is drawn");
     eq(u.none, "No sector", "a name the universe does not carry is No sector");
     deep(u.empty, { windows: 0, layers: [0, 0, 0, 0], top: 0 }, "an empty record is an empty model, not an error");
     eq(u.dte, "1\u20137 days", "the horizon counts from the window's own Eastern date (Sep 29 evening ET to Oct 6 is 7 days)");
