@@ -3614,6 +3614,20 @@ Turning it off: set `FLOWS_LEDGER_LIVE = "off"` in `wrangler.toml` and deploy (a
 
 What is not proven here: that the production edge streams the flow topic at the rate the local runtime did; that the Actions runner's clock (which stamps the stored record's windows) and the Durable Object's clock (which stamps the streamed ones) agree to about a second, which the order of two versions of one window rests on; and what the real vendor does to an alert it revises (whether the revised alert keeps its id; the rail drops a repeated id, so a revision that keeps one reaches the page only with the next book read, every heartbeat that saw a change).
 
+### 10.5p Positioning: three switches, one payload key, what it reads, how to turn it off
+
+`FLOWS_POSITIONING` (`wrangler.toml` [vars], shipped `owner`) is `on`, `owner` or off, and anything else is `owner`. It opens `/flows/positioning/`, `GET /api/flows/positioning`, the Late, Unusual and Money layers of `/flows/political/` and the `ps` section of `card-x`. With it closed for a reader the page is the unknown-page 404, the route is `404 positioning_off`, and the Political and card-x reads strip the layer keys and `ps` before they leave the Worker, so the bytes a closed reader gets are those of a payload written before the package.
+
+Two switches belong to the nightly, not the Worker, and are repository variables of the pipeline workflow, unset by default: `FLOWS_POSITIONING_NIGHTLY` (`off` turns the whole leg off; any other value, or none, leaves it on) and `FLOWS_POSITIONING_CAP` (the nightly cap on per-name reads, default 600, at most 1,500, `0` reads none). With the nightly off the run publishes no `positioning` key, no `ps` section and no layer, and the stage is recorded as skipped; the other keys are byte for byte what they were.
+
+What it costs: the feed's calls are counted by `CALL_COST.positioning` (720 a night, `BUDGETS.positioning`), the per-name reads go through the planner of the slow parts with their own cap, the payload is one `flows_payload` row of at most 96 KiB (political grows to 120 KiB), and a page load reads one row. Nothing is written by a member. The page makes no model call and no live feed call.
+
+How to read it: the stamp beside the title is the session of the payload and the TRT time it was built. A sector or name without a figure shows a dash and the reason; a part the plan refuses is remembered for seven days so the nightly does not ask again; a rotation of names is read over several nights, so the short side fills in over the first week after the switch is turned on.
+
+Turning it off: set `FLOWS_POSITIONING = "off"` in `wrangler.toml` and deploy; set `FLOWS_POSITIONING_NIGHTLY` to `off` in the repository variables to stop the nightly reading. Neither changes another page.
+
+What is not proven here: that the live feed returns the shapes the fixtures were generated to, which the weekly probe checks; the planned probes (tier `planned`) have not yet been answered by a weekly run.
+
 ### 10.6 The staging Worker, the external prober and the load test
 
 Three tools stand outside production so that a change to a Durable Object, a
