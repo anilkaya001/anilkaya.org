@@ -25,7 +25,7 @@ export const RATE_LIMITS = Object.freeze([
   Object.freeze({ name: "LAB_WRITE", limit: 30, periodS: 60 }),
 ]);
 
-export const COVERAGE_KEYS = Object.freeze([...new Set([...NOW_NIGHTLY_KEYS, "universe", "regime", "ideas", "roster", "calib", "dispersion", "deepen"])]);
+export const COVERAGE_KEYS = Object.freeze([...new Set([...NOW_NIGHTLY_KEYS, "universe", "regime", "ideas", "roster", "calib", "dispersion", "deepen", "eventrisk", "er-sectors"])]);
 
 const LIVE_IDS = Object.freeze(Object.keys(LIVE_KEYS));
 

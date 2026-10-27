@@ -13,6 +13,7 @@ import { num } from "../../../shared/flows-features.js";
 import { runSigmaLedger } from "../../flows-legs/sigma-ledger.mjs";
 import { decodeLedger, recentReporters } from "../../../shared/flows-reports.js";
 import { extrasCap, extrasMode } from "../../../shared/flows-vendor-extras.js";
+import { eventRiskCap, eventRiskNightly } from "../../../shared/flows-er-switch.js";
 import { BOARD_SCHEMA_VERSION, MOVER_ROWS, barsInHand, buildMovers, candleDate, candlesAscending, daysToEarnings, repairCandles, sessionCandles, sessionRow } from "../rank.mjs";
 
 export async function runMarket(ctx) {
@@ -139,7 +140,7 @@ export async function runMarket(ctx) {
       deepTickers,
       windowTickers: windowTickersOf(withTilt.map((w) => w.row), { origin: sessionDate || gateOrigin }),
       deadline: stats.startedAt + DEADLINE_MS, pool: runPooled, width: poolWidth(2).width, stats,
-      extras: extrasMode(process.env) === "off" ? null : { readPrior: (t) => readStored("card-x:" + t), cap: extrasCap(process.env) },
+      extras: extrasMode(process.env) === "off" ? null : { readPrior: (t) => readStored("card-x:" + t), cap: extrasCap(process.env), ...(eventRiskNightly(process.env) ? { er: { cap: eventRiskCap(process.env) } } : {}) },
       log: (line) => console.log(line),
     });
     for (const [t, part] of marketLegs.ownership) {
@@ -151,6 +152,7 @@ export async function runMarket(ctx) {
       for (const [t, sec] of marketLegs.extras.sections) {
         if (sec.dx) cardX.add(t, "dx", sec.dx);
         if (sec.vx) cardX.add(t, "vx", sec.vx);
+        if (sec.er) cardX.add(t, "er", sec.er);
       }
     }
     console.log(`  market legs: ${marketLegs.calls ?? 0} vendor call(s)`);
@@ -231,6 +233,7 @@ export async function runMarket(ctx) {
       notes: EVENTS_NOTES,
     });
     await publish("events", eventsPayload);
+    ctx.eventsPayload = eventsPayload;
     if (eventsPayload.shedRows) console.warn(`  events: ${eventsPayload.shedRows} far-dated row(s) shed to stay under the ingest cap`);
     const gatedShown = events.byStage.gated || 0;
     console.log(

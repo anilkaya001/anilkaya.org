@@ -64,6 +64,8 @@ const GLOBALS = [
   global("reports", { required: ["v", "asOf", "t"] }),
   global("oracle-top", { capBytes: 16 * 1024, required: ["items", "sessionDate"] }),
   global("oracle-norm", { capBytes: 100 * 1024, required: ["t", "sessionDate"] }),
+  global("eventrisk", { capBytes: 96 * 1024, required: ["v", "sessionDate", "generatedAt"] }),
+  global("er-sectors", { capBytes: 96 * 1024, required: ["v", "readAt"] }),
 ];
 
 const dated = (id, source, over = {}) => product(id, "dated", { pattern: source, archive: true, ...over });

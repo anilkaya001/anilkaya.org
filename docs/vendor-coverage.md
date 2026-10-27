@@ -40,9 +40,9 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/shorts/{ticker}/volume-and-ratio` | read | shorts-volume | any | observed | whole body | read by the code | nightly | read |
 | `/api/shorts/{ticker}/volumes-by-exchange` | not added | - | any | not observed | short volume by exchange | shares stated | positioning packet | no: `shorts-volume` already carries the ratio |
 | `/api/stock/{ticker}/atm-chains` | not added | - | any | not observed | at-the-money chains for expirations the caller names | stated | options | no: needs `expirations[]` and duplicates `option-contracts` |
-| `/api/stock/{ticker}/balance-sheets` | not added | - | any | not observed | balance sheet statements | stated | fundamentals packet | no: duplicate of `financials` |
-| `/api/stock/{ticker}/cash-flows` | not added | - | any | not observed | cash flow statements | stated | fundamentals packet | no: duplicate of `financials` |
-| `/api/stock/{ticker}/earnings` | not added | - | any | not observed | reported and estimated EPS with the surprise | strings | earnings packet | no: the EPS history is inside `financials.earnings`, which the dossier stores |
+| `/api/stock/{ticker}/balance-sheets` | read | balance-sheets | any | not observed | balance sheet statements | stated | fundamentals packet | read for the event-risk package: the `er.fin` part, only for names whose bundled `financials` part is unusable |
+| `/api/stock/{ticker}/cash-flows` | read | cash-flows | any | not observed | cash flow statements | stated | fundamentals packet | read for the event-risk package: the `er.fin` part, as above |
+| `/api/stock/{ticker}/earnings` | read | stock-earnings | any | not observed | reported and estimated EPS with the surprise | strings | earnings packet | read for the event-risk package: the `er.eps` part, every carded name, with our own surprise |
 | `/api/stock/{ticker}/expiry-breakdown` | read | expiry-breakdown | any | observed | whole body | read by the code | Worker | read |
 | `/api/stock/{ticker}/financials` | read | financials | any | observed | income_statements, balance_sheets, cash_flows, earnings, fiscal_date_ending, ... | read by the code | dossier | read |
 | `/api/stock/{ticker}/flow-alerts` | deprecated | - | any | not observed | a name's flow alerts | - | - | deprecated: the market-wide alerts route is read |
@@ -60,7 +60,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/stock/{ticker}/greek-flow/{expiry}` | not added | - | any | not observed | delta and vega flow per minute for one expiry | stated | flow | no: large, and the engines use the all-expiry series |
 | `/api/stock/{ticker}/greeks` | probe only | - | any | observed | the vendor's greeks per strike and expiry | strings | engine cross-check | no: observed on the wire but large; a follow-up as an independent check of the engine's greeks |
 | `/api/stock/{ticker}/historical-risk-reversal-skew` | read | rr-skew | any | observed | whole body | read by the code | nightly | read |
-| `/api/stock/{ticker}/income-statements` | not added | - | any | not observed | income statements | stated | fundamentals packet | no: duplicate of `financials` |
+| `/api/stock/{ticker}/income-statements` | read | income-statements | any | not observed | income statements | stated | fundamentals packet | read for the event-risk package: the `er.fin` part, as above |
 | `/api/stock/{ticker}/info` | read | info | any | observed | full_name, sector, issue_type, marketcap, avg30_volume, ... | read by the code | Worker, dossier, engines | read |
 | `/api/stock/{ticker}/insider-buy-sells` | not added | - | any | not observed | insider purchases and sales with notional | notional stated as value | positioning packet | no: duplicate of the insider batch and `insider-flow` |
 | `/api/stock/{ticker}/interpolated-iv` | added | interpolated-iv | any | not observed | implied volatility, implied move and 1-year percentile for each tenor | days and percentile stated; volatility and implied move withheld | peers packet | added: `vx.ivp`, read every night; overlaps the screener's 30-day `iv_percentile_1y`, so its unique value is the other tenors |
@@ -77,17 +77,17 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/stock/{ticker}/option-stance` | probe only | - | any | not observed | a vendor trade-stance ranking of contracts with a fit score, return on capital and pop | return on capital unit not stated | none | probe only: asked weekly (tier 2) for a later comparison with our own ratio and Win %, never displayed |
 | `/api/stock/{ticker}/option/stock-price-levels` | not added | - | any | not observed | option volume by price level | stated | flow | no: low value |
 | `/api/stock/{ticker}/option/volume-oi-expiry` | not added | - | any | not observed | volume and open interest per expiry | stated | options | no: a sum of `option-contracts` |
-| `/api/stock/{ticker}/options-pulse` | not added | - | any | not observed | the Nasdaq options pulse for a name | the spec documents no response | flow | no: the response schema is empty in the committed spec |
+| `/api/stock/{ticker}/options-pulse` | read | stock-options-pulse | any | not observed | the Nasdaq options pulse for a name | the spec documents no response | flow | read for names reporting within two sessions: opening-buy transaction counts only; the sentiment scores are not read because the spec states no scale |
 | `/api/stock/{ticker}/options-volume` | read | options-volume | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/ownership` | enterprise | - | Enterprise | not observed | institutions, insiders and politicians with the most shares | stated | positioning packet | no: Enterprise only; `institution/{ticker}/ownership` is read |
-| `/api/stock/{ticker}/quote` | probe only | - | any | not observed | the latest trade, NBBO and quote statistics | stated | price packet | no: entitlement unanswered; asked weekly (tier 2); `stock-state` is read |
+| `/api/stock/{ticker}/quote` | read | stock-quote | any | not observed | the latest trade, NBBO and quote statistics | stated | price packet | read on a member request behind the member and on-demand gates, kept 15 seconds; the quote-change counters are not read |
 | `/api/stock/{ticker}/spot-exposures` | read | spot-exposures | any | observed | start_time, price, gamma_per_one_percent_move_oi, gamma_per_one_percent_move_vol, gamma_per_one_percent_move_dir | read by the code | Worker, nightly, rail | read |
 | `/api/stock/{ticker}/spot-exposures/expiry-strike` | read | spot-exposures-expiry-strike | any | observed | whole body | read by the code | engines, nightly | read |
 | `/api/stock/{ticker}/spot-exposures/strike` | read | spot-exposures-strike | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/spot-exposures/{expiry}/strike` | deprecated | - | any | not observed | spot gamma by strike for one expiry | - | - | deprecated: the expiry-strike route is read |
 | `/api/stock/{ticker}/stock-state` | read | stock-state | any | observed | close, prev_close, open, high, low, ... | read by the code | Worker, dossier, engines | read |
 | `/api/stock/{ticker}/stock-volume-price-levels` | probe only | - | any | not observed | lit and off-lit stock volume by price | shares stated | flow | no: entitlement unanswered; asked weekly (tier 2); if it answers it ranks above the ETF read |
-| `/api/stock/{ticker}/technical-indicator/{function}` | not added | - | any | not observed | any technical indicator series | per function | price packet | no: computed from the candles the nightly holds |
+| `/api/stock/{ticker}/technical-indicator/{function}` | read | tech-natr | any | not observed | any technical indicator series | per function | price packet | read for NATR(14) only, for the names of the earnings window |
 | `/api/stock/{ticker}/volatility/anomaly` | read | vol-anomaly | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/volatility/character` | read | vol-character | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/volatility/realized` | not added | - | any | not observed | 30-day implied against 21-session realised volatility | strings, units not stated | options | no: duplicate of `vrp` and the realised-volatility section |
@@ -100,10 +100,20 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 
 ## Registered operations without a ticker in the path
 
-30 registry operations (market-wide, calendars, screeners, groups, sectors) all read before this branch.
+30 registry operations (market-wide, calendars, screeners, groups, sectors) were read before the event-risk package, which adds ten more rows below; its seven per-name paths are in the table above.
 
 | Operation | Status | Registry id | Plan | Wire | Consumers |
 | --- | --- | --- | --- | --- | --- |
+| `/api/calendar/ipo` | read | calendar-ipo | Advanced | not observed | event-risk package, nightly |
+| `/api/companies/listings` | read | listings-active | Advanced | not observed | event-risk package, nightly (active weekly, delisted by date as `listings-delisted`) |
+| `/api/potus/schedule` | read | potus-schedule | Advanced | not observed | event-risk package, nightly |
+| `/api/potus/posts` | read | potus-posts | Advanced | not observed | event-risk package, nightly |
+| `/api/stock/{sector}/tickers` | read | sector-tickers | Advanced | not observed | event-risk package, weekly; the spec has no `/api/stock/{ticker}/tickers`, so the per-sector path is read instead |
+| `/api/socket/trading_halts` | read | socket-halts | Advanced | not observed | the rail socket upstream, topic `ht`; no REST call |
+| `/api/alerts` | read | alerts-fired | Advanced | not observed | event-risk package, nightly; read only, the alert's second time field is not read |
+| `/api/alerts/configuration` | read | alerts-config | Advanced | not observed | event-risk package, nightly; read only, never a POST |
+| `/api/alerts/filters` | read | alerts-filters | Advanced | not observed | event-risk package, weekly |
+| `/api/alerts/query/grammar` | read | alerts-grammar | Advanced | not observed | event-risk package, weekly |
 | `/api/option-contract/{id}/historic` | read | contract-historic | Advanced | observed | nightly |
 | `/api/option-trades/multi-leg` | read | multi-leg | Advanced | observed | nightly |
 | `/api/congress/recent-trades` | read | congress-recent | Advanced | observed | nightly |

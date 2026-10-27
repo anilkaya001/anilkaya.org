@@ -22,6 +22,7 @@ import { DRY_SESSION_DATE } from "./flows-nightly/fixtures.mjs";
 import { sameSessionGate } from "./flows-nightly/archive.mjs";
 import { runBoards } from "./flows-nightly/sections/boards.mjs";
 import { runMarket } from "./flows-nightly/sections/market.mjs";
+import { runEventRisk } from "./flows-nightly/sections/eventrisk.mjs";
 import { runUniverse } from "./flows-nightly/sections/universe.mjs";
 import { publishNews, publishPulse, publishSectorPremium, runAlerts } from "./flows-nightly/sections/alerts.mjs";
 import { runChains } from "./flows-nightly/sections/chains.mjs";
@@ -281,6 +282,7 @@ async function main() {
   await runContext(ctx);
   await runCards(ctx);
   await runFocus(ctx);
+  await runEventRisk(ctx);
   await runOraclePrep(ctx);
   await runCompute(ctx);
   await runOraclePublish(ctx);
