@@ -16,6 +16,7 @@
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const money = (v) => F.money(v);
   const pct = (v) => (num(v) === null ? DASH : Math.round(v * 100) + "%");
+  const band = (lo, hi) => (num(lo) === null || num(hi) === null ? DASH : Math.floor(lo * 100 + 1e-9) + "\u2013" + Math.ceil(hi * 100 - 1e-9) + "%");
   const count = (v) => Math.round(v).toLocaleString("en-US");
   const plural = (k, one, many) => (k === 1 ? one : many);
 
@@ -45,12 +46,11 @@
   const KINDS = {
     ca: { label: "Calls \u00b7 ask side", lean: "bull", short: "Calls ask" },
     pb: { label: "Puts \u00b7 bid side", lean: "bull", short: "Puts bid" },
-    nx: { label: "Unsided", lean: "nx" },
     pa: { label: "Puts \u00b7 ask side", lean: "bear", short: "Puts ask" },
     cb: { label: "Calls \u00b7 bid side", lean: "bear", short: "Calls bid" },
   };
-  const LEANS = { bull: "Bullish", nx: "Unsided", bear: "Bearish" };
-  const LEAN_GLYPH = { bull: "up", bear: "down", nx: "flat" };
+  const LEANS = { bull: "Bullish", bear: "Bearish" };
+  const LEAN_GLYPH = { bull: "up", bear: "down" };
   const DTE = { d0: "0DTE", w1: "1–7 days", m1: "8–31 days", far: "32+ days", nx: "No expiry" };
   const CAPTIONS = { lean: ["Sector", "Side", "Name", "Lean"], dte: ["Sector", "Side", "Name", "Expiry"] };
   const RESID = { "s:idx": 1, "s:fund": 1, "s:~": 2, "s:none": 3, "s:unread": 4, "s:wait": 5, "n:~": 1 };
@@ -73,13 +73,13 @@
     const cap = clamp(Math.round(num(o.names) || 10), 3, 24);
     const secOf = typeof o.sectorOf === "function" ? o.sectorOf : () => undefined;
     const parts = [];
-    let total = 0, windows = 0;
+    let flagged = 0, noSide = 0, windows = 0;
     (Array.isArray(rows) ? rows : []).forEach((r, ri) => {
       const prem = num(r && r.prem);
       const t = r && typeof r.t === "string" && r.t.trim() ? r.t.trim().toUpperCase() : null;
       if (!t || prem === null || prem <= 0) return;
       windows++;
-      total += prem;
+      flagged += prem;
       const cp = r.cp === "C" || r.cp === "P" ? r.cp : null;
       const sp = cp ? F.askSplit(r) : null;
       let a = sp ? sp.ask : 0, b = sp ? sp.bid : 0;
@@ -87,9 +87,10 @@
       const push = (k, v) => { if (v > prem * 1e-9) parts.push({ r: ri, t, g, k, v, lean: KINDS[k].lean, x, sz: sz !== null && sz >= 0 ? sz : null }); };
       push(cp === "C" ? "ca" : "pa", a);
       push(cp === "C" ? "cb" : "pb", b);
-      push("nx", Math.max(0, prem - a - b));
+      noSide += Math.max(0, prem - a - b);
     });
 
+    const total = parts.reduce((s, p) => s + p.v, 0);
     const byName = new Map(), bySec = new Map();
     for (const p of parts) {
       byName.set(p.t, (byName.get(p.t) || 0) + p.v);
@@ -162,10 +163,11 @@
       row.v += p.v;
       table.set(key, row);
     }
-    const lean = { bull: 0, bear: 0, nx: 0 };
+    const lean = { bull: 0, bear: 0, nx: noSide };
     for (const p of parts) lean[p.lean] += p.v;
+    const cover = flagged > 0 ? { flagged, sided: total, share: total / flagged, bullLo: lean.bull / flagged, bullHi: (flagged - lean.bear) / flagged, bearLo: lean.bear / flagged, bearHi: (flagged - lean.bull) / flagged } : null;
     return {
-      mode, total, windows, names: byName.size, layers, lean,
+      mode, total, flagged, cover, windows, names: byName.size, layers, lean,
       edges: hops.map((m) => [...m.values()]),
       paths: [...paths.values()].sort((a, b) => b.v - a.v),
       top: [...table.values()].sort((a, b) => b.v - a.v || (a.t < b.t ? -1 : 1)),
@@ -387,11 +389,11 @@
       return {
         title: "Flow network",
         lead: "Each flagged window's premium, split by the vendor's own attribution against the quote, routed through its sector and its name to its lean or its expiry.",
-        facts: m ? [["Windows", count(m.windows)], ["Premium", money(m.total)], ["Names", count(m.names)], ["Sectors", U.state === "ok" ? "Nightly universe" : U.state === "fail" ? "Not readable" : "Pending"], ["Read", S.readAt ? F.time(S.readAt) : null]] : [],
+        facts: m ? [["Windows", count(m.windows)], ["Flagged", money(m.flagged)], ["Sided", m.cover ? money(m.total) + " " + MID + " " + pct(m.cover.share) : DASH], ["Names", count(m.names)], ["Sectors", U.state === "ok" ? "Nightly universe" : U.state === "fail" ? "Not readable" : "Pending"], ["Read", S.readAt ? F.time(S.readAt) : null]] : [],
         notes: [
           "These are the vendor's flagged alerts, not every execution: the selection is the vendor's rules, so a name missing here is not a quiet name.",
           "Ask side and bid side are the vendor's split of each flagged window's premium. For contract volume the vendor defines the ask side as a fill above the midpoint; it does not document the alert field. Lean is a convention: ask-side calls and bid-side puts are drawn bullish, bid-side calls and ask-side puts bearish, and none of it is proof of who initiated.",
-          "Unsided is premium the vendor left between the quotes, or a window it never split by side.",
+          "Premium the vendor left between the quotes, or in a window it never split by side, has no stated side. Premium with no stated side is not drawn as a node. Lean is shown as a range from the sided premium alone. Beside it is the share of flagged premium with a stated side.",
           "Every layer is ranked by premium, largest at the top; Other, No sector and the unread or pending sector buckets sit at the bottom whatever their size.",
           "Sphere area and band width are premium in dollars, on one scale for every node and band, and every layer carries the same total. Motion has two classes. Live motion is an arrival or your hand: a flare marks a window that reached this page while it was open, a band carries light only for premium that arrived in the last five minutes, ranks glide when new data reorders them, and the view moves only while you drag it. Ambient is ambient motion, not data: light runs along every band at a pace set by its size, spheres breathe and the view sways, and none of it is a trade. Ambient starts on after the close and stays as you leave it.",
           "Sectors come from the nightly universe; index products such as SPX and VIX are Index options, SPY, QQQ, IWM and DIA are Index funds, and any other name the universe does not carry is drawn under No sector. Expiry is counted in calendar days from the window's own US session date.",
@@ -419,21 +421,23 @@
     }
     paintPill();
 
+    function leanText() {
+      const c = M && M.cover;
+      return c ? "bullish " + band(c.bullLo, c.bullHi) + " and bearish " + band(c.bearLo, c.bearHi) + " of " + money(c.flagged) + " flagged, with " + pct(c.share) + " of it sided" : "not stated";
+    }
+
     function sentence() {
       if (!M || !M.windows) return "Flow network: " + (S.st && S.st.reason ? S.st.reason : "no flagged windows to draw.");
       const top = M.top.slice(0, 3).map((r) => r.t + ", " + r.kind.toLowerCase() + ", " + money(r.v) + (r.sector ? ", " + r.sector : "")).join("; ");
-      const t = M.total;
-      return "Flow network of " + count(M.windows) + " flagged " + plural(M.windows, "window", "windows") + " carrying " + money(t) +
-        " of premium. Largest paths: " + top + ". By the usual convention " + pct(M.lean.bull / t) + " of it leans bullish, " +
-        pct(M.lean.bear / t) + " bearish, and " + pct(M.lean.nx / t) + " is unsided.";
+      return "Flow network of " + count(M.windows) + " flagged " + plural(M.windows, "window", "windows") + " carrying " + money(M.total) +
+        " of sided premium. Largest paths: " + top + ". By the usual convention the lean is " + leanText() + ".";
     }
 
     function paintLede() {
       const bits = ["Where flagged option premium is flowing: from the sector, through the side of the quote it met and the name, to its " + (mode === "lean" ? "lean" : "expiry") +
         ", each layer ranked by premium, largest " + (VERT ? "first" : "at the top") + ", leftover buckets last. "];
       if (M && M.windows) {
-        bits.push(h("b", null, money(M.total)), " across " + count(M.windows) + " " + plural(M.windows, "window", "windows") + ", ",
-          h("b", null, pct(M.lean.bull / M.total)), " leaning bullish and ", h("b", null, pct(M.lean.bear / M.total)), " bearish by convention. ");
+        bits.push(h("b", null, money(M.total)), " of sided premium in " + count(M.windows) + " " + plural(M.windows, "window", "windows") + ", " + leanText() + ", by convention. ");
       }
       bits.push(h("span", { class: "fn-lede-x" }, "The vendor's flagged alerts, not every execution."));
       lede.replaceChildren(...bits);
@@ -496,7 +500,6 @@
       legend.replaceChildren(...[
         k("up", "is-up", "Bullish lean: ask-side calls, bid-side puts"),
         k("down", "is-down", "Bearish lean: bid-side calls, ask-side puts"),
-        k("flat", "is-nx", "Unsided"),
         h("span", { class: "ui-key fn-k is-slate" }, h("i", { class: "fn-dot" }), "Other, No sector"),
         h("span", { class: "ui-key fn-k is-note" }, "Sphere area and band width are premium in USD, one scale throughout; every layer carries the same total" + (still ? "" : AMB ? "; a flare marks a window that arrived while you watched" : "; light runs only for premium that arrived in the last five minutes, and a flare marks a window that arrived while you watched") + ". Drag to turn; " + (matchMedia("(pointer: coarse)").matches ? "double tap" : "double click") + " to recentre"),
         AMB && !still ? h("span", { class: "ui-key fn-k is-amb" }, "ambient motion, not data: pulses show a band's size, not individual trades") : null,
@@ -1055,10 +1058,10 @@
     }
     const contracts = (d) => (d.contracts ? count(d.contracts) + " " + plural(d.contracts, "contract", "contracts") : null);
     function hitLabel(d) {
-      const lean = d.v ? " Lean by convention: " + pct(d.bull / d.v) + " bullish, " + pct(d.bear / d.v) + " bearish, " + pct(d.nx / d.v) + " unsided." : "";
+      const lean = d.v ? " Lean by convention among its sided premium: " + pct(d.bull / d.v) + " bullish, " + pct(d.bear / d.v) + " bearish." : "";
       const what = d.layer === 2 && d.ticker ? "Rank " + d.pos + ", " + d.ticker + (d.sec ? ", " + d.sec : "") : d.label + (d.members && d.members.length ? " (" + d.members.slice(0, 8).join(", ") + (d.members.length > 8 ? ", and more" : "") + ")" : "");
       const ct = contracts(d);
-      return what + ": " + money(d.v) + ", " + pct(d.share) + " of flagged premium, " + count(d.windows) + " " + plural(d.windows, "window", "windows") + (ct ? ", " + ct : "") + "." + lean + (d.ticker ? " Opens the " + d.ticker + " page." : "");
+      return what + ": " + money(d.v) + ", " + pct(d.share) + " of sided premium, " + count(d.windows) + " " + plural(d.windows, "window", "windows") + (ct ? ", " + ct : "") + "." + lean + (d.ticker ? " Opens the " + d.ticker + " page." : "");
     }
 
     function buildHits() {
@@ -1166,8 +1169,8 @@
       let inV = 0, outV = 0;
       for (const e of n.inn) inV += e.v;
       for (const e of n.out) outV += e.v;
-      const lt = d.bull + d.bear + d.nx;
-      const lean = lt > 0 ? " " + MID + " ▲ " + pct(d.bull / lt) + " ▼ " + pct(d.bear / lt) + " – " + pct(d.nx / lt) : "";
+      const lt = d.bull + d.bear;
+      const lean = lt > 0 ? " " + MID + " ▲ " + pct(d.bull / lt) + " ▼ " + pct(d.bear / lt) : "";
       const rest = MID + " " + money(d.v) + " " + MID + " " + pct(d.share) + " of " + money(M.total) + (inV ? " " + MID + " in " + money(inV) : "") + (outV ? " " + MID + " out " + money(outV) : "") + lean;
       const c = chip([{ lh: 16, runs: [d.pos ? { t: String(d.pos), f: "500 11.5px", c: "rgba(235,235,245,0.5)" } : null, { t: d.label, f: "600 12.5px", c: "rgba(245,245,247,0.97)" }, { t: rest, f: "400 12.5px", c: "rgba(235,235,245,0.7)" }].filter(Boolean) }], { dpr, ff: FF, bg: true, padX: 10, h: 24 });
       if (c.w <= W - 28) READ = c;
@@ -1176,12 +1179,12 @@
       tipId = id;
       if (!id) { tip.hidden = true; return; }
       const d = N.get(id).d;
-      const lean = d.v ? [["up", pct(d.bull / d.v)], ["down", pct(d.bear / d.v)], ["flat", pct(d.nx / d.v)]] : [];
+      const lean = d.v ? [["up", pct(d.bull / d.v)], ["down", pct(d.bear / d.v)]] : [];
       const ct = contracts(d);
       tip.replaceChildren(...[
         h("b", null, (d.pos ? d.pos + " " + MID + " " : "") + (d.ticker || d.label)),
         h("span", null, (d.ticker ? (d.sec || "No sector") + " " + MID + " " : d.full && d.full !== d.label ? d.full + " " + MID + " " : "") + count(d.windows) + " " + plural(d.windows, "window", "windows")),
-        h("span", { class: "fn-tip-v" }, h("strong", null, money(d.v)), " " + pct(d.share) + " of flagged premium"),
+        h("span", { class: "fn-tip-v" }, h("strong", null, money(d.v)), " " + pct(d.share) + " of sided premium"),
         ct ? h("span", { class: "fn-tip-c" }, ct) : null,
         d.members && d.members.length ? h("span", null, d.members.slice(0, 6).join(", ") + (d.members.length > 6 ? " and " + (d.members.length - 6) + " more" : "")) : null,
         lean.length ? h("span", { class: "fn-tip-l" }, lean.map(([g, v]) => h("i", { "data-g": g }, UI.glyph(g), v))) : null,

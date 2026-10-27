@@ -9,7 +9,7 @@
   const OWNER = "now-popout";
   const DASH = "\u2014";
   const SIDE = { call: "Call", put: "Put" };
-  const LEAN = { bullish: "Bullish", bearish: "Bearish", unsided: "Unsided" };
+  const LEAN = { bullish: "Bullish", bearish: "Bearish", nosd: "Side not stated" };
   const HEAD = [["Ticker", "pw-c-t", ""], ["Side", "pw-c-s", ""], ["Strike", "pw-c-k pw-num", ""], ["Expiry", "pw-c-e", ""], ["Premium", "pw-c-p pw-num", ""], ["Lean", "pw-c-l", ""], ["TRT", "pw-c-m pw-num", "Start of the window, Turkey time (TRT)"]];
   const CLOCK = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Istanbul", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   const YEAR = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Istanbul", year: "numeric" });
@@ -77,7 +77,7 @@
     if (!side) return { key: null, why: "The window carries no call or put, so it has no lean." };
     const x = window.FlowsUI.F.askShare([r]);
     if (x.share === null) return { key: null, why: "The window carries no premium split into ask and bid, so it has no lean." };
-    if (x.side !== "ask" && x.side !== "bid") return { key: "unsided", why: "" };
+    if (x.side !== "ask" && x.side !== "bid") return { key: "nosd", why: "" };
     return { key: (side === "call") === (x.side === "ask") ? "bullish" : "bearish", why: "" };
   }
 
