@@ -129,15 +129,15 @@ async function battery(leg, section) {
     const notes = [];
     const stages = { run: async (id, fn, onError) => { try { return await fn(); } catch (e) { onError(e); return null; } }, detail: (d) => notes.push(d), skip: (id, why) => notes.push({ skipped: why }) };
     const ctx = { stages, vendor: vendorOf(), sessionDate: SESSION, generatedAt: AT, marketLegs: { extras: { calls: 1990 } } };
-    await section.runFlowlab(ctx, { env: { FLOWS_EXTRAS_CAP: "2000" }, put: async (k, v) => { puts.push(k); }, store: { flowalerts: { rows: ALERTS } }, pool: null });
+    await section.runFlowlabWith(ctx, { env: { FLOWS_EXTRAS_CAP: "2000" }, put: async (k, v) => { puts.push(k); }, store: { flowalerts: { rows: ALERTS } }, pool: null });
     need(notes[0] && notes[0].flCalls === 6 && notes[0].flSkipped === 1, "section: the extras remainder bounds the stage (" + JSON.stringify(notes[0]) + ")");
     need(puts.join() === "flowlab-roots,flowlab-venues,flowlab-screen,flowlab-corr", "section: published keys in order");
     const off = [];
-    await section.runFlowlab({ ...ctx, stages: { ...stages, skip: (id, why) => off.push([id, why]), run: async () => { throw new Error("must not run"); } } }, { env: { FLOWS_FLOWLAB_NIGHTLY: "off" } });
+    await section.runFlowlabWith({ ...ctx, stages: { ...stages, skip: (id, why) => off.push([id, why]), run: async () => { throw new Error("must not run"); } } }, { env: { FLOWS_FLOWLAB_NIGHTLY: "off" } });
     need(off.length === 1 && off[0][0] === "flowlab", "section: FLOWS_FLOWLAB_NIGHTLY=off skips the stage");
     const failed = [];
     const dead = { ...ctx, vendor: async () => { throw new Error("HTTP 503"); }, stages: { ...stages, detail: () => {} } };
-    await section.runFlowlab(dead, { env: {}, put: async (k) => failed.push(k), store: { flowalerts: null } });
+    await section.runFlowlabWith(dead, { env: {}, put: async (k) => failed.push(k), store: { flowalerts: null } });
     need(failed.join() === "flowlab-corr", "section: a dead feed writes only the off key and the stage does not throw");
   });
 

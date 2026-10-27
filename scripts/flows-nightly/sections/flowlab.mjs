@@ -41,7 +41,11 @@ export async function flowlabStage(ctx, deps = {}) {
   return { ...result, written, cap, at: now() };
 }
 
-export async function runFlowlab(ctx, deps = {}) {
+export async function runFlowlab(ctx) {
+  await runFlowlabWith(ctx, {});
+}
+
+export async function runFlowlabWith(ctx, deps) {
   const { stages } = ctx;
   const env = deps.env || process.env;
   if (!nightlyOn(env)) {
