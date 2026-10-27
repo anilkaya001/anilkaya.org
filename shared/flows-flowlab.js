@@ -664,6 +664,35 @@ export function reduceLegs(response, ctx = {}) {
   return { ok: true, x: { legs, confirmed: wanted !== null && legs.some((l) => l.c === wanted), dropped } };
 }
 
+export function reduceRecent(response) {
+  const list = rowsIn(response);
+  if (list === null) return { ok: false, why: "unshaped" };
+  if (list.length === 0) return { ok: false, why: "empty" };
+  const rows = [];
+  let dropped = 0;
+  for (const row of list) {
+    if (!isObj(row) || typeof row.expiry !== "string" || !DAY_RE.test(row.expiry)) { dropped++; continue; }
+    const cents = {};
+    let ok = true;
+    for (const [n, key] of [["callC", "call_premium"], ["putC", "put_premium"], ["callAskC", "call_premium_ask_side"], ["callBidC", "call_premium_bid_side"], ["putAskC", "put_premium_ask_side"], ["putBidC", "put_premium_bid_side"], ["callOtmC", "call_otm_premium"], ["putOtmC", "put_otm_premium"]]) {
+      const v = row[key] === undefined || row[key] === null ? null : centsOf(row[key], { signed: true });
+      if (row[key] !== undefined && row[key] !== null && v === null) { ok = false; break; }
+      cents[n] = v === null ? null : v.cents;
+    }
+    const counts = {};
+    for (const [n, key] of [["callV", "call_volume"], ["putV", "put_volume"], ["callTr", "call_trades"], ["putTr", "put_trades"]]) {
+      const g = volumeField(row, key);
+      if (!g.ok) { ok = false; break; }
+      counts[n] = g.value;
+    }
+    if (!ok) { dropped++; continue; }
+    rows.push({ e: row.expiry, ...cents, ...counts, netC: cents.callC !== null && cents.putC !== null ? cents.callC - cents.putC : null });
+  }
+  if (!rows.length) return typeFail("expiry");
+  rows.sort((a, b) => (a.e < b.e ? -1 : a.e > b.e ? 1 : 0));
+  return { ok: true, x: { rows, dropped } };
+}
+
 const GREEK_FIELDS = Object.freeze([["dirDelta", "dir_delta_flow"], ["dirVega", "dir_vega_flow"], ["totDelta", "total_delta_flow"], ["totVega", "total_vega_flow"], ["otmDirDelta", "otm_dir_delta_flow"], ["otmDirVega", "otm_dir_vega_flow"]]);
 
 const DECIMAL = /^-?\d+(?:\.\d+)?$/;

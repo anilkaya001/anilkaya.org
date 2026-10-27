@@ -95,7 +95,7 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
     "/api/stock/{ticker}/volatility/term-structure/distribution", "/api/volatility/option-sentiment/top"],
     "the five live-only operations the nightly reads, and the volatility context the reading wants");
 
-  const files = spawnSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "worker.js", "shared", "scripts"], { cwd: ROOT, encoding: "utf8" }).stdout
+  const files = spawnSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "worker.js", "shared", "scripts", "server/flowlab.js"], { cwd: ROOT, encoding: "utf8" }).stdout
     .split("\n").filter((f) => /\.m?js$/.test(f))
     .filter((f) => !/fake|live-day\.mjs$|flows-ws-probe\.mjs$|ops-probe\.mjs$|launch-readiness\.mjs$/.test(f));
   ok(files.length > 40 && files.includes("worker.js") && files.includes("scripts/flows-pipeline.mjs") && files.includes("scripts/flows-probe.mjs"),
@@ -164,7 +164,7 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
   deep(list.liveOnly.filter((op) => registered.has(op)).sort(), OPS.filter((e) => e.liveOnly).map((e) => e.op).sort(),
     "the probe list's liveOnly and the registry's agree on every registered operation; the volatility context is probed and not yet read");
 
-  const onDemandFiles = new Set(["worker.js", "shared/flows-live-worker.js"]);
+  const onDemandFiles = new Set(["worker.js", "shared/flows-live-worker.js", "server/flowlab.js"]);
   const onDemand = new Set(dossierIds);
   for (const [id, where] of refs) if (where.some((f) => onDemandFiles.has(f))) onDemand.add(id);
   deep(OPS.filter((e) => e.limiter === "ondemand").map((e) => e.id).sort(), [...onDemand].sort(),
