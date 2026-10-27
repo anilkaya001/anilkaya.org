@@ -24,6 +24,7 @@ function fitSoft(payload) {
 export const CARD_X_SHED = Object.freeze([
   ["dx.parts", (p) => { if (!hasLiveParts(p.dx)) return false; p.dx = stubSection(p.dx, "dx"); return true; }],
   ["vx.parts", (p) => { if (!hasLiveParts(p.vx)) return false; p.vx = stubSection(p.vx, "vx"); return true; }],
+  ["ps.parts", (p) => { if (!hasLiveParts(p.ps)) return false; p.ps = stubSection(p.ps, "ps"); return true; }],
   ["insiders.dots", (p) => { if (p.insiders && p.insiders.dots) p.insiders.dots = p.insiders.dots.slice(-10); }],
   ["earnings.events", (p) => { if (p.earnings && p.earnings.events) p.earnings.events = p.earnings.events.slice(0, 8); }],
   ["short.volume.path", (p) => { if (p.short && p.short.volume) delete p.short.volume.path; }],

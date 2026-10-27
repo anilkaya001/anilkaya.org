@@ -51,6 +51,7 @@ export const ERRORS = Object.freeze({
   oracle_off: entry(404, "The Neuron's view is off"),
   ops_off: entry(404, "The owner operations view is off"),
   payload_too_large: entry(413, "Payload is too large"),
+  positioning_off: entry(404, "Positioning is off"),
   ready_off: entry(404, "The readiness check is off"),
   rate_limited: entry(429, "Too many requests; try again shortly."),
   reset_required: entry(409, "Learning progress was reset; refresh synchronized state and try again"),

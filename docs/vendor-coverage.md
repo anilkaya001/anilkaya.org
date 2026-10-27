@@ -23,7 +23,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/etfs/{ticker}/in-outflow` | read | etf-in-outflow | any | observed | whole body | read by the code | nightly | read |
 | `/api/etfs/{ticker}/info` | not added | - | any | not observed | an ETF's identity, assets, expense ratio | stated for ETFs only | fund cards (nine funds) | no: an ETF-only read, a follow-up for the fund cards |
 | `/api/etfs/{ticker}/weights` | not added | - | any | not observed | an ETF's sector and country weights | stated for ETFs only | fund cards | no: an ETF-only read, a follow-up for the fund cards |
-| `/api/insider/{ticker}` | not added | - | any | not observed | the names of a company's insiders | third-party names | none | no: names of people; the insider batch and `insider-flow` already carry the flow |
+| `/api/insider/{ticker}` | read | insiders | any | not observed | the names of a company's insiders | third-party names | none | no: names of people; the insider batch and `insider-flow` already carry the flow |
 | `/api/insider/{ticker}/ticker-flow` | read | insider-flow | any | observed | date, buy_sell, transactions, uniq_insiders, volume, ... | read by the code | dossier | read |
 | `/api/institution/{ticker}/ownership` | read | ownership | any | observed | name, short_name, units, units_changed, historical_units, ... | read by the code | dossier | read |
 | `/api/lit-flow/{ticker}` | probe only | - | any | not observed | lit-exchange stock prints | stated | none | no: print-level and heavy; asked weekly as an entitlement question (tier 2) |
@@ -34,11 +34,11 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/seasonality/{ticker}/monthly` | not added | - | any | not observed | average and median change, share of positive closes and years by calendar month | share stated; the change fields are described as per day for the month | price packet | no: each month has 10 to 20 years, so a 60 per cent share is under one standard error from a coin; the change wording is ambiguous |
 | `/api/seasonality/{ticker}/year-month` | not added | - | any | not observed | open, close and change for every past month | open and close stated as prices | price packet | no: derivable from the daily candles the nightly already holds |
 | `/api/shorts/{ticker}/data` | read | shorts-data | any | observed | whole body | read by the code | nightly | read |
-| `/api/shorts/{ticker}/ftds` | not added | - | any | not observed | failures to deliver per settlement date: shares and price | quantity stated in shares; price withheld | positioning packet | no: published twice a month with a lag of weeks, a squeeze narrative and not a desk input; first to add if wanted |
+| `/api/shorts/{ticker}/ftds` | read | ftds | any | not observed | failures to deliver per settlement date: shares and price | quantity stated in shares; price withheld | positioning packet | no: published twice a month with a lag of weeks, a squeeze narrative and not a desk input; first to add if wanted |
 | `/api/shorts/{ticker}/interest-float` | deprecated | - | any | not observed | short interest and float (version 1) | - | - | deprecated: version 2 is read |
 | `/api/shorts/{ticker}/interest-float/v2` | read | short-interest | any | observed | market_date, short_interest, total_float, days_to_cover | read by the code | dossier | read |
 | `/api/shorts/{ticker}/volume-and-ratio` | read | shorts-volume | any | observed | whole body | read by the code | nightly | read |
-| `/api/shorts/{ticker}/volumes-by-exchange` | not added | - | any | not observed | short volume by exchange | shares stated | positioning packet | no: `shorts-volume` already carries the ratio |
+| `/api/shorts/{ticker}/volumes-by-exchange` | read | short-venues | any | not observed | short volume by exchange | shares stated | positioning packet | no: `shorts-volume` already carries the ratio |
 | `/api/stock/{ticker}/atm-chains` | not added | - | any | not observed | at-the-money chains for expirations the caller names | stated | options | no: needs `expirations[]` and duplicates `option-contracts` |
 | `/api/stock/{ticker}/balance-sheets` | not added | - | any | not observed | balance sheet statements | stated | fundamentals packet | no: duplicate of `financials` |
 | `/api/stock/{ticker}/cash-flows` | not added | - | any | not observed | cash flow statements | stated | fundamentals packet | no: duplicate of `financials` |
@@ -62,7 +62,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/stock/{ticker}/historical-risk-reversal-skew` | read | rr-skew | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/income-statements` | not added | - | any | not observed | income statements | stated | fundamentals packet | no: duplicate of `financials` |
 | `/api/stock/{ticker}/info` | read | info | any | observed | full_name, sector, issue_type, marketcap, avg30_volume, ... | read by the code | Worker, dossier, engines | read |
-| `/api/stock/{ticker}/insider-buy-sells` | not added | - | any | not observed | insider purchases and sales with notional | notional stated as value | positioning packet | no: duplicate of the insider batch and `insider-flow` |
+| `/api/stock/{ticker}/insider-buy-sells` | read | insider-bs | any | not observed | insider purchases and sales with notional | notional stated as value | positioning packet | no: duplicate of the insider batch and `insider-flow` |
 | `/api/stock/{ticker}/interpolated-iv` | added | interpolated-iv | any | not observed | implied volatility, implied move and 1-year percentile for each tenor | days and percentile stated; volatility and implied move withheld | peers packet | added: `vx.ivp`, read every night; overlaps the screener's 30-day `iv_percentile_1y`, so its unique value is the other tenors |
 | `/api/stock/{ticker}/iv-rank` | read | iv-rank | any | observed | whole body | read by the code | engines, nightly | read |
 | `/api/stock/{ticker}/max-pain` | read | max-pain | any | observed | whole body | read by the code | nightly | read |
@@ -146,3 +146,31 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 - Bytes: `dx` is held to 24 KiB and `vx` to 8 KiB; a deep name's card-x grows by about 6 KiB in the dry run (53.5 to 59.6 KB) and is shed (as stubs) before any volatility or flow section if it nears 100 KiB.
 - The dossier's on-demand fan-out stays at nine calls and charges a member token per call; nothing here widens it. A fresh nightly part is a cache hit, which frees one of the nine.
 - Third-party text is cleaned with the dossier sanitiser before it is stored.
+
+
+## Positioning package
+
+| Operation | Status | Registry id | Plan | Wire | Returns | Unit status | Surface | Decision |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `/api/institutions` | read | inst-list | Advanced | not observed | the largest 13F filers with their book totals | dollar totals stated as strings | positioning page | read |
+| `/api/institutions/latest_filings` | read | inst-latest | Advanced | not observed | the newest 13F filings | dates stated | positioning page | read |
+| `/api/institution/{name}/holdings` | read | inst-holdings | Advanced | not observed | one filer's holdings | units and dollars stated | positioning page | read |
+| `/api/institution/{name}/activity` | read | inst-activity-v1 | Advanced | not observed | one filer's changes, deprecated form | units stated | positioning page, fallback only | read |
+| `/api/institution/{name}/activity/v2` | read | inst-activity | Advanced | not observed | one filer's changes by report date | units stated, price as a string | positioning page | read |
+| `/api/institution/{name}/sectors` | read | inst-sectors | Advanced | not observed | one filer's book by sector and quarter | dollars and counts stated | positioning page | read |
+| `/api/insider/{sector}/sector-flow` | read | insider-sector | Advanced | not observed | insiders buying and selling by sector and day | counts stated, dollars withheld | positioning page | read |
+| `/api/congress/unusual-trades` | read | cg-unusual | Premium | not observed | disclosures the feed flagged | band stated, tags documented | political layers | read |
+| `/api/congress/unusual-trades/by-tickers` | read | cg-unusual-tickers | Premium | not observed | flagged disclosures for chosen names | band stated | political layers | read |
+| `/api/congress/unusual-trades/stats` | read | cg-unusual-stats | Premium | not observed | groupings of flagged disclosures | key names not yet observed | political layers | read |
+| `/api/congress/unusual-trades/chart-data` | read | cg-unusual-chart | Premium | not observed | prices at trade and now for flagged disclosures | prices stated | political layers | read |
+| `/api/congress/late-reports` | read | cg-late | Advanced | not observed | disclosures filed late | band stated | political layers | read |
+| `/api/congress/politicians` | read | cg-politicians | Advanced | not observed | the members who traded lately | names reduced to initials | political layers | read |
+| `/api/congress/congress-trader` | read | cg-trader | Advanced | not observed | one member's disclosures over a year | band stated | political layers | read |
+| `/api/politician-portfolios/disclosures` | read | pp-disclosures | Enterprise | not observed | disclosure filings by member and year | dates stated | political layers | read |
+| `/api/politician-portfolios/people` | read | pp-people | Enterprise | not observed | members with portfolios | names reduced to initials | political layers | read |
+| `/api/politician-portfolios/recent_trades` | read | pp-recent | Enterprise | not observed | recent disclosed trades with a late filter | band stated | political layers | read |
+| `/api/politician-portfolios/{politician_id}` | read | pp-portfolio | Enterprise | not observed | one member's holdings | counts only | political layers | read |
+| `/api/politics/politician/trades` | read | pol-trades | Enterprise | not observed | disclosed trades with a late filter | band stated | political layers | read |
+| `/api/politics/fec/candidates` | read | fec-candidates | Enterprise | not observed | campaign candidates | count only, no names | political layers | read |
+| `/api/politics/fec/companies` | read | fec-companies | Advanced | not observed | company committee money and lobbying | dollars stated | political layers | read |
+| `/api/politics/fec/contributions` | read | fec-contributions | Enterprise | not observed | committee money to candidates | sums stated, no names | political layers | read |

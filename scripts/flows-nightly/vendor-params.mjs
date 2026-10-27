@@ -46,6 +46,7 @@ export const CALL_COST = Object.freeze({
   sigmaLedger: 240,
   ivp: 1,
   slow: 1500,
+  positioning: 720,
   misc: 67,
 });
 
@@ -69,6 +70,7 @@ export function callModel({ enriched = 0, deep = 0, cross = 0, dossiers = 0, ear
     sigmaLedger: cost.sigmaLedger,
     ivp: cost.ivp * carded,
     slow: cost.slow,
+    positioning: cost.positioning,
     misc: cost.misc,
   };
   return { legs, total: Object.values(legs).reduce((a, b) => a + b, 0) };
