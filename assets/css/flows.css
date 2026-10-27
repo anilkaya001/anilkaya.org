@@ -8,7 +8,7 @@
   --font-ui: var(--font-figure);
 
   --ground-base: #07090e;
-  --ground-sky: url("/assets/img/atmosphere.svg?v=404") center / cover no-repeat;
+  --ground-sky: url("/assets/img/atmosphere.svg?v=408") center / cover no-repeat;
   --aur-1: rgba(64, 120, 255, 0.16);
   --aur-2: rgba(150, 100, 255, 0.11);
   --aur-3: rgba(60, 200, 240, 0.07);
@@ -874,6 +874,19 @@ a.ff-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 .fx-site a:hover { color: var(--label-1); background: var(--fill-3); }
 .fx-site a[aria-current] { color: var(--label-1); background: var(--glass-knob); box-shadow: var(--glass-knob-edge); }
 @media (pointer: coarse) { .fx-site a { min-height: 40px; } }
+@media (max-width: 1099.98px) {
+  .fx-mem { width: 44px; height: 44px; padding: 0; justify-content: center; border-radius: 50%; background: none; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; color: var(--accent-ink); }
+  .fx-mem .ui-g { font-size: 20px; }
+  .fx-mem .fx-search-l { display: none; }
+}
+.fm-act { display: inline-flex; align-items: center; gap: var(--sp-3); min-height: 36px; padding: 0 var(--sp-4); border: 0; border-radius: 10px; background: var(--fill-3); color: var(--label-1); font: var(--t-footnote); font-weight: 500; cursor: pointer; }
+.fm-act .ui-g { font-size: 15px; color: var(--accent-ink); }
+.fm-act:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+.ui-mod-h>.fm-act { min-height: 0; height: 32px; }
+@media (any-pointer: coarse) { .ui-mod-h>.fm-act { height: 44px; } .bd-mod .ui-mod-h:has(>.fm-act) { min-height: 44px; } }
+@media (any-pointer: coarse) { .fm-act { min-height: 44px; } }
+.fx-mem .fx-search-l { min-width: 0; }
+.fx-mem[aria-busy] { cursor: progress; opacity: 0.7; }
 .fx-who { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; }
 .fx-avatar {
   display: inline-grid;
@@ -1169,7 +1182,7 @@ span.ui-fresh, span.ui-fresh:hover { color: var(--label-2); cursor: default; bac
   font: var(--t-caption2);
 }
 @media (pointer: coarse) { .flows-body .fx-bar .ak-dock-tab-k { display: none; } }
-@media (max-width: 767.98px) { .flows-body .fx-bar .ak-dock-tab { display: none; } }
+@media (max-width: 767.98px) { .flows-body .fx-bar .ak-dock-tab, .fx-bar:has(#fxGate) .fx-mem { display: none; } }
 .ak-dock { position: fixed; inset: calc(var(--bar-h) + var(--safe-t)) 0 0 auto; z-index: 105; pointer-events: none; }
 .ak-dock-scrim { display: none; position: fixed; inset: 0; pointer-events: auto; background: var(--scrim); }
 .ak-dock-panel {
@@ -1291,6 +1304,8 @@ span.ui-fresh, span.ui-fresh:hover { color: var(--label-2); cursor: default; bac
   .ui-mod-h > .ui-mod-t { grid-column: 1; grid-row: 1; }
   .ui-mod-h > .ui-mod-sp { grid-column: 2; grid-row: 1; }
   .ui-mod-h > .ui-info { grid-column: 3; grid-row: 1; }
+  .ui-mod-h>.fm-act { grid-column: 2; grid-row: 1; justify-self: end; }
+  .ui-mod-h:has(>.fm-act) > .ui-mod-sp { display: none; }
   .ui-mod-h > .ui-seg { grid-column: 1 / -1; grid-row: 2; width: 100%; }
   .ui-mod-h > :is(.ui-calib, .dk-rank) { grid-column: 1 / -1; justify-self: start; }
 }
@@ -1670,7 +1685,10 @@ a.ui-row:hover { background: var(--fill-4); }
 .ui-exp-i { min-height: 36px; padding: 0 12px; border: 0; border-radius: 8px; background: none; color: var(--label-1); font: var(--t-footnote); text-align: left; cursor: pointer; }
 .ui-exp-i:hover { background: var(--fill-4); }
 .ui-exp-n { padding: 8px 12px; color: var(--label-2); font: var(--t-caption); }
+.ui-exp-i[aria-disabled="true"] { opacity: 0.5; cursor: default; }
+.ui-exp[data-member] .ui-exp-m { min-width: 208px; max-width: min(320px, calc(100vw - 32px)); background: var(--mat-opaque); }
 @media (pointer: coarse) { .ui-exp-i { min-height: 44px; } }
+@media (any-pointer: coarse) { .ui-exp[data-member] .ui-exp-b, .ui-exp[data-member] .ui-exp-i { min-height: 44px; } }
 
 .ui-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-3); }
 .ui-tile { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; padding: var(--sp-4); border-radius: var(--r-md); background: var(--fill-4); }

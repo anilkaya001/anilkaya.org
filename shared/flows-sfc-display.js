@@ -64,6 +64,88 @@ export function moneyShort(cents) {
   return `${sign}$${dollars.toFixed(0)}`;
 }
 
+const floorDiv = (n, d) => n / d - (n % d !== 0n && (n < 0n) !== (d < 0n) ? 1n : 0n);
+
+const ceilDiv = (n, d) => -floorDiv(-n, d);
+
+const TIERS = Object.freeze([
+  Object.freeze({ min: 0n, step: 100n, decimals: 0, suffix: "" }),
+  Object.freeze({ min: 100000n, step: 10000n, decimals: 1, suffix: "k" }),
+  Object.freeze({ min: 100000000n, step: 1000000n, decimals: 2, suffix: "M" }),
+  Object.freeze({ min: 100000000000n, step: 1000000000n, decimals: 2, suffix: "B" }),
+]);
+
+function outwards(cents, direction) {
+  if (!Number.isSafeInteger(cents)) throw new RangeError("moneyOut takes a safe integer");
+  if (direction !== "down" && direction !== "up") throw new RangeError("moneyOut rounds down or up");
+  const c = BigInt(cents);
+  const abs = c < 0n ? -c : c;
+  let i = 0;
+  while (i + 1 < TIERS.length && abs >= TIERS[i + 1].min) i += 1;
+  const at = (k) => (direction === "down" ? floorDiv(c, TIERS[k].step) : ceilDiv(c, TIERS[k].step));
+  let count = at(i);
+  let width = count < 0n ? -count : count;
+  while (i + 1 < TIERS.length && width * TIERS[i].step >= TIERS[i + 1].min) {
+    i += 1;
+    count = at(i);
+    width = count < 0n ? -count : count;
+  }
+  return { count, width, tier: TIERS[i] };
+}
+
+export function moneyOut(cents, direction, { plus = false } = {}) {
+  const { count, width, tier } = outwards(cents, direction);
+  if (count === 0n) return "$0";
+  const digits = String(width).padStart(tier.decimals + 1, "0");
+  const whole = tier.decimals ? digits.slice(0, -tier.decimals) : digits;
+  const frac = tier.decimals ? "." + digits.slice(-tier.decimals) : "";
+  return (count < 0n ? MINUS : plus ? "+" : "") + "$" + group(whole) + frac + tier.suffix;
+}
+
+export function printedSign(cents, direction) {
+  const { count } = outwards(cents, direction);
+  return count > 0n ? 1 : count < 0n ? -1 : 0;
+}
+
+export function netProof(net, unknown) {
+  if (!Number.isSafeInteger(net) || !Number.isSafeInteger(unknown) || unknown < 0) throw new RangeError("netProof takes safe integer cents and a non-negative side unknown");
+  if (unknown === 0) return net > 0 ? "up" : net < 0 ? "down" : "even";
+  if (printedSign(net - unknown, "down") > 0) return "up";
+  if (printedSign(net + unknown, "up") < 0) return "down";
+  return "open";
+}
+
+const tenthsDown = (n, t) => (n * 1000n) / t;
+
+const tenthsUp = (n, t) => (n * 1000n + t - 1n) / t;
+
+const tenths = (x, up) => {
+  if (x >= 490n && x <= 510n) return x % 10n === 0n ? String(x / 10n) : `${x / 10n}.${x % 10n}`;
+  return String(up ? (x + 9n) / 10n : x / 10n);
+};
+
+const sayBound = (text) => (text.startsWith(">") ? "over " + text.slice(1) : text.startsWith("<") ? "under " + text.slice(1) : text);
+
+export function leanBounds(askCents, bidCents, unknownCents) {
+  for (const v of [askCents, bidCents, unknownCents]) if (!Number.isSafeInteger(v) || v < 0) throw new RangeError("leanBounds takes safe non-negative integers");
+  const A = BigInt(askCents);
+  const B = BigInt(bidCents);
+  const U = BigInt(unknownCents);
+  const T = A + B + U;
+  if (T === 0n) return null;
+  if (U === 0n) {
+    if (2n * A === T) return { text: "50%", lo: "50", hi: "50", say: "50%", single: true };
+    const i = (200n * A + T) / (2n * T);
+    const text = i !== 50n ? `${i}%` : 2n * A > T ? ">50%" : "<50%";
+    return { text, lo: text.slice(0, -1), hi: text.slice(0, -1), say: sayBound(text), single: true };
+  }
+  const lo10 = tenthsDown(A, T);
+  const hi10 = tenthsUp(A + U, T);
+  const lo = 2n * A > T && lo10 === 500n ? ">50" : tenths(lo10, false);
+  const hi = 2n * B > T && hi10 === 500n ? "<50" : tenths(hi10, true);
+  return { text: `${lo}–${hi}%`, lo, hi, say: `${sayBound(lo)} to ${sayBound(hi)}%`, single: false };
+}
+
 export function scaleText(cents) {
   const d = Math.abs(cents) / 100;
   const pick = (v, suffix) => "$" + Number(v.toPrecision(3)) + suffix;

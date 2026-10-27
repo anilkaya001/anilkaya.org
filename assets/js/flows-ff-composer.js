@@ -42,7 +42,7 @@
 
     function gridIndex(x, unit) {
       if (!isNum(x) || !units[unit]) return null;
-      var g = round(Number((x / units[unit].xStep).toPrecision(12)));
+      var g = round(Math.round(x / units[unit].xStep * 1e9) / 1e9);
       return g === 0 ? 0 : g;
     }
     function fromGrid(g, unit) { return unscaled(g * gridUnits(unit), unit); }

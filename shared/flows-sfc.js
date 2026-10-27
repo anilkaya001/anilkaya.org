@@ -142,10 +142,86 @@ export function sessionOfWindow(row) {
   return at === null ? null : easternDay(at);
 }
 
+export const newBookState = () => ({ books: new Map(), counts: emptyCounts() });
+
+export function contributionOf(row, { deltaMicro = deltaMicroOf, session = null, sessionOf = sessionOfWindow } = {}) {
+  if (session !== null) {
+    const day = sessionOf(row);
+    if (day !== null && day !== session) return { kind: "offSession" };
+  }
+  const right = row.cp === "C" ? "C" : row.cp === "P" ? "P" : null;
+  if (right === null) return { kind: "noRight" };
+  const entry = windowEntry(row);
+  const rounded = entry.rounded === true;
+  if (!entry.ok) return entry.why === "sides" ? { kind: "invalid", rounded, invalidCents: entry.T } : { kind: "unreadable", rounded };
+  if (entry.T === 0) return { kind: "zero", rounded };
+  const c = {
+    kind: "booked", rounded, name: row.t, right, entry,
+    n: 1, T: entry.T, AC: 0, BC: 0, AP: 0, BP: 0, U: { btw: 0, cross: 0, leg: 0, ns: 0 }, sided: entry.A + entry.B,
+    covered: 0, sameDay: 0, noExposure: 0, noDelta: 0, X: 0n, Ub: 0n,
+  };
+  if (right === "C") { c.AC = entry.A; c.BC = entry.B; } else { c.AP = entry.A; c.BP = entry.B; }
+  if (entry.reason !== null) c.U[entry.reason] = entry.U;
+  if (session !== null && row.exp === session) c.sameDay = entry.T;
+  const size = row.size;
+  const price = centsOf(row.px);
+  if (!isInt(size) || size <= 0 || price === null || price.cents <= 0) { c.noExposure = 1; return c; }
+  const S = BigInt(price.cents);
+  const P = BigInt(entry.T);
+  const delta = deltaMicro(row);
+  if (delta === null || !Number.isInteger(delta) || Math.abs(delta) > MICRO) {
+    c.Ub = 100n * BigInt(size) * S;
+    c.noDelta = 1;
+    return c;
+  }
+  const d = BigInt(delta);
+  const dAbs = d < 0n ? -d : d;
+  c.X = rhaz(100n * BigInt(entry.A - entry.B) * BigInt(size) * d * S, P * BigInt(MICRO));
+  c.Ub = ceilDiv(100n * BigInt(entry.U) * BigInt(size) * dAbs * S, P * BigInt(MICRO));
+  c.covered = entry.A + entry.B;
+  return c;
+}
+
+export function applyContribution(state, c, sign, column) {
+  const { books, counts } = state;
+  const s = (v) => (sign === 1 ? v : 0 - v);
+  counts[c.kind] = plus(counts[c.kind], s(1));
+  if (c.rounded) counts.rounded = plus(counts.rounded, s(1));
+  if (c.kind === "invalid") counts.invalidCents = plus(counts.invalidCents, s(c.invalidCents));
+  if (c.kind !== "booked") return;
+  counts.noExposure = plus(counts.noExposure, s(c.noExposure));
+  counts.noDelta = plus(counts.noDelta, s(c.noDelta));
+  let book = books.get(c.name);
+  if (!book) {
+    if (sign !== 1) throw new RangeError("a window left a book that never held it");
+    book = newBook(c.name, column(c.name));
+    books.set(c.name, book);
+  }
+  book.n = plus(book.n, s(c.n));
+  book.T = plus(book.T, s(c.T));
+  book.AC = plus(book.AC, s(c.AC));
+  book.BC = plus(book.BC, s(c.BC));
+  book.AP = plus(book.AP, s(c.AP));
+  book.BP = plus(book.BP, s(c.BP));
+  for (const r of Object.keys(book.U)) book.U[r] = plus(book.U[r], s(c.U[r]));
+  book.sided = plus(book.sided, s(c.sided));
+  book.covered = plus(book.covered, s(c.covered));
+  book.sameDay = plus(book.sameDay, s(c.sameDay));
+  book.noExposure = plus(book.noExposure, s(c.noExposure));
+  book.X += sign === 1 ? c.X : -c.X;
+  book.Ub += sign === 1 ? c.Ub : -c.Ub;
+  if (book.n === 0) {
+    const clean = book.T === 0 && book.AC === 0 && book.BC === 0 && book.AP === 0 && book.BP === 0 && book.sided === 0 && book.covered === 0
+      && book.sameDay === 0 && book.noExposure === 0 && book.X === 0n && book.Ub === 0n && Object.values(book.U).every((v) => v === 0);
+    if (!clean) throw new RangeError("a book emptied of windows still holds figures");
+    books.delete(c.name);
+  }
+}
+
 export function bookWindows(rows, { column, deltaMicro = deltaMicroOf, session = null, sessionOf = sessionOfWindow, collect = false } = {}) {
-  const books = new Map();
+  const state = newBookState();
+  const { books, counts } = state;
   const accepted = [];
-  const counts = emptyCounts();
   const latest = new Map();
   const queue = [];
   for (const row of Array.isArray(rows) ? rows : []) {
@@ -163,46 +239,9 @@ export function bookWindows(rows, { column, deltaMicro = deltaMicroOf, session =
   }
   for (const item of queue) {
     const row = typeof item === "string" ? latest.get(item) : item;
-    if (session !== null) {
-      const day = sessionOf(row);
-      if (day !== null && day !== session) { counts.offSession += 1; continue; }
-    }
-    const right = row.cp === "C" ? "C" : row.cp === "P" ? "P" : null;
-    if (right === null) { counts.noRight += 1; continue; }
-    const entry = windowEntry(row);
-    if (entry.rounded) counts.rounded += 1;
-    if (!entry.ok) {
-      if (entry.why === "sides") { counts.invalid += 1; counts.invalidCents = plus(counts.invalidCents, entry.T); } else counts.unreadable += 1;
-      continue;
-    }
-    if (entry.T === 0) { counts.zero += 1; continue; }
-    const name = row.t;
-    if (!books.has(name)) books.set(name, newBook(name, column(name)));
-    const book = books.get(name);
-    book.n += 1;
-    counts.booked += 1;
-    if (collect) accepted.push({ row, entry, right });
-    book.T = plus(book.T, entry.T);
-    if (right === "C") { book.AC = plus(book.AC, entry.A); book.BC = plus(book.BC, entry.B); } else { book.AP = plus(book.AP, entry.A); book.BP = plus(book.BP, entry.B); }
-    if (entry.reason !== null) book.U[entry.reason] = plus(book.U[entry.reason], entry.U);
-    book.sided = plus(book.sided, entry.A + entry.B);
-    if (session !== null && row.exp === session) book.sameDay = plus(book.sameDay, entry.T);
-    const size = row.size;
-    const price = centsOf(row.px);
-    if (!isInt(size) || size <= 0 || price === null || price.cents <= 0) { book.noExposure += 1; counts.noExposure += 1; continue; }
-    const S = BigInt(price.cents);
-    const P = BigInt(entry.T);
-    const delta = deltaMicro(row);
-    if (delta === null || !Number.isInteger(delta) || Math.abs(delta) > MICRO) {
-      book.Ub += 100n * BigInt(size) * S;
-      counts.noDelta += 1;
-      continue;
-    }
-    const d = BigInt(delta);
-    const dAbs = d < 0n ? -d : d;
-    book.X += rhaz(100n * BigInt(entry.A - entry.B) * BigInt(size) * d * S, P * BigInt(MICRO));
-    book.Ub += ceilDiv(100n * BigInt(entry.U) * BigInt(size) * dAbs * S, P * BigInt(MICRO));
-    book.covered = plus(book.covered, entry.A + entry.B);
+    const c = contributionOf(row, { deltaMicro, session, sessionOf });
+    applyContribution(state, c, 1, column);
+    if (collect && c.kind === "booked") accepted.push({ row, entry: c.entry, right: c.right });
   }
   return { books, counts, accepted };
 }

@@ -6,7 +6,7 @@ import { leanRead } from "./flows-sides.js";
 import { periodPlan, trtStamp, dayLabel } from "./flows-sfc-time.js";
 import { sessionClose } from "./flows-freshness.js";
 import { readTides, sectorTides } from "./flows-sfc-tide.js";
-import { unitFor, cellText, formatUnits, exactDollars, moneyShort, roundGrid, caption, niceScale, scaleText, MINUS, DASH } from "./flows-sfc-display.js";
+import { unitFor, cellText, formatUnits, exactDollars, moneyShort, moneyOut, netProof, leanBounds, roundGrid, caption, niceScale, scaleText, MINUS, DASH } from "./flows-sfc-display.js";
 import { NO_OPEN_INTEREST } from "./flows-sfc-stock.js";
 import * as C from "./flows-sfc-copy.js";
 
@@ -60,17 +60,24 @@ function tideReason(scope, tides) {
   return "No sector tide in this scope.";
 }
 
-function scopeOutside(scope, columns, totals, tides) {
+function outsideColumns(columns, tides, aligner) {
+  if (!aligner) return columns;
+  const out = new Map(columns);
+  for (const [c, tide] of tides.sectors) out.set(c, aligner.column(c, tide.at));
+  return out;
+}
+
+function scopeOutside(scope, columns, totals, tides, aligner) {
   if (scope.kind === "all") {
     const sectors = new Map([...tides.sectors].map(([k, v]) => [k, { calls: safe(v.calls), puts: safe(v.puts) }]));
-    return outsideAll(columns, sectors);
+    return outsideAll(outsideColumns(columns, tides, aligner), sectors);
   }
   if (scope.kind === "sector") {
     const tide = SECTORS.includes(scope.sector) ? tides.sectors.get(scope.sector) : null;
-    return tide ? outsideOf({ calls: safe(tide.calls), puts: safe(tide.puts) }, totals) : null;
+    return tide ? outsideOf({ calls: safe(tide.calls), puts: safe(tide.puts) }, aligner ? aligner.column(scope.sector, tide.at) : totals) : null;
   }
   const tide = TIDE_ETFS.includes(scope.name) ? tides.etf.get(scope.name) : null;
-  return tide ? outsideOf({ calls: safe(tide.calls), puts: safe(tide.puts) }, totals) : null;
+  return tide ? outsideOf({ calls: safe(tide.calls), puts: safe(tide.puts) }, aligner ? aligner.name(scope.name, tide.at) : totals) : null;
 }
 
 function ledgerTable(matrix, outsideReason) {
@@ -149,12 +156,13 @@ function tiltView(columns, uni, shed) {
   };
 }
 
-function sectorTable(columns, selected, tides, uni, tilt) {
+function sectorTable(columns, selected, tides, uni, tilt, aligner = null) {
   const held = COLUMNS.filter((c) => columns.has(c) && columns.get(c).n > 0);
   const tideCols = SECTORS.filter((c) => tides.sectors.has(c));
   const g1 = held.map((c) => { const t = columns.get(c); return [t.AC - t.BC, t.AP - t.BP]; });
   const g2 = held.map((c) => [unsidedOf(columns.get(c))]);
-  const outsideOfCol = (c) => { const o = outsideOf({ calls: safe(tides.sectors.get(c).calls), puts: safe(tides.sectors.get(c).puts) }, columns.get(c) || emptyTotals()); return o.calls + o.puts; };
+  const heldOutside = outsideColumns(columns, tides, aligner);
+  const outsideOfCol = (c) => { const o = outsideOf({ calls: safe(tides.sectors.get(c).calls), puts: safe(tides.sectors.get(c).puts) }, heldOutside.get(c) || emptyTotals()); return o.calls + o.puts; };
   const g3 = tideCols.map((c) => [outsideOfCol(c)]);
   const all = [...g1.flat(), ...g1.map((r) => r[0] + r[1]), ...g2.flat(), ...g3.flat()];
   const unit = unitFor(maxAbs(all.length ? all : [0]));
@@ -176,6 +184,7 @@ function sectorTable(columns, selected, tides, uni, tilt) {
     const taker = i >= 0 ? t.AC + t.AP - (t.BC + t.BP) : null;
     return {
       key: c, label: c, short: C.SECTOR_SHORT[c] || c, kind: kindOf(c), selected: selected === c, windows: i >= 0 ? t.n : 0, premium: i >= 0 ? safe(t.T) : null,
+      takerC: i >= 0 ? taker : null, uC: i >= 0 ? unsidedOf(t) : null, proof: i >= 0 ? netProof(taker, unsidedOf(t)) : null,
       taker: i >= 0 ? cell(taker, r1.rowTotals[i], unit) : nothing,
       calls: i >= 0 ? cell(g1[i][0], r1.cells[i][0], unit) : nothing,
       puts: i >= 0 ? cell(g1[i][1], r1.cells[i][1], unit) : nothing,
@@ -290,6 +299,43 @@ function flowView(totals, outside) {
   };
 }
 
+function heroView(totals, lean, shed) {
+  const T = totals.T;
+  const A = totals.AC + totals.AP;
+  const B = totals.BC + totals.BP;
+  const U = unsidedOf(totals);
+  const part = (id, label, cents) => ({ id, label, cents, text: moneyShort(cents), exact: exactDollars(cents), frac: T > 0 ? cents / T : null });
+  const bounds = leanBounds(A, B, U);
+  const tick = lean.why ? null : lean.pct.share;
+  const verdictId = lean.side === "buyers" ? "paid" : lean.side === "sellers" ? "received" : lean.why && C.HERO.lean.verdict[lean.why] ? lean.why : "open";
+  const verdictCopy = C.HERO.lean.verdict[verdictId];
+  const heldNote = shed === 0 ? null : shed === null ? C.HERO.lean.held.unrecorded : C.HERO.lean.held.shed(shed);
+  const signed = (cents) => `${sign(cents)}${moneyShort(Math.abs(cents))}`;
+  const net = (id, label, ask, bid) => {
+    const n = ask - bid;
+    const proof = netProof(n, U);
+    return {
+      id, label, cents: n, text: signed(n), exact: `${sign(n)}${exactDollars(Math.abs(n))}`, proof, glyph: C.HERO.cells.glyph[proof],
+      line1: C.HERO.cells.range(moneyOut(n - U, "down", { plus: true }), moneyOut(n + U, "up", { plus: true })), line2: C.HERO.cells.proof[proof].short, why: C.HERO.cells.proof[proof].long,
+    };
+  };
+  return {
+    lean: {
+      T, A, B, U, frac: { lo: lean.lo, hi: lean.hi, share: lean.share },
+      parts: [part("ask", C.HERO.lean.ask, A), part("unknown", C.HERO.lean.unknown, U), part("bid", C.HERO.lean.bid, B)],
+      bounds: bounds === null ? null : bounds.text,
+      tick, tickLine: tick === null ? C.HERO.lean.noTick(lean.reason || "no premium") : C.HERO.lean.tick(tick),
+      bar: bounds === null ? null : C.HERO.lean.bar(bounds.say),
+      verdict: { state: verdictId === "paid" || verdictId === "received" ? verdictId : "open", id: verdictId, text: verdictCopy.short, long: [verdictCopy.long, ...(heldNote ? [heldNote] : []), C.HERO.lean.basis].join(" ") },
+    },
+    cells: [
+      { id: "held", label: C.HERO.cells.held.label, cents: T, text: moneyShort(T), exact: exactDollars(T), proof: null, why: null, glyph: "", line1: C.HERO.cells.held.line1(totals.n), line2: C.HERO.cells.held.line2(moneyShort(totals.sameDay)) },
+      net("calls", C.HERO.cells.calls.label, totals.AC, totals.BC),
+      net("puts", C.HERO.cells.puts.label, totals.AP, totals.BP),
+    ],
+  };
+}
+
 function checksView(ctx) {
   const { matrix, sums, totals, sectorExact, tilt, tides, session, outsideAbsent, sideDiff, foots, largest, scopeKind, windows, tideAt, windowsAt } = ctx;
   const none = windows === 0;
@@ -344,6 +390,7 @@ function readingView({ scope, totals, tilt, shed }) {
 export function ledgerView(input) {
   const {
     now, scope = { kind: "all", key: "all" }, period: requested = null, live = null, nightly = null, breadth = null, universe = null, clock = null,
+    booked = null, aligner = null,
   } = input;
   const liveP = live ? obj(live.payload) : null;
   const nightlyP = nightly ? obj(nightly.payload) : null;
@@ -368,7 +415,7 @@ export function ledgerView(input) {
   if (rowsIn === null) return { ...head, status: "failed", why: "The record has no readable windows.", scope: { kind: scope.kind, key: scope.key } };
   try {
     const uni = readUniverse(universe);
-    const { books, counts, accepted } = bookWindows(rowsIn, { column: uni.columnOf, deltaMicro: deltaMicroOf, session, collect: scope.kind === "name" });
+    const { books, counts, accepted } = booked || bookWindows(rowsIn, { column: uni.columnOf, deltaMicro: deltaMicroOf, session, collect: scope.kind === "name" });
     const everEntered = sourceP.record && Number.isFinite(sourceP.record.everEntered) ? sourceP.record.everEntered : null;
     const held = rowsIn.length;
     const totalSeen = everEntered !== null && everEntered >= held ? everEntered : null;
@@ -383,13 +430,13 @@ export function ledgerView(input) {
       return { ...head, status: "quiet", why: `${scope.name} has no held windows in this period.`, scope: { kind: scope.kind, key: scope.key }, counts };
     }
     if (totals.n === 0) return { ...head, status: "quiet", why: C.EMPTY.page.quiet(chosen.label ? chosen.label.split(" · ")[0] : "Period"), scope: { kind: scope.kind, key: scope.key }, counts };
-    const outside = scopeOutside(scope, columns, totals, tides);
+    const outside = scopeOutside(scope, columns, totals, tides, aligner);
     const matrix = buildMatrix(totals, outside);
     const sums = matrixSums(matrix);
     const outsideReason = tideReason(scope, tides);
     const ledger = ledgerTable(matrix, outsideReason);
     const tilt = tiltView(columns, uni, shed);
-    const sectors = sectorTable(columns, scope.kind === "sector" ? scope.sector : null, tides, uni, tilt);
+    const sectors = sectorTable(columns, scope.kind === "sector" ? scope.sector : null, tides, uni, tilt, aligner);
     const allTotals = sumBooks(books);
     const sectorExact = { taker: scope.kind === "all" ? sectors.exact.taker : -(matrix.rows[0][0] + matrix.rows[1][0] + matrix.rows[2][0] + matrix.rows[3][0]), noside: scope.kind === "all" ? sectors.exact.noside : unsidedOf(totals) };
     const sideDiff = totals.T - (totals.AC + totals.BC + totals.AP + totals.BP + unsidedOf(totals));
@@ -402,6 +449,7 @@ export function ledgerView(input) {
       return { ...head, status: "failed", why: reason, scope: { kind: scope.kind, key: scope.key }, withheld: { reason, all: true }, checks: { head: C.CHECKS_HEAD, items: checks.items, failed: checks.failed, notes: [] } };
     }
     const lean = leanRead({ T: totals.T, A: totals.AC + totals.AP, B: totals.BC + totals.BP });
+    const hero = heroView(totals, lean, shed);
     const notes = [
       { id: "held", text: C.NOTES.held.text(held, totalSeen), hover: C.NOTES.held.hover },
       { id: "tide", text: C.NOTES.tide.text(tides.sectors.size), hover: C.NOTES.tide.hover },
@@ -411,7 +459,7 @@ export function ledgerView(input) {
       ? C.SCOPE_LINE.all(money(totals.T), held, shed, totalSeen)
       : scope.kind === "sector" ? C.SCOPE_LINE.sector(money(totals.T), totals.n, scope.sector, shed) : C.SCOPE_LINE.name(money(totals.T), totals.n, scope.name, shed);
     const tiltHold = checks.tiltFail ? C.WITHHELD.tilt(hashOf({ sum: String(tilt.sum) })) : null;
-    const sectorsOut = checks.tiltFail ? sectorTable(columns, scope.kind === "sector" ? scope.sector : null, tides, uni, { status: "absent", reason: tiltHold, rows: [], unweighted: [] }) : sectors;
+    const sectorsOut = checks.tiltFail ? sectorTable(columns, scope.kind === "sector" ? scope.sector : null, tides, uni, { status: "absent", reason: tiltHold, rows: [], unweighted: [] }, aligner) : sectors;
     const out = {
       ...head, status: "ok", why: null,
       scope: {
@@ -421,7 +469,10 @@ export function ledgerView(input) {
       withheld: null, checks: { head: C.CHECKS_HEAD, items: checks.items, failed: checks.failed, notes }, ledger, sectors: sectorsOut, lean: { ...lean, line: lineOfLean(lean) },
       tilt: checks.tiltFail ? { status: "absent", reason: tiltHold, rows: [], unweighted: [] } : { ...tilt, lines: [C.TILT_LINES.definition, C.TILT_LINES.total(tilt.weighted.length), C.TILT_LINES.reading, C.TILT_LINES.funds, ...(shed ? [C.TILT_LINES.shed(shed)] : [])] },
       flow: flowView(totals, outside),
-      stock: { status: "absent", reason: NO_OPEN_INTEREST, line: C.PANEL_LINES.stock, memo: { sameSession: safe(totals.sameDay), text: `Premium in held windows that expire this session: ${money(totals.sameDay)}.`, exact: exactDollars(totals.sameDay) }, notBuilt: C.NOT_BUILT_LINE },
+      hero,
+      tide: { at: tides.lastAt === null ? null : trtStamp(tides.lastAt, session), groups: tides.sectors.size },
+      stock: { status: "absent", reason: NO_OPEN_INTEREST, line: C.PANEL_LINES.stock, memo: { sameSession: safe(totals.sameDay), text: `Premium in held windows that expire at the session close: ${money(totals.sameDay)}.`, exact: exactDollars(totals.sameDay) }, notBuilt: C.NOT_BUILT_LINE },
+      align: aligner ? { on: true, at: tides.lastAt, atText: tides.lastAt === null ? null : trtStamp(tides.lastAt, session), newer: tides.lastAt === null ? null : aligner.newer(tides.lastAt) } : { on: false, at: null, atText: null, newer: null },
       dq: { ...counts },
       notes: C.DELTA_NOTES,
     };

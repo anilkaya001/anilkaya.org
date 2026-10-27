@@ -3824,11 +3824,14 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "S-E's install fix: a step writes needs=true|false to $GITHUB_OUTPUT (a failed run.mjs fails the assignment " +
     "under bash -e) and the Chromium install runs on that output, so a failed install fails the shard");
   ok(!/\|\| true/.test(regression), "no step swallows a failure with || true");
-  ok(/- name: Install Chromium\n(?:.*\n){3}      - name: Check the contracts first\n {8}working-directory: tests\n {8}run: node run\.mjs --only contracts\n {6}- name: Run the shard\n/.test(regShard) &&
+  ok(/- name: Install Chromium\n(?:.*\n){3}(?: {6}- name: Install WebKit and Firefox on the shard that holds the engine suite\n(?:.*\n){5})?      - name: Check the contracts first\n {8}working-directory: tests\n {8}run: node run\.mjs --only contracts\n {6}- name: Run the shard\n/.test(regShard) &&
      (regShard.match(/node run\.mjs --only contracts/g) || []).length === 1 && !/--only contracts/.test(regFast),
     "EVERY SHARD CHECKS THE CONTRACTS FIRST: after npm ci and the Chromium decision, before its own selection, each shard runs " +
     "node run.mjs --only contracts (about ten seconds), so a red contracts check stops the shard inside its first minute " +
     "instead of after a complete run of the six, while the fast job still runs the whole fast group once");
+  ok(/- name: Install WebKit and Firefox on the shard that holds the engine suite\n {8}if: steps\.browser\.outputs\.needs == 'true'\n {8}working-directory: tests\n {8}run: \|\n {10}pin="\$\(node -e '[^\n]*suites\/flows-sfc-firstpaint\.json[^\n]*'\)"\n {10}if \[ "\$pin" = "\$\{\{ matrix\.shard \}\}" \]; then npx playwright install --with-deps webkit firefox; fi\n/.test(regShard) &&
+     /^ {10}SFC_ENGINES: all$/m.test(regShard) && (regShard.match(/playwright install/g) || []).length === 2,
+    "THE ENGINE SUITE GETS ITS ENGINES: the shard that pins flows-sfc-firstpaint installs WebKit and Firefox beside Chromium (read from the suite's own pin, so a repin moves the install with it) and the shard step sets SFC_ENGINES=all, which makes the suite require all three instead of skipping an engine that is not installed");
   ok(new RegExp(String.raw`run: node run\.mjs --shard \$\{\{ matrix\.shard \}\}\/${CI_SHARDS} \$\{\{ steps\.select\.outputs\.args \}\}\n`).test(regShard) && /run: node run\.mjs --group fast\n/.test(regFast) &&
      !/npm test/.test(regression),
     "the shards and the fast job run run.mjs selections, which run-contract proves cover every suite exactly once");

@@ -1,1 +1,1 @@
-{"name": "flows-render", "class": "C", "group": "shard", "timing": false, "medianS": 95.7, "shard": 12, "files": ["flows-card-render.mjs"], "covers": ["assets/js/flows-ticker.js","scripts/flows-pipeline.mjs","tests/fixtures-flows-v1-card.json"]}
+{"name": "flows-render", "class": "C", "group": "shard", "timing": false, "medianS": 95.7, "shard": 5, "files": ["flows-card-render.mjs"], "covers": ["assets/js/flows-ticker.js","scripts/flows-pipeline.mjs","tests/fixtures-flows-v1-card.json"]}

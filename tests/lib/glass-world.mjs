@@ -4,11 +4,12 @@ import * as PAGES from "../../shared/flows-pages.js";
 import { nightlyEmit, emitRead } from "./nightly-emit.mjs";
 import { openHome } from "./home-fixtures.mjs";
 import { openMarket, ROOT } from "./market-fixtures.mjs";
+import { mount as mountLedger } from "./sfc-render-world.mjs";
 
 const MIME = { ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json" };
 export const ORIGIN = "https://example.test";
 export const NOW = Date.parse("2026-08-24T22:25:00.000Z");
-export const PAGE_KINDS = ["home", "long", "market", "ticker"];
+export const PAGE_KINDS = ["home", "long", "market", "ticker", "ledger"];
 export const VIEWPORTS = [{ width: 1920, height: 1080 }, { width: 1440, height: 820 }, { width: 390, height: 844 }];
 export const MODES = ["default", "reduced-transparency", "contrast-more", "no-backdrop", "forced"];
 
@@ -80,7 +81,13 @@ export async function openGlass(browser, { kind, viewport = VIEWPORTS[1], patch 
   if (!PAGE_KINDS.includes(kind)) throw new Error("glass-world: unknown page " + kind);
   if (kind === "home") return openHome(browser, { viewport, patch, reduced });
   if (kind === "market") return openMarket(browser, { rich: true, viewport, patch, reduced });
+  if (kind === "ledger") return openLedger(browser, { viewport, patch, reduced });
   return openEmit(browser, { kind, viewport, patch, reduced });
+}
+
+async function openLedger(browser, { viewport, patch, reduced }) {
+  const m = await mountLedger(browser, viewport.width, viewport.height, { patch, settle: 300, context: { deviceScaleFactor: 1, reducedMotion: reduced ? "reduce" : "no-preference" } });
+  return { context: m.ctx, page: m.page, errors: m.errors };
 }
 
 export async function settle(page) {

@@ -32,14 +32,21 @@ const fin = (v) => typeof v === "number" && Number.isFinite(v);
 const SQRT3 = Math.sqrt(3);
 const clamp01 = (v) => Math.min(1, Math.max(0, v));
 
-export function carryOf({ S, r, T, q }) {
+export function datedYield(q, T, nEx) {
+  if (!fin(q) || !fin(T) || !(T > 0) || !Number.isInteger(nEx) || nEx < 1) return q;
+  return q * 0.25 * nEx / T;
+}
+
+export function carryOf({ S, r, T, q, nEx = null }) {
   const known = fin(q);
-  const F = S * Math.exp((r - (known ? q : 0)) * T);
+  const dated = known && Number.isInteger(nEx) && nEx >= 1 && fin(T) && T > 0;
+  const qUse = dated ? datedYield(q, T, nEx) : q;
+  const F = S * Math.exp((r - (known ? qUse : 0)) * T);
   const L = FWD_LINES;
-  const divRel = known ? L.DIV_SHARE * Math.abs(Math.exp(r * T) - Math.exp((r - q) * T)) : 0;
+  const divRel = known ? L.DIV_SHARE * Math.abs(Math.exp(r * T) - Math.exp((r - qUse) * T)) : 0;
   const unknown = known ? 0 : L.DIV_SE_UNKNOWN * T;
   const rel = Math.sqrt(L.SPOT_SE ** 2 + (L.RATE_SE * T) ** 2 + (L.BORROW_SE * T) ** 2 + divRel ** 2 + unknown ** 2);
-  return { F, se: F * rel, known };
+  return { F, se: F * rel, known, dated };
 }
 
 export function sigmaAtm(quotes, F, D, T) {
@@ -136,10 +143,10 @@ export function dDeltaMax(se, F, sigma, T) {
   return Math.max(FWD_LINES.BOUND_FLOOR, s) * (se / F) / s;
 }
 
-export function chooseForward({ quotes, S, r, T, q }) {
+export function chooseForward({ quotes, S, r, T, q, nEx = null }) {
   const L = FWD_LINES;
   const D = Math.exp(-r * T);
-  const carry = carryOf({ S, r, T, q });
+  const carry = carryOf({ S, r, T, q, nEx });
   const sig0 = sigmaAtm(quotes, carry.F, D, T);
   const dividends = !carry.known || q > 0;
   const chosen = selectPairs(quotes, { Fc: carry.F, T, sigma: sig0, divides: dividends });
@@ -147,7 +154,7 @@ export function chooseForward({ quotes, S, r, T, q }) {
   const pairs = chosen.map((p) => [p.K, p.cb, p.ca, p.pb, p.pa]);
   const out = {
     F: carry.F, se: carry.se, src: "carry", n: par ? par.n : 0, z: null, gapBp: null, veto: false,
-    Fc: carry.F, seC: carry.se, qKnown: carry.known, Fpar: par ? par.F : null, sePar: par ? par.se : null, birge: par ? par.birge : null,
+    Fc: carry.F, seC: carry.se, qKnown: carry.known, qDated: carry.dated, Fpar: par ? par.F : null, sePar: par ? par.se : null, birge: par ? par.birge : null,
     sigmaAtm: sig0, dDeltaMax: dDeltaMax(carry.se, carry.F, sig0, T), T, r, D, pairs,
   };
   if (!par) return out;

@@ -42,6 +42,8 @@ import { flowsAiRows } from "./server/routes/flows-ai.js";
 import { flowsReadyRows } from "./server/routes/flows-ready.js";
 import { flowsOracleRows } from "./server/routes/flows-oracle.js";
 import { flowsLedgerRows } from "./server/routes/flows-ledger.js";
+import { flowsMeRows } from "./server/routes/flows-me.js";
+import { createMemberStore } from "./server/member-store.js";
 import { flowsDispatchRows } from "./server/routes/flows-dispatch.js";
 import { flowsPipelineRows } from "./server/routes/flows-pipeline.js";
 import { createCallMeter, summarize as summarizeCalls } from "./shared/flows-call-meter.js";
@@ -60,7 +62,8 @@ import { nightlyFreshMeta, STRIP_FIELDS, stripValues, LIVE_BUDGET } from "./shar
 import { readExpiryBreakdown } from "./shared/flows-positioning.js";
 import { serveRt, railReadiness } from "./shared/flows-rt-routes.js";
 import { RT_LIMITS, rtSwitches, rtIsOwner } from "./shared/flows-rt.js";
-import { memberAllowed } from "./shared/flows-access.js";
+import { memberAllowed, memberId } from "./shared/flows-access.js";
+import { partState } from "./shared/flows-vendor-extras.js";
 import { vendorBase, vendorRedirected, vendorUrl, vendorMeter, newerMeter } from "./shared/flows-vendor-core.js";
 import { pathFor } from "./shared/flows-vendor-ops.js";
 import { rankShortCalls } from "./shared/flows-premium-rank.js";
@@ -82,6 +85,7 @@ function createState() {
     keyCounter: null,
     scChains: new Map(),
     scFlights: new Map(),
+    scRefreshes: new Map(),
   };
 }
 const state = createState();
@@ -222,6 +226,40 @@ async function pruneAttemptLedgers(env, now) {
   }
   return removed;
 }
+
+const MEMBER_STATE_SCHEMA_SQL = Object.freeze([
+  "CREATE TABLE IF NOT EXISTS member_state ( " +
+    "member_id TEXT PRIMARY KEY NOT NULL CHECK (length(member_id) BETWEEN 3 AND 32 AND member_id NOT GLOB '*[^a-z0-9_.-]*'), " +
+    "wl_kid INTEGER, " +
+    "wl_iv TEXT, " +
+    "wl_ct TEXT, " +
+    "wl_ver INTEGER NOT NULL DEFAULT 0 CHECK (typeof(wl_ver) = 'integer' AND wl_ver >= 0), " +
+    "device_only INTEGER NOT NULL DEFAULT 0 CHECK (device_only IN (0, 1)), " +
+    "seen_ms INTEGER, " +
+    "visit_ms INTEGER, " +
+    "prev_seen_ms INTEGER, " +
+    "updated_ms INTEGER NOT NULL, " +
+    "CHECK ((wl_kid IS NULL) = (wl_iv IS NULL) AND (wl_iv IS NULL) = (wl_ct IS NULL)), " +
+    "CHECK (wl_kid IS NULL OR (typeof(wl_kid) = 'integer' AND wl_kid BETWEEN 0 AND 4294967295)), " +
+    "CHECK (wl_iv IS NULL OR (typeof(wl_iv) = 'text' AND length(wl_iv) = 16 AND wl_iv NOT GLOB '*[^A-Za-z0-9_-]*')), " +
+    "CHECK (wl_ct IS NULL OR (typeof(wl_ct) = 'text' AND length(wl_ct) = 3520 AND wl_ct NOT GLOB '*[^A-Za-z0-9_-]*')), " +
+    "CHECK (wl_ct IS NULL OR wl_ver >= 1), " +
+    "CHECK (device_only = 0 OR wl_ct IS NULL), " +
+    "CHECK ((seen_ms IS NULL) = (visit_ms IS NULL)), " +
+    "CHECK (visit_ms IS NULL OR visit_ms <= seen_ms), " +
+    "CHECK (prev_seen_ms IS NULL OR (visit_ms IS NOT NULL AND prev_seen_ms < visit_ms)) " +
+    ")",
+  "CREATE TABLE IF NOT EXISTS member_export ( " +
+    "id INTEGER PRIMARY KEY, " +
+    "member_id TEXT NOT NULL CHECK (length(member_id) BETWEEN 3 AND 32 AND member_id NOT GLOB '*[^a-z0-9_.-]*'), " +
+    "page TEXT NOT NULL CHECK (length(page) BETWEEN 1 AND 32 AND page NOT GLOB '*[^a-z0-9-]*'), " +
+    "n_rows INTEGER NOT NULL CHECK (typeof(n_rows) = 'integer' AND n_rows >= 0), " +
+    "cols TEXT NOT NULL CHECK (length(cols) BETWEEN 1 AND 512 AND cols NOT GLOB '*[^a-z0-9_,]*'), " +
+    "at_ms INTEGER NOT NULL CHECK (typeof(at_ms) = 'integer') " +
+    ")",
+  "CREATE INDEX IF NOT EXISTS member_export_by_member ON member_export (member_id, at_ms)",
+  "CREATE INDEX IF NOT EXISTS member_export_by_at ON member_export (at_ms)",
+]);
 
 const MARKET_SNAPSHOT_SCHEMA_SQL =
   "CREATE TABLE IF NOT EXISTS market_snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL, updated_at INTEGER NOT NULL)";
@@ -907,6 +945,7 @@ function flowsLoginLimited() {
 }
 
 const FLOWS_STORE = createFlowsStore({ ensureFlowsTables: (env) => ensureFlowsTables(env) });
+const MEMBER_STORE = createMemberStore({ schemaSql: MEMBER_STATE_SCHEMA_SQL });
 const readFlowsPayload = (env, key, trace) => FLOWS_STORE.read(env, key, trace);
 
 function nightlyFreshHeaders(stored) {
@@ -2370,6 +2409,7 @@ function offMarketChain(list, ivBasis, rankBy) {
 }
 
 async function buildChainPayload(env, ctx, vf, { ticker, strategy, rankBy, limit, terms, refresh }) {
+  if (strategy === "sc" && scServerRankOff(env)) return { ...(await buildChainPayload(env, ctx, vf, { ticker, strategy: "cc", rankBy, limit, terms, refresh })), scOff: true };
   if (strategy === "sc") return buildShortCallPayload(env, ctx, vf, { ticker, terms, refresh });
   const chainPage = (page) => vf(pathFor("option-contracts", { ticker }), {
 
@@ -2477,6 +2517,35 @@ function chainEnvelope({ ticker, strategy, spot, asOf, print, found, live, info,
   };
 }
 
+const scServerRankOff = (env) => String(env && env.FLOWS_DESK_SC_PAGES).trim() === "0";
+
+const SC_REFRESH_LIMIT = 3;
+const SC_REFRESH_WINDOW_MS = 60000;
+
+function scRefreshAllowed(session, now = Date.now()) {
+  const id = memberId(session);
+  if (id === null) return true;
+  const stamps = (state.scRefreshes.get(id) || []).filter((t) => now - t < SC_REFRESH_WINDOW_MS);
+  if (stamps.length >= SC_REFRESH_LIMIT) { state.scRefreshes.set(id, stamps); return false; }
+  stamps.push(now);
+  state.scRefreshes.set(id, stamps);
+  if (state.scRefreshes.size > 500) for (const [k, v] of state.scRefreshes) if (!v.some((t) => now - t < SC_REFRESH_WINDOW_MS)) state.scRefreshes.delete(k);
+  return true;
+}
+
+function exDatesOf(extra) {
+  let x;
+  try { x = JSON.parse(extra.payload); } catch { return null; }
+  const part = x && x.vx && x.vx.dividends;
+  if (!["fresh", "stale"].includes(partState(part, "dividends", Date.now()))) return null;
+  const d = part.x;
+  if (!d || d.ok !== true) return null;
+  const out = new Set();
+  if (typeof d.nextEx === "string") out.add(d.nextEx);
+  if (Array.isArray(d.declared)) for (const e of d.declared) if (e && typeof e.ex === "string") out.add(e.ex);
+  return out.size ? Array.from(out).sort() : null;
+}
+
 const scPageCeiling = (env) => {
   const v = Number.parseInt(env && env.FLOWS_DESK_SC_PAGES, 10);
   return Number.isInteger(v) && v >= 1 && v <= SC_MAX_PAGES ? v : SC_PAGES_DEFAULT;
@@ -2492,13 +2561,15 @@ async function readShortCallSnapshot(env, ctx, vf, ticker) {
     ...(page > 1 ? { page } : {}),
   }, { deadlineMs: UW_CHAIN_DEADLINE_MS });
 
+  const exPending = keepAlive(ctx, readFlowsPayload(env, "card-x:" + ticker).then((r) => (r ? exDatesOf(r) : null)).catch(() => null));
   const cardPending = keepAlive(ctx, readCardWithEngine(env, ticker).catch(() => null));
-  const [firstPage, candles, state, info, cardRead] = await Promise.all([
+  const [firstPage, candles, state, info, cardRead, exDates] = await Promise.all([
     chainPage(1),
     vf(pathFor("ohlc-1d", { ticker }), { timeframe: "5D" }, { deadlineMs: UW_OHLC_DEADLINE_MS }),
     vf(pathFor("stock-state", { ticker }), {}).catch(keepRefusal(null)),
     cachedTickerInfo(env, ctx, ticker, vf),
     cardPending,
+    exPending,
   ]);
   const readMs = chainReadMs(env);
   const unwrap = (r) => (Array.isArray(r) ? r : (r && r.data) || []);
@@ -2516,7 +2587,7 @@ async function readShortCallSnapshot(env, ctx, vf, ticker) {
     logFailure("warn", "chain coherence check failed", { ticker }, error);
     found = { status: "unchecked", spot: print.spot, printSpot: print.spot, impliedSpot: null, offMarket: [] };
   }
-  return { rows: got.rows, pages: got.pages, failed: got.failed, budget: got.budget, truncated: got.truncated, maxPages, readMs, print, found, asOf, live: stateOf(state), info, cardRead, engineRate };
+  return { exDates, rows: got.rows, pages: got.pages, failed: got.failed, budget: got.budget, truncated: got.truncated, maxPages, readMs, print, found, asOf, live: stateOf(state), info, cardRead, engineRate };
 }
 
 async function buildShortCallPayload(env, ctx, vf, { ticker, terms, refresh = false }) {
@@ -2526,7 +2597,7 @@ async function buildShortCallPayload(env, ctx, vf, { ticker, terms, refresh = fa
     snap = await singleFlight(state.scFlights, ticker, () => readShortCallSnapshot(env, ctx, vf, ticker));
     if (!snap.budget && snap.failed === 0) chainCachePut(state.scChains, ticker, snap, Date.now());
   }
-  const { rows, print, found, asOf, readMs, cardRead, engineRate } = snap;
+  const { rows, print, found, asOf, readMs, cardRead, engineRate, exDates } = snap;
   const spot = found.spot;
   const engine = deskEngine(cardRead && cardRead.card, Date.now());
   const shed = [];
@@ -2536,7 +2607,7 @@ async function buildShortCallPayload(env, ctx, vf, { ticker, terms, refresh = fa
     ? { ...offMarketChain(rows, "not read: the quotes and the price disagree", "annualized"), cut: null }
     : rankShortCalls(rows, {
       ticker, spot, readMs, asOfDay: asOf, rate: engineRate, rateMethod: engine.status === "ok" && engine.rate ? engine.rate.method : null,
-      facts: engine.status === "ok" ? engine.facts : [], terms: { h: terms.haircut, f: terms.floor }, pages: snap.pages, truncated: snap.truncated, shed,
+      facts: engine.status === "ok" ? engine.facts : [], terms: { h: terms.haircut, f: terms.floor }, pages: snap.pages, truncated: snap.truncated, shed, exDates,
     });
   return chainEnvelope({ ticker, strategy: "sc", spot, asOf, print, found, live: snap.live, info: snap.info, cardRead, readMs, ranked, truncated: snap.truncated });
 }
@@ -2989,7 +3060,7 @@ const rtServe = (request, env, url) => serveRt(request, env, url, { json, HttpEr
 
 const ROUTER = createRouter(flowsReadRows({ readServed, readFlowsPayload, readWithOverlay, passthrough, recallLastGood, storeGone,
   absentKey, cardWithEngine, briefWithLive, briefFeedsAhead, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK }),
-flowsDeskRows({ vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }),
+flowsDeskRows({ scRefreshAllowed, vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }),
 flowsAiRows({ askSpend, summaryResponse, readFlowsSummary, neuronProvenance, ensureFlowsTables, dossierResponse, askQuestion, askAnswer,
   readFlowsPayload, briefWithLive, askFloodPeriodS: ASK_FLOOD_PERIOD_S, aiCap: FLOWS_READING.aiCapOf }),
 flowsIngestRows({ store: FLOWS_STORE, ensureFlowsTables, storeGone, passthrough }),
@@ -3007,7 +3078,8 @@ flowsPipelineRows({ store: FLOWS_STORE, ensureFlowsTables, readClock: FLOWS_LIVE
   vendorCalls: (env) => (meterOn(env) ? summarizeCalls(state.vendorMeter.snapshot()) : null) }),
 flowsOpsRows({ ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), meter: () => state.keyCounter }),
 flowsOracleRows({ store: FLOWS_STORE, ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), nightlyFreshHeaders, recallLastGood }),
-flowsLedgerRows({ store: FLOWS_STORE, ensureFlowsTables, readLiveRows: FLOWS_LIVE.readLiveRows }),
+flowsLedgerRows({ store: FLOWS_STORE, ensureFlowsTables, readLiveRows: FLOWS_LIVE.readLiveRows, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
+flowsMeRows({ store: MEMBER_STORE, flowsStore: FLOWS_STORE, readLiveRows: FLOWS_LIVE.readLiveRows, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsFilmRows(),
 flowsPageRows({ currentFlowsUser, readFlowsSummary: readHomeSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
   scenesOn: (env, username) => {
@@ -3780,6 +3852,7 @@ export default {
         await pruneAiOutcomes(env, at);
         await pruneAttemptLedgers(env, at);
         await pruneLoginFailures(env, at);
+        await MEMBER_STORE.housekeeping(env, at, [env.MEMBER_STATE_KEY, env.MEMBER_STATE_KEY_PREV]);
       }
     })());
   },

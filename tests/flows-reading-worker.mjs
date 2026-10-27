@@ -981,14 +981,23 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
 
 {
   const [A, B] = FIXTURE_ROSTER;
-  const MEMBER_VENDOR = { limit: async ({ key }) => ({ success: key !== A }) };
+  let aEntered;
+  const entered = new Promise((resolve) => { aEntered = resolve; });
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const MEMBER_VENDOR = { limit: async ({ key }) => { if (key === A) { aEntered(); await held; } return { success: key !== A }; } };
   const UW_ONDEMAND = { limit: async () => ({ success: true }) };
   const f = world();
   const ai = rig();
   const env = { ...AI_ENV, AI: ai, MEMBER_VENDOR, UW_ONDEMAND };
   const getA = await client(f.D1, env, A);
   const getB = await client(f.D1, env, B);
-  const [a, b] = await Promise.all([getA("/api/flows/summary?t=" + T), getB("/api/flows/summary?t=" + T)]);
+  const sentA = getA("/api/flows/summary?t=" + T);
+  await entered;
+  const sentB = getB("/api/flows/summary?t=" + T);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  release();
+  const [a, b] = await Promise.all([sentA, sentB]);
   await Promise.all([a.settle(), b.settle()]);
   const joined = stub.calls.filter((c) => c.key !== "screener").length === 0;
   ok(joined, "(setup) member B's summary, sent with A's, joins A's single flight of the dossier assembly");

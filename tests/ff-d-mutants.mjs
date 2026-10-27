@@ -3,8 +3,8 @@ import { loadModel } from "./lib/ff-d-model-load.mjs";
 
 const PLANTS = [
   ["rounds negatives toward plus infinity", [["function round(x) { return x < 0 ? -Math.round(-x) : Math.round(x); }", "function round(x) { return Math.round(x); }"]]],
-  ["rounds twice, to the step and then to the grid", [["var g = round(Number((x / units[unit].xStep).toPrecision(12)));", "var g = round(scaled(x, unit) / gridUnits(unit));"]]],
-  ["trusts float division on a tie", [["var g = round(Number((x / units[unit].xStep).toPrecision(12)));", "var g = round(x / units[unit].xStep);"]]],
+  ["rounds twice, to the step and then to the grid", [["var g = round(Math.round(x / units[unit].xStep * 1e9) / 1e9);", "var g = round(scaled(x, unit) / gridUnits(unit));"]]],
+  ["trusts float division on a tie", [["var g = round(Math.round(x / units[unit].xStep * 1e9) / 1e9);", "var g = round(x / units[unit].xStep);"]]],
   ["accepts k, m and b on a sigma", [["if (m[2] && unit !== \"usd\" && unit !== \"contracts\") return null;", ""]]],
   ["lets a nightly-only quantity go live", [["function cadenceAllowed(state, cadence) {\n      if (cadence === state.cadence)", "function cadenceAllowed(state, cadence) {\n      return { ok: true, reason: null };\n      if (cadence === state.cadence)"]]],
   ["allows == on an anomaly", [["if (c.op === \"==\" && m.kind !== \"anomaly\") base.push(\"==\");", "base.push(\"==\");"]]],
