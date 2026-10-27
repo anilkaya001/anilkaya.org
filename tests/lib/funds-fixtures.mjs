@@ -1,6 +1,6 @@
 import { fakeFundsRead, FUNDS_FAKE_SCREENER_GAPS } from "../../scripts/flows-legs/funds-fake.mjs";
 import { fundActivity, metaFrom, readList, rowsOf } from "../../shared/flows-floor-funds.js";
-import { shapeFunds } from "../../shared/flows-live.js";
+import { shapeFunds } from "../../shared/flows-floor-funds-live.js";
 
 export const FUNDS_SESSION = "2026-09-29";
 

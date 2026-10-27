@@ -126,7 +126,7 @@ try {
     ok(/1 health failure, 2 warnings/.test(night) && /cards: 2 failed/.test(night), "with the health counts in the singular where they are one, and the first health line on the card itself");
     ok(/universe\s+4\.2 s\s+ok/.test(night), "slowest stages first");
     const sw = await text(page, "#hSw");
-    ok(/5 of 15 switches are on/.test(sw) && /Read-only/.test(sw) && /FLOWS_RT_UPSTREAM\s+socket/.test(sw), "switches are read-only and list those not on");
+    ok(/5 of 16 switches are on/.test(sw) && /Read-only/.test(sw) && /FLOWS_RT_UPSTREAM\s+socket/.test(sw), "switches are read-only and list those not on");
     ok(/vendor calls 21,400|21,400/.test(await text(page, "#stTiles")) && /14,900 of 30,000/.test(await text(page, "#stTiles")), "the tiles carry the vendor and model figures");
     for (const id of ["hEng", "hRail", "hNight", "hSw"]) ok(/read 21:41:07 TRT/.test(await text(page, "#" + id + "Asof")), id + " states when it was read, in TRT");
     ok(/Readiness: Ready\. US session open\./.test(await text(page, "#stReady")), "the readiness line");
@@ -214,7 +214,7 @@ try {
     ok(/Prices\s+1\.8 s\s+4\.9 s\s+15\.0 s\s+live/.test(feeds) && /Flagged alerts\s+2\.3 s\s+7\.4 s/.test(feeds), "feed latency, alerts read the item lag: " + feeds.slice(0, 300));
     ok(/Behind the vendor's stamp; alerts and news behind the item's own time\./.test(feeds), "and what each is measured against");
     const stored = await text(page, "#lStored");
-    ok(/All 11 keys are inside their lines|keys are stale or missing/.test(stored) && /live:heartbeat/.test(stored), "stored feeds, worst first: " + stored.slice(0, 300));
+    ok(/All 12 keys are inside their lines|keys are stale or missing/.test(stored) && /live:(heartbeat|funds)/.test(stored), "stored feeds, worst first: " + stored.slice(0, 300));
     const timing = await text(page, "#lTime");
     ok(/Tier 2 pass\s+Took 1 min, 44 calls, 1 failed/.test(timing) && /Vendor socket\s+connected, 412,000 messages/.test(timing), "timing summary: " + timing.slice(0, 300));
     ok(/Worker clock vs browser\s+[+\u2212]\d+ ms/.test(timing), "the clock offset is an estimate in ms");

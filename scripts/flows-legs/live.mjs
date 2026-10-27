@@ -1,6 +1,6 @@
 import {
   LIVE_KEYS, LIVE_BUDGET, SECTOR_TIDES, shapeBreadth, shapeStrips, appendStripSeries, shapeVol,
-  indexRows, shapeMovers, shapeFunds, mergeLiveAlerts, shapeAlertsHead, alertsPagePlan,
+  indexRows, shapeMovers, mergeLiveAlerts, shapeAlertsHead, alertsPagePlan,
   oldestCreated, stripNames, rowsOf, failed, freshEnvelope, timeMs, isoSec, anyAnswered, BREADTH_ETFS, VERDICT,
   nightlySources, priorCloseBase,
 } from "../../shared/flows-live.js";
@@ -9,6 +9,7 @@ import { phaseAt, closeMinutes, inferredEarlyClose, PHASE_MINUTES, LIVE_CLOCK, e
 import { fakeLiveVendor, fakeBoards } from "./live-fake.mjs";
 import { pathFor } from "../../shared/flows-vendor-ops.js";
 import { nightlyFundsOn, readList } from "../../shared/flows-floor-funds.js";
+import { shapeFunds } from "../../shared/flows-floor-funds-live.js";
 
 export const LIVE_READ_PACE_MS = LIVE_BUDGET.tier2PaceMs;
 

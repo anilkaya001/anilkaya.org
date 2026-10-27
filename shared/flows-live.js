@@ -5,7 +5,6 @@ import {
 import { buildFlowAlerts, mergeAlerts } from "./flows-alerts.js";
 import { rowsOf } from "./flows-rows.js";
 import { pathFor } from "./flows-vendor-ops.js";
-import { liveRows } from "./flows-floor-funds.js";
 
 export const LIVE_KEY_RE = /^live:[a-z]+(?::[a-z]+)?$/;
 
@@ -880,16 +879,6 @@ export function appendStripSeries(prev, strips, { at, session, writer, max = LIV
     trimmed++;
   }
   return { ...out, trimmed, appended: !replace, replaced: !!replace };
-}
-
-export function shapeFunds(raw, { at, session, writer } = {}) {
-  return {
-    v: 1, key: "live:funds", session,
-    fresh: freshEnvelope({ readAt: at, source: "actions", cadenceS: LIVE_KEYS["live:funds"].cadenceS, session, writer }),
-    units: { prem: "usd", vol: "contracts", net: "usd" },
-    basis: "whole-session options activity per fund, as the feed reports it",
-    rows: liveRows(rowsOf(raw), session),
-  };
 }
 
 export function shapeVol(indexRaw, { at, session, writer } = {}) {

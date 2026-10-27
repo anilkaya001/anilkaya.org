@@ -17,6 +17,7 @@ const FIX = JSON.parse(read("scripts/render-preview.fixtures.json")).market;
 const HTML = PAGES.marketPage({ username: "test" });
 const CHUNK = "/assets/js/flows-market-below.js";
 const SINGLE_FILE_BYTES = 102594;
+const FLOOR_FUNDS_ALLOWANCE = { bytes: 1024, why: "WP1: the eager market script reads the market payload's funds block and the live funds row for the Floor, keeps the Basis address through a tab change and refreshes the row on the heartbeat, measured as 124,450 to 125,450 B together" };
 const HORIZON_ALLOWANCE = { bytes: 1024, why: "lane 4: the Volatility lens reads the universe's own earnings window, report-session column and elapsed sessions instead of a literal 21 (the universe rows carry hz, rd and the unstated-time ages, the lens counts the sessions since the nightly and prints one line when the window is not stated), measured as 123,824 to 124,450 B together" };
 const LOWER = ["mktSectors", "mktMovers", "mktAgainst", "mkVolume", "mkOi", "mkImpact", "mkInsiders", "mkDark", "mkSeason", "mkAdv", "mkExpiry", "mkVol", "mkRadar", "mkGroups"];
 const UPPER = ["mktTilt", "mktBreadth", "mktTape", "mkTide", "mkEtfSPY", "mkEtfQQQ", "mkEtfIWM", "mkSecTides"];
@@ -25,7 +26,7 @@ const UPPER = ["mktTilt", "mktBreadth", "mktTape", "mkTide", "mkEtfSPY", "mkEtfQ
   const eager = fs.statSync(path.join(ROOT, "assets/js/flows-market.js")).size;
   const chunk = fs.statSync(path.join(ROOT, "assets/js/flows-market-below.js")).size;
   ok(SINGLE_FILE_BYTES - eager >= 36 * 1024, `THE FIRST-PAINT FILE IS AT LEAST 36 KB SMALLER THAN THE SINGLE FILE IT REPLACED: ${eager} B against ${SINGLE_FILE_BYTES} B (${SINGLE_FILE_BYTES - eager} B freed)`);
-  ok(chunk + eager < SINGLE_FILE_BYTES + 21504 + HORIZON_ALLOWANCE.bytes, `and the two files together are within 22 KB of it (${chunk + eager} B): the tab controller and the fitter are the only addition`);
+  ok(chunk + eager < SINGLE_FILE_BYTES + 21504 + HORIZON_ALLOWANCE.bytes + FLOOR_FUNDS_ALLOWANCE.bytes, `and the two files together are within 22 KB of it (${chunk + eager} B): the tab controller and the fitter are the only addition`);
   ok(!new RegExp(`<script[^>]+${CHUNK.replace(/\./g, "\\.")}`).test(HTML), "the chunk is not a script src of the page");
   eq(HTML.match(/<i\b[^>]*data-defer="market-below"[^>]*>/g).length, 1, "the page declares the market-below group once");
   const first = read("assets/js/flows-market.js");
