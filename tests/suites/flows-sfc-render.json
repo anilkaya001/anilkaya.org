@@ -1,1 +1,1 @@
-{"name": "flows-sfc-render", "class": "N", "group": "shard", "timing": false, "medianS": 60, "timeoutS": 400, "shard": 8, "command": "node flows-sfc-render.mjs", "files": ["flows-sfc-render.mjs"], "covers": ["assets/css/flows-sfc.css","assets/js/flows-sfc.js"]}
+{"name": "flows-sfc-render", "class": "N", "group": "shard", "timing": false, "medianS": 60, "timeoutS": 400, "shard": 5, "command": "node flows-sfc-render.mjs", "files": ["flows-sfc-render.mjs"], "covers": ["assets/css/flows-sfc.css","assets/js/flows-sfc.js"]}
