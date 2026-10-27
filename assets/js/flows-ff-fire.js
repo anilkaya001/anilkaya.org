@@ -315,8 +315,10 @@
         var w = t.house && t.house.length ? byId[t.house[0]] : null;
         if (!t.house || !t.house.length) { n.textContent = ""; n.removeAttribute("data-ff-absent"); return; }
         var ra = w && w.rarity;
+        var row = n.closest(".ffx-trow");
         if (ra && ra.text && ra.text !== DASH) { n.textContent = "House: " + ra.text; n.removeAttribute("data-ff-absent"); }
         else { n.textContent = DASH + " " + (ra && ra.reasonText ? ra.reasonText : "no record"); n.setAttribute("data-ff-absent", ra && ra.reason ? ra.reason : "no_record"); n.title = n.textContent; }
+        if (row) row.title = row.querySelector(".ffx-trow-t").textContent + " · " + n.textContent;
       });
     }, function (err) {
       rows.forEach(function (r) {

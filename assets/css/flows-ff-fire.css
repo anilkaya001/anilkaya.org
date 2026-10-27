@@ -160,6 +160,13 @@
   .ffx-ph { min-height: 0; padding: 4px 12px 0; }
   .ffx-optrow .ffx-lbl:nth-of-type(2) { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); }
 }
+@media (max-height: 760px) {
+  .ffx-trow { flex-direction: row; align-items: center; gap: 8px; }
+  .ffx-trow-t { flex: 1; }
+  .ffx-trow-m { flex: none; }
+  .ffx-trow-r, .ffx-foot { display: none; }
+  .ffx-tpls { grid-auto-rows: 44px; }
+}
 @media (max-height: 700px) {
   .ffx-sentence { -webkit-line-clamp: 2; min-height: 0; }
 }
