@@ -217,7 +217,7 @@ const SHARED_DEFERRED = {
 };
 const GPU_ONLY = {};
 const SHARED_GROUPS = new Set(["oracle", "member"]);
-const MEMBER_BOOT_MAX = 2176;
+const MEMBER_BOOT_MAX = 2205;
 const MEMBER_CORE_GZIP_MAX = 6 * 1024;
 const MEMBER_GROUP = ["/assets/js/storage.js", "/assets/js/flows-member.js", "/assets/js/flows-member-ui.js"];
 const MEMBER_GROUP_KIB = 75;

@@ -9,7 +9,8 @@
     return fetch("/api/me/visit", { method: "POST", credentials: "same-origin", cache: "no-store" }).then((x) => {
       if (x.ok) r.dataset.visit = 1;
       else dead = x.status === 401 || x.status === 404;
-    }, () => 0);
+      return x.text();
+    }).catch(() => 0);
   };
   const load = () => g || (g = U().defer("member"));
   const ui = () => load().then(() => U().defer("member-ui"));
