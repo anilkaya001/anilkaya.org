@@ -57,7 +57,16 @@ export function eligibleCall(c, g, { spot }) {
   return gateOf({ days: c.days, premium: c.bid * 100, oi: c.oi, spread: mid > 0 ? (c.ask - c.bid) / mid : null }, g);
 }
 
-export function preRank({ raw, ticker, spot, readMs, asOfDay, rate, rateMethod = null, facts = [], terms, k = RANK_K, cap = RANK_CAP, gates = {} }) {
+const ISO = /^\d{4}-\d{2}-\d{2}$/;
+
+export function exCount(exDates, asOfDay, expiry) {
+  if (!Array.isArray(exDates) || !ISO.test(String(asOfDay)) || !ISO.test(String(expiry))) return null;
+  let n = 0;
+  for (const d of exDates) if (typeof d === "string" && ISO.test(d) && d > asOfDay && d <= expiry) n++;
+  return n;
+}
+
+export function preRank({ raw, ticker, spot, readMs, asOfDay, rate, rateMethod = null, facts = [], terms, k = RANK_K, cap = RANK_CAP, gates = {}, exDates = null }) {
   const g = { ...DEFAULT_GATES, ...gates };
   const { rows, shed, dups } = leanRows(raw, ticker);
   const quotes = quotesByExpiry(rows);
@@ -88,7 +97,7 @@ export function preRank({ raw, ticker, spot, readMs, asOfDay, rate, rateMethod =
     const input = frameInput(expiry);
     const base = leanFrame(input);
     if (base.bad) { frameBy.set(expiry, base); continue; }
-    const rec = chooseForward({ quotes: quotes.get(expiry), S: spot, r: base.r, T: base.T, q });
+    const rec = chooseForward({ quotes: quotes.get(expiry), S: spot, r: base.r, T: base.T, q, nEx: exCount(exDates, asOfDay, expiry) });
     fwdBy.set(expiry, rec);
     frameBy.set(expiry, leanFrame({ ...input, fwd: rec }));
   }
@@ -163,9 +172,9 @@ export function preRank({ raw, ticker, spot, readMs, asOfDay, rate, rateMethod =
   };
 }
 
-export function rankShortCalls(raw, { ticker, spot, readMs, asOfDay, rate, rateMethod = null, facts = [], terms = { h: SC_DEFAULTS.haircut, f: SC_DEFAULTS.floor }, k = RANK_K, gates = {}, pages = null, truncated = false, shed = [] }) {
+export function rankShortCalls(raw, { ticker, spot, readMs, asOfDay, rate, rateMethod = null, facts = [], terms = { h: SC_DEFAULTS.haircut, f: SC_DEFAULTS.floor }, k = RANK_K, gates = {}, pages = null, truncated = false, shed = [], exDates = null }) {
   const g = { ...DEFAULT_GATES, ...gates };
-  const pre = preRank({ raw, ticker, spot, readMs, asOfDay, rate, rateMethod, facts, terms, k, gates });
+  const pre = preRank({ raw, ticker, spot, readMs, asOfDay, rate, rateMethod, facts, terms, k, gates, exDates });
   const books = new Map();
   const bookOf = (expiry) => {
     if (!books.has(expiry)) {

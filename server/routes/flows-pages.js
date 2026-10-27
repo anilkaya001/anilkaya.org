@@ -3,6 +3,7 @@ import { FLOWS_PAGES, ownerNav, oracleShell } from "../../shared/flows-pages.js"
 import { memberShell } from "../../shared/flows-member-shell.js";
 import { modeOf } from "../../shared/flows-member-state.js";
 import { EXPORT_PAGES, pageHold } from "../../shared/flows-export-build.js";
+import { ledgerLiveOn } from "../../shared/flows-ledger-live.js";
 
 const homeNet = (env, owner) => {
   const mode = String(env && env.FLOWS_HOME_NET || "").trim().toLowerCase();
@@ -40,7 +41,7 @@ const PAGES = Object.freeze([
   { slug: "ticker", render: (username, summary, owner, scenes) => FLOWS_PAGES.tickerPage({ username, scenes }) },
   { slug: "moves", gate: "FLOWS_MOVES", render: (username) => FLOWS_PAGES.movesPage({ username }) },
   { slug: "unusual", render: (username, summary, owner) => FLOWS_PAGES.unusualPage({ username, owner }) },
-  { slug: "ledger", gate: "FLOWS_LEDGER", render: (username) => FLOWS_PAGES.ledgerPage({ username }) },
+  { slug: "ledger", gate: "FLOWS_LEDGER", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.ledgerPage({ username, live: ledgerLiveOn(env, owner) }) },
   { slug: "events", render: (username) => FLOWS_PAGES.eventsPage({ username }) },
   { slug: "political", render: (username) => FLOWS_PAGES.politicalPage({ username }) },
   { slug: "status", ownerOnly: true, render: (username) => FLOWS_PAGES.statusPage({ username }) },

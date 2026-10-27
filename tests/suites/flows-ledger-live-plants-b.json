@@ -1,0 +1,1 @@
+{"name": "flows-ledger-live-plants-b", "class": "N", "group": "shard", "timing": false, "medianS": 80, "shard": 10, "command": "node --disable-warning=ExperimentalWarning flows-ledger-live-plants-b.mjs", "files": ["flows-ledger-live-plants-b.mjs"], "covers": ["assets/css/flows-sfc-live.css","assets/js/flows-sfc-live.js","assets/js/flows-sfc.js"]}
