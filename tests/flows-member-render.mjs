@@ -147,6 +147,7 @@ async function sidebar(shellFn) {
     await p.page.waitForTimeout(250);
     const geo = await measure(p.page, HEADERS.moves, false);
     eq([geo.side, geo.who], [base.side, base.who], "the sidebar is exactly what it was without the member shell");
+    eq(await p.page.evaluate(() => { const m = [...document.querySelectorAll(".fx-mem")]; const last = m[m.length - 1]; return [m.length, last && last.nextElementSibling && last.nextElementSibling.id, m[0] && m[0].parentElement === document.getElementById("fxFresh").parentElement]; }), [2, "fxFresh", true], "the member buttons sit in the bar directly before the freshness pill");
   } finally { await p.close(); }
 }
 

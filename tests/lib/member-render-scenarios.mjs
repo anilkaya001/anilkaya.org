@@ -14,7 +14,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const names = (prefix, n, from = 0) => Array.from({ length: n }, (_, i) => prefix + String(from + i).padStart(3, "0"));
 const UNI = names("SYA", 300, 1);
 
-export const open = (b, slug, o = {}) => W.open(b.browser, slug, { ...b.opts, ...o, mutate: { ...(b.opts && b.opts.mutate), ...o.mutate } });
+const mergeMutate = (a = {}, c = {}) => { const out = { ...a }; for (const [f, t] of Object.entries(c)) out[f] = (out[f] || []).concat(t); return out; };
+export const open = (b, slug, o = {}) => W.open(b.browser, slug, { ...b.opts, ...o, mutate: mergeMutate(b.opts && b.opts.mutate, o.mutate) });
 
 async function using(b, slug, o, fn) {
   const p = await open(b, slug, o);
