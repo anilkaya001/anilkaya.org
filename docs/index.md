@@ -1811,7 +1811,7 @@ The Flagged now pop-out, `/flows/now/` (`nowPage` in `shared/flows-pages.js`, a 
 | File | Exports | Suites |
 |---|---|---|
 | `assets/css/flows-now.css` |  | flows-glass-render, flows-layout-sweep, flows-now-render |
-| `assets/js/flows-now.js` |  | flows-layout-sweep, flows-lean, flows-now-render |
+| `assets/js/flows-now.js` |  | flows-copy-lint, flows-layout-sweep, flows-lean, flows-now-render |
 | `tests/flows-now-render.mjs` |  | flows-now-render |
 
 ### `tests/flows-weight.mjs`, `tests/flows-defer-render.mjs`
@@ -1941,10 +1941,10 @@ Flows page controllers, one IIFE per page: home, boards, market, ticker, premium
 | `assets/js/flows-desk.js` |  | flows-defaults-render, flows-desk, flows-desk-audit-render, flows-desk-calls-render, flows-desk-client, flows-desk-onescreen and 4 more |
 | `assets/js/flows-events.js` |  | flows-events, flows-feeds-onescreen, flows-layout-sweep, flows-payload-shape |
 | `assets/js/flows-market.js` |  | flows-layout-sweep, flows-market, flows-market-below-render, flows-market-floor-render, flows-market-onescreen, flows-market-river-render and 6 more |
-| `assets/js/flows-overview.js` |  | flows-home-below-render, flows-home-composition, flows-home-net-render, flows-home-onescreen, flows-horizon-lint, flows-layout-sweep and 4 more |
+| `assets/js/flows-overview.js` |  | flows-copy-lint, flows-home-below-render, flows-home-composition, flows-home-net-render, flows-home-onescreen, flows-horizon-lint and 5 more |
 | `assets/js/flows-strategy.js` |  | flows-defaults-render, flows-horizon-lint, flows-layout-sweep |
 | `assets/js/flows-ticker.js` |  | fixture-guard, flows, flows-copy-lint, flows-deepen, flows-fixture-guard-render, flows-flow-net-render and 17 more |
-| `assets/js/flows-unusual.js` |  | flows-feeds-onescreen, flows-flow-below-render, flows-layout-sweep, flows-net-map-render, flows-net-render, flows-pages-render and 2 more |
+| `assets/js/flows-unusual.js` |  | flows-copy-lint, flows-feeds-onescreen, flows-flow-below-render, flows-layout-sweep, flows-net-map-render, flows-net-render and 3 more |
 
 ### `assets/js/flows-status.js`, `assets/js/flows-status-latency.js`, `assets/js/flows-status-capacity.js`, `assets/js/flows-status-coverage.js`, `assets/css/flows-status.css`, `tests/flows-status-render.mjs`, `tests/lib/status-world.mjs`
 
@@ -2003,7 +2003,7 @@ The public front door: `aboutPage` and `glossaryPage` in `shared/flows-pages.js`
 | File | Exports | Suites |
 |---|---|---|
 | `assets/css/flows-public.css` |  | flows-glass-render, flows-layout-sweep |
-| `shared/flows-glossary.js` | `shared/flows-glossary.js#GLOSSARY`, `shared/flows-glossary.js#GLOSSARY_PAGES` | contracts, flows, flows-basis, flows-board-hit-render, flows-brand-render, flows-deadline-render and 64 more |
+| `shared/flows-glossary.js` | `shared/flows-glossary.js#GLOSSARY`, `shared/flows-glossary.js#GLOSSARY_PAGES` | contracts, flows, flows-basis, flows-board-hit-render, flows-brand-render, flows-copy-lint and 65 more |
 | `tests/flows-public-contract.mjs` |  | flows-public |
 
 ### `assets/js/flows-chart.js`
@@ -2041,8 +2041,8 @@ The ticker's Flow network, the dock's last module (its button used to say it was
 | File | Exports | Suites |
 |---|---|---|
 | `assets/css/flows-ticker-network.css` |  | flows-flow-net-render, flows-glass-render, flows-layout-sweep |
-| `assets/js/flows-ticker-network.js` |  | flows-flow-net-render, flows-glance-frame-render, flows-glance-live-render, flows-glance-render, flows-layout-sweep, flows-movelab-render and 4 more |
-| `shared/flows-flow-net.js` | `shared/flows-flow-net.js#COLUMN_KEYS`, `shared/flows-flow-net.js#DAYS_PER_YEAR`, `shared/flows-flow-net.js#EXPIRY_NODES`, `shared/flows-flow-net.js#FACE_LINES`, `shared/flows-flow-net.js#FIXED_BAND`, `shared/flows-flow-net.js#FLAG_NODES`, `shared/flows-flow-net.js#MIN_WINDOWS`, `shared/flows-flow-net.js#MONEY_NODES`, `shared/flows-flow-net.js#NEAR_Z`, `shared/flows-flow-net.js#SESSION_CAP`, `shared/flows-flow-net.js#SIDE_NODES`, `shared/flows-flow-net.js#TITLES`, `shared/flows-flow-net.js#buildNet`, `shared/flows-flow-net.js#calendarDays`, `shared/flows-flow-net.js#expiryBucket`, `shared/flows-flow-net.js#flagNode`, `shared/flows-flow-net.js#moneyness`, `shared/flows-flow-net.js#readoutFor`, `shared/flows-flow-net.js#shares`, `shared/flows-flow-net.js#sideSplit`, `shared/flows-flow-net.js#volFor` | flows-flow-net-render |
+| `assets/js/flows-ticker-network.js` |  | flows-copy-lint, flows-flow-net-render, flows-glance-frame-render, flows-glance-live-render, flows-glance-render, flows-layout-sweep and 5 more |
+| `shared/flows-flow-net.js` | `shared/flows-flow-net.js#COLUMN_KEYS`, `shared/flows-flow-net.js#DAYS_PER_YEAR`, `shared/flows-flow-net.js#EXPIRY_NODES`, `shared/flows-flow-net.js#FACE_LINES`, `shared/flows-flow-net.js#FIXED_BAND`, `shared/flows-flow-net.js#FLAG_NODES`, `shared/flows-flow-net.js#MIN_WINDOWS`, `shared/flows-flow-net.js#MONEY_NODES`, `shared/flows-flow-net.js#NEAR_Z`, `shared/flows-flow-net.js#SESSION_CAP`, `shared/flows-flow-net.js#SIDE_NODES`, `shared/flows-flow-net.js#TITLES`, `shared/flows-flow-net.js#buildNet`, `shared/flows-flow-net.js#calendarDays`, `shared/flows-flow-net.js#expiryBucket`, `shared/flows-flow-net.js#flagNode`, `shared/flows-flow-net.js#moneyness`, `shared/flows-flow-net.js#readoutFor`, `shared/flows-flow-net.js#shares`, `shared/flows-flow-net.js#sideSplit`, `shared/flows-flow-net.js#volFor` | flows-copy-lint, flows-flow-net-render |
 | `tests/flows-flow-net-render.mjs` |  | flows-flow-net-render |
 
 ### `shared/flows-moves-sig.js`, `tests/flows-moves-sig.mjs`
@@ -2082,7 +2082,7 @@ The Market page's flow network, condensed (`FlowsUI.netMap`: `mount`, `of`, `rea
 | File | Exports | Suites |
 |---|---|---|
 | `assets/css/flows-net-map.css` |  | flows-feeds-onescreen, flows-flow-below-render, flows-glass-render, flows-layout-sweep, flows-net-map-render, flows-net-render and 2 more |
-| `assets/js/flows-net-map.js` |  | flows-feeds-onescreen, flows-flow-below-render, flows-layout-sweep, flows-net-map-render, flows-net-render, flows-pages-render and 1 more |
+| `assets/js/flows-net-map.js` |  | flows-copy-lint, flows-feeds-onescreen, flows-flow-below-render, flows-layout-sweep, flows-net-map-render, flows-net-render and 2 more |
 | `tests/flows-net-map-render.mjs` |  | flows-net-map-render |
 
 ### `tests/flows-market-onescreen.mjs`, `tests/lib/market-fixtures.mjs`
@@ -2108,7 +2108,7 @@ The Market page's opening scene, the Session (`FlowsUI.river`: `model`, `layout`
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/js/flows-market-river.js` |  | flows-layout-sweep, flows-lean, flows-market-below-render, flows-market-floor-render, flows-market-onescreen, flows-market-river-render and 2 more |
+| `assets/js/flows-market-river.js` |  | flows-copy-lint, flows-layout-sweep, flows-lean, flows-market-below-render, flows-market-floor-render, flows-market-onescreen and 3 more |
 | `tests/flows-market-river-render.mjs` |  | flows-market-river-render |
 
 ### `assets/js/flows-market-floor.js`, `tests/flows-market-floor-render.mjs`
@@ -2117,7 +2117,7 @@ The Market page's opening view, the Floor (`FlowsUI.floor`: `model`, `layout`, `
 
 | File | Exports | Suites |
 |---|---|---|
-| `assets/js/flows-market-floor.js` |  | flows-layout-sweep, flows-lean, flows-market-below-render, flows-market-floor-render, flows-market-onescreen, flows-market-river-render and 2 more |
+| `assets/js/flows-market-floor.js` |  | flows-copy-lint, flows-layout-sweep, flows-lean, flows-market-below-render, flows-market-floor-render, flows-market-onescreen and 3 more |
 | `tests/flows-market-floor-render.mjs` |  | flows-market-floor-render |
 
 ### `tests/flows-lean.mjs`
