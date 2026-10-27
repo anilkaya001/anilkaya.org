@@ -27,7 +27,7 @@
     surgeMult: 3, surgeFloor: 500000, surgeN: 3, repeatN: 3, repeatMult: 2, repeatFloor: 250000,
     flipSided: 400000, flipAbs: 0.4, flipEarlierMin: 45, coverage: 0.5,
     clusterShare: 0.6, clusterFloor: 300000, sweepN: 4, sweepAsk: 65, sweepFloor: 300000,
-    sizeMult: 5, sizeFloor: 500, sizePrem: 250000, sectorN: 4, sectorFloor: 5000000, eventMult: 1.5, eventSessions: 21
+    sizeMult: 5, sizeFloor: 500, sizePrem: 250000, sectorN: 4, sectorFloor: 5000000, eventMult: 1.5
   });
 
   var NEG = Object.freeze({ "-1": MINUS, "0": "", "1": "" });
@@ -242,7 +242,7 @@
       if (all.length < T.minWindows) continue;
       var norm = ctx && ctx.norm && fin(ctx.norm.winN) !== null && ctx.norm.winN >= 20 ? ctx.norm : null;
       if (!norm) continue;
-      var ev = ctx.earnings && ctx.earnings.inWindow === true && fin(ctx.earnings.sessions) !== null && ctx.earnings.sessions <= T.eventSessions;
+      var ev = ctx.earnings && ctx.earnings.inWindow === true && fin(ctx.earnings.sessions) !== null;
       var mult = ev ? T.eventMult : 1;
       var sessions = ev ? ctx.earnings.sessions : null;
       var recent = all.filter(function (x) { return x.at > now - T.windowMin * MIN && x.at <= now; });

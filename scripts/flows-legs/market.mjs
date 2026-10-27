@@ -7,6 +7,8 @@ import { readRegime, assembleRegime, REGIME_CALLS } from "./regime.mjs";
 import { readDeepOwnership, ownershipParts } from "./ownership.mjs";
 import { readCatalysts, assembleCatalysts, calendarPlan } from "./events.mjs";
 import { runExtras } from "./extras.mjs";
+import { readReactions, reactionObservations, historyObservations } from "./reactions.mjs";
+import { mergeLedger, mergeObservations, reportsPayload } from "../../shared/flows-reports.js";
 import { isoDay, sessionsBetween, vnum, compactNumbers } from "../../shared/flows-cross.js";
 import { putCallHistory } from "../../shared/flows-regime.js";
 
@@ -28,7 +30,7 @@ export const MARKET_LEG_CALLS =
 export async function runMarketLegs({
   uw, sessionDate = null, screenerDate = null, generatedAt = null, harvest = null, filters = {},
   eligible = () => true, rowOf = (r) => r, cardedTickers = [], deepTickers = [], readTickers = [], windowTickers = [],
-  deadline = null, pool = null, width = 1, stats = null, log = () => {}, sigma = null, extras: extrasOptions = null,
+  deadline = null, pool = null, width = 1, stats = null, log = () => {}, sigma = null, extras: extrasOptions = null, reports = null,
 } = {}) {
   const meter = makeCallMeter(stats);
   const lines = [];
@@ -59,8 +61,24 @@ export async function runMarketLegs({
     `, rho ${Object.entries(regime.impliedCorrelation.byIndex).map(([k, v]) => `${k}:${v && v.rho !== null && v.rho !== undefined ? v.rho.toFixed(3) : (v && v.reason) || "—"}`).join(" ")}` +
     `, ${regime.bytes} bytes`);
 
+  const names = [...new Set(eligibleRows.map((r) => r && r.ticker).filter(Boolean))];
+  const nextOf = new Map();
+  for (const r of eligibleRows) {
+    const d = r && isoDay(r.next_earnings_date);
+    if (d) nextOf.set(r.ticker, d);
+  }
+  let reactions = null;
+  let first = null;
+  if (reports && reports.prior && sessionDate) {
+    reactions = await readReactions(uw, { sessionDate, ledgerAsOf: reports.prior.asOf, deadline });
+    first = mergeLedger(reports.prior, reactionObservations(reactions.steps, sessionDate), { asOf: sessionDate, universe: names, next: nextOf, covered: reactions.covered });
+    say(`  reports: ${reactions.steps.length} reaction read(s) in ${reactions.calls} call(s)` +
+      (reactions.cut.length ? `, ${reactions.cut.length} day(s) not fully read (${reactions.cut.join(", ")})` : "") +
+      `, ledger from ${reports.prior.asOf || "nothing"} holding ${reports.prior.rows.size} name(s)`);
+  }
   const universe = universePayload(eligibleRows, {
     sessionDate, generatedAt, readAt, harvest: h, screened: harvested.length, sigma,
+    reports: first ? { cells: first.cells, from: reports.prior.asOf, cut: reactions.cut } : null,
   });
   say(`  universe: ${universe.n} names, ${universe.cols ? Object.keys(universe.cols).length : 0} columns` +
     (universe.shed.length ? `, shed ${universe.shed.join(", ")}` : "") + `, ${universe.bytes} bytes` +
@@ -91,7 +109,7 @@ export async function runMarketLegs({
     (future ? `; ${future} short-interest row(s) dated after the session were cut` : ""));
 
   const earningsTickers = [...new Set([...owned, ...windowTickers])];
-  const rawCatalysts = await readCatalysts(uw, { sessionDate, earningsTickers, deadline, pool, width });
+  const rawCatalysts = await readCatalysts(uw, { sessionDate, earningsTickers, deadline, pool, width, reactions, ledgerAsOf: reports && reports.prior ? reports.prior.asOf : null });
   const { additions, earnings } = assembleCatalysts(rawCatalysts, {
     sessionDate, carded: new Set(carded), reportCatalysts, windowTickers, screenerByTicker,
   });
@@ -104,9 +122,17 @@ export async function runMarketLegs({
     ? await runExtras({ uw, names: owned, sessionDate, now: Date.parse(readAt) || Date.now(), deadline, pool, width, log: say, ...extrasOptions })
     : null;
 
+  let reportsOut = null;
+  if (first) {
+    const log2 = [];
+    const seen = mergeObservations([reactionObservations(reactions.steps, sessionDate), historyObservations(rawCatalysts.earnings, sessionDate)], log2);
+    const second = mergeLedger(reports.prior, seen, { asOf: sessionDate, universe: names, next: nextOf, covered: reactions.covered });
+    reportsOut = { ledger: second.ledger, payload: reportsPayload(second.ledger, { generatedAt, readAt }), log: [...first.log, ...log2, ...second.log], cut: reactions.cut };
+    say(`  reports: ledger now holds ${second.ledger.rows.size} name(s)` + (reportsOut.log.length ? `, ${reportsOut.log.length} disagreement(s) between sources resolved` : ""));
+  }
   return {
     universe, regime, indexRows: index.rows, eventsAdditions: additions,
-    ownership, earnings, extras, calls: meter(), lines, readAt, harvested,
+    ownership, earnings, extras, calls: meter(), lines, readAt, harvested, reports: reportsOut,
   };
 }
 

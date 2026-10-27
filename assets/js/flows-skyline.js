@@ -3,7 +3,6 @@
   const SQ = Math.sqrt(252);
   const MIN = 2;
   const CAP = 40;
-  const EVENT = 21;
   const NARROW = 640;
   const SESSIONS = 252;
   const FLOOR_N = 250;
@@ -72,8 +71,12 @@
 
   function model(u) {
     if (!u || u.status !== "ok" || !Array.isArray(u.t)) return null;
-    const chg = col(u, "chg"), iv = col(u, "iv30p"), ed = col(u, "ed");
+    const chg = col(u, "chg"), iv = col(u, "iv30p"), ed = col(u, "ed"), rd = col(u, "rd");
     if (!chg || !iv) return null;
+    const F = window.FlowsUI.F;
+    const words = F.horizon(u.hz);
+    const unstated = u.rdBasis && u.rdBasis.unstated ? u.rdBasis.unstated : {};
+    const edUn = u.edUnstated && typeof u.edUnstated === "object" ? u.edUnstated : {};
     const sg = col(u, "sig"), f2 = col(u, "f2"), f3 = col(u, "f3");
     const names = Array.isArray(u.sectors) ? u.sectors : [];
     const all = [];
@@ -81,11 +84,10 @@
       const c = chg[i], v = iv[i];
       if (c === null || v === null || !(v > 0)) return;
       const m = c / (v / SQ);
-      const e = ed ? ed[i] : null;
       const s = Array.isArray(u.sec) && u.sec[i] !== null && u.sec[i] !== undefined ? names[u.sec[i]] || null : null;
       all.push({
         t, sector: s, secIx: s === null ? names.length : u.sec[i], chg: c, iv: v, m, h: Math.abs(m), dir: m > 0 ? 1 : -1,
-        event: e !== null && e !== undefined && e <= EVENT,
+        event: words === null ? false : F.earnIn({ ed: ed ? ed[i] : null, rd: rd ? rd[i] : null, rdMax: Number.isInteger(unstated[t]) ? unstated[t] : null, edMax: F.later(edUn, u.edUnstatedThrough, t, ed ? ed[i] : null) }, u.hz, 0) === true,
         sig: sg ? sg[i] : null, f2: f2 ? f2[i] : null, f3: f3 ? f3[i] : null,
       });
     });
@@ -96,13 +98,14 @@
       const f = p.event ? { why: "event" } : often(p);
       p.often = f.why ? null : f;
       p.why = f.why;
+      p.note = f.why === "event" ? words.apart : WHY[f.why];
       if (f.why) absent[f.why].push(p.t);
     }
     prisms.sort((a, b) => a.secIx - b.secIx || byHeight(a, b));
     prisms.forEach((p, i) => { p.gi = i; });
     return {
       n: all.length, beyond: beyond.length, prisms, max: prisms.reduce((x, p) => Math.max(x, p.h), 0),
-      apart: prisms.some((p) => p.event), day: u.sessionDate || null,
+      apart: prisms.some((p) => p.event), day: u.sessionDate || null, words,
       plotted: prisms.filter((p) => p.often).length, absent,
     };
   }
@@ -122,14 +125,12 @@
   const dirWord = (p) => (p.dir > 0 ? "up" : p.dir < 0 ? "down" : "flat");
   const glyphOf = (p) => (p.dir > 0 ? "▲" : p.dir < 0 ? "▼" : "–");
 
-  const APART = "Earnings within 21 sessions: event not separated.";
   const WHY = {
-    event: APART,
     scale: "No typical-day move is published for this name.",
     under: "It moved under 2 typical days, below the lowest count published.",
   };
   const WHY_SHORT = { event: "Event not separated", scale: "No move scale published", under: "Under 2 typical days" };
-  const sentence = (p) => (p.often ? p.often.text : WHY[p.why]);
+  const sentence = (p) => (p.often ? p.often.text : p.note);
   const headOf = (p) => p.t + " " + f1(p.m) + " IV-days";
 
   function wrap(text, maxW, measure) {
@@ -362,13 +363,14 @@
   const NOTE = "Height is the move in IV-days, not a probability. Colour and the triangle give the direction. No selection line is drawn: no error rate has been measured.";
   const OFTEN_NOTE = "Height is how often this name had a day as far out as the 2x or 3x typical-day rung its move reached, over the last year, on a log scale from 1 in 2 to 1 in 250 sessions: higher is rarer. It counts past days and is not a forecast. Colour gives the direction. A line above a prism means rarer than the 1 in 250 floor.";
   const LINE = "A ranking, not a test: no error rate measured.";
+  const NO_HORIZON = "Earnings are not separated: this payload does not state the earnings window.";
   const CAPTION = "IV as of the previous close.";
 
   function absentNote(md) {
     const a = md.absent, parts = [];
     if (a.scale.length) parts.push("no typical-day move published: " + a.scale.join(", "));
     if (a.under.length) parts.push("under 2 typical days, below the lowest count published: " + a.under.join(", "));
-    if (a.event.length) parts.push("earnings within 21 sessions, event not separated: " + a.event.join(", "));
+    if (a.event.length) parts.push("earnings within " + md.words.n + " sessions, event not separated: " + a.event.join(", "));
     return "Drawn here: " + md.plotted + " of " + md.prisms.length + ". Shown in IV-days only" + (parts.length ? ", not here: " + parts.join("; ") : "") + ".";
   }
 
@@ -429,7 +431,7 @@
       const showAbsent = mode === "often" || off;
       noteB.hidden = !showAbsent;
       noteB.textContent = showAbsent ? (off ? "How often is off: none of these names has a published typical-day move with a 2x or 3x count to draw. " : "") + absentNote(md) : "";
-      noteC.textContent = LINE + " " + CAPTION + (md.apart && mode === "ivdays" ? " Hatched prisms: " + APART : "");
+      noteC.textContent = LINE + " " + CAPTION + (md.apart && mode === "ivdays" ? " Hatched prisms: " + md.words.apart : "") + (md.words === null ? " " + NO_HORIZON : "");
       filled = "";
       draw();
     };

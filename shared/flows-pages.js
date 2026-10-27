@@ -1,10 +1,11 @@
-export const ASSET_VERSION = "400";
+export const ASSET_VERSION = "401";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
 import { stamp as trtStamp } from "./flows-time.js";
 import { etDayOf, isSession, shiftDay } from "./flows-quant-time.js";
 import { ledgerBody, LEDGER_DESCRIPTION, LEDGER_STYLES, LEDGER_SCRIPTS } from "./flows-page-ledger.js";
+import { HORIZON_SESSIONS } from "./flows-horizon.js";
 
 export const CALENDAR_BACK_DAYS = 14;
 export const CALENDAR_SESSIONS = 60;
@@ -1132,8 +1133,8 @@ export function movesPage({ username = "" } = {}) {
           <div class="mv-listbox" id="mvNow" role="group" aria-label="Largest moves in IV-days"></div>
         </div>
         <div class="mv-box mv-box-apart">
-          <div class="mv-bh"><h2>Earnings within 21 sessions</h2><span class="note" id="mvApartNote"></span></div>
-          <div class="mv-listbox" id="mvApart" role="group" aria-label="Largest moves among names reporting within 21 sessions"></div>
+          <div class="mv-bh"><h2 id="mvApartH">Earnings within ${HORIZON_SESSIONS} sessions</h2><span class="note" id="mvApartNote"></span></div>
+          <div class="mv-listbox" id="mvApart" role="group" aria-label="Largest moves among names reporting within ${HORIZON_SESSIONS} sessions"></div>
         </div>
         <div class="mv-box mv-box-sec" id="mvSecBox" hidden>
           <div class="mv-bh"><h2>Sectors</h2><span class="note" id="mvSecNote"></span><button type="button" class="link" id="mvSecMore" aria-haspopup="dialog">Show all</button></div>
