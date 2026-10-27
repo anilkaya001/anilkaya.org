@@ -51,7 +51,7 @@ export const STATE_CHIPS = Object.freeze({
   candidate: "Candidate", "no-expiry-in-rows": "No expiry", "min-volume": "200 minimum", "not-optionable": "Not optionable", off: "Off",
 });
 
-export const CONVENTION = "By convention: a fill at the ask is a buy.";
+export const CONVENTION = "By convention: a fill on the ask side is a buy.";
 
 export const SESSION_NOTE = "Times are Türkiye time (TRT). Session dates are US exchange dates.";
 

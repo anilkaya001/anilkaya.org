@@ -3,6 +3,7 @@ import { readFileSync, statSync, existsSync, appendFileSync, readdirSync } from 
 import { gzipSync } from "node:zlib";
 import * as PAGES from "../shared/flows-pages.js";
 import { memberShell } from "../shared/flows-member-shell.js";
+import { flowlabShell } from "../shared/flows-flowlab-shell.js";
 
 const REPO = new URL("../", import.meta.url);
 const sizeOf = (src) => statSync(new URL("." + src, REPO)).size;
@@ -26,6 +27,9 @@ const SKIP_FOCUS = { bytes: 50, why: "lane 5: the sign-in, About, Glossary and n
 const NETWORK_TICKER = { bytes: 687, why: "lane 5: the ticker builds the Flow network module the dock always named (buildNetwork, 0.7 KB of flows-ticker.js) and defers the group file; the dock button no longer says not built" };
 const NETWORK_GROUP = { bytes: 23757, why: "lane 5, plus 34 bytes for the sided-only nodes: flows-ticker-network.js is the deferred group network, asked for when the module nears the viewport; it adds nothing to the eager JavaScript" };
 const LEDGER_PAGE = { bytes: 42161, gzip: 11353, cssBytes: 34571, cssGzip: 6733, why: "the Premium ledger is a new route: its controller flows-sfc.js and its sheet flows-sfc.css are the whole cost of it above the shared kernel (flows-ui.js, flows-dock.js, flows-fresh.js, base.css, flows.css), and it defers nothing but the dock's Ask file; measured when the page landed and again when the page was redrawn with its skeleton, hero, strip and fixed-layout tables, which added 5.9 KB of controller and 12.3 KB of sheet, and again when the page was redesigned as a Balance hero with a lean interval bar, sign marks, responsive wordings that fit instead of cut, panel tabs and the first-paint skeleton of every cell, which added 4.5 KB of controller and 2.9 KB of sheet, plus the 1 KiB of eager headroom the floor requires" };
+const FLOWLAB_PAGE = { bytes: 66500, gzip: 18400, cssBytes: 13800, cssGzip: 3100, why: "Flow Lab is a new owner-gated route: its controller flows-flowlab.js, the drill sheet flows-drill.js and its sheet flows-flowlab.css are the whole cost of it above the shared kernel" };
+const FLOWLAB_ENTRY = { bytes: 17500, gzip: 5300, cssBytes: 13800, why: "Flow Lab drill sheet: the deferred group drill (flows-drill.js and its own sheet) that the Unusual, ticker and Moves pages ask for on the first contract opened" };
+const FLOWLAB_LINK = { movesBytes: 260, belowBytes: 1700, networkBytes: 1450, why: "Flow Lab entry points: the Moves drill panel links the name to Flow Lab, the Unusual feed rows and the ticker Flow network open a contract in the drill sheet, and the feed rows take one 44 px button column in flows-feeds.css; each renders only when #fxFlowlab is on the page" };
 const RT_STAMP = { bytes: 184, gzip: 51, why: "the live ledger: flows-rt.js stamps each topic with the page's monotonic time when a frame arrives (performance.now(), three sites and the topic record) and status() hands that stamp, the hub's send time, the hub's read time and the poll interval back, 184 B raw (35,965 to 36,149) on every route that loads the rail eagerly; the strip needs the stamp to print a receipt age that does not depend on the wall clock" };
 const LEDGER_HOOKS = { bytes: 2259, gzip: 719, why: "the live ledger: flows-sfc.js writes a repaint into the cells that changed instead of replacing the markup (the morph seam, setText and the in-place attribute writes), keeps keyboard focus and the figure line through it, and hands the heartbeat's update time to the live module, 2,259 B raw (42,377 to 44,636) over the controller the page landed with" };
 const LEDGER_LIVE = { bytes: 138867, why: "the live Premium ledger, owner-only behind FLOWS_LEDGER_LIVE: the deferred group ledger-live is the rail client (flows-rt.js, 36,149 B), the browser build of the book and view code (flows-ledger.bundle.js, 80,563 B: the same shared modules the Worker builds the view with, so the page can apply each arriving window exactly) and the glue (flows-sfc-live.js, 22,155 B); a page with the switch off declares none of it and the eager JavaScript does not move" };
@@ -60,8 +64,9 @@ const CEILING_KIB = {
   nowPage: 129,
   unusualPage: 191 + (191 + 2327 / 1024) - (191) + (191 + 2327 / 1024 + 265 / 1024) - (191 + 2327 / 1024) + (191 + 2327 / 1024 + 265 / 1024 - 314 / 1024) - (191 + 2327 / 1024 + 265 / 1024) + 2322 / 1024 + 2000 / 1024 + 1300 / 1024 + 2400 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024 + 700 / 1024 + 1306 / 1024 + RT_STAMP.bytes / 1024,
   eventsPage: 155 + 5786 / 1024 + (155 + 5786 / 1024 + 2327 / 1024) - (155 + 5786 / 1024) + (155 + 5786 / 1024 + 2327 / 1024 + 265 / 1024) - (155 + 5786 / 1024 + 2327 / 1024) + 2010 / 1024 + NN_KERNEL.bytes / 1024,
-  movesPage: 151 + 5522 / 1024 + 442 / 1024 + 320 / 1024 + 64 / 1024 + NN_KERNEL.bytes / 1024 + MOVES_PARTS.bytes / 1024 + MOVES_SECTORS.bytes / 1024 + 144 / 1024 + MOVES_EARNINGS.bytes / 1024 + RT_STAMP.bytes / 1024,
+  movesPage: 151 + 5522 / 1024 + 442 / 1024 + 320 / 1024 + 64 / 1024 + NN_KERNEL.bytes / 1024 + MOVES_PARTS.bytes / 1024 + MOVES_SECTORS.bytes / 1024 + 144 / 1024 + MOVES_EARNINGS.bytes / 1024 + RT_STAMP.bytes / 1024 + FLOWLAB_LINK.movesBytes / 1024,
   ledgerPage: 82.6 + LEDGER_PAGE.bytes / 1024 + LEDGER_HOOKS.bytes / 1024,
+  flowlabPage: 135.2 + FLOWLAB_PAGE.bytes / 1024,
   politicalPage: 118 + 2010 / 1024 + 700 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024,
   loginPage: 5,
   aboutPage: 5,
@@ -84,6 +89,7 @@ const GZIP_KIB = {
   eventsPage: 34 + 1932 / 1024 + (34 + 1932 / 1024 + 830 / 1024) - (34 + 1932 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (34 + 1932 / 1024 + 830 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024 - 98 / 1024) - (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) + 641 / 1024 + 2000 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
   movesPage: 47.5 + 1122 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + MOVES_PARTS.gzip / 1024 + MOVES_SECTORS.gzip / 1024 + MOVES_PARTS.gzip / 1024 + MOVES_SECTORS.gzip / 1024 + MOVES_EARNINGS.gzip / 1024,
   ledgerPage: 27 + LEDGER_PAGE.gzip / 1024 + LEDGER_HOOKS.gzip / 1024,
+  flowlabPage: 42.1 + FLOWLAB_PAGE.gzip / 1024,
   politicalPage: 37.5 + 641 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
   loginPage: 3,
   aboutPage: 3,
@@ -106,6 +112,7 @@ const CSS_KIB = {
   eventsPage: 105 + 565 / 1024 + 160 / 1024 + 367 / 1024 + 367 / 1024 + 1500 / 1024 + 4700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   movesPage: 95.5 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + MOVES_SECTORS.cssBytes / 1024,
   ledgerPage: 86.5 + LEDGER_PAGE.cssBytes / 1024,
+  flowlabPage: 86.5 + FLOWLAB_PAGE.cssBytes / 1024,
   politicalPage: 100.5 + 1700 / 1024 + 400 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   loginPage: 80 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   aboutPage: 81 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
@@ -128,6 +135,7 @@ const CSS_GZIP_KIB = {
   eventsPage: 23 + 64 / 1024 + 400 / 1024 + 1800 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   movesPage: 21 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + MOVES_SECTORS.cssGzip / 1024,
   ledgerPage: 18.6 + LEDGER_PAGE.cssGzip / 1024,
+  flowlabPage: 18.6 + FLOWLAB_PAGE.cssGzip / 1024,
   politicalPage: 22.5 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   loginPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   aboutPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
@@ -220,7 +228,7 @@ const SHARED_DEFERRED = {
   link: { file: "/assets/js/flows-link.js", declared: null },
 };
 const GPU_ONLY = {};
-const SHARED_GROUPS = new Set(["oracle", "member"]);
+const SHARED_GROUPS = new Set(["oracle", "member", "drill"]);
 const MEMBER_BOOT_MAX = 2318;
 const MEMBER_CORE_GZIP_MAX = 6 * 1024;
 const MEMBER_GROUP = ["/assets/js/storage.js", "/assets/js/flows-member.js", "/assets/js/flows-member-ui.js"];
@@ -239,6 +247,9 @@ DEFERRED_KIB.marketPage += DARK_POOL_TIME.bytes / 1024;
 const HORIZON_DEFERRED = { od: "LANE-4", tickerBytes: 2947, marketBytes: 1261, why: "lane 4: the ticker's Move lab reads the earnings window and the report-session column from the universe, ages them by the sessions elapsed and shows a Reacting today, Reacted one session ago or Report time not stated state, and reads the carried forward ages of unstated report times (flows-ticker-movelab.js 19,302 to 22,249 B), and Market's Skyline and Volatility lens read the same window, column and ages in place of a literal 21 (flows-skyline.js 22,056 to 22,571 B, flows-market-below.js 59,053 to 59,799 B)" };
 DEFERRED_KIB.tickerPage += HORIZON_DEFERRED.tickerBytes / 1024;
 DEFERRED_KIB.marketPage += HORIZON_DEFERRED.marketBytes / 1024;
+DEFERRED_KIB.tickerPage += FLOWLAB_LINK.networkBytes / 1024;
+DEFERRED_KIB.unusualPage += FLOWLAB_LINK.belowBytes / 1024;
+DEFERRED_KIB.flowlabPage = 80 + NN_ASK.bytes / 1024;
 
 const FLOOR_BYTES = 1024;
 const EAGER_KERNEL = [
@@ -491,12 +502,12 @@ for (const name of Object.keys(CEILING_KIB)) {
   }
 
   {
-    const CHART_ROUTES = ["deskPage", "marketPage", "overviewPage", "sidePage", "strategyPage", "tickerPage",
+    const CHART_ROUTES = ["deskPage", "flowlabPage", "marketPage", "overviewPage", "sidePage", "strategyPage", "tickerPage",
       "unusualPage", "watchPage"];
     const FREE_ROUTES = ["aboutPage", "eventsPage", "glossaryPage", "loginPage", "notFoundPage", "politicalPage"];
     const chartRoutes = measured.filter((m) => m.parts.some((p) => /^flows-chart\.js/.test(p))).map((m) => m.name).sort();
     eq(chartRoutes.join(", "), CHART_ROUTES.join(", "),
-       "the chart library ships on exactly the eight routes that draw a chart, and the routes that draw none never download it");
+       "the chart library ships on exactly the nine routes that draw a chart, and the routes that draw none never download it");
     for (const name of FREE_ROUTES) {
       ok(pageNames.includes(name) && !chartRoutes.includes(name), `${name} does not link flows-chart.js`);
     }
@@ -643,6 +654,14 @@ for (const name of Object.keys(CEILING_KIB)) {
       const added = shelled.length - m.html.length;
       ok(added > 0 && added <= ORACLE_MARKUP_BYTES + 400, `${m.name}: the Neuron's placeholder adds ${added} B of markup`);
       eq(PAGES.oracleShell(m.html, "off", "overview"), m.html, `${m.name}: with the switch off the page is untouched`);
+    }
+    const drillBytes = sizeOf("/assets/js/flows-drill.js");
+    ok(drillBytes > 0 && drillBytes <= FLOWLAB_ENTRY.bytes, `the drill sheet weighs ${drillBytes} B, inside its stated ${FLOWLAB_ENTRY.bytes} B, and loads only when a page carries #fxFlowlab`);
+    for (const slug of ["unusual", "ticker", "moves"]) {
+      const base = "<html><body><main>x</main></body></html>";
+      const shelled = flowlabShell(base, slug, true);
+      ok(/data-defer="drill"[^>]*data-src="\/assets\/js\/flows-drill\.js\?v=\d+"/.test(shelled) && shelled.includes('id="fxFlowlab"'), `${slug}: the shell declares the drill group and its root`);
+      eq(flowlabShell(base, slug, false), base, `${slug}: with the switch off the page is untouched`);
     }
     const bootBytes = sizeOf("/assets/js/flows-member-boot.js");
     ok(bootBytes > 0 && bootBytes <= MEMBER_BOOT_MAX, `the member boot weighs ${bootBytes} B, inside its stated ${MEMBER_BOOT_MAX} B, and is the only eager member script`);
