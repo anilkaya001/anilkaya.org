@@ -5282,7 +5282,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     }
     r.finish();
     ok(r.records().filter((y) => y.why).every((y) => y.why.length <= WHY_CAP && !/\s{2}/.test(y.why)), "a failure reason is one line and capped");
-    ok(JSON.stringify(r.records()).length < 5900, `even with every isolated stage failed the records stay under 5.9 KB (${JSON.stringify(r.records()).length})`);
+    ok(JSON.stringify(r.records()).length < 6100, `even with every isolated stage failed the records stay under 6.1 KB, the funds stage being the record added since 5.9 KB (${JSON.stringify(r.records()).length})`);
     let n = 0;
     const bigClock = () => (n += 98765);
     const wide = createStageRunner({ clock: bigClock, calls: () => n / 30 });
