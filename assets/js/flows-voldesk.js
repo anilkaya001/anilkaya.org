@@ -451,8 +451,9 @@
         }
         root.append(svg("line", { x1: g0, x2: g0 + 4 * c, y1: 4 * c, y2: 4 * c, class: "vd-div" }));
         root.append(svg("line", { x1: g0 + 4 * c, x2: g0 + 4 * c, y1: 4 * c, y2: n * c, class: "vd-div" }));
+        const hadFocus = box.dataset.focus === "1" || box.contains(document.activeElement);
         box.replaceChildren(root);
-        if (box.dataset.focus === "1") { const a = root.querySelector('[tabindex="0"]'); if (a) a.focus({ preventScroll: true }); }
+        if (hadFocus) { const a = root.querySelector('[tabindex="0"]'); if (a) a.focus({ preventScroll: true }); }
       };
       const say2 = (i, j) => { read.textContent = sentence(i, j); };
       const move = (i, j) => { cur = { i, j }; draw(); say2(i, j); };

@@ -152,13 +152,14 @@
       if (close) close.focus();
     };
     dlg.addEventListener("close", () => { if (opener && opener.isConnected) opener.focus(); });
+    document.body.append(dlg);
     host.hidden = false;
     host.dataset.state = m.state;
     if (m.state !== "ok") {
-      host.replaceChildren(h("p", { class: "ftxc-t" }, COPY["title.xcheck"]), h("p", { class: "ftxc-s" }, m.text), dlg);
+      host.replaceChildren(h("p", { class: "ftxc-t" }, COPY["title.xcheck"]), h("p", { class: "ftxc-s" }, m.text));
     } else {
       const [l, g, d] = strip(m, () => open(d));
-      host.replaceChildren(l, g, d, dlg);
+      host.replaceChildren(l, g, d);
     }
     let button = null;
     const slot = o.buttonHost || null;

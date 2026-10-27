@@ -12,7 +12,7 @@ export const DEEPEN = Object.freeze({
   keepSessions: 40,
   callsPerName: 39,
   msPerName: 6650,
-  baselineCalls: 6600,
+  baselineCalls: 6460,
   baselineMs: 19 * 60 * 1000,
   deadlineMs: 90 * 60 * 1000,
   daySharePct: 0.85,
