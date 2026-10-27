@@ -813,7 +813,7 @@
         const front = cam(s.x, 0, s.z - PED / 2 - 0.06);
         const hot = hotOf(s);
         lab.add(s.label, front.x + level.get(s.id)[0], front.y + (phone ? 10 : 14) + level.get(s.id)[1], "center", hot ? 30 : 25, s.v === null ? TOK.faint : TOK.body, tf, { id: s.id, z: s.pz });
-        if (s.cap) lab.add(s.cap, front.x + level.get(s.id)[0], front.y + (phone ? 10 : 14) + level.get(s.id)[1] + (phone ? 10 : 12), "center", 7, TOK.faint, tf, { id: s.id, z: s.pz });
+        if (s.cap) lab.add(s.cap.slice(8), front.x + level.get(s.id)[0], front.y + (phone ? 10 : 14) + level.get(s.id)[1] + (phone ? 14 : 16), "center", 7, TOK.faint, tf, { id: s.id, z: s.pz });
         if (s.v !== null && (topSet.has(s.id) || hot)) {
           const t = tileOf(s.id), val = measure === "volume" ? F.num(s.v) : measure === "lean" ? moneyS(s.v) : money(s.v);
           lab.add(val, s.px, s.py - 6, "center", hot ? 29 : 8 + s.h / (SC.hmax || 1), TOK.strong, vf, { id: s.id, z: s.pz });
@@ -856,7 +856,7 @@
       wide = wrap.clientWidth >= 860;
       SC = layout(M, measure, W, H, { phone: W < 640, yaw, pitch });
       canvas.setAttribute("aria-label", describe());
-      legend.querySelector(".mk-fl-heights").textContent = "Height: " + (M.basis === "session" ? meas().nounS : meas().noun) + ", one scale" + (SC && SC.vMax ? ", the tallest " + (measure === "volume" ? F.num(SC.vMax) + " contracts" : money(SC.vMax)) : "") + (M.basis === "session" ? ". White base stripe: share of all fund premium in the session." : ". White base stripe: share of all flagged premium.");
+      legend.querySelector(".mk-fl-heights").textContent = "Height: " + (M.basis === "session" ? meas().nounS : meas().noun) + ", one scale" + (SC && SC.vMax ? ", the tallest " + (measure === "volume" ? F.num(SC.vMax) + " contracts" : money(SC.vMax)) : "") + (M.basis === "session" ? ". White base stripe: share of all fund premium in the session." : ". White base stripe: share of all flagged premium." + (M.fundsOn ? " The figure under a dashed tile is its whole-session premium, not flagged." : ""));
       paint();
       placeHits();
       paintRead();

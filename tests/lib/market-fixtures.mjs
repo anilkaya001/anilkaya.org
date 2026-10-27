@@ -119,8 +119,10 @@ export async function openMarket(browser, { rich = false, tweak = null, now = RI
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   page.errors = errors;
+  page.seen = [];
   const dir = rich ? nightlyEmit() : null;
   if (rich) await page.clock.install({ time: now });
+  else if (funds && funds.now) await page.clock.install({ time: funds.now });
   const html = PAGES.marketPage({ username: "test", owner, scenes, funds: Boolean(funds) });
   await page.routeWebSocket(/\/api\/rt\/ws/, (ws) => ws.close({ code: 4011, reason: "off" }));
   await page.route("**/*", async (route) => {
@@ -136,6 +138,7 @@ export async function openMarket(browser, { rich = false, tweak = null, now = RI
       return route.fulfill({ path: f, contentType: MIME[path.extname(f)] || "application/octet-stream" });
     }
     if (u.pathname.startsWith("/api/rt/")) return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: { code: "rt_off", message: "off" } }) });
+    if (u.pathname.startsWith("/api/flows/")) page.seen.push(u.pathname + u.search);
     if (gate && u.pathname.startsWith("/api/flows/")) await gate;
     if (u.pathname === "/api/flows/flowalerts") {
       if (alertsStatus !== 200) return route.fulfill({ status: alertsStatus, contentType: "application/json", body: "{}" });
