@@ -965,6 +965,7 @@ export const SCENARIOS = {
       await setTicker(p.page, "SYA001");
       await until(p.page, () => { const s = document.querySelector(".fm-star"); return s && !s.hidden; });
       eq([await attr(p.page, ".fm-star", "aria-disabled"), await attr(p.page, ".fm-star", "aria-pressed")], ["true", "false"], "an unreadable list leaves the star unpressable");
+      await settle(p.page, 400);
       const dim = await p.page.evaluate(() => getComputedStyle(document.querySelector(".fm-star")).color);
       await p.page.click(".fm-star", { force: true });
       await settle(p.page, 300);
@@ -976,6 +977,7 @@ export const SCENARIOS = {
       await p.page.keyboard.press("Escape");
       await until(p.page, () => document.querySelectorAll("dialog[open]").length === 0);
       eq(await attr(p.page, ".fm-star", "aria-disabled"), "false", "starting a new list frees the star");
+      await settle(p.page, 400);
       ok(dim !== await p.page.evaluate(() => getComputedStyle(document.querySelector(".fm-star")).color), "and an unpressable star is drawn dimmer than a live one");
       await p.page.click(".fm-star");
       await until(p.page, () => document.querySelector(".fm-star").getAttribute("aria-pressed") === "true");
