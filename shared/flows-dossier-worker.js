@@ -103,10 +103,12 @@ export const DOSSIER_SQL = Object.freeze({
     "WHERE instr(r, '{\"t\":\"' || ?1 || '\"') > 0)) || ']') AS row FROM flows_payload WHERE id = 'events'",
   roster: "SELECT json_extract(payload, '$.depth.\"' || ? || '\"') AS depth FROM flows_payload WHERE id = 'roster'",
   macro: "SELECT updated_at, json_extract(payload, '$.session') AS session, json_extract(payload, '$.generatedAt') AS generated, " +
-    "json_extract(payload, '$.rates.spreads.s2s10') AS s2s10, json_extract(payload, '$.rates.curve[4]') AS ten, json_extract(payload, '$.fx.breadth') AS breadth, " +
+    "json_extract(payload, '$.rates.spreads.s2s10') AS s2s10, " +
+    "COALESCE(" + [0, 1, 2, 3, 4, 5].map((i) => "CASE WHEN json_extract(payload, '$.rates.curve[" + i + "][0]') = '10year' THEN json_extract(payload, '$.rates.curve[" + i + "][1]') END").join(", ") + ") AS ten, " +
+    " json_extract(payload, '$.fx.breadth') AS breadth, " +
     "json_extract(payload, '$.futures.products.ES.chg1') AS es, json_extract(payload, '$.crypto.BTC.chg1') AS btc, " +
     [0, 1, 2, 3].map((i) => "json_object('at', json_extract(payload, '$.odds.events[" + i + "].at'), 'event', json_extract(payload, '$.odds.events[" + i + "].event'), " +
-      "'price', json_extract(payload, '$.odds.events[" + i + "].markets[0].price'), 'thin', json_extract(payload, '$.odds.events[" + i + "].markets[0].thin')) AS e" + i).join(", ") + " " +
+      "'price', json_extract(payload, '$.odds.events[" + i + "].markets[0].price'), 'resolved', json_extract(payload, '$.odds.events[" + i + "].markets[0].resolved'), 'thin', json_extract(payload, '$.odds.events[" + i + "].markets[0].thin')) AS e" + i).join(", ") + " " +
     "FROM flows_payload WHERE id = 'macro'",
   strips: "SELECT read_at, session, json_extract(payload, '$.rows.\"' || ?1 || '\"') AS row, json_extract(payload, '$.fields') AS fields FROM flows_live WHERE id = 'live:strips'",
   market: "SELECT read_at, session, json_extract(payload, '$.tide.status') AS tide_status, json_extract(payload, '$.last.tideNet') AS tide_net, " +
@@ -141,7 +143,7 @@ function decodeMacro(row) {
     sessionDate: typeof row.session === "string" ? row.session.slice(0, 10) : null,
     generatedAt: typeof row.generated === "string" ? row.generated : null,
     s2s10: isNum(row.s2s10) ? row.s2s10 : null,
-    ten: tryParse(row.ten, null),
+    ten: isNum(row.ten) ? row.ten : null,
     breadth: tryParse(row.breadth, null),
     es: isNum(row.es) ? row.es : null,
     btc: isNum(row.btc) ? row.btc : null,

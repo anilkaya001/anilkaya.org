@@ -337,6 +337,7 @@ a.fe-erow:hover, a.fe-frow:hover { background: var(--fill-4); }
 .fe-mrow { grid-template-columns: 44px minmax(0, 1fr) 62px 54px; }
 #evMacroCard[data-odds="on"] .fe-mrow { grid-template-columns: 44px minmax(0, 1fr) 62px 54px 64px; }
 .fe-modd { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fe-modd-retry { margin-left: 6px; min-height: 24px; padding: 0 8px; border: 1px solid var(--line, currentColor); border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .fe-mname { display: flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap; }
 .fe-mname b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
 .fe-mname small { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--label-3); font: var(--t-caption); }

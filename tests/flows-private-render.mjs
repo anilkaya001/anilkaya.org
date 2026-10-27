@@ -24,6 +24,12 @@ ok(/\.defer\("private", \{ when: "visible"/.test(TICKER_SRC) && /function buildP
 ok(!/vendor|tape|unusual whales/i.test(LENS_SRC), "no provider name and no tape in the lens");
 ok(!/leader[^"\n]*\bname/i.test(LENS_SRC.replace(/\{n\} disclosed leaders; names are not shown\./, "")), "the lens never reads a leader's name");
 
+{
+  const GUARD = /function buildPrivate\(card\) \{\s*if \(isIndex\(card\) \|\| !UI\.defer \|\| !\$\("ftPrivate"\)\) return;/;
+  const planted = TICKER_SRC.replace(' || !$("ftPrivate")', "");
+  ok(planted !== TICKER_SRC && !GUARD.test(planted), "PLANTED WRONG BUILD caught: the module fetched with the switch off");
+}
+
 const NOW = Date.parse("2026-10-27T21:40:00Z");
 
 function pmPayload(world) {

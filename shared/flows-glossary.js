@@ -13,26 +13,26 @@ const BOARDS = { file: "assets/js/flows-board.js", page: "the Bullish and Bearis
 
 export const GLOSSARY = Object.freeze([
   { key: "aggressor-side", term: "Aggressor side", ...MACRO, lines: [
-    "Unsided: the feed gives no aggressor side.",
+    "No aggressor side: the feed does not report one.",
     "Crossed-quote prints are counted apart, never sided.",
   ] },
   { key: "contango", term: "Contango (futures)", ...MACRO, lines: [
     "Index futures usually sit above spot by carry.",
   ] },
   { key: "dollar-breadth", term: "Dollar breadth", ...MACRO, lines: [
-    "Dollar up against {up} of {n} majors over the last day.",
+    "Dollar breadth counts the majors the dollar rose against over the last day.",
     "The feed carries no dollar index; this count is not one.",
   ] },
   { key: "coin-flip", term: "Distinguishable from a coin", ...MACRO, lines: [
     "Indistinguishable from a coin flip.",
-    "{s} of {n} names remain distinguishable from a coin after correction.",
+    "Names are ranked after a correction for how many were tested.",
   ] },
   { key: "disclosed-investor", term: "Disclosed investor", ...MACRO, lines: [
-    "Disclosed investor in {n} private companies.",
+    "A disclosed investor is a firm the feed lists as backing private companies.",
     "Not listed as a disclosed private-markets investor.",
   ] },
   { key: "implied-mark", term: "Implied per-share mark", ...MACRO, lines: [
-    "The feed's implied per-share price on {date}; not a trade.",
+    "An implied per-share price comes from the feed's funding data, not from a trade.",
   ] },
   { key: "inverted-curve", term: "Inverted curve", ...MACRO, lines: [
     "Inverted: the 2-year yields more than the 10-year.",
@@ -41,7 +41,7 @@ export const GLOSSARY = Object.freeze([
     "Most active contract, as the feed ranks them.",
   ] },
   { key: "prediction-price", term: "Prediction-market price", ...MACRO, lines: [
-    "Prediction-market price {p}: the market's number, not a forecast.",
+    "A prediction-market price is the market's number, not a forecast.",
   ] },
   { key: "spread-2s10s", term: "2s10s spread", ...MACRO, lines: [
     "Normal: the 10-year yields more than the 2-year.",
@@ -51,7 +51,7 @@ export const GLOSSARY = Object.freeze([
     "Thin market: under $50K of liquidity or a spread above 5 points.",
   ] },
   { key: "wilson-interval", term: "Wilson interval", ...MACRO, lines: [
-    "Up in {k} of {n} years: {lo} to {hi} at 95%.",
+    "The share of years a month rose is shown with a 95% interval.",
   ] },
   { key: "advancers", term: "Advancers", ...MARKET_BELOW, lines: [
     "The session's price change for every eligible name in the screened universe, in half-point bins.",

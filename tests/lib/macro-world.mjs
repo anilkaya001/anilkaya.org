@@ -41,6 +41,8 @@ export function liveBodies(payload, zone = "ok") {
   };
 }
 
+export const patchMisses = [];
+
 export async function openMacro(browser, { viewport = { width: 1440, height: 820 }, payload = null, live = true, liveZone = "ok", hash = "", reduced = false, coarse = false, onRoute = null, patch = null, pending = false, macroStatus = 200 } = {}) {
   const context = await browser.newContext({ viewport, reducedMotion: reduced ? "reduce" : "no-preference", hasTouch: coarse, isMobile: coarse });
   const page = await context.newPage();
@@ -63,7 +65,9 @@ export async function openMacro(browser, { viewport = { width: 1440, height: 820
       if (!fs.existsSync(f)) return route.fulfill({ status: 404, body: "" });
       if (patch && patch[u.pathname]) {
         let src = fs.readFileSync(f, "utf8");
-        for (const [from, to] of patch[u.pathname]) src = src.replaceAll(from, to);
+        let applied = 0;
+        for (const [from, to] of patch[u.pathname]) { if (src.includes(from)) applied++; src = src.replaceAll(from, () => to); }
+        if (!applied) patchMisses.push(u.pathname);
         return route.fulfill({ body: src, contentType: MIME[path.extname(f)] });
       }
       return route.fulfill({ path: f, contentType: MIME[path.extname(f)] || "application/octet-stream" });

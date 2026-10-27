@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { launch } from "./lib/browser.mjs";
-import { openMacro, settle, macroPayload, FX, liveBodies, NOW } from "./lib/macro-world.mjs";
+import { openMacro, settle, macroPayload, FX, liveBodies, NOW, patchMisses } from "./lib/macro-world.mjs";
 import * as PAGES from "../shared/flows-pages.js";
 
 let checks = 0;
@@ -150,6 +150,7 @@ async function planted(name, patch, check, payload = null) {
   let failed = false;
   try { await check(page); } catch { failed = true; }
   await context.close();
+  eq(patchMisses.splice(0), [], `the planted build "${name}" applied exactly once`);
   ok(failed, `PLANTED WRONG BUILD caught: ${name}`);
 }
 
@@ -195,6 +196,45 @@ await planted("a live read while the tab is hidden", { [MACRO_JS]: [["if (!docum
   await page.clock.runFor(10 * 60 * 1000);
   ok(!reqs.some((u) => u.includes("/api/flows/macro/now")), "hidden");
 });
+
+const ADDRESS = /\b0x[0-9a-fA-F]{20,}\b/;
+const longSentences = (texts) => texts.flatMap((t) => t.split(/(?<=[.!?])\s+|\s·\s/)).filter((x) => x.trim().split(/\s+/).length > 14);
+async function scanTabs(page) {
+  const out = { text: "", long: [], missingSrc: [] };
+  for (const tab of TABS) {
+    await page.click("#mcT-" + tab);
+    await page.waitForTimeout(120);
+    const r = await page.evaluate(() => {
+      const v = document.querySelector(".mc-view:not([inert])");
+      return {
+        text: v.innerText,
+        notes: [...v.querySelectorAll(".mc-note, .mc-line")].map((e) => e.textContent),
+        mods: [...v.querySelectorAll(".mc-mod")].filter((m) => m.offsetParent !== null).map((m) => ({ id: m.dataset.m, src: (m.querySelector(".mc-src") || {}).textContent || "", body: m.querySelectorAll(".mc-body > :not(.mc-note)").length })),
+      };
+    });
+    out.text += "\n" + r.text;
+    out.long.push(...longSentences(r.notes));
+    out.missingSrc.push(...r.mods.filter((m) => m.src.trim() === "" && m.body > 0).map((m) => tab + ":" + m.id));
+  }
+  return out;
+}
+{
+  const { page, context } = await openMacro(browser);
+  await settle(page);
+  const r = await scanTabs(page);
+  eq(r.long, [], "no sentence on any tab runs past fourteen words");
+  ok(!ADDRESS.test(r.text), "no wallet-shaped address is rendered on any tab");
+  ok(!BANNED.test(r.text), "no provider name and no tape on any tab");
+  eq(r.missingSrc, [], "every module on every tab names its source");
+  await context.close();
+}
+const PUT = 'const put = (m, html) => { const b = $("mcB-" + m); if (b) b.innerHTML = html; };';
+const plantText = (extra) => ({ [MACRO_JS]: [[PUT, 'const put = (m, html) => { const b = $("mcB-" + m); if (b) b.innerHTML = html + \'<p class="mc-note">' + extra + '</p>\'; };']] });
+await planted("a sentence over fourteen words", plantText("one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen."), async (page) => eq((await scanTabs(page)).long, [], "long"));
+await planted("the word vendor in the text", plantText("The vendor says so."), async (page) => ok(!BANNED.test((await scanTabs(page)).text), "vendor"));
+await planted("the word tape in the text", plantText("From the tape."), async (page) => ok(!BANNED.test((await scanTabs(page)).text), "tape"));
+await planted("an address rendered", plantText("0x" + "ab".repeat(20)), async (page) => ok(!ADDRESS.test((await scanTabs(page)).text), "address"));
+await planted("a module with no source tag", { [MACRO_JS]: [['const srcSet = (m, text) => { const s = $("mcS-" + m); if (s) s.textContent = text; };', 'const srcSet = () => {};']] }, async (page) => eq((await scanTabs(page)).missingSrc, [], "src"));
 
 await browser.close();
 console.log(`flows-macro-render: ${checks} checks`);

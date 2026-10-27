@@ -534,11 +534,28 @@ const MUTANTS = [
   ok(!factOf(buildPeersPacket({ ticker: "AAPL", now: NOW, expectedSession: "2026-10-27", held: { cardX: { sessionDate: "2026-10-27", pm: stale } } }), "pm.investor"), "an expired section gives no fact");
   const none = buildPeersPacket({ ticker: "AAPL", now: NOW, expectedSession: "2026-10-27", held: { cardX: { sessionDate: "2026-10-27", pm: P.pmCardSection({ at: NOW - 1000, session: "2026-10-27", match: null, why: "plan" }) } } });
   ok(none.withheld.some((w) => w.k === "pm" && /plan/.test(w.reason)), "a plan refusal is held with its reason");
-  const mc = { sessionDate: "2026-10-27", s2s10: 29, ten: ["10year", 4.31, "2026-10-27"], breadth: { up: 3, n: 7 }, es: 0.003, btc: -0.0014, events: [{ at: "2026-10-29T18:00:00Z", event: "FOMC Interest Rate Decision", price: 0.62, thin: false }] };
+  const mc = { sessionDate: "2026-10-27", s2s10: 29, ten: 4.31, breadth: { up: 3, n: 7 }, es: 0.003, btc: -0.0014, events: [{ at: "2026-10-29T18:00:00Z", event: "FOMC Interest Rate Decision", price: 0.62, thin: false }] };
   const macro = buildMacroPacket({ ticker: "AAPL", now: NOW, expectedSession: "2026-10-27", held: { macro: mc } });
   eq(factOf(macro, "rates.s2s10").display, "+29 bp", "the macro packet prints the spread in basis points");
   eq(factOf(macro, "rates.10y").display, "4.31%", "and the ten-year yield in percent");
   ok(/62%/.test(factOf(macro, "odds.next").v) && /not a forecast/.test(factOf(macro, "odds.next").note), "the odds fact is the market's number, not a forecast");
+  const mixed = buildMacroPacket({ ticker: "AAPL", now: NOW, expectedSession: "2026-10-27", held: { macro: { ...mc, events: [{ at: "2026-10-28T18:00:00Z", event: "Done", price: 1, resolved: true }, { at: "2026-10-30T18:00:00Z", event: "Later", price: 0.4 }, { at: "2026-10-29T18:00:00Z", event: "Sooner", price: 0.3 }] } } });
+  ok(/30% for Sooner/.test(factOf(mixed, "odds.next").v), "odds.next skips a resolved market and takes the nearest release");
+  eq(factOf(mixed, "fx.breadth").note, "a count of 7 pairs, not an index", "the breadth note uses the count read, not a fixed seven");
+  const peers2 = buildPeersPacket({ ticker: "AAPL", now: NOW, expectedSession: "2026-10-27", held: { cardX: { sessionDate: "2026-10-27", pm: P.pmCardSection({ at: NOW - 1000, session: "2026-10-27", match: { name: "Sample Fund", companyCount: 2 }, companies: [["SYX001", "Alpha Co", "Tech"]] }) } } });
+  ok(peers2.text.some((t) => t.k === "pm.peers" && t.untrusted === true), "private company names travel as untrusted text");
+  ok(!peers2.facts.some((f) => f.k === "pm.peers"), "and not as a plain fact");
+  const amb = buildPeersPacket({ ticker: "AAPL", now: NOW, expectedSession: "2026-10-27", held: { cardX: { sessionDate: "2026-10-27", pm: P.pmCardSection({ at: NOW - 1000, session: "2026-10-27", match: null, why: "ambiguous" }) } } });
+  ok(amb.withheld.some((w) => w.k === "pm" && /more than one investor/.test(w.reason)), "an ambiguous match is held with its reason");
+  {
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(":memory:");
+    db.exec("CREATE TABLE flows_payload (id TEXT, payload TEXT, updated_at TEXT)");
+    const curve = [["3month", 4.4], ["2year", 4.0], ["7year", 4.2], ["10year", 4.31], ["30year", 4.8]];
+    db.prepare("INSERT INTO flows_payload VALUES ('macro', ?, 'x')").run(JSON.stringify({ session: "2026-10-27", rates: { curve, spreads: {} }, fx: {}, odds: { events: [] } }));
+    const row = db.prepare(DOSSIER_SQL.macro).get();
+    eq(row.ten, 4.31, "the ten-year is found by its name even when the five-year read failed");
+  }
   const behind = buildMacroPacket({ ticker: "AAPL", now: NOW, expectedSession: "2026-10-29", held: { macro: mc } });
   ok(!factOf(behind, "rates.s2s10"), "a macro board two sessions behind gives no fact");
   eq(buildMacroPacket({ ticker: "AAPL", now: NOW, expectedSession: "2026-10-27", held: {} }).facts.some((f) => f.k.startsWith("rates.")), false, "with no macro held the packet is what it was");

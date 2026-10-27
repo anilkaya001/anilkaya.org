@@ -1497,9 +1497,9 @@ export function buildPeersPacket(inp) {
       if (!parts.some((q) => q.key === "card-x:" + ctx.ticker)) parts.push({ kind: "nightly", key: "card-x:" + ctx.ticker });
       rec.fact("pm.investor", "Disclosed investor in private companies", pm.match.companyCount, "count", { grade: pg, note: "the feed's count of private companies this firm is listed as an investor in" });
       const names = arr(pm.match.companies).filter((e) => Array.isArray(e) && typeof e[1] === "string").slice(0, 5).map((e) => cleanLabel(e[1], 60)).filter(Boolean);
-      if (names.length) rec.fact("pm.peers", "Private companies it is listed as investing in", names.join(", "), "text", { grade: pg, silent: true, note: "names only; ordered as the feed lists them" });
+      if (names.length) rec.say("pm.peers", "note", "Private companies it is listed as investing in: " + names.join(", "), null, "UW private-markets investor list");
     } else {
-      rec.hold("pm", why(pm.why === "plan" ? "plan" : pm.why === "none" ? "empty" : "absent", pm.why === "plan" ? "the private-markets route needs a feed plan the site does not hold" : "this name is not listed as a disclosed private-markets investor"));
+      rec.hold("pm", why(pm.why === "plan" ? "plan" : pm.why === "none" ? "empty" : "absent", pm.why === "plan" ? "the private-markets route needs a feed plan the site does not hold" : pm.why === "ambiguous" ? "the feed lists more than one investor under this name, so none is matched" : "this name is not listed as a disclosed private-markets investor"));
     }
   }
   const etf = h.sectorEtf && isObj(h.sectorEtf) ? h.sectorEtf : null;
@@ -1570,12 +1570,12 @@ export function buildMacroPacket(inp) {
       const mg = gradeBySession(mgap);
       parts.push({ kind: "nightly", key: "macro" });
       if (isNum(mc.s2s10)) rec.fact("rates.s2s10", "Ten-year less two-year Treasury yield", mc.s2s10, "bp", { signed: true, grade: mg, note: "basis points, from one date's yields" });
-      const ten = Array.isArray(mc.ten) && isNum(mc.ten[1]) ? mc.ten[1] : null;
+      const ten = isNum(mc.ten) ? mc.ten : null;
       if (ten !== null) rec.fact("rates.10y", "Ten-year Treasury yield", ten, "pct", { grade: mg, digits: 2 });
-      if (isObj(mc.breadth) && isNum(mc.breadth.up) && isNum(mc.breadth.n) && mc.breadth.n > 0) rec.fact("fx.breadth", "Majors the dollar rose against over the last day", mc.breadth.up + " of " + mc.breadth.n, "text", { grade: mg, silent: true, note: "a count of seven pairs, not an index" });
+      if (isObj(mc.breadth) && isNum(mc.breadth.up) && isNum(mc.breadth.n) && mc.breadth.n > 0) rec.fact("fx.breadth", "Majors the dollar rose against over the last day", mc.breadth.up + " of " + mc.breadth.n, "text", { grade: mg, silent: true, note: "a count of " + mc.breadth.n + " pairs, not an index" });
       if (isNum(mc.es)) rec.fact("futures.ES.chg1", "S&P 500 futures, one-day change", mc.es, "fraction", { signed: true, grade: mg, silent: true });
       if (isNum(mc.btc)) rec.fact("crypto.BTC.chg1", "Bitcoin, one-day change", mc.btc, "fraction", { signed: true, grade: mg, silent: true });
-      const next = arr(mc.events).find((e) => isNum(e.price));
+      const next = arr(mc.events).filter((e) => isNum(e.price) && e.resolved !== true && typeof e.at === "string").sort((x, y) => x.at.localeCompare(y.at))[0];
       if (next) rec.fact("odds.next", "Prediction-market price for the next matched release", Math.round(next.price * 100) + "% for " + cleanLabel(next.event, 60), "text", { grade: next.thin === true ? Math.min(mg, 1) : mg, silent: true, note: "the market's number, not a forecast" });
     } else {
       rec.hold("macro", why("expired", "the macro board describes " + mc.sessionDate));
