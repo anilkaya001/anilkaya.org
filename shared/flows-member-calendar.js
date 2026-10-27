@@ -1,8 +1,7 @@
 import { sessionsBetween } from "./flows-cross.js";
+import { HORIZON_SESSIONS } from "./flows-horizon.js";
 
-export { sessionsBetween };
-
-export const HORIZON_SESSIONS = 21;
+export { sessionsBetween, HORIZON_SESSIONS };
 
 export function withinHorizon(fromDay, toDay) {
   const n = sessionsBetween(fromDay, toDay);
