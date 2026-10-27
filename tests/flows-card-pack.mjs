@@ -19,9 +19,10 @@ const ok = (c, m) => { assert.ok(c, m); checks++; };
 const eq = (a, b, m) => { assert.equal(a, b, m); checks++; };
 const same = (a, b, m) => { assert.deepEqual(a, b, m); checks++; };
 
-const HEADROOM_BYTES = Math.floor(0.95 * CARD_X_SOFT_BYTES);
-const WIRE_CEILING = 56700;
-const SERVED_CEILING = 62800;
+const WP4_PS = { od: "WP4", bytes: 2200, why: "the ps section (ftd, svx, ibs, ins) is the next field the headroom was held for: it adds 2.2 KB to a deep card, sheds before any other section and never costs one its room" };
+const HEADROOM_BYTES = Math.floor(0.95 * CARD_X_SOFT_BYTES) + WP4_PS.bytes;
+const WIRE_CEILING = 56700 + WP4_PS.bytes;
+const SERVED_CEILING = 62800 + WP4_PS.bytes;
 const DAY = 86400000;
 const iso = (n) => new Date(n * DAY).toISOString().slice(0, 10);
 const dayN = (s) => Date.parse(s + "T00:00:00Z") / DAY;

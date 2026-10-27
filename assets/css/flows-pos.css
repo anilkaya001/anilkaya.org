@@ -38,6 +38,7 @@
 .pos-load, .pos-state { margin: 0; padding: 12px 0; color: var(--label-2); font: var(--t-footnote); }
 .pos-state b { display: block; color: var(--label-1); font-weight: 600; margin-bottom: 2px; }
 .pos-foot { flex: none; margin: 4px 0 0; color: var(--label-3); font: var(--t-caption); }
+#posRotCardB > .pos-foot { min-height: 34px; }
 .pos-up { color: var(--up); }
 .pos-down { color: var(--down); }
 .pos-mut { color: var(--label-3); }
@@ -167,14 +168,15 @@
   .pos-segw { display: inline-flex; }
 }
 @media (max-width: 767.98px) {
+  #posRotCardB > .pos-foot { min-height: 48px; }
   .pos-head { gap: 8px; flex-wrap: nowrap; }
   .pos-head h1 { font-size: 24px; }
   .pos-stamp { display: none; }
   .pos-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pos-kpi { height: 54px; padding: 0 10px; }
   .pos-kpi .v { font-size: 17px; }
-  .pos-rot .pos-row { grid-template-columns: minmax(84px, 108px) minmax(0, 1fr) 50px; gap: 8px; }
-  .pos-rot-head { grid-template-columns: minmax(84px, 108px) minmax(0, 1fr) 50px; }
+  .pos-rot .pos-row { grid-template-columns: minmax(84px, 108px) minmax(0, 1fr) 60px; gap: 8px; }
+  .pos-rot-head { grid-template-columns: minmax(84px, 108px) minmax(0, 1fr) 60px; }
   .pos-rot .pos-row .now, .pos-rot .pos-row .was, .pos-rot .pos-row .brd, .pos-rot .pos-row .fil, .pos-rot-head span:nth-child(3), .pos-rot-head span:nth-child(4), .pos-rot-head span:nth-child(6), .pos-rot-head span:nth-child(7) { display: none; }
   .pos-frow { grid-template-columns: minmax(0, 1fr) 84px 44px; height: 56px; min-height: 56px; }
   .pos-frow.pos-fhead { height: 24px; min-height: 24px; }

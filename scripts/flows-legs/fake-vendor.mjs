@@ -1,5 +1,6 @@
 import { addDays, weekdaysAhead, priorWeekdayIso, isWeekdayIso } from "../../shared/flows-cross.js";
 import { touch } from "./taint.mjs";
+import { fakePositioningUw } from "./positioning-fake.mjs";
 
 function prng(seed) {
   let s = seed | 0;
@@ -571,12 +572,19 @@ export function makeFakeVendor({ sessionDate, screenerRows = [], carded = [] } =
     }],
   ];
 
+  let positioningUw = null;
   const vendor = async (path, params = {}, { envelope = false } = {}) => {
     calls.push(path);
     for (const [re, handler] of handlers) {
       const m = re.exec(path);
       if (!m) continue;
       const body = handler(params, m);
+      if (envelope) return body;
+      return Array.isArray(body) ? body : (body && body.data) || [];
+    }
+    if (/^\/api\/shorts\/[A-Z0-9.]+\/(ftds|volumes-by-exchange)$/.test(path) || /^\/api\/stock\/[A-Z0-9.]+\/insider-buy-sells$/.test(path) || /^\/api\/insider\/[A-Z0-9.]+$/.test(path)) {
+      positioningUw = positioningUw || fakePositioningUw();
+      const body = await positioningUw(path, params);
       if (envelope) return body;
       return Array.isArray(body) ? body : (body && body.data) || [];
     }

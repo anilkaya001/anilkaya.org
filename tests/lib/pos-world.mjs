@@ -92,7 +92,7 @@ export async function openPos(browser, w, h, o = {}) {
     return r.fulfill({ contentType: "text/html; charset=utf-8", body: doc });
   });
   await page.goto("https://example.test/flows/positioning/");
-  await page.waitForSelector("#pos[data-ready]", { timeout: 15000 });
+  await page.waitForSelector(o.ready === false ? "#posRotCardB .pos-state" : "#pos[data-ready]", { timeout: 15000 });
   await page.waitForTimeout(o.settle === undefined ? 350 : o.settle);
   return { ctx, page, errors, asked };
 }

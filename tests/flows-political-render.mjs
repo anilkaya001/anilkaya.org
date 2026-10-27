@@ -720,5 +720,80 @@ for (const [name, from, to] of MUTANTS) {
   ok(problems.length > 0, "PLANTED WRONG BUILD CAUGHT: " + name + " (" + problems.length + " failures, first: " + problems[0] + ")");
 }
 
+const LAYER_HTML = PAGES.politicalPage({ username: "test", layers: true });
+const LT = RAW.map((r) => r.t);
+const lateRows = [
+  { t: LT[0], side: "buy", lo: 15001, hi: 50000, txn: "2026-08-17", filed: "2026-10-12", lagS: 38, lagD: 56, over45: true, who: "FA", ch: "H", src: "cg" },
+  { t: LT[0], side: "sell", lo: 1001, hi: 15000, txn: "2026-08-20", filed: "2026-10-12", lagS: 36, lagD: 53, over45: true, who: "FB", ch: "S", src: "cg" },
+  { t: LT[1], side: "sell", lo: 50001, hi: 100000, txn: "2026-08-21", filed: "2026-10-13", lagS: 37, lagD: 53, over45: true, who: "FC", ch: "H", src: "cg" },
+  { t: LT[2], side: "buy", lo: 100001, hi: 250000, txn: "2026-08-24", filed: "2026-10-14", lagS: null, lagD: 51, over45: true, who: "FD", ch: "H", src: "cg" },
+];
+const lateBy = { [LT[0]]: { n: 2, maxS: 38 }, [LT[1]]: { n: 1, maxS: 37 }, [LT[2]]: { n: 1, maxS: null } };
+const unusualRows = [
+  { id: "u1", t: LT[3], side: "buy", lo: 15001, hi: 50000, txn: "2026-09-09", filed: "2026-09-30", lagS: 15, lagD: 21, over45: false, who: "FA", ch: "H", tags: ["cc", "fp"], r: 0.1, rSpy: 0.04, ex: 0.06 },
+  { id: "u2", t: LT[3], side: "sell", lo: 1001, hi: 15000, txn: "2026-09-10", filed: "2026-09-30", lagS: 14, lagD: 20, over45: false, who: "FB", ch: "S", tags: ["other"], r: null, rSpy: null, ex: null },
+  { id: "u3", t: LT[1], side: "buy", lo: 50001, hi: 100000, txn: "2026-09-11", filed: "2026-10-01", lagS: 14, lagD: 20, over45: false, who: "FC", ch: "H", tags: ["ul"], r: -0.02, rSpy: 0.03, ex: -0.05 },
+];
+const unusualBy = { [LT[3]]: { n: 2, tags: ["cc", "fp", "other"], who: ["FA", "FB"] }, [LT[1]]: { n: 1, tags: ["ul"], who: ["FC"] } };
+const LAYERED = {
+  ...PAYLOAD,
+  late: { status: "ok", window: { from: "2020-01-10", to: ASOF }, rows: lateRows, byT: lateBy },
+  unusual: { status: "ok", rows: unusualRows, byT: unusualBy },
+  money: { status: "ok", cycle: 2026, asOf: "2026-08-24", byT: { [LT[0]]: { pac: 250000, pacN: 3, pacC: 40, dem: 100000, rep: 120000, other: 30000, lobby: 1500000, emp: 80000, cands: null } } },
+  held: { status: "ok", asOf: "2026-08-24", byT: { [LT[0]]: 3 }, portfolios: 6 },
+  plan: {},
+};
+const layerProbe = async (browser, js, o = {}) => {
+  const m = await mount(browser, 1440, 820, { html: LAYER_HTML, payload: o.payload || LAYERED, js });
+  const problems = [];
+  const need = (c, msg) => { if (!c && problems.length < 6) problems.push(msg); };
+  need((await m.page.locator("#plLayerSeg button").count()) === 4, "the layer switch has four buttons");
+  need((await m.page.locator(".pl-bdg").count()) === 0, "no badge before a layer is chosen");
+  await m.page.click('#plLayerSeg [data-layer="late"]');
+  await m.page.waitForTimeout(200);
+  const late = await m.page.evaluate(() => ({ hash: location.hash, pressed: document.querySelector('#plLayerSeg [aria-pressed="true"]').dataset.layer, badges: [...document.querySelectorAll(".pl-tile[data-t]")].map((t) => [t.dataset.t, (t.querySelector(".pl-bdg") || {}).textContent || null, t.classList.contains("dim")]) }));
+  need(late.hash === "#layer=late" && late.pressed === "late", "choosing Late writes the address and presses the button");
+  for (const [t, b, dim] of late.badges) {
+    const e = lateBy[t];
+    need(e ? b === "L " + (e.maxS === null ? "\u2014" : e.maxS) && !dim : b === null && dim, `Late badge on ${t}: ${b} dim ${dim}`);
+  }
+  const feed = await m.page.evaluate(() => document.getElementById("plFeedL") ? document.getElementById("plFeedL").innerText : "");
+  need(lateRows.every((r) => feed.includes(r.t)) || (await m.page.locator("#plFeed").innerText()).includes(lateRows[0].t), "the feed lists the late filings");
+  await m.page.click('#plLayerSeg [data-layer="unusual"]');
+  await m.page.waitForTimeout(200);
+  const un = await m.page.evaluate(() => [...document.querySelectorAll(".pl-tile[data-t]")].map((t) => [t.dataset.t, (t.querySelector(".pl-bdg") || {}).textContent || null]));
+  for (const [t, b] of un) { const e = unusualBy[t]; need(e ? b === "U " + e.n : b === null, `Unusual badge on ${t}: ${b}`); }
+  await m.page.click('#plLayerSeg [data-layer="money"]');
+  await m.page.waitForTimeout(200);
+  need((await m.page.locator(".pl-bdg").count()) === 0, "Money draws no tile badge");
+  await m.page.click('#plLayerSeg [data-layer="none"]');
+  await m.page.waitForTimeout(200);
+  need((await m.page.locator(".pl-bdg").count()) === 0 && (await m.page.locator(".pl-tile.dim").count()) === 0, "None clears every badge and dimming");
+  need((await fit(m.page)).v, "no page scroll with a layer on");
+  await m.ctx.close();
+  return problems;
+};
+{
+  const none = await mount(browser, 1440, 820, { html: HTML });
+  eq(await none.page.locator("#plLayerSeg, #plPosChip").count(), 0, "a page rendered without layers has no layer switch and no link to Positioning");
+  await none.ctx.close();
+  const withL = await mount(browser, 1440, 820, { html: LAYER_HTML, payload: LAYERED });
+  eq(await withL.page.locator("#plLayerSeg").count(), 1, "a page rendered with layers has the switch");
+  ok((await withL.page.locator("#plPosChip").getAttribute("href")) === "/flows/positioning/", "and a link to Positioning");
+  await withL.ctx.close();
+  eq(await layerProbe(browser, undefined), [], "THE LAYERS: Late and Unusual badge the named stocks and dim the rest, the feed lists the filings, Money adds no badge, None clears, the address follows");
+  const wrongBuilds = [
+    ["a badge on a stock the layer does not name", "const b = active && layerReady(layerData()) ? badgeFor(el.dataset.t) : null;", "const b = active && layerReady(layerData()) ? (badgeFor(el.dataset.t) || { text: \"L 0\", cls: \"\", title: \"\" }) : null;"],
+    ["an unnamed stock left undimmed", "el.classList.toggle(\"dim\", active && layerReady(layerData()) && !b);", "el.classList.toggle(\"dim\", false);"],
+    ["a missing lag drawn as zero", "const sessText = (v) => (v === null || v === undefined ? DASH : String(v));", "const sessText = (v) => (v === null || v === undefined ? \"0\" : String(v));"],
+    ["the address never written", "if (!quiet) { try { history.replaceState(null, \"\", layer === \"none\" ? location.pathname + location.search : \"#layer=\" + layer); } catch (error) { void error; } }", ""],
+  ];
+  for (const [name, from, to] of wrongBuilds) {
+    ok(JS.split(from).length === 2, "the planted build changes the module exactly once: " + name);
+    const problems = await layerProbe(browser, JS.replace(from, to)).catch((e) => ["threw: " + String(e.message).split("\n")[0]]);
+    ok(problems.length > 0, "PLANTED WRONG BUILD CAUGHT: " + name + " (first: " + problems[0] + ")");
+  }
+}
+
 await browser.close();
 console.log(`✓ flows-political-render: ${checks} assertions — the Political page in Chromium against a synthetic payload of the real shape, no server: no page scroll, no clipped cell and every dialog inside the viewport at 1440x820, 1024x768 and 390x844 in every tab, view and panel; tile areas equal to the square roots of disclosed dollars and to filers; states, rings and bounds equal to independent sums with no firm reduction anywhere; the strip's blind window; Flows context read from the card with dashes and reasons, a failure and a Retry; the keyboard; 44 px targets; reduced motion; the stamp in TRT; the page's pure functions equal to the leaf's; no colour literal, no forbidden word, no hyphen minus; the page with the orb mounted and the Ask dock open or closed at 1920, 1440, 1180 and 390 px, laid out by its own width with nothing cut and nothing under the orb; and ${MUTANTS.length + LAYOUT_MUTANTS.length} planted wrong builds that each fail`);

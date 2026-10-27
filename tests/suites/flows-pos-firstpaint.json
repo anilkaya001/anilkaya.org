@@ -1,0 +1,1 @@
+{"name": "flows-pos-firstpaint", "class": "N", "group": "shard", "timing": false, "medianS": 30, "shard": 3, "command": "node --disable-warning=ExperimentalWarning flows-pos-firstpaint.mjs", "files": ["flows-pos-firstpaint.mjs"], "covers": ["assets/css/flows-pos.css","assets/js/flows-pos.js","tests/fixtures-positioning-vendor.json"]}
