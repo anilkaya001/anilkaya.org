@@ -377,8 +377,9 @@ def expected(inp, name):
     matched = [k for k in atm_by if k in chains_by]
     rows["chainSelf"] = "nc" if not matched else ("agree" if all(atm_by[k] == chains_by[k] for k in matched) else "differs")
     out["rows"] = rows
-    compared = sum(1 for v in rows.values() if v in ("agree", "differs"))
-    out["v"] = "differs" if any(v == "differs" for v in rows.values()) else ("agree" if compared >= 3 else "nc")
+    judged = {k: v for k, v in rows.items() if k != "chainSelf"}
+    compared = sum(1 for v in judged.values() if v in ("agree", "differs"))
+    out["v"] = "differs" if any(v == "differs" for v in judged.values()) else ("agree" if compared >= 3 else "nc")
     return out
 
 

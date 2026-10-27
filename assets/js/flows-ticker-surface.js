@@ -483,12 +483,14 @@
     const xcFlag = document.getElementById("ftSurface");
     const xcHost = xcFlag && xcFlag.dataset.xcheck ? h("div", { class: "ftxc", id: "ftXcheck", hidden: true }) : null;
     let xc = null;
+    let xcApi = null;
     root.append(chipsEl, rowEl, colsEl, ...(xcHost ? [xcHost] : []), dockEl);
     host.append(root);
     if (xcHost && UI.defer) {
-      UI.defer("xcheck", { when: "visible", el: xcHost, label: "The engine cross-check" }).then(() => {
+      UI.defer("xcheck", { when: "idle", el: root, label: "The engine cross-check" }).then(() => {
         const api = window.FlowsUI && window.FlowsUI.xcheck;
         if (dead || !api) return;
+        xcApi = api;
         return api.ready.then(() => { if (!dead) xc = api.mount(xcHost, input.cardX || null, { buttonHost: document.getElementById("ftGReset") }); });
       });
     }
@@ -1147,6 +1149,10 @@
         host.replaceChildren();
       },
       reset: () => hooks.go("reset"),
+      setCardX(next) {
+        input.cardX = next || null;
+        if (xc && xcApi && !dead) xc = xcApi.mount(xcHost, input.cardX, { buttonHost: document.getElementById("ftGReset") });
+      },
       go: hooks.go,
       update(nextCard) {
         const next = surfaceModel(nextCard, FQ);

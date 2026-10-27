@@ -907,16 +907,10 @@
 
   let vdOpened = false;
   function openVoldesk() {
-    const termHost = $("mkVdTerm");
-    if (vdOpened || !termHost) return;
+    if (vdOpened || !$("mkVdTerm")) return;
     vdOpened = true;
-    const hosts = { term: termHost, termSeg: $("mkVdTermSeg"), ivrv: $("mkVdIvrv"), corr: $("mkVdCorr"), corrSeg: $("mkVdCorrSeg"), char: $("mkVdChar") };
-    Promise.all([
-      optional("/api/flows/voldesk"),
-      UI.defer ? UI.defer("voldesk", { when: "visible", el: $("mkVdTermCard"), label: "The Vol desk" }) : Promise.reject(new Error("no loader")),
-    ]).then(([payload]) => window.FlowsUI.volDesk.ready.then(() => { window.FlowsUI.volDesk.mount(hosts, payload, { now: Date.now() }); })).catch((error) => {
-      for (const host of Object.values(hosts)) if (host && !host.classList.contains("mk-segc")) host.replaceChildren(UI.silent({ state: "unavailable", reason: "The Vol desk did not load: " + (error && error.message ? error.message : "no message") + "." }, "Vol desk", 120));
-    });
+    Promise.all([optional("/api/flows/voldesk"), UI.defer("voldesk", { when: "visible", el: $("mkVdTermCard"), label: "The Vol desk" })])
+      .then(([payload]) => window.FlowsUI.volDesk.ready.then(() => window.FlowsUI.volDesk.mount(null, payload)));
   }
 
   const TABS = [...document.querySelectorAll("#mkTabs [role=tab]")];

@@ -24,6 +24,7 @@
     "xcheck.units.none": "The feed does not state gamma's unit; its figures match neither.",
     "xcheck.stale": "Last audited {date}; names rotate through the audit.",
     "xcheck.never": "Not audited in the last five sessions.",
+    "xcheck.loading": "The cross-check is still loading.",
     "xcheck.convention": "Delta conventions can differ by the dividend discount; tolerance covers it.",
     "xcheck.self": "Feed against feed: its chain and its at-the-money table.",
   });
@@ -33,6 +34,7 @@
     date: "the feed row is from another session",
     "partial chain": "the chain read was partial",
     units: "the gamma unit is not stated",
+    sign: "the feed's exposure sign convention is not confirmed",
     absent: "the feed returned nothing",
     failed: "the feed read failed",
     plan: "the feed plan does not include it",
@@ -71,6 +73,7 @@
   const RIGHT = Object.freeze(["oiExpiry", "oiAll", "dexExpiry", "gexAll"]);
 
   function model(cardX) {
+    if (cardX && typeof cardX === "object" && cardX.loading) return { state: "pending", text: say("xcheck.loading") };
     const va = cardX && typeof cardX === "object" && cardX.va && typeof cardX.va === "object" && Array.isArray(cardX.va.rows) ? cardX.va : null;
     if (!va) return { state: "never", text: say("xcheck.never") };
     const rows = new Map(va.rows.map((r) => [r[0], { id: r[0], e: r[1], f: r[2], gap: r[3], tol: r[4], v: r[5], why: r[6] || null }]));
@@ -164,7 +167,7 @@
     let button = null;
     const slot = o.buttonHost || null;
     if (slot) {
-      const label = m.state === "ok" ? "Cross-check · " + GLYPH[m.v] + " " + WORD[m.v] : "Cross-check · " + say("xcheck.never").replace(/\.$/, "");
+      const label = m.state === "ok" ? "Cross-check · " + GLYPH[m.v] + " " + WORD[m.v] : "Cross-check · " + m.text.replace(/\.$/, "");
       button = h("button", { type: "button", class: "ft-gbtn ftxc-b", "aria-haspopup": "dialog", disabled: m.state === "ok" ? null : "true", onclick: () => open(button) }, label);
       slot.append(button);
     }

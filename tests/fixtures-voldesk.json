@@ -6486,7 +6486,7 @@
  "fixture": true,
  "provenance": {
   "generator": "tests/gen-voldesk-fixtures.py",
-  "generatorSha256": "ebd171d55676239ef82916d2d3cba2cc0a8829087d61f6b153a7be3e3bfecdd1",
+  "generatorSha256": "7e900a41c2aa59120a31cb5f8854e5688a2d9edec872e2e71efd0d1895620309",
   "nature": "synthetic, written from the schema; not feed data",
   "shapesSha256": "8a565f75b2095cfe4b7f9836fbba8dd167640f0f4411139e353d297198dcebb2",
   "specSha256": "c8686b3ff855cb5720900c23e17e7f49ff6c61df32835d977e60c85f340b76d7"
@@ -14569,7 +14569,7 @@
      "spot": "agree"
     },
     "unit": "per$",
-    "v": "differs"
+    "v": "agree"
    },
    "input": {
     "atm": [

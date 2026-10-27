@@ -75,6 +75,7 @@ function battery(M, HM) {
   const st = (c, m) => assert.ok(c, m);
   const se = (a, b, m) => assert.equal(a, b, m);
   const sd = (a, b, m) => assert.deepEqual(a, b, m);
+  const auditK = (w) => M.auditName({ exposureSign: true, ...w });
 
   check("numbers", () => {
     se(M.numOf("0.25", "x").v, 0.25, "decimal");
@@ -242,25 +243,41 @@ function battery(M, HM) {
   check("audit-worlds", () => {
     for (const name of ["agree", "differs", "per1pct", "nounit", "dateoff", "truncated", "spotoff", "selfoff"]) {
       const w = FX.worlds[name];
-      const a = M.auditName(w.input);
+      const a = auditK(w.input);
       sd(verdicts(a), w.expect.rows, `${name}: every row's verdict`);
       se(a.v, w.expect.v, `${name}: the name verdict`);
       if (w.expect.unit !== undefined) se(a.unit, w.expect.unit, `${name}: the gamma unit`);
     }
-    const agree = M.auditName(FX.worlds.agree.input);
+    const agree = auditK(FX.worlds.agree.input);
     se(agree.expiry, "2026-11-22", "the expiry nearest 30 days");
     se(agree.rows.length, 9, "nine rows");
     sd(agree.rows.map((r) => r[0]), [...M.ROW_IDS], "in the frozen order");
     se(agree.strikes.length, 5, "five strikes");
-    se(agree.n.agree + agree.n.differs + agree.n.nc, 9, "tally");
+    se(agree.n.agree + agree.n.differs + agree.n.nc, 8, "tally counts the eight engine-against-feed rows");
+    se(rowOf(agree, "chainSelf") ? true : false, true, "and the feed-against-feed row is kept apart");
+  });
+
+  check("audit-sign", () => {
+    const d = M.auditName(FX.worlds.agree.input);
+    se(rowOf(d, "gexAll")[5], "nc", "gamma exposure is not compared while the sign is unconfirmed");
+    se(rowOf(d, "gexAll")[6], "sign", "and says sign");
+    se(rowOf(d, "dexExpiry")[5], "nc", "delta exposure the same");
+    se(rowOf(d, "dexExpiry")[6], "sign", "with the same reason");
+    const neg = tweak("agree", (w) => { for (const r of w.exStrike.rows || w.exStrike) if (r && typeof r === "object" && r.put_gex !== undefined) r.put_gex = "-" + String(r.put_gex).replace("-", ""); });
+    const n = M.auditName(neg);
+    se(rowOf(n, "gexAll")[6], "sign", "a put-negative world is still not compared");
+    const self = tweak("agree", (w) => { for (const r of w.atm.rows || w.atm) if (r && r.open_interest !== undefined) r.open_interest = String(Number(r.open_interest) + 7); });
+    const sa = auditK(self);
+    se(rowOf(sa, "chainSelf")[5], "differs", "a feed-against-feed difference shows on its own row");
+    se(sa.v, auditK(FX.worlds.agree.input).v, "and never moves the name verdict");
   });
 
   check("audit-failed", () => {
-    const f = M.auditName(FX.worlds.failed.input);
+    const f = auditK(FX.worlds.failed.input);
     const stNc = (c, m) => st(c, m);
     se(rowOf(f, "delta")[5], "nc", "a failed read is not compared");
     se(rowOf(f, "delta")[6], "failed", "and says failed");
-    const p = M.auditName(FX.worlds.plan.input);
+    const p = auditK(FX.worlds.plan.input);
     se(rowOf(p, "delta")[6], "plan", "plan");
     se(rowOf(p, "oiExpiry")[6], "limited", "limited");
     for (const row of [...f.rows, ...p.rows]) if (row[5] === "nc" && row[0] !== "chainSelf") stNc(row[3] === null, "an nc row never carries a gap");
@@ -271,10 +288,10 @@ function battery(M, HM) {
     const gammaScaled = (k) => tweak("agree", (w) => {
       for (const r of w.greeks) r.call_gamma = String(Number(r.call_gamma) * k);
     });
-    const base = M.auditName(FX.worlds.agree.input);
+    const base = auditK(FX.worlds.agree.input);
     const med = (xs) => { const s = xs.slice().sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
     const r0 = med(base.strikes.map((s) => s[6] / s[5]));
-    const plain = (target) => M.auditName(gammaScaled(target / r0));
+    const plain = (target) => auditK(gammaScaled(target / r0));
     se(plain(1.149).unit, "per$", "1.149 of the engine reads as per dollar");
     se(plain(1.151).unit, null, "1.151 matches neither");
     se(plain(1 / 1.149).unit, "per$", "the lower edge");
@@ -289,9 +306,9 @@ function battery(M, HM) {
   });
 
   check("tol-rows", () => {
-    const base = M.auditName(FX.worlds.agree.input);
+    const base = auditK(FX.worlds.agree.input);
     const g0 = (id) => rowOf(base, id)[3];
-    const run = (fn) => M.auditName(tweak("agree", fn));
+    const run = (fn) => auditK(tweak("agree", fn));
     const shiftDelta = (s) => (w) => { for (const r of w.greeks) r.call_delta = String(Number(r.call_delta) + s); };
     se(rowOf(run(shiftDelta(0.03 - g0("delta") - 0.0006)), "delta")[5], "agree", "delta just inside");
     se(rowOf(run(shiftDelta(0.03 - g0("delta") + 0.0006)), "delta")[5], "differs", "delta just outside");
@@ -364,25 +381,25 @@ function battery(M, HM) {
   });
 
   check("verdict-nc", () => {
-    const a = M.auditName(FX.worlds.nounit.input);
+    const a = auditK(FX.worlds.nounit.input);
     se(a.n.nc, 2, "nc rows are counted as nc");
-    se(a.n.agree, 7, "agree rows as agree");
+    se(a.n.agree, 6, "agree rows as agree");
   });
 
   check("verdict-few", () => {
-    const a = M.auditName(tweak("agree", (w) => { w.greeks = { why: "failed" }; w.atm = { why: "failed" }; w.oiExpiry = { why: "failed" }; w.volOi = { why: "failed" }; w.exStrike = { why: "failed" }; w.exStrikeExpiry = { why: "failed" }; w.chains = { why: "failed" }; }));
+    const a = auditK(tweak("agree", (w) => { w.greeks = { why: "failed" }; w.atm = { why: "failed" }; w.oiExpiry = { why: "failed" }; w.volOi = { why: "failed" }; w.exStrike = { why: "failed" }; w.exStrikeExpiry = { why: "failed" }; w.chains = { why: "failed" }; }));
     se(a.v, "nc", "fewer than three compared rows is not agree");
     se(a.why, "few", "and says few");
-    const three = M.auditName(tweak("agree", (w) => { w.greeks = { why: "failed" }; w.exStrike = { why: "failed" }; w.exStrikeExpiry = { why: "failed" }; w.chains = { why: "failed" }; }));
+    const three = auditK(tweak("agree", (w) => { w.greeks = { why: "failed" }; w.exStrike = { why: "failed" }; w.exStrikeExpiry = { why: "failed" }; w.chains = { why: "failed" }; }));
     se(three.n.agree + three.n.differs, 3, "three compared");
     se(three.v, "agree", "agree at three");
-    const two = M.auditName(tweak("agree", (w) => { w.greeks = { why: "failed" }; w.exStrike = { why: "failed" }; w.exStrikeExpiry = { why: "failed" }; w.chains = { why: "failed" }; w.volOi = { why: "failed" }; }));
+    const two = auditK(tweak("agree", (w) => { w.greeks = { why: "failed" }; w.exStrike = { why: "failed" }; w.exStrikeExpiry = { why: "failed" }; w.chains = { why: "failed" }; w.volOi = { why: "failed" }; }));
     se(two.n.agree + two.n.differs, 2, "two compared");
     se(two.v, "nc", "two compared rows are not an agreement");
   });
 
   check("truncated", () => {
-    const a = M.auditName(FX.worlds.truncated.input);
+    const a = auditK(FX.worlds.truncated.input);
     for (const id of ["oiExpiry", "oiAll", "dexExpiry", "gexAll"]) {
       se(rowOf(a, id)[5], "nc", `${id} is not compared on a partial chain`);
       se(rowOf(a, id)[6], "partial chain", `${id} says why`);
@@ -390,9 +407,9 @@ function battery(M, HM) {
   });
 
   check("dateoff", () => {
-    const a = M.auditName(FX.worlds.dateoff.input);
+    const a = auditK(FX.worlds.dateoff.input);
     for (const id of ["delta", "iv", "gamma"]) se(rowOf(a, id)[6], "date", `${id}: a feed row of another session is not compared`);
-    const o = M.auditName(tweak("agree", (w) => { w.oiExpiry.find((r) => r.expiry === "2026-11-22").date = "2026-10-22"; }));
+    const o = auditK(tweak("agree", (w) => { w.oiExpiry.find((r) => r.expiry === "2026-11-22").date = "2026-10-22"; }));
     se(rowOf(o, "oiExpiry")[6], "date", "nor an open interest row of another session");
   });
 
@@ -400,7 +417,7 @@ function battery(M, HM) {
     const seen = new Set();
     const w = clone(FX.worlds.agree.input);
     for (const k of ["greeks", "chains", "atm", "oiExpiry", "volOi", "exStrike", "exStrikeExpiry"]) w[k] = proxied(w[k], seen);
-    M.auditName(w);
+    auditK(w);
     const allowed = new Set([...opById("greeks").reads, ...opById("option-chains").reads, ...opById("atm-chains").reads, ...opById("oi-per-expiry").reads,
       ...opById("volume-oi-expiry").reads, ...opById("greek-exposure-strike").reads, ...opById("greek-exposure-strike-expiry").reads]);
     const never = [...M.NEVER_READ.greeks, ...M.NEVER_READ.exposure];
@@ -417,6 +434,9 @@ function battery(M, HM) {
     se([...seen].filter((k) => M.NEVER_READ.stats.includes(k)).length, 0, "iv_rank, rv_high and rv_low are never read");
     const served = JSON.stringify(M.ivrvFund(FX.realized.fresh, { data: row }, SESSION));
     st(!/ivRank|iv_rank|rvHigh|rv_high|rvLow|rv_low/.test(served), "no such key in the served section");
+    const above = M.statsRow({ data: { ...row, iv: "0.35" } });
+    st(above.ivPlace > 1, "an implied above its year high is not clamped to the top");
+    st(M.statsRow({ data: { ...row, iv: "0.05" } }).ivPlace < 0, "nor one below its low to the bottom");
   });
 
   check("stance-not-served", () => {
@@ -441,7 +461,7 @@ function battery(M, HM) {
   });
 
   check("fitters", () => {
-    const a = M.auditName(FX.worlds.agree.input);
+    const a = auditK(FX.worlds.agree.input);
     const va = M.buildVa(a, { at: "2026-10-23T21:45:00Z", session: SESSION });
     st(JSON.stringify(va).length <= M.VA_CAP, "a va fits its 2 KiB");
     const fat = { ...va, strikes: Array.from({ length: 40 }, (_, i) => [i, 1.123456, 1.123456, 0.3, 0.3, 0.00012345, 0.00012345]) };
@@ -542,7 +562,10 @@ const MUTANTS = [
   ["delta-signed-gap-only", LEAF, [["Math.abs(gap) <= tol + 1e-12 ? \"agree\" : \"differs\"]", "gap <= tol + 1e-12 ? \"agree\" : \"differs\"]"]], "tol-rows"],
   ["truncated-chain-compared", LEAF, [["const chainOk = chain && Array.isArray(chain.rows) && !chain.truncated;", "const chainOk = chain && Array.isArray(chain.rows);"]], "truncated"],
   ["other-session-compared", LEAF, [["{ dateOff = true; continue; }", "{ dateOff = true; }"]], "dateoff"],
-  ["nc-counted-as-agree", LEAF, [["for (const r of rows) n[r[5]]++;", "for (const r of rows) n[r[5] === \"nc\" ? \"agree\" : r[5]]++;"]], "verdict-nc"],
+  ["nc-counted-as-agree", LEAF, [["if (r[0] !== \"chainSelf\") n[r[5]]++;", "if (r[0] !== \"chainSelf\") n[r[5] === \"nc\" ? \"agree\" : r[5]]++;"]], "verdict-nc"],
+  ["feed-against-feed-counted", LEAF, [["if (r[0] !== \"chainSelf\") n[r[5]]++;", "n[r[5]]++;"]], "audit-sign"],
+  ["exposure-sign-assumed", LEAF, [["export const EXPOSURE_SIGN_KNOWN = false;", "export const EXPOSURE_SIGN_KNOWN = true;"]], "audit-sign"],
+  ["iv-place-clamped", LEAF, [["ivPlace: place };", "ivPlace: place === null ? null : Math.min(1, Math.max(0, place)) };"]], "withheld-stats"],
   ["agree-with-two-rows", LEAF, [["compared >= 3 ? \"agree\"", "compared >= 0 ? \"agree\""]], "verdict-few"],
   ["iv-rank-served", LEAF, [["return { status: \"ok\", iv: iv.v, ivHigh: hi.v,", "return { status: \"ok\", ivRank: row.iv_rank, iv: iv.v, ivHigh: hi.v,"], ["? { iv: r6(stats.iv),", "? { ivRank: stats.ivRank, iv: r6(stats.iv),"]], "withheld-stats"],
   ["rv-high-read", LEAF, [["const rv = volOf(row.rv, \"rv\");", "const rv = volOf(row.rv, \"rv\"); void row.rv_high;"]], "withheld-stats"],
@@ -562,7 +585,7 @@ for (const [id, file, transforms, named] of MUTANTS) {
   const fails = file === LEAF ? battery(mod, H) : battery(V, mod);
   ok(fails.some((f) => f.startsWith(named + ":")), `PLANTED ${id}: the battery fails its check "${named}" (failed: ${fails.map((f) => f.split(":")[0]).join(", ") || "nothing"})`);
 }
-eq(MUTANTS.length, 24, "twenty-four planted wrong builds, as the package names them");
+eq(MUTANTS.length, 27, "twenty-seven planted wrong builds, the package's twenty-four and three from review");
 
 {
   const ids = OPS.filter((e) => e.reads && e.reads.length === 0).map((e) => e.id);

@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "410";
+export const ASSET_VERSION = "409";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -942,7 +942,7 @@ ${shell("Market", "market", username, `
   <p class="visually-hidden" id="mktStatus" role="status">Loading the session\u2026</p>
   <p class="visually-hidden" id="mktStale" role="status" hidden></p>
   <p class="visually-hidden" id="mkPulseStamp"></p>
-  <div class="mk-tabs" role="tablist" aria-label="Market views" id="mkTabs">${tabs.map(([k, t], i) => `<button type="button" role="tab" id="mkT-${k}" aria-controls="mkP-${k}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-tab="${k}">${t}</button>`).join("")}</div>
+  <div class="mk-tabs${voldesk ? " mk-dn" : ""}" role="tablist" aria-label="Market views" id="mkTabs">${tabs.map(([k, t], i) => `<button type="button" role="tab" id="mkT-${k}" aria-controls="mkP-${k}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-tab="${k}">${t}</button>`).join("")}</div>
   </div>
   <section class="mk-hero" id="mkHero" aria-label="The market at a glance"></section>
   <div class="mk-sub" id="mkSub" role="tablist" aria-label="Modules in this view" hidden></div>

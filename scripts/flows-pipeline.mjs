@@ -34,7 +34,8 @@ import { runDeepenLedger, runDeepenPlan } from "./flows-nightly/sections/deepen.
 import { pathFor } from "../shared/flows-vendor-ops.js";
 import { processCpuMs, runCompute } from "./flows-nightly/sections/compute.mjs";
 import { runOraclePrep, runOraclePublish } from "./flows-nightly/sections/oracle.mjs";
-import { runVolAuditStage, runVoldeskStage } from "./flows-nightly/sections/voldesk.mjs";
+import { runVolAuditSection, runVoldeskStage, volAuditFailed } from "./flows-nightly/sections/voldesk.mjs";
+import { voldeskBuildOn } from "../shared/flows-voldesk.js";
 
 export {
   CALL_BUDGET, CALL_COST, CALL_OVERRUN_MARGIN, CHAIN_RESERVE_MS, DEADLINE_MS, DEEP_NAMES, DEEP_RULE,
@@ -270,7 +271,7 @@ async function main() {
   }
 
   const ctx = { stages, sessionDate, intraday, gateOrigin, gate };
-  ctx.afterDossiers = () => runVolAuditStage(ctx);
+  ctx.auditHooks = { on: voldeskBuildOn(process.env), run: () => runVolAuditSection(ctx), failed: (error) => volAuditFailed(ctx, error) };
   await runUniverse(ctx);
   await runBoards(ctx);
   await stages.run("deepen-plan", () => runDeepenPlan(ctx), (error) => {

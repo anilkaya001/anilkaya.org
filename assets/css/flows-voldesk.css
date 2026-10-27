@@ -137,7 +137,7 @@
 .ftxc-dlg .nm-dtw { overflow: auto; min-height: 0; }
 .ftxc-dlg .nm-dx { display: flex; justify-content: flex-end; }
 .ftxc-dlg .nm-link { min-height: 44px; min-width: 44px; background: var(--fill-3); color: var(--label-1); border: 0; border-radius: var(--r-sm); padding: 0 var(--sp-4); font: var(--t-footnote); }
-@media (max-width: 1023.98px) {
+@media (max-width: 1023.98px), (max-height: 939.98px) {
   .ftxc { display: none; }
 }
 @media (pointer: coarse) { .ftxc-d { min-height: 44px; } }

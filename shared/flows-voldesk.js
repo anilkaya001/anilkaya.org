@@ -59,6 +59,8 @@ export const XCHECK_TOL = Object.freeze({
   oiRel: 0.01, dexRel: 0.05, gexRel: 0.10, spotRel: 0.0025, unitBand: 1.15,
 });
 
+export const EXPOSURE_SIGN_KNOWN = false;
+
 export const ROW_IDS = Object.freeze(["spot", "delta", "iv", "gamma", "oiExpiry", "oiAll", "dexExpiry", "gexAll", "chainSelf"]);
 
 export const ROW_OPS = Object.freeze({
@@ -306,7 +308,7 @@ export function statsRow(raw) {
   const rv = volOf(row.rv, "rv");
   if (iv.v === null) return { status: "failed", why: iv.why };
   const place = hi.v !== null && lo.v !== null && hi.v > lo.v ? (iv.v - lo.v) / (hi.v - lo.v) : null;
-  return { status: "ok", iv: iv.v, ivHigh: hi.v, ivLow: lo.v, rv: rv.v, ivPlace: place === null ? null : Math.min(1, Math.max(0, place)) };
+  return { status: "ok", iv: iv.v, ivHigh: hi.v, ivLow: lo.v, rv: rv.v, ivPlace: place };
 }
 
 export function ivrvFund(realizedRaw, statsRaw, session) {
@@ -502,7 +504,7 @@ function judge(id, e, f, gap, tol) {
 
 const nc = (id, why, tol = null) => [id, null, null, null, tol, "nc", why];
 
-export function auditName({ card, chain, greeks, chains, atm, oiExpiry, volOi, exStrike, exStrikeExpiry, session }) {
+export function auditName({ card, chain, greeks, chains, atm, oiExpiry, volOi, exStrike, exStrikeExpiry, session, exposureSign = EXPOSURE_SIGN_KNOWN }) {
   const engine = card && card.engine && Array.isArray(card.engine.expiries) ? card.engine : null;
   const chosen = engine ? chooseExpiry(engine.expiries) : null;
   const rows = [];
@@ -647,7 +649,8 @@ export function auditName({ card, chain, greeks, chains, atm, oiExpiry, volOi, e
 
   let dexRow;
   const seFeed = feedRows(exStrikeExpiry);
-  if (!chainOk) dexRow = nc("dexExpiry", chainWhy, XCHECK_TOL.dexRel);
+  if (!exposureSign) dexRow = nc("dexExpiry", "sign", XCHECK_TOL.dexRel);
+  else if (!chainOk) dexRow = nc("dexExpiry", chainWhy, XCHECK_TOL.dexRel);
   else if (!seFeed.rows) dexRow = nc("dexExpiry", seFeed.why, XCHECK_TOL.dexRel);
   else {
     let eDex = 0;
@@ -676,7 +679,8 @@ export function auditName({ card, chain, greeks, chains, atm, oiExpiry, volOi, e
 
   let gexRow;
   const sFeed = feedRows(exStrike);
-  if (!chainOk) gexRow = nc("gexAll", chainWhy, XCHECK_TOL.gexRel);
+  if (!exposureSign) gexRow = nc("gexAll", "sign", XCHECK_TOL.gexRel);
+  else if (!chainOk) gexRow = nc("gexAll", chainWhy, XCHECK_TOL.gexRel);
   else if (!sFeed.rows) gexRow = nc("gexAll", sFeed.why, XCHECK_TOL.gexRel);
   else if (unit !== "per$") gexRow = nc("gexAll", "units", XCHECK_TOL.gexRel);
   else if (!fin(S)) gexRow = nc("gexAll", "engine", XCHECK_TOL.gexRel);
@@ -737,7 +741,7 @@ export function auditName({ card, chain, greeks, chains, atm, oiExpiry, volOi, e
 
 function finishAudit(rows, extra) {
   const n = { agree: 0, differs: 0, nc: 0 };
-  for (const r of rows) n[r[5]]++;
+  for (const r of rows) if (r[0] !== "chainSelf") n[r[5]]++;
   const compared = n.agree + n.differs;
   const v = n.differs > 0 ? "differs" : compared >= 3 ? "agree" : "nc";
   return { ...extra, v, ...(v === "nc" ? { why: "few" } : {}), n, rows };
@@ -806,12 +810,14 @@ export function fitVoldesk(payload, cap = VOLDESK_CAP) {
     ["character.prev", (p) => ({ ...p, character: { ...p.character, prev: { meanRev: [], persistent: [] } } })],
     ["matrix.1Y", (p) => ({ ...p, matrix: { ...p.matrix, "1Y": { status: "shed", why: "size", cells: [], minDate: null, maxDate: null, sectorAvg: null, sectorN: 0 } } })],
     ["futures.history", (p) => ({ ...p, term: { ...p.term, futures: { ...p.term.futures, points: p.term.futures.points.slice(0, 4) } } })],
+    ["character.movers", (p) => ({ ...p, character: { ...p.character, movers: Array.isArray(p.character.movers) ? p.character.movers.slice(0, 5) : p.character.movers } })],
   ];
   for (const [name, fn] of steps) {
     if (bytesOf(out) <= cap) break;
     out = fn(out);
     shed.push(name);
   }
+  if (bytesOf(out) > cap) throw new Error("voldesk payload over its size cap");
   return shed.length ? { ...out, shed } : out;
 }
 

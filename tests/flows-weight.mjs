@@ -176,7 +176,10 @@ for (const name of ["deskPage", "sidePage", "watchPage"]) {
   GZIP_KIB[name] += MEMBER_EXPORT_JS.gzip / 1024;
 }
 
-const VOLDESK_MARKET = { od: "WP3", bytes: 1500, gzip: 600, cssBytes: 100, cssGzip: 120, why: "WP3 volatility structure: flows-market.js opens the Vol desk tab on first use (one optional fetch, the deferred volDesk group and the short sub-switch labels) and flows-market.css shows the tab's panel and sizes eleven tabs on a phone; the desk itself and the cross-check strip are deferred groups with their own sheets and add nothing eager" };
+const VOLDESK_MARKET = { od: "WP3", bytes: 1500, gzip: 600, cssBytes: 110, cssGzip: 120, why: "WP3 volatility structure: flows-market.js opens the Vol desk tab on first use (one optional fetch, the deferred volDesk group and the short sub-switch labels) and flows-market.css shows the tab's panel and sizes eleven tabs on a phone; the desk itself and the cross-check strip are deferred groups with their own sheets and add nothing eager" };
+const VOLDESK_TICKER = { od: "WP3", bytes: 400, gzip: 200, why: "WP3 review fixes: flows-ticker.js hands a late card-x to the mounted Surface tab through setCardX, so the cross-check strip never shows a stale never-audited line" };
+CEILING_KIB.tickerPage += VOLDESK_TICKER.bytes / 1024;
+GZIP_KIB.tickerPage += VOLDESK_TICKER.gzip / 1024;
 CEILING_KIB.marketPage += VOLDESK_MARKET.bytes / 1024;
 GZIP_KIB.marketPage += VOLDESK_MARKET.gzip / 1024;
 CSS_KIB.marketPage += VOLDESK_MARKET.cssBytes / 1024;
@@ -245,7 +248,7 @@ DEFERRED_KIB.marketPage += DARK_POOL_TIME.bytes / 1024;
 const HORIZON_DEFERRED = { od: "LANE-4", tickerBytes: 2947, marketBytes: 1261, why: "lane 4: the ticker's Move lab reads the earnings window and the report-session column from the universe, ages them by the sessions elapsed and shows a Reacting today, Reacted one session ago or Report time not stated state, and reads the carried forward ages of unstated report times (flows-ticker-movelab.js 19,302 to 22,249 B), and Market's Skyline and Volatility lens read the same window, column and ages in place of a literal 21 (flows-skyline.js 22,056 to 22,571 B, flows-market-below.js 59,053 to 59,799 B)" };
 DEFERRED_KIB.tickerPage += HORIZON_DEFERRED.tickerBytes / 1024;
 DEFERRED_KIB.marketPage += HORIZON_DEFERRED.marketBytes / 1024;
-const VOLDESK_DEFERRED = { od: "WP3", tickerBytes: 11500, marketBytes: 37200, why: "WP3 volatility structure: the Vol desk controller (flows-voldesk.js) and the ticker's engine cross-check strip (flows-ticker-xcheck.js) are deferred groups, requested on the first open of the Vol desk tab and when the Surface tab opens" };
+const VOLDESK_DEFERRED = { od: "WP3", tickerBytes: 12000, marketBytes: 37700, why: "WP3 volatility structure: the Vol desk controller (flows-voldesk.js) and the ticker's engine cross-check strip (flows-ticker-xcheck.js) are deferred groups, requested on the first open of the Vol desk tab and when the Surface tab opens" };
 DEFERRED_KIB.tickerPage += VOLDESK_DEFERRED.tickerBytes / 1024;
 DEFERRED_KIB.marketPage += VOLDESK_DEFERRED.marketBytes / 1024;
 

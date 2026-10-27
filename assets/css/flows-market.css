@@ -370,6 +370,12 @@
 @media (max-width: 1199.98px) {
   .mk-tabs button { padding: 0 6px; font-size: 12.5px; }
 }
+@media (min-width: 900px) {
+  .mk-dn button { padding: 0 7px; font-size: 12.5px; }
+}
+@media (min-width: 900px) and (max-width: 1199.98px) {
+  .mk-dn button { padding: 0 5px; font-size: 12px; }
+}
 @media (max-width: 899px) {
   .flows-body[data-flows-page="market"] .flows-main { --mk-pad-b: var(--sp-3); }
   .mk-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-self: stretch; }

@@ -8,6 +8,8 @@ const TICKER = { file: "assets/js/flows-ticker.js", page: "each name's Ticker pa
 const POLITICAL = { file: "assets/js/flows-political.js", page: "Political", href: "/flows/political/" };
 const MOVES = { file: "assets/js/flows-moves.js", page: "Moves", href: "/flows/moves/" };
 const UNUSUAL = { file: "assets/js/flows-unusual.js", page: "Unusual", href: "/flows/unusual/" };
+const VOLDESK = { file: "assets/js/flows-voldesk.js", page: "Market", href: "/flows/market/" };
+const XCHECK = { file: "assets/js/flows-ticker-xcheck.js", page: "each name's Ticker page", href: null };
 const BOARDS = { file: "assets/js/flows-board.js", page: "the Bullish and Bearish boards", href: "/flows/long/" };
 
 export const GLOSSARY = Object.freeze([
@@ -21,11 +23,23 @@ export const GLOSSARY = Object.freeze([
     "Beyond 2 counts names more than 2 IV-days from flat, up or down.",
     "Share is that count over the sector's names.",
   ] },
+  { key: "engine-cross-check", term: "Engine cross-check", ...XCHECK, lines: [
+    "The feed's own figures, checked against the site's engine.",
+  ] },
   { key: "board-map", term: "Board map", ...BOARDS, lines: [
     "Every name on the board, grouped by sector. A tile's area is its net premium and its color is its score, deeper for stronger.",
   ] },
+  { key: "backwardation", term: "Backwardation", ...VOLDESK, lines: [
+    "Backwardation: 30-day implied above 90-day.",
+  ] },
   { key: "bounds-agree", term: "Bounds agree", ...POLITICAL, lines: [
     "The whole whisker is on the buying side of zero. Even the low bound is a net purchase.",
+  ] },
+  { key: "contango", term: "Contango", ...VOLDESK, lines: [
+    "Contango: 90-day implied above 30-day.",
+  ] },
+  { key: "correlation-window", term: "Correlation window", ...VOLDESK, lines: [
+    "Correlation window: the span of daily returns compared, three months or one year.",
   ] },
   { key: "disclosed-net", term: "Disclosed net", ...POLITICAL, lines: [
     "The bar is disclosed purchases minus disclosed sales from the midpoint of each dollar band.",
@@ -127,6 +141,12 @@ export const GLOSSARY = Object.freeze([
   { key: "q-and-p", term: "Risk-neutral and real-world chance", ...TICKER, lines: [
     "Priced by the options engine on this name's own smile: the chance of profit and the expected P&L are computed twice, under the risk-neutral density the smile implies (Q) and under the real-world GARCH law (P).",
   ] },
+  { key: "implied-against-realised", term: "Implied against realised", ...VOLDESK, lines: [
+    "Implied is option-market volatility today; realised is the last 21 sessions' moves.",
+  ] },
+  { key: "roll-per-30-days", term: "Roll per 30 days", ...VOLDESK, lines: [
+    "Roll: second-month futures against the front, per 30 days.",
+  ] },
   { key: "sector-tides", term: "Sector tides", ...MARKET, lines: [
     "Net option premium through the session for each of the eleven sectors, on one shared scale so heights compare.",
   ] },
@@ -135,6 +155,9 @@ export const GLOSSARY = Object.freeze([
   ] },
   { key: "tide", term: "Tide", ...MARKET, lines: [
     "Net call premium minus net put premium is the net; a put line below zero is puts sold.",
+  ] },
+  { key: "volatility-half-life", term: "Volatility half-life", ...VOLDESK, lines: [
+    "Half-life: sessions for a volatility shock to halve.",
   ] },
   { key: "volatility", term: "Volatility", ...MARKET_BELOW, lines: [
     "The index ETFs' fixed-tenor implied volatility stands in for the VIX curve, which the vendor plan does not serve.",

@@ -3291,7 +3291,7 @@
         Promise.all(["card", "summary", "card-x", "hist"].map((p) => soft(getJSON(api(p, t)))))
           .then(([card, neuron, cx, hist]) => {
             if (!card || !card.panels) return;
-            STATE.card = card; STATE.neuron = neuron || (STATE.neuron && STATE.neuron.loading ? { status: "unavailable" } : STATE.neuron); STATE.cardX = joined(cx, card); STATE.hist = joined(hist, card);
+            STATE.card = card; STATE.neuron = neuron || (STATE.neuron && STATE.neuron.loading ? { status: "unavailable" } : STATE.neuron); STATE.cardX = joined(cx, card); STATE.hist = joined(hist, card); if (SURF.api && SURF.api.setCardX) SURF.api.setCardX(STATE.cardX);
             paintAll();
             if (neuronPending(STATE.neuron)) awaitNeuron(t, card);
             else if (readPending(STATE.neuron)) awaitReading(t, card);
@@ -3370,7 +3370,7 @@
     if (!had("card-x") || !had("hist")) {
       Promise.all([cxP, histP]).then(([cx, hist]) => {
         if (STATE.card !== card) return;
-        if (STATE.cardX === waiting) STATE.cardX = joined(cx, card);
+        if (STATE.cardX === waiting) { STATE.cardX = joined(cx, card); if (SURF.api && SURF.api.setCardX) SURF.api.setCardX(STATE.cardX); }
         if (STATE.hist === waiting) STATE.hist = joined(hist, card);
         paintDossier(card);
       });

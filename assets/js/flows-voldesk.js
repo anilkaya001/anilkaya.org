@@ -31,6 +31,11 @@
     "futures.roll": "Second month {sign}{x}% against the front, per 30 days.",
     "ivrv.line": "Implied {iv}, realised over 21 sessions {rv}, spread {sign}{s} points.",
     "ivrv.place": "Implied at {p}% of its 1-year range.",
+    "def.roll": "Roll: second-month futures against the front, per 30 days.",
+    "def.ivrv": "Implied is option-market volatility today; realised is the last 21 sessions' moves.",
+    "def.corr": "Correlation window: the span of daily returns compared, three months or one year.",
+    "ivrv.above": "Implied is above its 1-year range.",
+    "ivrv.below": "Implied is below its 1-year range.",
     "ivrv.stale": "Realised as of {date}, the feed's latest.",
     "matrix.cell": "{a} and {b}: {r} over {rows} sessions, {from} to {to}.",
     "matrix.asym": "The feed gave two values for this pair, so it is withheld.",
@@ -64,6 +69,7 @@
   const sgn = (x, dp) => (x < 0 ? MINUS : x > 0 ? "+" : "") + F.px(Math.abs(x), dp);
   const r2 = (x) => (x < 0 ? MINUS : "") + F.px(Math.abs(x), 2);
   const pct1 = (x) => F.pct(x, 1);
+  const coord = (v) => Math.round(v * 8) / 8;
 
   function stateOf(part, what, unshapedKey) {
     if (!part) return { state: "pending", reason: say("state.pending") };
@@ -152,7 +158,7 @@
     funds.forEach((f, si) => {
       const list = (f.points || []).filter(([d]) => d <= X_MAX);
       if (!list.length) return;
-      const path = list.map(([d, iv], i) => (i ? "L" : "M") + x(d).toFixed(1) + " " + y(iv * 100).toFixed(1)).join("");
+      const path = list.map(([d, iv], i) => (i ? "L" : "M") + coord(x(d)) + " " + coord(y(iv * 100))).join("");
       root.append(svg("path", { d: path, class: "vd-line", "data-t": f.t, "stroke-dasharray": DASHES[f.t] }));
       list.forEach(([d, iv], i) => {
         root.append(markShape(MARKS[f.t], x(d), y(iv * 100), "vd-mark"));
@@ -192,7 +198,7 @@
       root.append(svg("line", { x1: L, x2: L + pw, y1: y(part.spot), y2: y(part.spot), class: "vd-spot" }));
       root.append(svg("text", { x: L + pw, y: y(part.spot) - 4, class: "vd-gl", "text-anchor": "end" }, document.createTextNode("Index level " + F.px(part.spot, 1))));
     }
-    root.append(svg("path", { d: pts.map((p, i) => (i ? "L" : "M") + x(p[1]).toFixed(1) + " " + y(p[2]).toFixed(1)).join(""), class: "vd-fut" }));
+    root.append(svg("path", { d: pts.map((p, i) => (i ? "L" : "M") + coord(x(p[1])) + " " + coord(y(p[2]))).join(""), class: "vd-fut" }));
     for (const p of pts) {
       root.append(svg("circle", { cx: x(p[1]), cy: y(p[2]), r: 3.2, class: "vd-fm" }));
       root.append(svg("text", { x: x(p[1]), y: H - 8, class: "vd-ax", "text-anchor": "middle" }, document.createTextNode(p[1] + "d")));
@@ -210,7 +216,9 @@
     return Math.min(BANDS - 1, Math.max(0, Math.floor(r / 0.2)));
   }
 
-  function mount(hosts, payload, ref) {
+  function mount(given, payload, ref) {
+    const el = (id) => document.getElementById(id);
+    const hosts = given || { term: el("mkVdTerm"), termSeg: el("mkVdTermSeg"), ivrv: el("mkVdIvrv"), corr: el("mkVdCorr"), corrSeg: el("mkVdCorrSeg"), char: el("mkVdChar") };
     const prior = hosts.term && MOUNTS.get(hosts.term);
     if (prior) prior.destroy();
     const M = model(payload, ref);
@@ -354,12 +362,12 @@
       const tip = [];
       if (stats && isNum(stats.ivLow) !== null && isNum(stats.ivHigh) !== null) {
         const lo = Math.min(stats.ivLow, row.rv), hi = Math.max(stats.ivHigh, row.rv);
-        const pos = (v) => ((v - lo) / (hi - lo || 1) * 100).toFixed(1) + "%";
+        const pos = (v) => coord((v - lo) / (hi - lo || 1) * 100) + "%";
         bar = h("span", { class: "vd-bar", role: "img", "aria-label": "Implied " + pct1(row.iv) + ", realised " + pct1(row.rv) + " on a 1-year implied range of " + pct1(stats.ivLow) + " to " + pct1(stats.ivHigh) },
-          h("i", { class: "vd-range", style: { left: pos(stats.ivLow), width: ((stats.ivHigh - stats.ivLow) / (hi - lo || 1) * 100).toFixed(1) + "%" } }),
+          h("i", { class: "vd-range", style: { left: pos(stats.ivLow), width: coord((stats.ivHigh - stats.ivLow) / (hi - lo || 1) * 100) + "%" } }),
           h("i", { class: "vd-iv", style: { left: pos(row.iv) } }),
           h("i", { class: "vd-rv", style: { left: pos(row.rv) } }));
-        if (isNum(stats.ivPlace) !== null) tip.push(say("ivrv.place", { p: F.px(stats.ivPlace * 100, 0) }));
+        if (isNum(stats.ivPlace) !== null) tip.push(stats.ivPlace > 1 ? say("ivrv.above") : stats.ivPlace < 0 ? say("ivrv.below") : say("ivrv.place", { p: F.px(stats.ivPlace * 100, 0) }));
       } else {
         bar = h("span", { class: "vd-bar vd-nobar" }, DASH, " ", h("span", { class: "vd-why" }, "no 1-year range"));
       }
@@ -582,6 +590,19 @@
         hosts.corrSeg.append(UI.segmented("Correlation window", [{ label: "3M" }, { label: "1Y" }], (i) => { corrWin = i; paintCorr(); }, 0));
       }
     }
+
+    const infoFor = (host, label, build) => {
+      const mod = host ? host.closest(".mk-mod") : null;
+      const head = mod ? mod.querySelector(":scope > .ui-mod-h") : null;
+      if (!head || head.querySelector(".vd-info") || typeof UI.infoButton !== "function") return;
+      const btn = UI.infoButton(label, build, { small: true });
+      btn.classList.add("vd-info");
+      head.append(btn);
+    };
+    infoFor(hosts.term, say("title.term").toLowerCase(), () => ({ title: say("title.term"), lead: say("state.contango"), notes: [say("state.backwardation"), say("def.roll")] }));
+    infoFor(hosts.ivrv, say("title.ivrv").toLowerCase(), () => ({ title: say("title.ivrv"), lead: say("def.ivrv") }));
+    infoFor(hosts.corr, say("title.matrix").toLowerCase(), () => ({ title: say("title.matrix"), lead: say("def.corr") }));
+    infoFor(hosts.char, say("title.character").toLowerCase(), () => ({ title: say("title.character"), lead: say("character.def"), notes: [say("character.hurst")] }));
 
     paintSeg();
     paintTerm();

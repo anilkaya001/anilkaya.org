@@ -10,6 +10,7 @@ import * as PAGES from "../shared/flows-pages.js";
 import { liveEntry, phaseView } from "../shared/flows-live-worker.js";
 import { phaseAt, expectedNightlySession, freshHeaders } from "../shared/flows-freshness.js";
 import { realisticWorld, respondWith } from "./lib/sfc-render-world.mjs";
+import { payloadFor as voldeskPayload } from "./lib/voldesk-world.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, "..");
@@ -105,6 +106,7 @@ function answer(route, u) {
       return { serverNow: NOW, tier1: { at: iso(NOW - 120000), okAt: iso(NOW - 120000), why: null }, clock: null,
         expected: expectedNightlySession(NOW, null), phase: phaseView(phaseAt(NOW, null)), keys };
     }
+    case "voldesk": return voldeskPayload("ok");
     default: return null;
   }
 }
@@ -117,7 +119,7 @@ const SPECS = [
   { id: "long", fn: "sidePage", args: { side: "long" }, url: "/flows/long/" },
   { id: "short", fn: "sidePage", args: { side: "short" }, url: "/flows/short/" },
   { id: "watch", fn: "watchPage", url: "/flows/watch/" },
-  { id: "market", fn: "marketPage", url: "/flows/market/" },
+  { id: "market", fn: "marketPage", args: { voldesk: true }, url: "/flows/market/" },
   { id: "network", fn: "networkPage", url: "/flows/network/" },
   { id: "now", fn: "nowPage", url: "/flows/now/" },
 

@@ -135,7 +135,7 @@ manifest carries the operation path with the set named in `SHAPE`.
 - `vix-term`: the curve reducer needs, per point, a maturity date and a price. It looks for
   them by **exact key name** in this order: maturity `expiry`, `expiration`, `settle_date`,
   `date`; price `price`, `close`, `settle`, `last`; spot `vix`, `spot`, `index`. It uses a key
-  only if the manifest lists it at that path with type `str#` or `num`. If a maturity or a
+  only if the manifest lists it at that path with type `str#`, `str` (a date can only be a string) or `num`. If a maturity or a
   price key is missing, the result is `{ status: "unshaped", why: "keys" }`. Never fall back
   to a positional read.
 - `vol-character-top`: rows use the names the per-ticker `/volatility/character`
