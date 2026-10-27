@@ -160,6 +160,7 @@ const EVENTS_RECENT = { od: "LANE-4", bytes: 4498, gzip: 1127, cssBytes: 379, cs
 GZIP_KIB.eventsPage += EVENTS_RECENT.gzip / 1024;
 CSS_KIB.eventsPage += EVENTS_RECENT.cssBytes / 1024;
 CSS_GZIP_KIB.eventsPage += EVENTS_RECENT.cssGzip / 1024;
+GZIP_KIB.eventsPage += 190 / 1024;
 CEILING_KIB.tickerPage += (TICKER_DEALER_LABELS.bytes + TICKER_PRINTS_MOVE.bytes) / 1024;
 GZIP_KIB.tickerPage += (TICKER_DEALER_LABELS.gzip + TICKER_PRINTS_MOVE.gzip) / 1024;
 for (const name of ["sidePage", "watchPage"]) {
