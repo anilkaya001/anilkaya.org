@@ -86,7 +86,7 @@ const CALENDAR_MUTANTS = [
   ["the horizon exclusive", [["sessionsUntil <= HORIZON_SESSIONS", "sessionsUntil < HORIZON_SESSIONS"]]],
   ["a past report inside the horizon", [["sessionsUntil >= 0 && ", ""]]],
   ["a missing count inside the horizon", [["Number.isFinite(sessionsUntil) && sessionsUntil >= 0", "!(sessionsUntil < 0)"]]],
-  ["a horizon of 20", [["export const HORIZON_SESSIONS = 21;", "export const HORIZON_SESSIONS = 20;"]]],
+  ["a horizon of 20", [["import { HORIZON_SESSIONS } from \"./flows-horizon.js\";", "const HORIZON_SESSIONS = 20;"]]],
   ["the window horizon exclusive", [["n !== null && n >= 0 && n <= HORIZON_SESSIONS", "n !== null && n >= 0 && n < HORIZON_SESSIONS"]]],
 ];
 

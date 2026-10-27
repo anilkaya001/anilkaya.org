@@ -4,11 +4,13 @@
   let last = 0, dead = 0, g;
   const ping = (force) => {
     const n = Date.now();
+    try { const k = +sessionStorage.fv; if (k <= n) last = Math.max(last, k); } catch {}
     if (dead || document.visibilityState !== "visible" || (!force && n - last < 6e4)) return 0;
     last = n;
-    return fetch("/api/me/visit", { method: "POST", credentials: "same-origin", cache: "no-store" }).then((x) => {
+    try { sessionStorage.fv = n; } catch {}
+    return fetch("/api/me/visit", { method: "POST", credentials: "same-origin", cache: "no-store" }).then(x => {
       if (x.ok) r.dataset.visit = 1;
-      else dead = x.status === 401 || x.status === 404;
+      else dead = /^40[14]$/.test(x.status);
       return x.text();
     }).catch(() => 0);
   };
@@ -39,7 +41,7 @@
     addEventListener("pageshow", (e) => {
       if (e.persisted) { ping(); r.dispatchEvent(new Event("member:resume")); }
     });
-    if (document.getElementById("ftHero") && !(navigator.connection || {}).saveData) load();
+    if (document.getElementById("ftHero") && !navigator.connection?.saveData) load();
   };
   const boot = () => (document.prerendering ? document.addEventListener("prerenderingchange", start, { once: true }) : start());
   if (document.readyState === "complete") boot();
