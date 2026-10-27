@@ -90,7 +90,6 @@
       id: o.id, model: model, state: o.state, lockCadence: !!adjust, ctx: {},
       onChange: function (state, reasons) {
         keyed = null;
-        if (templateKey && templateKey !== "custom" && !model.sameAst(model.toAst(state), model.toAst(model.fromAst(findTemplate(templateKey).ast)))) templateKey = "custom";
         out.textContent = "";
         sync(state, reasons);
         if (o.onChange) o.onChange(state, reasons);
@@ -105,12 +104,18 @@
       return reg.templates[0];
     }
 
+    function hint(state) {
+      if (!templateKey || templateKey === "custom" || templateKey === "blank") return undefined;
+      var t = findTemplate(templateKey);
+      return model.sameAst(model.toAst(state), model.toAst(model.fromAst(t.ast))) ? t.id : undefined;
+    }
+
     function sync(state, reasons) {
       var blocked = reasons.length > 0 || busy || !!disabled;
       arm.setAttribute("aria-disabled", blocked ? "true" : "false");
       arm.title = disabled ? disabled : reasons.length ? reasons[0].text : "";
       if (reasons.length) pv.idle(reasons[0].text);
-      else pv.run(model.toAst(state), templateKey && templateKey !== "custom" && templateKey !== "blank" ? findTemplate(templateKey).id : undefined);
+      else pv.run(model.toAst(state), hint(state));
     }
 
     function done(result) {
@@ -150,7 +155,8 @@
       else {
         if (!keyed) keyed = uuid();
         var body = { ast: ast, title: model.title(state) };
-        if (templateKey && templateKey !== "custom" && templateKey !== "blank") body.template = findTemplate(templateKey).id;
+        var h = hint(comp.state());
+        if (h) body.template = h;
         p = net.post("/api/ff/wires", body, { "Idempotency-Key": keyed });
       }
       p.then(function (r) { busy = false; sync(comp.state(), comp.reasons()); done(r); }, function (err) { busy = false; sync(comp.state(), comp.reasons()); fail(err); });

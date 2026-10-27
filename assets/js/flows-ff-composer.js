@@ -553,6 +553,7 @@
       var msel = el("select", { class: "ffx-sel ffx-m", "data-k": "m" + i, "data-i": String(i), "aria-label": "Quantity, condition " + (i + 1) });
       metricGroups(msel, i, i);
       msel.value = c.m;
+      msel.title = m.label;
       li.appendChild(msel);
       if (m.unit === "bool") {
         li.appendChild(el("button", { type: "button", class: "ffx-bool", "data-k": "bool" + i, "data-i": String(i), "aria-pressed": c.x ? "true" : "false", text: c.x ? "yes" : "no" }));
@@ -638,12 +639,15 @@
       sectorIn.hidden = state.scope.kind !== "sector" || !haveSectors;
       sectorText.hidden = state.scope.kind !== "sector" || !!haveSectors;
       if (document.activeElement !== namesIn) namesIn.value = state.scope.symbols.join(", ");
+      namesIn.title = state.scope.symbols.join(", ");
       if (haveSectors) {
         sectorIn.textContent = "";
         sectorIn.appendChild(el("option", { value: "", text: "Choose a sector" }));
         Array.from(ctx.sectors).sort().forEach(function (s) { sectorIn.appendChild(el("option", { value: s, text: s })); });
         sectorIn.value = state.scope.sector || "";
       } else if (document.activeElement !== sectorText) sectorText.value = state.scope.sector || "";
+      sectorIn.title = state.scope.sector || "";
+      sectorText.title = state.scope.sector || "";
       var pr = model.persistRange(state.cadence);
       pVal.textContent = model.persistLabel(state);
       pDec.setAttribute("aria-disabled", state.persist <= pr[0] ? "true" : "false");

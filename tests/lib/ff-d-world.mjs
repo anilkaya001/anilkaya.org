@@ -21,8 +21,8 @@ export const HTML = pageHtml();
 export const SIZES = [[1920, 1080], [1920, 940], [1440, 820], [1024, 768], [1024, 660], [390, 844], [390, 664]];
 
 export const UNIVERSE = {
-  status: "ok", n: 12,
-  t: ["SYN101", "SYN102", "SYN103", "SYN104", "SYN105", "SYN106", "SYN107", "SYN108", "SYN109", "SYN110", "SYN111", "SYN112"],
+  status: "ok", n: 40,
+  t: Array.from({ length: 40 }, (_, i) => "SYN" + (100 + i)),
   sectors: ["Energy", "Financials", "Technology"],
 };
 
@@ -67,6 +67,7 @@ export function houseWires() {
 
 export async function mount(browser, w, h, o = {}) {
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, reducedMotion: "reduce", ...(o.context || {}) });
+  ctx.setDefaultTimeout(o.timeout || 6000);
   const page = await ctx.newPage();
   const errors = [];
   const calls = [];
@@ -89,7 +90,7 @@ export async function mount(browser, w, h, o = {}) {
       try { body = req.postDataJSON(); } catch { body = null; }
       calls.push({ method: req.method(), path: p, query: u.search, body, headers: req.headers() });
       if (o.api) {
-        const hit = await o.api({ method: req.method(), path: p, query: u.search, body, headers: req.headers(), r, json: (b, s) => json(r, b, s) });
+        const hit = await o.api({ method: req.method(), path: p, query: u.search, body, headers: req.headers(), r, json: (b, s) => json(r, b, s).then(() => true) });
         if (hit !== undefined) return hit;
       }
       if (p === "/api/flows/universe") return json(r, UNIVERSE);

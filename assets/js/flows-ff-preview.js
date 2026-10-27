@@ -121,6 +121,7 @@
         kids.push(el("div", { class: "ffx-slwrap" }, [list]), el("div", { class: "ffx-slfoot" }, [
           el("span", { text: view.truncated ? "The first " + total + " of those that hold." : "" }), all]));
         host.__fit = function () { fitList(list, all, total); };
+        if (typeof ResizeObserver === "function") new ResizeObserver(function () { if (host.__fit) host.__fit(); }).observe(list);
       } else {
         kids.push(el("p", { class: "ffx-sub1", text: hold === 0 && decided > 0 ? "No name holds this right now." : "" }));
         host.__fit = null;
