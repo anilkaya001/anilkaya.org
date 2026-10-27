@@ -381,7 +381,8 @@
   .sf[data-view="balance"] .sf-stage { flex: 1 1 0; }
   .sf-read { flex-direction: column; align-items: stretch; }
   .sf-read .sf-ph { padding: 6px 12px 0; }
-  .sf-readbox { grid-template-columns: minmax(0, 1fr); overflow: hidden; }
+  .sf-readbox { grid-template-columns: minmax(0, 1fr); overflow: hidden; gap: 2px; padding: 0 12px 4px; }
+  .rd-l { gap: 1px; font-size: 12px; line-height: 15px; }
   .sf-mat, .sf-body { padding: 0 4px; }
   .sf-groups { display: inline-flex; margin-left: 0; width: 100%; }
   .sf-groups button { flex: 1; justify-content: center; }
