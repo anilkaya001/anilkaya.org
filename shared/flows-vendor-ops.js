@@ -42,7 +42,7 @@ const RAW = [
   { id: "earnings", path: "/api/earnings/{ticker}", licence: "aggregate", klass: "slow", limiter: "ondemand", maxBytes: 131072, reads: ["report_date", "report_time", "source", "expected_move_perc", "post_earnings_move_1d", "post_earnings_move_1w", "pre_earnings_move_1w", "long_straddle_1d", "long_straddle_1w"] },
   { id: "shorts-data", path: "/api/shorts/{ticker}/data", licence: "aggregate", klass: "nightly" },
   { id: "shorts-volume", path: "/api/shorts/{ticker}/volume-and-ratio", licence: "aggregate", klass: "nightly" },
-  { id: "multi-leg", path: "/api/option-trades/multi-leg", licence: "print", klass: "nightly" },
+  { id: "multi-leg", path: "/api/option-trades/multi-leg", licence: "print", klass: "nightly", limiter: "ondemand", maxBytes: 262144, reads: ["id", "ticker", "executed_at", "strategy", "code", "leg_count", "strikes", "total_premium", "net_premium", "direction", "size"] },
   { id: "congress-recent", path: "/api/congress/recent-trades", licence: "print", klass: "nightly" },
   { id: "politician-holders", path: "/api/politician-portfolios/holders/{ticker}", plan: "enterprise", licence: "text", klass: "nightly" },
   { id: "screener-stocks", path: "/api/screener/stocks", licence: "quote", klass: "quote", limiter: "ondemand", reads: ["ticker", "close", "prev_close", "net_call_premium", "net_put_premium", "bullish_premium", "bearish_premium", "call_volume", "put_volume", "call_volume_ask_side", "put_volume_ask_side", "iv30d", "iv_rank", "implied_move_perc", "gex_gamma_per_one_percent_move_oi", "gex_gamma_per_one_percent_move_vol", "gex_gamma_per_one_percent_move_dir", "put_call_ratio", "relative_volume", "stock_volume", "call_premium", "put_premium", "call_volume_bid_side", "put_volume_bid_side", "iv30d_1d", "marketcap", "issue_type", "full_name"] },
@@ -86,6 +86,24 @@ const RAW = [
   { id: "splits", path: "/api/companies/{ticker}/splits", licence: "aggregate", klass: "slow", maxBytes: 32768, reads: ["splits", "effective_date", "split_factor"] },
   { id: "interpolated-iv", path: "/api/stock/{ticker}/interpolated-iv", licence: "derived", klass: "nightly", maxBytes: 32768, reads: ["date", "days", "percentile"] },
   { id: "etf-exposure", path: "/api/etfs/{ticker}/exposure", licence: "aggregate", klass: "slow", maxBytes: 131072, reads: ["etf", "weight", "shares"] },
+  { id: "contract-screener", path: "/api/screener/option-contracts", licence: "aggregate", klass: "quote", limiter: "ondemand", maxBytes: 524288, reads: ["option_symbol", "option_type", "strike", "expiry", "stock_price", "volume", "open_interest", "premium", "avg_price", "ask_side_volume", "bid_side_volume", "mid_volume", "no_side_volume", "sweep_volume", "floor_volume", "multileg_volume", "stock_multi_leg_volume", "cross_volume", "ticker_vol", "trades", "last_fill", "sector", "next_earnings_date", "er_time"] },
+  { id: "contract-flow", path: "/api/option-contract/{id}/flow", licence: "print", klass: "quote", limiter: "ondemand", maxBytes: 262144, reads: ["id", "executed_at", "price", "size", "premium", "nbbo_bid", "nbbo_ask", "exchange", "canceled", "report_flags", "tags", "flow_alert_id", "implied_volatility", "delta", "open_interest", "multi_vol", "stock_multi_vol", "option_type", "strike", "expiry"] },
+  { id: "contract-intraday", path: "/api/option-contract/{id}/intraday", licence: "aggregate", klass: "breadth", limiter: "ondemand", maxBytes: 262144, reads: ["start_time", "open", "high", "low", "close", "avg_price", "iv_low", "iv_high", "volume_ask_side", "volume_bid_side", "volume_mid_side", "volume_no_side", "volume_multi", "volume_stock_multi", "premium_ask_side", "premium_bid_side", "premium_mid_side", "premium_no_side"] },
+  { id: "contract-profile", path: "/api/option-contract/{id}/volume-profile", licence: "aggregate", klass: "breadth", limiter: "ondemand", maxBytes: 131072, reads: ["price", "volume", "ask_vol", "bid_vol", "mid_vol", "sweep_vol", "floor_vol", "multi_vol", "cross_vol", "transactions", "date"] },
+  { id: "flow-alert-trades", path: "/api/option-trades/flow-alerts/{id}", licence: "print", klass: "quote", limiter: "ondemand", maxBytes: 131072, reads: ["alert", "trades", "has_more"] },
+  { id: "multi-leg-legs", path: "/api/option-trades/multi-leg/{id}/legs", licence: "print", klass: "quote", limiter: "ondemand", maxBytes: 32768, reads: ["option_symbol", "type", "strike", "expiry", "side", "size", "price", "premium", "nbbo_bid", "nbbo_ask", "delta", "theta", "open_interest", "volume"] },
+  { id: "exchange-breakdown", path: "/api/option-trades/exchange-breakdown/{date}", licence: "aggregate", klass: "breadth", limiter: "ondemand", maxBytes: 524288, reads: ["underlying_symbol", "exchange", "trade_code", "trade_count", "contracts", "premium", "call_trades", "put_trades"] },
+  { id: "optionable-roots", path: "/api/option-trades/optionable-tickers", licence: "aggregate", klass: "slow", maxBytes: 524288 },
+  { id: "strike-flow-intraday", path: "/api/stock/{ticker}/flow-per-strike-intraday", licence: "aggregate", klass: "breadth", limiter: "ondemand", maxBytes: 524288, reads: ["timestamp", "strike", "call_volume_ask_side", "call_volume_bid_side", "put_volume_ask_side", "put_volume_bid_side", "call_premium_ask_side", "call_premium_bid_side", "put_premium_ask_side", "put_premium_bid_side", "call_volume", "put_volume"] },
+  { id: "flow-recent", path: "/api/stock/{ticker}/flow-recent", licence: "aggregate", klass: "breadth", limiter: "ondemand", maxBytes: 131072, reads: ["date", "expiry", "call_premium", "put_premium", "call_premium_ask_side", "call_premium_bid_side", "put_premium_ask_side", "put_premium_bid_side", "call_volume", "put_volume", "call_otm_premium", "put_otm_premium", "call_trades", "put_trades"] },
+  { id: "greek-flow-expiry", path: "/api/stock/{ticker}/greek-flow/{expiry}", licence: "aggregate", klass: "breadth", limiter: "ondemand", maxBytes: 131072, reads: ["timestamp", "expiry", "dir_delta_flow", "dir_vega_flow", "total_delta_flow", "total_vega_flow", "otm_dir_delta_flow", "otm_dir_vega_flow", "transactions", "volume"] },
+  { id: "group-greek-flow-expiry", path: "/api/group-flow/{flow_group}/greek-flow/{expiry}", licence: "aggregate", klass: "breadth", limiter: "ondemand", maxBytes: 131072, reads: ["timestamp", "expiry", "dir_delta_flow", "dir_vega_flow", "total_delta_flow", "total_vega_flow", "otm_dir_delta_flow", "otm_dir_vega_flow", "transactions", "volume", "flow_group", "net_call_premium", "net_put_premium", "net_call_volume", "net_put_volume"] },
+  { id: "option-price-levels", path: "/api/stock/{ticker}/option/stock-price-levels", licence: "aggregate", klass: "breadth", limiter: "ondemand", maxBytes: 131072, reads: ["price", "call_volume", "put_volume"] },
+  { id: "stock-price-levels", path: "/api/stock/{ticker}/stock-volume-price-levels", licence: "aggregate", klass: "breadth", limiter: "ondemand", maxBytes: 131072, reads: ["price", "lit_vol", "off_vol"] },
+  { id: "lit-recent", path: "/api/lit-flow/recent", licence: "print", klass: "quote", limiter: "ondemand", maxBytes: 262144, reads: ["ticker", "executed_at", "price", "size", "premium", "nbbo_bid", "nbbo_ask", "market_center", "canceled", "trade_code", "sale_cond_codes"] },
+  { id: "lit-ticker", path: "/api/lit-flow/{ticker}", licence: "print", klass: "quote", limiter: "ondemand", maxBytes: 262144, reads: ["ticker", "executed_at", "price", "size", "premium", "nbbo_bid", "nbbo_ask", "market_center", "canceled", "trade_code", "sale_cond_codes"] },
+  { id: "analytics-window", path: "/api/analytics/window", licence: "derived", klass: "nightly", maxBytes: 262144 },
+  { id: "analytics-sliding", path: "/api/analytics/sliding", licence: "derived", klass: "nightly", maxBytes: 262144 },
 ];
 
 export const OPS = Object.freeze(RAW.map((e) => Object.freeze({
@@ -126,6 +144,10 @@ export const BUDGETS = Object.freeze({
   rail: Object.freeze({ window: "04:00-20:00 ET, trading days, while demanded", perMinute: 240 }),
   premarketNews: Object.freeze({ window: "04:00-09:30 ET, trading days", everyMin: 30, callsPerFiring: 1, maxFiringsPerDay: 11, perMinute: 1 }),
   ondemand: Object.freeze({ binding: "UW_ONDEMAND", limit: 120, periodS: 60, failsOpen: true }),
+  flowlab: Object.freeze({
+    nightlyMax: 40,
+    memberCallsPerRead: Object.freeze({ screen: 1, core: 3, alert: 1, structure: 1, legs: 1, strikes: 1, recent: 1, greek: 1, levels: 2, lit: 1, venues: 1, group: 1, litMarket: 1 }),
+  }),
 });
 
 export const PLAN = Object.freeze({
