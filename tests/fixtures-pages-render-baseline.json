@@ -435,5 +435,51 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 18
+ },
+ "political-layers@320": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0,
+  "targetsUnder44": 3
+ },
+ "political-layers@390": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0,
+  "targetsUnder44": 2
+ },
+ "political-layers@1440": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0
+ },
+ "positioning@320": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0,
+  "targetsUnder44": 1
+ },
+ "positioning@390": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0,
+  "targetsUnder44": 0
+ },
+ "positioning@1440": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0
  }
 }

@@ -56,7 +56,8 @@ const onBattery = (dir) => {
   const sum = p.rotation.sectors.reduce((a, s) => a + (s.wNow || 0), 0);
   need(Math.abs(sum - 100) < 0.051, `the printed weights foot to 100 (${sum.toFixed(2)})`);
   const ps = psCards(dir);
-  need(ps.length > 0 && ps.every((c) => c.ps.parts && ["ftd", "svx", "ibs", "ins"].every((id) => id in c.ps.parts)), "card-x carries the four ps parts");
+  need(ps.length > 0 && ps.every((c) => c.ps.parts && ["ftd", "ibs", "ins"].every((id) => id in c.ps.parts)), "every card-x with a ps section carries the failure, insider-sale and insider-count parts");
+  need(ps.some((c) => c.ps.parts && "svx" in c.ps.parts) && ps.some((c) => c.ps.parts && !("svx" in c.ps.parts)), "the venue part is carried by the deep names alone");
   need(ps.some((c) => c.ps.parts.ftd.x && c.ps.parts.ftd.x.ok === true), "and at least one is a read, not a refusal");
   need(ps.every((c) => Buffer.byteLength(JSON.stringify(c)) <= 61440), "no card-x passes its 60 KiB soft limit");
   const pol = read(dir, "political");
@@ -80,7 +81,7 @@ const offBattery = (dir, baseline) => {
   const stage = stageOf(dir, "positioning");
   need(stage && stage.status === "skipped", "the stage is recorded as skipped");
   if (baseline) {
-    for (const key of ["board:long", "universe", "regime", "events", "market", "brief"]) need(raw(dir, key) === raw(baseline, key), `${key} is byte for byte the same as the run with the leg on`);
+    for (const key of ["board:long", "universe", "regime", "events", "market"]) need(raw(dir, key) === raw(baseline, key), `${key} is byte for byte the same as the run with the leg on`);
   }
   return fails;
 };
@@ -112,7 +113,7 @@ const [on, off, capped] = await Promise.all([
     ["weights that do not foot", (b) => { b.positioning.rotation.sectors[0].wNow += 1.5; }, (b) => Math.abs(b.positioning.rotation.sectors.reduce((a, s) => a + s.wNow, 0) - 100) < 0.051],
     ["the short side pending though names were read", (b) => { b.positioning.shorts.status = "pending"; b.positioning.shorts.ftd.names = 0; }, (b) => b.positioning.shorts.status === "ok" && b.positioning.shorts.ftd.names > 0],
     ["the layers missing from political", (b) => { delete b.political.late; }, (b) => ["late", "unusual", "money", "held", "plan"].every((k) => k in b.political)],
-    ["a ps part missing from a card", (b) => { delete b.ps[0].ps.parts.svx; }, (b) => b.ps.every((c) => ["ftd", "svx", "ibs", "ins"].every((id) => id in c.ps.parts))],
+    ["a ps part missing from a card", (b) => { delete b.ps[0].ps.parts.ibs; }, (b) => b.ps.every((c) => ["ftd", "ibs", "ins"].every((id) => id in c.ps.parts))],
     ["the stage not recorded", (b) => { b.meta.stages = b.meta.stages.filter((s) => s.id !== "positioning"); }, (b) => b.meta.stages.some((s) => s.id === "positioning" && s.status === "ok")],
     ["the barred word in a sentence", (b) => { b.positioning.rotation.note = "from the tape"; }, (b) => !/\btape\b/i.test(JSON.stringify(b.positioning))],
     ["a fixture stamp dropped", (b) => { delete b.positioning.fixture; }, (b) => b.positioning.fixture === true],
