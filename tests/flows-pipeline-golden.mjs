@@ -163,7 +163,7 @@ if (WRITE) {
   const second = mkdtempSync(path.join(os.tmpdir(), "flows-golden-"));
   try {
     execFileSync(process.execPath, [path.join(ROOT, "scripts/flows-pipeline.mjs"), "--dry-run", "--emit", second + path.sep], {
-      cwd: ROOT, env: { ...process.env, FLOWS_DRY_NOW: DRY_NOW }, stdio: ["ignore", "ignore", "pipe"], maxBuffer: 64 * 1024 * 1024,
+      cwd: ROOT, env: { ...process.env, FLOWS_EVENTRISK_NIGHTLY: "off", FLOWS_DRY_NOW: DRY_NOW }, stdio: ["ignore", "ignore", "pipe"], maxBuffer: 64 * 1024 * 1024,
     });
     const other = emitFiles(second);
     assert.deepEqual(other, names);

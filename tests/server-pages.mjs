@@ -73,7 +73,11 @@ function oldChain(path, rc, d) {
       "/flows/moves/": (u) => FLOWS_PAGES.movesPage({ username: u }),
       "/flows/unusual/": (u, summary, owner) => FLOWS_PAGES.unusualPage({ username: u, owner }),
       "/flows/ledger/": (u) => FLOWS_PAGES.ledgerPage({ username: u }),
-      "/flows/events/": (u) => FLOWS_PAGES.eventsPage({ username: u }),
+      "/flows/events/": (u, summary, owner, scenes, env) => {
+        const w = String(env && env.FLOWS_EVENTRISK || "").trim().toLowerCase();
+        const open = w === "on" || ((w !== "off") && owner === true);
+        return FLOWS_PAGES.eventsPage({ username: u, eventrisk: open, halts: String(env && env.FLOWS_EVENTRISK_HALTS || "").trim().toLowerCase() === "on" });
+      },
       "/flows/political/": (u) => FLOWS_PAGES.politicalPage({ username: u }),
       "/flows/status/": (u) => FLOWS_PAGES.statusPage({ username: u }),
     };
@@ -88,7 +92,7 @@ function oldChain(path, rc, d) {
       const summary = session && path === "/flows/" ? await d.readFlowsSummary(env, "board") : null;
       const owner = session ? d.isOwner(env, session.username) : false;
       if (session && path === "/flows/status/" && !owner) throw new HttpError(404, "not_found", "Not found");
-      const page = session ? FLOWS_ROUTES[path](session.username, summary, owner) : FLOWS_PAGES.loginPage();
+      const page = session ? FLOWS_ROUTES[path](session.username, summary, owner, undefined, env) : FLOWS_PAGES.loginPage();
       const body = session && owner ? ownerNav(page) : page;
       return new Response(body, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
@@ -224,7 +228,8 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     ok(asOwner.split('id="railOps"').length === 2, path + ": an owner's sidebar carries the Operations group exactly once");
     ok(asOwner.includes('<a href="/flows/status/"') && asOwner.includes('href="/flows/status/#view=latency"'), path + ": with Status and Latency links");
     ok(!asMember.includes("railOps") && !asMember.includes("/flows/status/"), path + ": a member's HTML names neither the group nor the page");
-    if (slug === "market" || slug === "unusual") continue;
+    if (slug === "events") ok(asOwner.includes("erRiskCard") && !asMember.includes("erRiskCard") && !asMember.includes("flows-er"), path + ": the event-risk views are the owner's alone while the switch ships owner");
+    if (slug === "market" || slug === "unusual" || slug === "events") continue;
     const brand = /<a class="ff-brand" href="([^"]*)"/;
     ok((asOwner.match(brand) || [])[1] === "/flows/status/#view=coverage" && (asMember.match(brand) || [])[1] === "/flows/about/", path + ": the trade-mark opens data coverage for an owner and About for a member");
     const noBrand = (t) => t.replace(/<a class="ff-brand"[\s\S]*?<\/a>/, "");

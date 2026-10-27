@@ -65,7 +65,7 @@
       unknownReason: "code not in this page's table",
       socketOnly: "The feed's halt channel is not connected, so no halt is shown. That is not the same as none.",
       notConfigured: "No trading-state alert is set on the feed account, so there is no 14-day record.",
-      closed: "The halt channel is not watched outside 04:00 to 20:00 ET.",
+      closed: "The halt channel is watched only while the extended session is open, and it is closed now.",
       off: "The halt channel is switched off.",
       noneYet: "No halt has been streamed since this connection began.",
       noneIn14: "The feed account recorded no halt in 14 days.",
@@ -623,11 +623,12 @@
     else if (h14.configured === false) archive.append(h("li", { class: "er-li is-empty is-warn" }, DASH + " " + COPY.halt.notConfigured));
     else if (!h14.rows.length) archive.append(h("li", { class: "er-li is-empty" }, DASH + " " + COPY.halt.noneIn14));
     else for (const r of h14.rows) archive.append(haltRow(r, { date: true, open: false }));
-    const panes = h("div", { class: "er-panes er-p2" }, pane("Live", "streamed now", livePane, "live"), pane("Last 14 days", "recorded on the feed account", archive, "days"));
-    const seg = paneSwitch("Halts", [["live", "Live"], ["days", "14 days"]], panes);
-    host.replaceChildren(seg, panes, h("p", { class: "er-foot" }, "Times in TRT. A halt shows as open until a later row for the same name resumes it."));
+    const archivePane = pane("Last 14 days", "recorded on the feed account", archive, "days");
+    const panes = liveState === "off" ? h("div", { class: "er-panes er-p1" }, archivePane) : h("div", { class: "er-panes er-p2" }, pane("Live", "streamed now", livePane, "live"), archivePane);
+    const seg = liveState === "off" ? null : paneSwitch("Halts", [["live", "Live"], ["days", "14 days"]], panes);
+    host.replaceChildren(...(seg ? [seg] : []), panes, h("p", { class: "er-foot" }, "Times in TRT. A halt shows as open until a later row for the same name resumes it."));
     const hasState = liveState !== "ok" || h14st.state !== "ok" || (h14 && h14.configured === false);
-    setState(host, hasState ? { state: "quiet", reason: liveState === "socket-only" ? COPY.halt.socketOnly : liveState === "off" ? COPY.halt.off : h14 && h14.configured === false ? COPY.halt.notConfigured : COPY.honesty.pending } : { state: "ok" }, COPY.titles.halts);
+    setState(host, hasState ? { state: "quiet", reason: liveState === "socket-only" ? COPY.halt.socketOnly : liveState === "off" ? COPY.honesty.pending : h14 && h14.configured === false ? COPY.halt.notConfigured : COPY.honesty.pending } : { state: "ok" }, COPY.titles.halts);
     setStamp(host, d, staleData(d));
     if (S.timer === null) S.timer = setInterval(() => { if (!document.hidden) refreshOpenCounts(); }, 60000);
     if (UI.rt && typeof UI.rt.on === "function" && !S.rtBound) { S.rtBound = true; try { UI.rt.on("ht", () => S.paintLive && S.paintLive()); } catch { S.rtBound = false; } }

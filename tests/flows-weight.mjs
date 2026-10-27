@@ -153,7 +153,8 @@ for (const name of Object.keys(CEILING_KIB)) {
   GZIP_KIB[name] += HORIZON_CORE.gzip / 1024;
 }
 const EVENTS_RECENT = { od: "LANE-4", bytes: 4498, gzip: 1127, cssBytes: 379, cssGzip: 46, why: "lane 4: the Events page counts the names whose report moved the price on the reaction session and the one before and the names whose report time is not stated, lists the largest movers among those that reacted on the nightly's session in typical days, names those that reacted two to five sessions ago, says why when the report column is withheld, pending or empty, cut or has no window, and prints its window in sessions through a date (flows-events.js 49,488 to 53,986 B raw and 14,009 to 15,136 B gzip, flows-feeds.css 31,209 to 31,588 B raw and 6,129 to 6,175 B gzip); the raw JavaScript ceiling is held by HELD_RAW_KIB, so only gzip and the sheet rise" };
-GZIP_KIB.eventsPage += EVENTS_RECENT.gzip / 1024;
+const EVENTS_ER = { od: "WP6", gzip: 160, why: "the Events page asks for the event-risk group after load and marks its week columns by date, a few hundred bytes of the page's own script; the group itself is deferred and counted by DEFERRED" };
+GZIP_KIB.eventsPage += (EVENTS_RECENT.gzip + EVENTS_ER.gzip) / 1024;
 CSS_KIB.eventsPage += EVENTS_RECENT.cssBytes / 1024;
 CSS_GZIP_KIB.eventsPage += EVENTS_RECENT.cssGzip / 1024;
 CEILING_KIB.tickerPage += (TICKER_DEALER_LABELS.bytes + TICKER_PRINTS_MOVE.bytes) / 1024;
@@ -209,6 +210,7 @@ const DEFERRED = {
   tickerPage: { groups: { surface: "/assets/js/flows-ticker-surface.js", movelab: "/assets/js/flows-ticker-movelab.js", network: "/assets/js/flows-ticker-network.js", live: "/assets/js/flows-ticker-live.js", "nn-orb": "/assets/js/flows-nn-orb.js" } },
   unusualPage: { groups: { net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js", "flow-below": "/assets/js/flows-unusual-below.js" }, modules: ["uaTimelineCard", "uaNamesCard", "uaUrgencyCard", "uaFeedCard", "uaSurpriseCard"] },
   marketPage: { groups: { floor: "/assets/js/flows-market-floor.js", river: "/assets/js/flows-market-river.js", "market-below": "/assets/js/flows-market-below.js", net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" }, modules: ["mkSectorsCard", "mkGroupsCard", "mkExpiryCard", "mkVolCard", "mkRadarCard", "mkAdvCard", "mkVolumeCard", "mkAgainstCard", "mkMoversCard", "mkOiCard", "mkDarkCard", "mkImpactCard", "mkInsidersCard", "mkSeasonCard"] },
+  eventsPage: { groups: { er: "/assets/js/flows-er.js" } },
   networkPage: { groups: { net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" } },
   deskPage: { groups: { "desk-calls": "/assets/js/flows-desk-calls.js" } },
   ledgerPage: { groups: { "ledger-live": ["/assets/js/flows-rt.js", "/assets/js/flows-ledger.bundle.js", "/assets/js/flows-sfc-live.js"] } },
@@ -232,7 +234,7 @@ const ORACLE_DEFERRED_KIB = 60;
 const ORACLE_MARKUP_BYTES = 720;
 const DEFERRED_KIB = {
   tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + NETWORK_GROUP.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + (260 + 848) / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024 + DESK_CALLS.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024 + (2240 + 627) / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
-  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + (26400 + 745) / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024 + LEDGER_LIVE.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024,
+  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + (26400 + 745) / 1024, eventsPage: 80 + NN_ASK.bytes / 1024 + 42, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024 + LEDGER_LIVE.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024,
 };
 const DARK_POOL_TIME = { bytes: 107, why: "lane 2 math audit: the Market page's dark-pool list drops canceled prints, prints its times in TRT through F.time and its prices through F.px, and says how many canceled prints it left out, measured as 58,946 to 59,053 B raw in the deferred flows-market-below.js" };
 DEFERRED_KIB.marketPage += DARK_POOL_TIME.bytes / 1024;
@@ -309,7 +311,7 @@ const measured = [];
 for (const name of pageNames) {
   let html;
   try {
-    html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", scenes: name === "tickerPage" }));
+    html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", eventrisk: name === "eventsPage", scenes: name === "tickerPage" }));
   } catch (error) {
     assert.fail(`${name} threw while rendering: ${error && error.message}`);
   }
@@ -501,7 +503,7 @@ for (const name of Object.keys(CEILING_KIB)) {
       ok(pageNames.includes(name) && !chartRoutes.includes(name), `${name} does not link flows-chart.js`);
     }
     for (const name of CHART_ROUTES) {
-      const html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", scenes: name === "tickerPage" }));
+      const html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", eventrisk: name === "eventsPage", scenes: name === "tickerPage" }));
       const order = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1].split("?")[0]);
       const at = order.indexOf("/assets/js/flows-ui.js");
       ok(at >= 0 && order[at + 1] === "/assets/js/flows-chart.js",

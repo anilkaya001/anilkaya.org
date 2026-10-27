@@ -16,6 +16,7 @@ import { flowsIngestRows } from "../server/routes/flows-ingest.js";
 import { flowsReadyRows } from "../server/routes/flows-ready.js";
 import { flowsOpsRows } from "../server/routes/flows-ops.js";
 import { flowsLedgerRows, LEDGER_ROW_CEILING } from "../server/routes/flows-ledger.js";
+import { flowsEventRiskRows, EVENTRISK_ROW_CEILING } from "../server/routes/flows-eventrisk.js";
 import { createRouter } from "../server/router.js";
 
 let checks = 0;
@@ -807,9 +808,10 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   const ASK = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const getOwner = await client(f.D1, { FLOWS_RT_USERS: FIXTURE_ROSTER[0], FLOWS_OPS: "on", FLOWS_READY: "on", FLOWS_RT_MODE: "off" });
   const getBook = await client(f.D1, { FLOWS_RT_USERS: FIXTURE_ROSTER[0], FLOWS_LEDGER_LIVE: "owner" });
-  const cost = async (path, { init, vendor = false, owner = false, coverage = false, book = false } = {}) => {
+  const getOwnerVendor = await client(f.D1, { UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test", FLOWS_RT_USERS: FIXTURE_ROSTER[0] });
+  const cost = async (path, { init, vendor = false, owner = false, coverage = false, book = false, ownerVendor = false } = {}) => {
     const n = f.trips.length;
-    const r = await (book ? getBook : coverage ? getCoverage : owner ? getOwner : vendor ? getVendor : get)(path, init);
+    const r = await (ownerVendor ? getOwnerVendor : book ? getBook : coverage ? getCoverage : owner ? getOwner : vendor ? getVendor : get)(path, init);
     return { rows: f.rowsRead(n), trips: f.trips.length - n, status: r.res.status };
   };
   const CEILING = [
@@ -835,6 +837,10 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
     ["/api/flows/ledger", LEDGER_ROW_CEILING],
     ["/api/flows/ledger?part=book&v=1", LEDGER_ROW_CEILING, { book: true }],
     ["/api/flows/ledger?scope=sector%3AEnergy&period=session", LEDGER_ROW_CEILING],
+    ["/api/flows/eventrisk", EVENTRISK_ROW_CEILING, { owner: true }],
+    ["/api/flows/eventrisk?part=sectors", EVENTRISK_ROW_CEILING, { owner: true }],
+    ["/api/flows/eventrisk?t=NVDA", EVENTRISK_ROW_CEILING, { owner: true }],
+    ["/api/flows/eventrisk?part=quote&t=NVDA", 0, { ownerVendor: true }],
   ];
   let home = 0;
   for (const [path, ceiling, opts = {}] of CEILING) {
@@ -864,7 +870,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   const source = workerSource();
   expect(source, /path === "(\/api\/flows\/[a-z-]+)"/, { min: 3, why: "the Flows routes not yet in the table are declared in the Worker chain" });
   const stub = new Proxy({}, { get: () => () => null });
-  const routerPaths = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub), flowsIngestRows(stub), flowsReadyRows(stub), flowsPipelineRows(stub), flowsOpsRows(stub), flowsLedgerRows(stub))
+  const routerPaths = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub), flowsIngestRows(stub), flowsReadyRows(stub), flowsPipelineRows(stub), flowsOpsRows(stub), flowsLedgerRows(stub), flowsEventRiskRows(stub))
     .rows.map((r) => r.path).filter((path) => path.startsWith("/api/flows/"));
   ok(routerPaths.length >= 24 && routerPaths.every((path) => /^\/api\/flows\/[a-z-]+$/.test(path)), "the router table holds the flows-read, flows-desk, flows-ai, ingest, ready and ops families: " + routerPaths.length + " rows");
   ok(routerPaths.includes("/api/flows/ready") && routerPaths.includes("/api/flows/ops"), "and the ready and ops routes are among them, so neither can escape the enumeration");

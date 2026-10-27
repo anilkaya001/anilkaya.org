@@ -66,7 +66,7 @@ export function nightlyEmit({ now = DRY_NOW, dir = process.env.FLOWS_EMIT_DIR ||
     try {
       execFileSync(process.execPath, [path.join(root, "scripts/flows-pipeline.mjs"), "--dry-run", "--emit", target + path.sep], {
         cwd: root,
-        env: { ...process.env, FLOWS_DRY_NOW: now },
+        env: { ...process.env, FLOWS_EVENTRISK_NIGHTLY: "off", FLOWS_DRY_NOW: now },
         stdio: ["ignore", "ignore", "pipe"],
         maxBuffer: 64 * 1024 * 1024,
       });

@@ -1,0 +1,1 @@
+{"name": "flows-er-nightly", "class": "N", "group": "shard", "timing": false, "medianS": 25, "shard": 1, "command": "node flows-er-nightly.mjs", "files": ["flows-er-nightly.mjs"], "covers": ["scripts/flows-pipeline.mjs","tests/lib/block-net.cjs"]}

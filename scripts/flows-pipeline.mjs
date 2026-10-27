@@ -282,9 +282,9 @@ async function main() {
   await runContext(ctx);
   await runCards(ctx);
   await runFocus(ctx);
-  await runEventRisk(ctx);
   await runOraclePrep(ctx);
   await runCompute(ctx);
+  await runEventRisk(ctx);
   await runOraclePublish(ctx);
   await stages.run("deepen-ledger", () => runDeepenLedger(ctx), (error) => {
     console.warn(`  deepen ledger: ${error.message} — the next run re-reads what the store holds`);

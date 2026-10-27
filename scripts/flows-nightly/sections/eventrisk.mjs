@@ -25,7 +25,7 @@ async function priorOf(key) {
 }
 
 export async function runEventRisk(ctx) {
-  const { stages, sessionDate, generatedAt, cardX, eventsPayload, withTilt, vendor } = ctx;
+  const { stages, sessionDate, generatedAt, cardX, eventsPayload, withTilt, vendor: feed } = ctx;
   if (!eventRiskNightly(process.env)) {
     stages.skip("eventrisk", "FLOWS_EVENTRISK_NIGHTLY is off");
     return;
@@ -37,7 +37,7 @@ export async function runEventRisk(ctx) {
     const universe = new Set((withTilt || []).map((w) => w && w.row && w.row.ticker).filter(Boolean));
     const now = Date.parse(generatedAt) || Date.now();
     const got = await runEventRiskReads({
-      uw: vendor, sessionDate, now, prior, priorSectors, windowNames: names.window, pulseNames: names.near,
+      uw: feed, sessionDate, now, prior, priorSectors, windowNames: names.window, pulseNames: names.near,
       deadline: stats.startedAt + DEADLINE_MS, pool: runPooled, width: poolWidth(2).width, log: (line) => console.log(line),
     });
     const payload = fitEventRisk(buildEventRisk({

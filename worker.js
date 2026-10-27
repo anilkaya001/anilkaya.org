@@ -993,7 +993,7 @@ const LAST_GOOD_REFRESH_MS = 10 * 60 * 1000;
 const LAST_GOOD_MAX_KEYS = 256;
 const LAST_GOOD_PATHS = new Set(["board", "market", "events", "scoretrack", "calib", "dispersion", "meta", "flowalerts", "pulse", "political", "unusual",
   "movers", "sectors", "sector-premium", "universe", "regime", "ideas", "focus", "roster", "news", "record", "card", "card-x",
-  "hist"].map((name) => "/api/flows/" + name));
+  "hist", "eventrisk"].map((name) => "/api/flows/" + name));
 
 function lastGoodKey(request, url) {
   if (request.method !== "GET" || !LAST_GOOD_PATHS.has(url.pathname)) return null;
@@ -1005,6 +1005,15 @@ function lastGoodKey(request, url) {
     const ticker = tickerParam(url);
     if (!TICKER_RE.test(ticker)) return null;
     tail = "?t=" + ticker;
+  } else if (url.pathname === "/api/flows/eventrisk") {
+    const part = url.searchParams.get("part");
+    if (part === "sectors") tail = "?part=sectors";
+    else if (part !== null) return null;
+    else if (url.searchParams.has("t")) {
+      const ticker = tickerParam(url);
+      if (!TICKER_RE.test(ticker)) return null;
+      tail = "?t=" + ticker;
+    } else return null;
   }
   return internalKey("lastgood", url.pathname.slice(1) + tail);
 }
@@ -3069,7 +3078,7 @@ flowsAiRows({ askSpend, summaryResponse, readFlowsSummary, neuronProvenance, ens
 flowsIngestRows({ store: FLOWS_STORE, ensureFlowsTables, storeGone, passthrough }),
 flowsReadyRows({ store: FLOWS_STORE, ensureFlowsTables, readClock: FLOWS_LIVE.readClock, railReadiness,
   isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
-flowsEventRiskRows({ readServed, passthrough, storeGone, vendorGate, serveCachedVendorRead,
+flowsEventRiskRows({ readFlowsPayload, recallLastGood, passthrough, storeGone, vendorGate, serveCachedVendorRead, quotePath: (ticker) => pathFor("stock-quote", { ticker }),
   isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsDispatchRows({ ensureFlowsTables, check: FLOWS_LIVE.checkDispatchCredential, record: FLOWS_LIVE.recordDispatchWhy,
   isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),

@@ -1,3 +1,4 @@
+import { pathFor } from "./flows-vendor-ops.js";
 import { rowsOf } from "./flows-rows.js";
 import { instantOf } from "./flows-time.js";
 import { cleanLabel } from "./flows-dossier.js";
@@ -133,3 +134,5 @@ export function halts14(fired, configs) {
   const configured = Array.isArray(configs) ? configs.some((c) => c && c.type === "trading_state") : null;
   return { configured, rows };
 }
+
+export const HALT_CHANNEL = pathFor("socket-halts", {});
