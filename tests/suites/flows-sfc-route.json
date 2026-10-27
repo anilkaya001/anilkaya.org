@@ -1,1 +1,1 @@
-{"name": "flows-sfc-route", "class": "N", "group": "shard", "timing": false, "medianS": 3, "shard": 2, "command": "node --disable-warning=ExperimentalWarning flows-sfc-route.mjs", "files": ["flows-sfc-route.mjs"], "covers": []}
+{"name": "flows-sfc-route", "class": "N", "group": "shard", "timing": false, "medianS": 3, "shard": 10, "command": "node --disable-warning=ExperimentalWarning flows-sfc-route.mjs", "files": ["flows-sfc-route.mjs"], "covers": []}

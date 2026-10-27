@@ -130,7 +130,7 @@ ok(!/--up\b|--down\b|--up-mark|--down-mark/.test(CSS), "nor the lean colours");
 }
 
 const SESSION = "2026-08-24";
-const dot = (p, cp, k, e, a = 0.5, sw = false, op = false) => ({ m: 100, p, cp, k, e, a, sw, op });
+const dot = (p, cp, k, e, a = 0.5, sw = false, op = false, b = Math.round((1 - a) * 1000) / 1000) => ({ m: 100, p, cp, k, e, a, b, sw, op });
 const CTX = { session: SESSION, spot: 100, iv30: 0.3, term: null };
 const mk = (dots, extra = {}) => ({ status: "ok", asOf: SESSION, n: dots.length, complete: true, prem: dots.reduce((a, d) => a + d.p, 0), dots, ...extra });
 const WORLD = mk([
@@ -152,9 +152,9 @@ const WORLD = mk([
   net.bands.forEach((list, j) => near(list.reduce((a, b) => a + b.v, 0), net.total, 1e-6, "hop " + j + " adds to the total"));
   const side = Object.fromEntries(net.columns[0].nodes.map((n) => [n.id, n.v]));
   near(side["side:ca"], 1000000 * 1 + 1500000 * 0.5, 1e-6, "calls on the ask side: the first window's whole premium and half of the fifth");
-  near(side["side:cr"], 3000000 + 1500000 * 0.5, 1e-6, "calls, rest: the third whole and the other half of the fifth");
+  near(side["side:cb"], 3000000 + 1500000 * 0.5, 1e-6, "calls on the bid side: the third whole and the other half of the fifth");
   near(side["side:pa"], 2000000 * 0.25 + 500000 * 0.75 + 800000 * 0.6, 1e-6, "puts on the ask side by each window's own ask share");
-  near(side["side:pr"], 2000000 * 0.75 + 500000 * 0.25 + 800000 * 0.4, 1e-6, "puts, rest");
+  near(side["side:pb"], 2000000 * 0.75 + 500000 * 0.25 + 800000 * 0.4, 1e-6, "puts on the bid side by each window's own bid share");
   const exp = Object.fromEntries(net.columns[1].nodes.map((n) => [n.id, n.v]));
   near(exp["exp:d0"], 1000000, 1e-6, "the same-day window is its own bucket");
   near(exp["exp:w1"], 2000000 + 1500000, 1e-6, "four and seven days are in one to seven");
@@ -196,10 +196,17 @@ const WORLD = mk([
   eq(L.buildNet({ ...WORLD, prem: 40000000 }, CTX).coverNote, "largest", "under half it is the largest windows only");
   eq(L.buildNet({ ...WORLD, n: 49 }, CTX).cover, 1, "the count of windows is not the coverage");
   const nulls = L.buildNet(mk([...WORLD.dots, { ...dot(400000, "C", 100, "2026-08-28", 0.5, true, true), a: null }, { ...dot(300000, "P", 100, "2026-08-28", 0.5, true, true), sw: undefined }]), CTX);
-  eq(nulls.excluded.unattributed, 1, "a window with no ask share is counted");
+  eq(nulls.excluded.noSide, 1, "a window with no ask share is counted as carrying premium with no stated side");
+  near(nulls.excluded.noSidePrem, 400000 * 0.5, 1e-6, "and its unsided dollars are the premium its bid share does not cover");
+  near(nulls.sidedShare, nulls.total / (nulls.total + 200000), 1e-9, "the sided share is the drawn premium over the drawn and the unsided");
   eq(nulls.excluded.unflagged, 1, "and one with no flag is counted");
   ok(nulls.columns[3].nodes.some((n) => n.id === "flg:u" && n.v === 300000), "and its premium sits in flags not read, not in neither flag");
-  near(nulls.columns[0].nodes.find((n) => n.id === "side:cr").v, WORLD.dots[2].p + 1500000 * 0.5 + 400000, 1e-6, "the window with no ask share is all in the rest, never coerced to the ask side");
+  near(nulls.columns[0].nodes.find((n) => n.id === "side:cb").v, WORLD.dots[2].p + 1500000 * 0.5 + 400000 * 0.5, 1e-6, "the window with no ask share draws only its stated bid side and is never coerced to the ask side");
+  ok(!nulls.columns[0].nodes.some((n) => /rest|unsided|unattributed/i.test(n.label)), "no side node is a peer bucket of premium with no stated side");
+  const onlyAsk = L.buildNet(mk([...WORLD.dots, { ...dot(400000, "C", 100, "2026-08-28", 0.5, true, true), b: null }]), CTX);
+  near(onlyAsk.excluded.noSidePrem, 200000, 1e-6, "a card written before the bid share existed leaves the bid dollars unsided, never as a bid");
+  const over = L.buildNet(mk([...WORLD.dots, { ...dot(400000, "C", 100, "2026-08-28", 0.7, true, true), b: 0.6 }]), CTX);
+  near(over.excluded.noSidePrem, 400000, 1e-6, "sides that add to more than the window are refused whole, as the leaf does for a window");
   const excl = L.buildNet(mk([...WORLD.dots, dot(700000, "C", 100, "2026-08-20"), dot(100000, "C", 100, "soon")]), CTX);
   eq(excl.excluded.window, 2, "an expiry before the session and a malformed one are excluded");
   for (const c of excl.columns) near(c.nodes.reduce((a, n) => a + n.v, 0), excl.total, 1e-6, "and every column still adds to the total: " + c.key);
@@ -231,6 +238,7 @@ function randomWorld(r) {
       cp: r() < 0.03 ? "X" : r() < 0.5 ? "C" : "P", k: r() < 0.04 ? (r() < 0.5 ? null : 0) : Math.round((60 + r() * 80) * 100) / 100,
       e: r() < 0.04 ? "nonsense" : days(Math.floor(r() * (r() < 0.3 ? 3 : 500)) - (r() < 0.04 ? 5 : 0)),
       a: r() < 0.06 ? null : r() < 0.03 ? 1.4 : Math.round(r() * 1000) / 1000,
+      b: r() < 0.08 ? null : r() < 0.03 ? 1.3 : Math.round(r() * 600) / 1000,
       sw: r() < 0.05 ? undefined : r() < 0.4, op: r() < 0.05 ? null : r() < 0.5,
     });
   }
@@ -300,11 +308,14 @@ const compare = (A) => {
 }
 
 const MUTANTS = [
-  ["the card's ask share used for the side column", "const ask = ok ? p * a : 0;", "const ask = ok ? p * (num(alerts.askShare) === null ? 0.5 : alerts.askShare) : 0;"],
-  ["a missing ask share not counted", "if (!ok) excluded.unattributed++;", ""],
-  ["a missing ask share read as zero and the premium dropped", "const ask = ok ? p * a : 0;", "const ask = ok ? p * a : -1;"],
+  ["the card's ask share used for the side column", "const ask = a === null ? 0 : p * a;", "const ask = a === null ? 0 : p * (num(alerts.askShare) === null ? 0.5 : alerts.askShare);"],
+  ["premium with no stated side not counted", "if (!(a !== null && b !== null && left <= p * 1e-9)) { excluded.noSide++; excluded.noSidePrem += left; }", ""],
+  ["a missing ask share read as minus one", "const ask = a === null ? 0 : p * a;", "const ask = a === null ? -1 : p * a;"],
+  ["the remainder drawn as a bid node", "const bid = b === null ? 0 : p * b;", "const bid = p - ask;"],
+  ["sides past the window accepted", "if (a !== null && b !== null && a + b > 1 + 1e-9) { a = null; b = null; }", ""],
+  ["the sided share over the placed window count", "const sidedShare = total + excluded.noSidePrem > 0 ? total / (total + excluded.noSidePrem) : null;", "const sidedShare = total > 0 ? 1 : null;"],
   ["a missing flag read as neither", ": \"flg:u\";", ": \"flg:n\";"],
-  ["an ask share past one accepted", "const ok = a !== null && a >= 0 && a <= 1;", "const ok = a !== null && a >= 0;"],
+  ["an ask share past one accepted", "if (a !== null && !(a >= 0 && a <= 1)) a = null;", "if (a !== null && !(a >= 0)) a = null;"],
   ["moneyness not scaled by the expiry", "(sigma * Math.sqrt(Math.max(days, 1) / DAYS_PER_YEAR))", "sigma"],
   ["no one-day floor", "Math.max(days, 1) / DAYS_PER_YEAR", "days / DAYS_PER_YEAR"],
   ["calls and puts swapped", "(cp === \"C\") === (z < 0)", "(cp === \"P\") === (z < 0)"],

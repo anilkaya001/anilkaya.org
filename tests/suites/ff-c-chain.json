@@ -1,0 +1,1 @@
+{"name": "ff-c-chain", "class": "N", "group": "shard", "timing": false, "medianS": 70, "shard": 6, "command": "node --disable-warning=ExperimentalWarning ff-c-chain.mjs", "files": ["ff-c-chain.mjs"], "covers": ["schema.sql","scripts/flows-pipeline.mjs"]}

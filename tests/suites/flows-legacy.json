@@ -1,1 +1,1 @@
-{"name": "flows-legacy", "class": "W", "group": "shard", "timing": false, "medianS": 12.6, "shard": 8, "files": ["flows-legacy-payload.mjs"], "covers": ["schema.sql","tests/fixtures-flows-v1-card.json"]}
+{"name": "flows-legacy", "class": "W", "group": "shard", "timing": false, "medianS": 12.6, "shard": 6, "files": ["flows-legacy-payload.mjs"], "covers": ["schema.sql","tests/fixtures-flows-v1-card.json"]}

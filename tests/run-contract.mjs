@@ -72,7 +72,7 @@ process.on("exit", () => {
   deep(checkRegistry({ root: REPO, manifest, pkg, tracked }), [], "the committed tests/suites/ agrees with the tree: every suite's files, class, group, timing flag and covers, and every helper reached by a suite");
   deep(syncRegistry({ root: REPO, manifest, pkg, tracked }).suites.map(formatSuite), readdirSync(path.join(HERE, SUITES_DIR)).sort().map((f) => readFileSync(path.join(HERE, SUITES_DIR, f), "utf8")), "syncing the committed registry changes nothing, so adding a suite is one file with a name and a sync");
   eq(manifest.version, 2, "the registry is version 2");
-  deep(manifest.suites.filter((s) => s.timing).map((s) => s.name).sort(), ["flows-ws-probe", "flows-premium-rank", "flows-rt", "flows-live", "flows-reads", "flows-verdict", "flows-dossier-reads", "flows-reading-worker", "flows-quant"].sort(), "the nine suites with in-process CPU or wall-clock gates carry the timing flag");
+  deep(manifest.suites.filter((s) => s.timing).map((s) => s.name).sort(), ["flows-ws-probe", "flows-premium-rank", "flows-rt", "flows-live", "flows-reads", "flows-verdict", "flows-dossier-reads", "flows-reading-worker", "flows-quant", "ff-a-bench"].sort(), "the ten suites with in-process CPU or wall-clock gates carry the timing flag");
   ok(manifest.suites.every((s) => ["fast", "shard"].includes(s.group)), "every suite names its group");
   deep(manifest.suites.filter((s) => s.group === "fast").map((s) => s.name), ["contracts", "run"], "only contracts and run are fast");
   const classes = manifest.suites.reduce((n, s) => ({ ...n, [s.class]: (n[s.class] || 0) + 1 }), {});
@@ -868,7 +868,7 @@ const clearRan = () => { for (const n of fx3Names) rmSync(mark(`ran-${n}`), { fo
   deep(live.problems, [], "tests/quarantine.json is a version 1 file with an entries list");
   deep(checkQuarantine(live.entries, { suites }), [], `the committed quarantine has no malformed, unregistered or expired entry (${live.entries.length} entries, checked against today's UTC date)`);
   const timing = suites.filter((s) => s.timing === true);
-  ok(timing.length === 9 && timing.every((s) => s.class === "N"), "the nine timing suites are all Node suites");
+  ok(timing.length === 10 && timing.every((s) => s.class === "N"), "the ten timing suites are all Node suites");
   ok(timing.every((s) => retryAllowed(s, { CI: "true" })) && !timing.some((s) => retryAllowed(s, {})) && !timing.some((s) => retryAllowed(s, { CI: "false" })), "a timing suite is retryable in CI and only there");
   ok(!suites.filter((s) => s.timing !== true).some((s) => retryAllowed(s, { CI: "true" })), "and no other suite is retryable anywhere");
   ok(!retryAllowed({ name: "x", timing: true, class: "C" }, { CI: "true" }) && !retryAllowed({ name: "x", timing: true, class: "W" }, { CI: "true" }), "a Chromium or workerd suite is never retried, even if it were tagged");

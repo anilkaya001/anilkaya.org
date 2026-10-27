@@ -90,13 +90,25 @@ export const INFO = Object.freeze([
   "A provider is whoever rested at the quote, not only a market maker.",
   "Only held flagged windows are booked. Smaller windows are shed and counted in the scope line.",
   "Figures are window totals, not trade by trade. Premium is booked by where a window traded against the bid and ask.",
-  "Cells are rounded so rows and columns still add up. Hover or focus a cell for the exact figure.",
+  "Cells are rounded so rows and columns still add up. A cell can sit up to one unit from its exact figure.",
+  "Hover or focus a cell for the exact figure.",
   "Premium whose side is unknown is booked both ways, so it nets to zero. It is never split.",
   "The ledger records no entries between sectors. Each sector closes on itself.",
   "Tilt compares a sector's delta-dollars with its market-cap share. It is exposure, not cash.",
   "Delta-dollars are taker contracts times 100 times delta times the stock price.",
   "Tilt is set against market-cap share, not against usual options activity.",
   "Index & ETF and No sector have no benchmark, so they carry no verdict.",
+  "The top bar shows takers' share of held premium as a range.",
+  "The hatched span is side unknown, drawn as a range, not a bucket.",
+  "Every range is rounded outward, so it never claims more than the figures prove.",
+  "A triangle beside a net means its sign holds for any side-unknown split. Calls and puts share that one total.",
+  "A hollow diamond means the sign is undecided. Side unknown is at least as large as the net.",
+  "The mark is decided from the printed range. It never claims a sign the figures do not show.",
+  "The range under a net is an outer range, not a confidence interval. Calls and puts share one side unknown, so their ranges do not add.",
+  "Nets count only trades with a matched side.",
+  "The tick shows takers' share of premium with a stated side. It assumes unknown premium splits the same way.",
+  "Sides come from matching trades to quotes, which can misplace a trade.",
+  "The last poll turns late after two missed polls. It shows no reply, not stopped data, once five minutes pass.",
   "The checks test that figures agree with each other. They do not test the vendor's data.",
   "Outside rows are the sector tide less held windows. They also hold trades the vendor never flagged.",
   "All times are TRT.",
@@ -231,4 +243,57 @@ export const TILT_LINES = Object.freeze({
   coverageLow: (pct) => `— · delta for ${pct}% of sided premium, under 80%`,
   noWeight: "— · no sector has a market-cap weight",
   noWindows: "— · no flagged windows in weighted sectors",
+});
+
+export const SECTOR_ORDER = Object.freeze([
+  "Basic Materials", "Communication Services", "Consumer Cyclical", "Consumer Defensive", "Energy", "Financial Services",
+  "Healthcare", "Industrials", "Real Estate", "Technology", "Utilities", "Index & ETF", "No sector",
+]);
+
+export const PENDING_LINE = "Waiting for the first reading of today's flagged premium.";
+
+export const HERO = Object.freeze({
+  lean: Object.freeze({
+    head: "Taker share",
+    tail: " of held premium",
+    pending: "Waiting for the first held window.",
+    ask: "Ask side",
+    bid: "Bid side",
+    unknown: "Side unknown",
+    tick: (pct) => `Tick: ${pct}% of premium with a stated side.`,
+    noTick: (reason) => `No tick: ${reason}`,
+    bar: (say) => `Takers bought ${say} of held premium.`,
+    verdict: Object.freeze({
+      paid: Object.freeze({ short: "Takers paid more, any split.", long: "In the held windows, takers paid more than they received. This holds for any split of side-unknown premium, if each matched side is right." }),
+      received: Object.freeze({ short: "Takers received more, any split.", long: "In the held windows, takers received more than they paid. This holds for any split of side-unknown premium, if each matched side is right." }),
+      open: Object.freeze({ short: "Undecided: the range includes 50%.", long: "Undecided: the range includes 50%, so the unknown premium decides which way it falls." }),
+      noSides: Object.freeze({ short: "Undecided: every side is unknown.", long: "Undecided: no premium was stated on an ask or bid side." }),
+      lowCoverage: Object.freeze({ short: "Undecided: under 40% has a side.", long: "Undecided: under 40% of premium has a stated side." }),
+      smallClassified: Object.freeze({ short: "Undecided: under $250k has a side.", long: "Undecided: under $250k of premium has a stated side." }),
+    }),
+    basis: "Sides come from matching trades to quotes.",
+    held: Object.freeze({ shed: (n) => `${n} windows shed from the held set are not counted.`, unrecorded: "The shed count is not recorded." }),
+  }),
+  cells: Object.freeze({
+    held: Object.freeze({ label: "Held premium", line1: (n) => `${n} windows`, line2: (money) => `${money} expires at the session close` }),
+    calls: Object.freeze({ label: "Net calls" }),
+    puts: Object.freeze({ label: "Net puts" }),
+    rangeLabel: "Range",
+    range: (lo, hi) => `Range ${lo} to ${hi}`,
+    glyph: Object.freeze({ up: "▲", down: "▼", open: "◇", even: "=" }),
+    proof: Object.freeze({
+      even: Object.freeze({ short: "Net is zero.", long: "Takers paid and received the same amount." }),
+      up: Object.freeze({ short: "Sign holds for any split.", long: "Takers paid more, even counting side unknown against them." }),
+      down: Object.freeze({ short: "Sign holds for any split.", long: "Takers received more, even counting side unknown against them." }),
+      open: Object.freeze({ short: "Undecided: side unknown is as large.", long: "Undecided: side unknown is at least as large as the stated net." }),
+    }),
+  }),
+});
+
+export const STRIP = Object.freeze({
+  label: "Data health",
+  windows: Object.freeze({ id: "windows", name: "Windows", pending: "waiting for the first read", asOf: (t) => `as of ${t}` }),
+  held: Object.freeze({ id: "held", name: "Held set", pending: "not counted yet" }),
+  tide: Object.freeze({ id: "tide", name: "Sector tide", pending: "not read yet", asOf: (t) => `as of ${t}`, none: "no sector tide" }),
+  poll: Object.freeze({ id: "poll", name: "Last poll", pending: "not read yet" }),
 });

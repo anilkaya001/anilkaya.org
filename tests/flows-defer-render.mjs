@@ -237,7 +237,7 @@ try {
         e.v += r.prem; e.up += r.cp === "C" ? r.askPrem : r.bidPrem; e.down += r.cp === "C" ? r.bidPrem : r.askPrem;
         by.set(r.t, e);
       }
-      const word = (e) => (e.up + e.down < e.v / 2 ? "Unsided" : (e.up - e.down) / e.v >= 0.1 ? "Bullish" : (e.up - e.down) / e.v <= -0.1 ? "Bearish" : "Mixed");
+      const word = (e) => (e.up + e.down < e.v / 2 ? "Side not stated" : (e.up - e.down) / e.v >= 0.1 ? "Bullish" : (e.up - e.down) / e.v <= -0.1 ? "Bearish" : "Mixed");
       return [...by.values()].sort((a, b) => b.v - a.v).slice(0, 8).map((e) => [e.t, word(e)]);
     };
     const HTML_U = PAGES.unusualPage({ username: "test" });
@@ -308,7 +308,7 @@ try {
         netNode: !!document.querySelector("#uaNet canvas"),
       }));
       eq(slot.rows, expectTop(payload), `BEFORE THE MODULE MOUNTS THE SLOT SHOWS ITS TABLE (${width} px): the eight largest names by flagged premium, each with its lean by the convention`);
-      eq(slot.rows.slice(0, 4), [["SYX901", "Unsided"], ["SYX902", "Bullish"], ["SYX903", "Mixed"], ["SYX904", "Bearish"]], "KNOWN ANSWERS: a name with 5% of its premium sided is Unsided and not Mixed, 60/40 fully sided is Bullish, 51/49 is Mixed and a put sold on the ask side is Bearish");
+      eq(slot.rows.slice(0, 4), [["SYX901", "Side not stated"], ["SYX902", "Bullish"], ["SYX903", "Mixed"], ["SYX904", "Bearish"]], "KNOWN ANSWERS: a name with 5% of its premium sided is Unsided and not Mixed, 60/40 fully sided is Bullish, 51/49 is Mixed and a put sold on the ask side is Bearish");
       ok(/Lean is a convention/.test(slot.note), "with the convention said under it");
       eq(slot.netNode, false, "and there is no canvas yet");
       const before = await below(page);
