@@ -248,7 +248,7 @@ const plants = [
 
 {
   const [name, browser] = engines[0];
-  const anchor = 'put(sub, L.groupRows.side.label); }\n    armGrid(table);';
+  const anchor = 'if (S.cell && S.cell.isConnected && line.dataset.on && S.cell.dataset.m) put(line, S.cell.dataset.m + ": " + S.cell.dataset.x);\n    armGrid(table);';
   eq(JS.split(anchor).length - 1, 1, 'planted build "the controller sizes the table from script" applies exactly once');
   const { m } = await run(name, browser, 1440, 820, { js: JS.replace(anchor, () => anchor + '\n    table.style.height = "100%";') });
   const styled = await m.page.evaluate(() => window.__fp.styled);

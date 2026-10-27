@@ -6,7 +6,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 
 export const GROUP = Object.freeze([
   "shared/flows-sides.js", "shared/flows-round.js", "shared/flows-sfc.js", "shared/flows-sfc-time.js", "shared/flows-sfc-tide.js",
-  "shared/flows-sfc-display.js", "shared/flows-sfc-stock.js", "shared/flows-sfc-copy.js", "shared/flows-sfc-view.js",
+  "shared/flows-sfc-display.js", "shared/flows-sfc-stock.js", "shared/flows-sfc-copy.js", "shared/flows-sfc-view.js", "shared/flows-ledger-book.js",
 ]);
 
 const SPECIFIER = /(\bfrom\s*)(["'])(\.{1,2}\/[^"'\n]+)\2/g;
@@ -63,6 +63,6 @@ export async function loadVariant(plant = null, salt = "") {
     return url;
   };
   const load = (file) => import(varied.has(file) ? build(file) : pathToFileURL(path.join(ROOT, file)).href);
-  const [sides, round, sfc, time, tide, display, stock, copy, view] = await Promise.all(GROUP.map(load));
-  return { sides, round, sfc, time, tide, display, stock, copy, view };
+  const [sides, round, sfc, time, tide, display, stock, copy, view, book] = await Promise.all(GROUP.map(load));
+  return { sides, round, sfc, time, tide, display, stock, copy, view, book };
 }

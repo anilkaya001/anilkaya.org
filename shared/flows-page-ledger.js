@@ -75,7 +75,7 @@ function stripSkeleton() {
   return `<footer class="sf-strip" id="sfStrip" role="group" aria-label="${esc(STRIP.label)}">${chip(STRIP.windows, STRIP.windows.pending)}${chip(STRIP.held, STRIP.held.pending)}${chip(STRIP.tide, STRIP.tide.pending)}${chip(STRIP.poll, STRIP.poll.pending)}</footer>`;
 }
 
-export function ledgerBody(glyph) {
+export function ledgerBody(glyph, deferred = "") {
   return `
   <p class="visually-hidden" id="sfStatus" role="status">Loading the ledger…</p>
   <div class="sf" id="sf" data-state="loading" data-view="balance">
@@ -122,6 +122,7 @@ export function ledgerBody(glyph) {
     </div>
     ${stripSkeleton()}
   </div>
+  ${deferred}
   <dialog class="sf-dlg" id="sfInfoDlg" aria-labelledby="sfInfoT"><div class="dg"><h2 id="sfInfoT">How to read this page</h2>
     <div class="body">${para(INFO)}<p>${esc(BALANCING_DEFINITION)}</p><h3>Not built</h3>${para(NOT_BUILT)}</div>
     <div class="x"><button type="button" class="link" id="sfInfoX">Close</button></div></div></dialog>

@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "405";
+export const ASSET_VERSION = "406";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -1153,7 +1153,10 @@ export function movesPage({ username = "" } = {}) {
   });
 }
 
-export function ledgerPage({ username = "" } = {}) {
+export function ledgerPage({ username = "", live = false } = {}) {
+  const deferred = live ? `<i hidden data-defer="ledger-live" data-src="${v("/assets/js/flows-rt.js")}" data-css="${v("/assets/css/flows-sfc-live.css")}"></i>
+  <i hidden data-defer="ledger-live" data-src="${v("/assets/js/flows-ledger.bundle.js")}"></i>
+  <i hidden data-defer="ledger-live" data-src="${v("/assets/js/flows-sfc-live.js")}"></i>` : "";
   return flowsDocument({
     title: "Premium ledger",
     description: LEDGER_DESCRIPTION,
@@ -1162,7 +1165,7 @@ export function ledgerPage({ username = "" } = {}) {
     chrome: false,
     styles: LEDGER_STYLES,
     scripts: LEDGER_SCRIPTS,
-    body: ledgerBody(glyph),
+    body: ledgerBody(glyph, deferred),
   });
 }
 

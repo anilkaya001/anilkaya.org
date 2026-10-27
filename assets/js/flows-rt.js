@@ -78,7 +78,7 @@
   function newTopic() {
     return {
       ep: null, sq: -1, synced: false, resync: false, cold: true, rows: new Map(), ring: [], seen: new Set(), cols: null,
-      meta: {}, full: {}, fresh: null, at: 0, frameAt: 0, regAt: 0, rsAt: 0, rsTries: 0, ver: 0, cache: null, cacheVer: -1,
+      meta: {}, full: {}, fresh: null, at: 0, perf: 0, frameAt: 0, regAt: 0, rsAt: 0, rsTries: 0, ver: 0, cache: null, cacheVer: -1,
       dropped: 0, truncated: false, tide: null, gaps: 0,
     };
   }
@@ -312,6 +312,7 @@
     T.fresh = f.fresh || null;
     T.sq = f.sq;
     T.at = f.at;
+    T.perf = performance.now();
     T.frameAt = Date.now();
     T.synced = true;
     T.resync = false;
@@ -359,6 +360,7 @@
     T.fresh = f.fresh || T.fresh;
     T.sq = f.sq;
     T.at = f.at;
+    T.perf = performance.now();
     T.frameAt = Date.now();
     T.cold = false;
     if (ids.length || fresh.length) T.ver++;
@@ -416,7 +418,7 @@
       var T = S.topics[k];
       if (!h || !T.synced || T.resync || S.refs[k] <= 0) return;
       if (typeof h.sq === "number" && h.sq > T.sq) { T.resync = true; stats.gaps++; ask(k); return; }
-      if (h.fresh && h.fresh.state !== "pending") { T.fresh = h.fresh; T.at = f.at; register(k, { fresh: h.fresh, at: f.at }); }
+      if (h.fresh && h.fresh.state !== "pending") { T.fresh = h.fresh; T.at = f.at; T.perf = performance.now(); register(k, { fresh: h.fresh, at: f.at }); }
     });
   }
 
@@ -955,10 +957,10 @@
   function fresh(k) { return S.topics[k] ? S.topics[k].fresh : null; }
 
   function status() {
-    var out = { transport: S.mode, label: labelOf(), closed: S.closed, degraded: S.degraded, final: S.final, hidden: S.hidden, topics: {} };
+    var out = { transport: S.mode, label: labelOf(), closed: S.closed, degraded: S.degraded, final: S.final, hidden: S.hidden, pollMs: S.pollMs, topics: {} };
     TOPICS.forEach(function (k) {
       var T = S.topics[k];
-      out.topics[k] = { sq: T.sq, ep: T.ep, synced: T.synced, resync: T.resync, cold: T.cold, rows: T.rows.size || T.ring.length, state: T.fresh ? T.fresh.state : null };
+      out.topics[k] = { sq: T.sq, ep: T.ep, synced: T.synced, resync: T.resync, cold: T.cold, rows: T.rows.size || T.ring.length, state: T.fresh ? T.fresh.state : null, at: T.at, perf: T.perf, readAt: T.fresh ? T.fresh.readAt : null };
     });
     return out;
   }

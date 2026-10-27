@@ -5,6 +5,9 @@ import { ERRORS } from "../server/errors.js";
 import { ledgerView } from "../shared/flows-sfc-view.js";
 import { makeWorld } from "./lib/sfc-world.mjs";
 import { loadVariant } from "./lib/sfc-variant.mjs";
+import { loadMutated } from "./truth/mutants.mjs";
+import { baseParity } from "../shared/flows-ledger-live.js";
+import { textHash } from "../shared/flows-ledger-strip.js";
 import { storedInput, NOW_INTRADAY } from "./lib/sfc-stored.mjs";
 
 let checks = 0;
@@ -25,9 +28,10 @@ const liveRow = (id, payload, readAt, extra = {}) => ({
   id, payload: JSON.stringify(payload), read_at: readAt, session: world.session, cadence_s: 300, source: "live", writer: "tier1", updated_at: readAt + 1000, ...extra,
 });
 
-function rig({ rows = null, stored = null, behaviour = {}, now = NOW_INTRADAY, ctx = {}, view = undefined } = {}) {
+function rig({ rows = null, stored = null, behaviour = {}, now = NOW_INTRADAY, ctx = {}, view = undefined, owner = false, make = flowsLedgerRows } = {}) {
   const cache = new FakeCache();
   globalThis.caches = { default: cache };
+  const clock = { t: now };
   const calls = { many: [], live: [], tables: 0, waited: 0 };
   const liveRows = rows || [liveRow("live:alerts", input.live.payload, input.live.readAt), liveRow("live:breadth", input.breadth.payload, input.live.readAt)];
   const storedRows = stored || new Map([["universe", { payload: JSON.stringify(input.universe), updatedAt: now - 3600000 }]]);
@@ -37,10 +41,11 @@ function rig({ rows = null, stored = null, behaviour = {}, now = NOW_INTRADAY, c
     },
     ensureFlowsTables: async () => { calls.tables++; },
     readLiveRows: async (db, ids, at) => { calls.live.push([ids, at]); return behaviour.liveFails ? null : { rows: liveRows.filter((r) => ids.includes(r.id)), clock: null }; },
-    now: () => now,
+    now: () => clock.t,
+    isOwner: (env, username) => owner && username === "member",
     ...(view ? { view } : {}),
   };
-  const table = createRouter(flowsLedgerRows(deps));
+  const table = createRouter(make(deps));
   const gates = { flows: async (request) => (request.headers.get("X-Test-User") ? { username: "member" } : null) };
   const call = async (pathAndQuery, { user = true, method = "GET", env = { DB: {} }, host = "https://anilkaya.test", c = ctx } = {}) => {
     const url = new URL(host + pathAndQuery);
@@ -48,7 +53,7 @@ function rig({ rows = null, stored = null, behaviour = {}, now = NOW_INTRADAY, c
     const res = await table.handle({ request, env, url, ctx: { waitUntil: (p) => { calls.waited++; return p; }, ...c } }, gates);
     return { res, body: res ? await res.json() : null };
   };
-  return { call, calls, cache, table };
+  return { call, calls, cache, table, clock };
 }
 
 {
@@ -185,6 +190,115 @@ function rig({ rows = null, stored = null, behaviour = {}, now = NOW_INTRADAY, c
   globalThis.caches = undefined;
   const none = await r.call("/api/flows/ledger?scope=sector:Utilities");
   eq(none.res.status, 200, "and no cache at all is a miss");
+}
+
+{
+  const r = rig();
+  const off = await thrown(() => r.call("/api/flows/ledger?part=book"));
+  eq(off && off.code, "ledger_live_off", "the book is a 404 while FLOWS_LEDGER_LIVE is unset");
+  eq(ERRORS.ledger_live_off[0], 404, "which is the table's 404");
+  eq(r.calls.many.length + r.calls.live.length, 0, "and it read nothing");
+  const odd = await thrown(() => r.call("/api/flows/ledger?part=book", { env: { DB: {}, FLOWS_LEDGER_LIVE: "maybe" } }));
+  eq(odd && odd.code, "ledger_live_off", "an odd value fails closed");
+  const member = await thrown(() => r.call("/api/flows/ledger?part=book", { env: { DB: {}, FLOWS_LEDGER_LIVE: "owner" } }));
+  eq(member && member.code, "ledger_live_off", "owner mode tells a member nothing");
+  const bad = await thrown(() => r.call("/api/flows/ledger?part=other", { env: { DB: {}, FLOWS_LEDGER_LIVE: "on" } }));
+  eq(bad && bad.code, "invalid_part", "an unknown part is a 400");
+  eq(ERRORS.invalid_part[0], 400, "from the table");
+  const owner = rig({ owner: true });
+  const mine = await owner.call("/api/flows/ledger?part=book", { env: { DB: {}, FLOWS_LEDGER_LIVE: "owner" } });
+  eq(mine.res.status, 200, "the owner reads the book in owner mode");
+  eq([mine.body.status, mine.body.session, mine.body.period, mine.body.v], ["ok", world.session, "intraday", 1], "an ok intraday book for the session");
+  eq(mine.body.rows.length, input.live.payload.rows.length, "with every held row");
+  eq(mine.body.viewHash, textHash(JSON.stringify(ledgerView({ ...input, nightly: null, clock: null, scope: { kind: "all", key: "all" }, period: null, now: NOW_INTRADAY, live: { payload: input.live.payload, readAt: input.live.readAt, session: world.session }, breadth: { payload: input.breadth.payload } }))), "and the hash of the view the route would have sent");
+  ok(baseParity(mine.body).ok, "which the browser's build reproduces");
+  eq(owner.calls.many, [["flowalerts", "universe"]], "the nightly alerts and the universe are one statement");
+  eq(owner.calls.live.map((c) => c[0]), [["live:alerts", "live:breadth"]], "the two live rows are one statement: no row the view does not read");
+  ok(mine.res.headers.get("X-Payload-Updated") !== null && mine.res.headers.get("X-Fresh-State") !== null, "the stamp and the freshness headers travel with it");
+  eq(owner.cache.puts, 1, "the book is kept for the next reader");
+  const again = await owner.call("/api/flows/ledger?part=book", { env: { DB: {}, FLOWS_LEDGER_LIVE: "owner" } });
+  eq([again.res.headers.get("X-Ledger-Cache"), owner.calls.many.length], ["hit", 1], "a second read is a hit and reads nothing");
+  const upd = Number(mine.res.headers.get("X-Payload-Updated"));
+  const env = { DB: {}, FLOWS_LEDGER_LIVE: "owner" };
+  const seen = await owner.call("/api/flows/ledger?part=book&v=" + upd, { env });
+  eq([seen.res.headers.get("X-Ledger-Cache"), owner.calls.many.length], ["hit", 1], "a stamp the copy already holds is a hit");
+  const older = await owner.call("/api/flows/ledger?part=book&v=" + (upd - 5000), { env });
+  eq(older.res.headers.get("X-Ledger-Cache"), "hit", "and so is an older one");
+  const early = await owner.call("/api/flows/ledger?part=book&v=" + (upd + 1), { env });
+  eq([early.res.headers.get("X-Ledger-Cache"), owner.calls.many.length], ["hit", 1], "a stamp newer than a copy built a moment ago is still the copy: nobody can force a rebuild every request");
+  owner.clock.t += 6000;
+  const newer = await owner.call("/api/flows/ledger?part=book&v=" + (upd + 1), { env });
+  eq([newer.res.headers.get("X-Ledger-Cache"), owner.calls.many.length], [null, 2], "a stamp newer than the copy, once the copy is five seconds old, is a read, so a change the heartbeat saw is never answered with the older copy");
+  const loop = await Promise.all(Array.from({ length: 5 }, () => owner.call("/api/flows/ledger?part=book&v=" + (upd + 1), { env })));
+  eq([loop.map((x) => x.res.headers.get("X-Ledger-Cache")), owner.calls.many.length], [Array(5).fill("hit"), 2], "and the stamp the read could not satisfy does not make the next five requests reads: one rebuild in five seconds");
+  const racing = rig({ owner: true });
+  const burst = await Promise.all(Array.from({ length: 6 }, () => racing.call("/api/flows/ledger?part=book", { env })));
+  eq([burst.map((x) => x.res.status), racing.calls.many.length, racing.calls.live.length], [Array(6).fill(200), 1, 1], "six readers that arrive together share one read of the store");
+  const junk = await owner.call("/api/flows/ledger?part=book&v=abc", { env });
+  eq(junk.res.headers.get("X-Ledger-Cache"), "hit", "a stamp that is not digits is ignored");
+  const future = await owner.call("/api/flows/ledger?part=book&v=" + (NOW_INTRADAY + 80000), { env });
+  eq([future.res.headers.get("X-Ledger-Cache"), owner.calls.many.length], ["hit", 2], "and a stamp from beyond the server's clock is ignored, so no stamp can keep the copy from being used");
+  eq(owner.cache.puts, 2, "the cache holds one book, replaced by the read, not one for every stamp");
+  const open = await r.call("/api/flows/ledger?part=book", { env: { DB: {}, FLOWS_LEDGER_LIVE: "on" } });
+  eq(open.res.status, 200, "on opens it to a member");
+  const late = rig({ now: NOW_INTRADAY + 3 * 3600000, owner: true });
+  const quiet = await late.call("/api/flows/ledger?part=book", { env: { DB: {}, FLOWS_LEDGER_LIVE: "on" } });
+  eq([quiet.body.status, quiet.body.v], ["not-live", 1], "when the intraday read is not live the answer says so and carries no rows");
+  ok(!("rows" in quiet.body), "and no windows");
+  eq(late.cache.puts, 0, "a not-live answer is never kept");
+}
+
+{
+  const r = rig();
+  const a = await r.call("/api/flows/ledger?scope=all");
+  const upd = Number(a.res.headers.get("X-Payload-Updated"));
+  const b = await r.call("/api/flows/ledger?scope=all&v=" + upd);
+  r.clock.t += 6000;
+  const c = await r.call("/api/flows/ledger?scope=all&v=" + (upd + 1));
+  eq([a.res.headers.get("X-Ledger-Cache"), b.res.headers.get("X-Ledger-Cache"), c.res.headers.get("X-Ledger-Cache")], [null, "hit", null], "the view takes the stamp too: the copy it holds answers a stamp it holds, and a newer stamp is a read");
+  const d = await r.call("/api/flows/ledger?scope=all&v=zz");
+  eq(d.res.headers.get("X-Ledger-Cache"), "hit", "a bad stamp is ignored");
+  eq(r.calls.many.length, 2, "two reads in all");
+}
+
+{
+  const battery = async (make) => {
+    const failed = [];
+    const note = (name, good) => { if (!good && !failed.includes(name)) failed.push(name); };
+    const env = { DB: {}, FLOWS_LEDGER_LIVE: "owner" };
+    const r = rig({ owner: true, make });
+    const first = await r.call("/api/flows/ledger?part=book", { env });
+    const upd = Number(first.res.headers.get("X-Payload-Updated"));
+    const seen = await r.call("/api/flows/ledger?part=book&v=" + upd, { env });
+    note("seen", seen.res.headers.get("X-Ledger-Cache") === "hit" && r.calls.many.length === 1);
+    const older = await r.call("/api/flows/ledger?part=book&v=" + (upd - 5000), { env });
+    note("older", older.res.headers.get("X-Ledger-Cache") === "hit");
+    r.clock.t += 6000;
+    const future = await r.call("/api/flows/ledger?part=book&v=" + (NOW_INTRADAY + 80000), { env });
+    note("future", future.res.headers.get("X-Ledger-Cache") === "hit" && r.calls.many.length === 1);
+    const newer = await r.call("/api/flows/ledger?part=book&v=" + (upd + 1), { env });
+    note("stamp", newer.res.headers.get("X-Ledger-Cache") === null && r.calls.many.length === 2);
+    await Promise.all(Array.from({ length: 5 }, () => r.call("/api/flows/ledger?part=book&v=" + (upd + 1), { env })));
+    note("throttle", r.calls.many.length === 2);
+    note("keys", r.cache.puts === 2);
+    const racing = rig({ owner: true, make });
+    await Promise.all(Array.from({ length: 6 }, () => racing.call("/api/flows/ledger?part=book", { env })));
+    note("flight", racing.calls.many.length === 1);
+    return failed;
+  };
+  eq(await battery(flowsLedgerRows), [], "the correct route passes every check of the cache battery");
+  const PLANTS = [
+    ["a stamp newer than the copy rebuilds on every request", "throttle", [["      if (!(Number.isFinite(built) && at - built < LEDGER_REBUILD_MIN_MS)) return null;", "      return null;"]]],
+    ["the stamp is part of the cache key", "seen", [['const key = internalKey("ledger", "book");', 'const key = internalKey("ledger", "book/" + url.searchParams.get("v"));']]],
+    ["readers that arrive together each read the store", "flight", [["    const id = key.url;", "    const id = key;"]]],
+    ["a stamp from the future is believed", "future", [["  return n <= at + 60000 ? n : null;", "  return n;"]]],
+    ["a stamp newer than the copy is ignored", "stamp", [['    if (v !== null && kept && !(Number(kept["X-Payload-Updated"]) >= v)) {', "    if (false) {"]]],
+  ];
+  for (const [title, expect, transforms] of PLANTS) {
+    const V = await loadMutated("server/routes/flows-ledger.js", transforms, { salt: expect.length });
+    const failed = await battery(V.flowsLedgerRows);
+    ok(failed.includes(expect), `${title} fails its check ${expect}; failed: ${failed.join(", ") || "none"}`);
+  }
 }
 
 console.log(`✓ flows-sfc-route: ${checks} assertions`);
