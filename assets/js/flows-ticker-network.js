@@ -265,7 +265,7 @@
     const head = h("div", { class: "fnw-bar" }, thin ? null : seg, h("span", { class: "fnw-stamp" }, net.session ? "Session " + F.day(net.session) + (gen && F.trtDay(gen) ? " \u00b7 read " + F.day(F.trtDay(gen)) + " " + F.time(gen) : "") : ""));
     const notes = [FACE.gross, FACE.ask, FACE.flags, spotLine(net)];
     if (net.excluded.window) notes.push(net.excluded.window + (net.excluded.window === 1 ? " window is" : " windows are") + " left out of every column: a missing price, strike or expiry.");
-    if (net.excluded.noSide) notes.push(net.excluded.noSide + (net.excluded.noSide === 1 ? " window has" : " windows have") + " premium with no stated side, " + F.money(net.excluded.noSidePrem) + " in all, left out of the map and counted here; " + Math.round(net.sidedShare * 100) + "% of the placed premium has a stated side.");
+    if (net.excluded.noSide) notes.push(net.excluded.noSide + (net.excluded.noSide === 1 ? " window has" : " windows have") + " premium with no stated side, " + F.money(net.excluded.noSidePrem) + " in all, left out of the map and counted here; " + F.pct(net.sidedShare, 0) + " of the placed premium has a stated side.");
     if (net.excluded.unflagged) notes.push(net.excluded.unflagged + (net.excluded.unflagged === 1 ? " window has" : " windows have") + " no sweep or opening flag read, shown as flags not read.");
     const face = h("p", { class: "fnw-face" }, notes.join(" "));
     wrap.append(head, read, warn, cover, narrow, stage, tableBox, face);
