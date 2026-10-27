@@ -2,6 +2,7 @@ import { HttpError, json, readBounded, requireMethod } from "./http.js";
 import { logFailure } from "./log.js";
 import { DATED_ARCHIVE_KEY_RE, ingestKeyParts } from "./store.js";
 import { PERMANENT_ARCHIVE_KEY_RE } from "../shared/flows-archive.js";
+import { decodeWire } from "../shared/flows-card-pack.js";
 import { FLOWS_MAX_PAYLOAD_BYTES } from "../shared/flows-live-worker.js";
 import {
   DOOR_LIMITS, assess, inspect, membershipFlag, parseHashHeader, planOf, producerOf, sha256Hex, tickerOfKey,
@@ -112,8 +113,12 @@ export function createDoor({ store, ensureFlowsTables, storeGone, log = logFailu
       seen.add(key);
       if (DATED_ARCHIVE_KEY_RE.test(key) || PERMANENT_ARCHIVE_KEY_RE.test(key)) { refuse("archive_in_batch", "Archive keys are written one at a time"); continue; }
       if (key === "meta") { refuse("single_only", "meta lands alone, last"); continue; }
-      const text = typeof item.payload === "string" ? item.payload : item.payload === undefined ? null : JSON.stringify(item.payload);
-      if (text === null) { refuse("invalid_payload", "Payload is not valid JSON"); continue; }
+      const posted = typeof item.payload === "string" ? item.payload : item.payload === undefined ? null : JSON.stringify(item.payload);
+      if (posted === null) { refuse("invalid_payload", "Payload is not valid JSON"); continue; }
+      if (posted.length > FLOWS_MAX_PAYLOAD_BYTES) { refuse("payload_too_large", "Payload too large"); continue; }
+      const wire = decodeWire(key, posted);
+      if (wire.error) { refuse("invalid_payload", wire.error); continue; }
+      const text = wire.text;
       if (text.length > FLOWS_MAX_PAYLOAD_BYTES) { refuse("payload_too_large", "Payload too large"); continue; }
       try { JSON.parse(text); } catch { refuse("invalid_payload", "Payload is not valid JSON"); continue; }
       live.push({ i, key, text, header: typeof item.hash === "string" ? item.hash : null });

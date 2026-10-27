@@ -228,9 +228,8 @@ const SWEEP = () => {
   return out;
 };
 
-const GATED = new Set(["unusual"]);
 const STANDARD = ["1440x820", "1024x768", "390x844", "1920x1080"];
-const gate = (e) => e.fatal || (e.one && STANDARD.includes(e.size) && (e.scroll.length || e.inner.length)) || e.canvas.length || (GATED.has(e.page) && e.clipped.length);
+const gate = (e) => e.fatal || (e.one && STANDARD.includes(e.size) && (e.scroll.length || e.inner.length)) || e.canvas.length || (STANDARD.includes(e.size) && (e.clipped.length || e.outside.length)) || (e.errors || []).length > 0;
 
 const browser = await chromium.launch();
 async function sweepSpec(spec, width, height, patch = null) {
@@ -275,6 +274,9 @@ try {
     const MUTANTS = [
       ["the sidebar scrolls inside itself at a short height", "status", 1440, 820, { "/assets/css/flows.css": [["  overflow: hidden;\n  visibility: hidden;", "  overflow-y: auto;\n  visibility: hidden;"], [".fx-side > .flows-rail { flex: 1 1 auto; min-height: 0; overflow-y: auto;", ".fx-side > .flows-rail { flex: 0 0 auto; min-height: 0;"]] }],
       ["the network module scrolls inside and keeps a fixed stage", "unusual", 1440, 820, { "/assets/css/flows-feeds.css": [[".fd-stage > .fd-mod[data-free] { overflow: hidden; }", ".fd-stage > .fd-mod[data-free] { overflow-y: auto; }"], [".fd-stage > .fd-mod[data-free] > .fn-host > .fn-stage { flex: 1; min-height: 0; height: auto; margin: 0; }", ".fd-stage > .fd-mod[data-free] > .fn-host > .fn-stage { flex: none; height: 560px; margin: 0; }"]] }],
+      ["the index volatility chart is taller than its card", "market", 1440, 820, { "/assets/js/flows-market-below.js": [["height: [150, 160, 180],\n      xTicks: [{ v: 7", "height: [180, 210, 230],\n      xTicks: [{ v: 7"]] }],
+      ["the small sector tiles print a value wider than the tile", "market", 390, 844, { "/assets/css/flows-market.css": [["clamp(9px, min(11cqmin, 17cqw), 28px)", "clamp(14px, 11cqmin, 30px)"], [".mk-small-h b { grid-area: v; min-width: 0; overflow: visible;", ".mk-small-h b { grid-area: v; min-width: 0; overflow: hidden;"]] }],
+      ["the feed fitter trims only one stacked group", "unusual", 390, 844, { "/assets/js/flows-feed-os.js": [["for (const kids of groups) {", "for (const kids of groups.slice(0, 1)) {"]] }],
       ["the scene is laid out at a clamped height the canvas is not shown at", "unusual", 1440, 820, { "/assets/js/flows-net.js": [["H = FIT ? avail :", "H = FIT ? Math.max(avail, 700) :"]] }],
     ];
     for (const [name, id, w, h, patch] of MUTANTS) {

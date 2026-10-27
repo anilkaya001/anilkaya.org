@@ -1,3 +1,6 @@
+import { HORIZON_SESSIONS, LIVE_ELAPSED_MAX, laterCandidate } from "../../shared/flows-horizon.js";
+import { ahead as aheadOf } from "../../shared/flows-calendar.js";
+
 export const NIGHT = "2026-10-16";
 export const GENERATED_AT = "2026-10-16T21:31:53.908Z";
 const T = 1e12;
@@ -25,6 +28,15 @@ export const SPECIAL = [
   ["NOCAP", -0.06, 0.3, 60, "Energy", null, 0.02, 9, 1],
   ["NOSEC", 0.045, 0.25, 60, null, 0.05 * T, 0.015, 15, 3],
   ["EDGE", 0.15, 0.2, 60, "Industrials", 0.02 * T, 0.01, 8, 1],
+  ["EDGE22", 0.14, 0.2, 22, "Industrials", 0.02 * T, 0.01, 8, 1],
+  ["REACT0", 0.11, 0.3, null, "Technology", 0.3 * T, 0.02, 12, 3, 0],
+  ["REACT1", -0.07, 0.3, null, "Financials", 0.2 * T, 0.02, 12, 3, 1],
+  ["REACT2", 0.08, 0.3, null, "Industrials", 0.1 * T, 0.02, 12, 3, 2],
+  ["UNSTATED2", 0.06, 0.3, null, "Energy", 0.1 * T, 0.02, 9, 1, null, 2],
+  ["UNSTATED3", -0.06, 0.3, null, "Energy", 0.1 * T, 0.02, 9, 1, null, 3],
+  ["SAMEDAY", 0.2, 0.3, 0, "Technology", 0.2 * T, 0.02, 12, 3, undefined, undefined, 1],
+  ["FWDUN", 0.05, 0.3, 1, "Technology", 0.2 * T, 0.02, 12, 3, undefined, undefined, 2],
+  ["FWDST", 0.05, 0.3, 1, "Technology", 0.2 * T, 0.02, 12, 3],
 ];
 
 export function names(n = 640, seed = 7) {
@@ -46,7 +58,7 @@ export function names(n = 640, seed = 7) {
 export function universe(list, o = {}) {
   const sectors = [...new Set(list.map((n) => n[4]).filter(Boolean))];
   const body = {
-    status: "ok", sessionDate: o.session || NIGHT, generatedAt: GENERATED_AT, t: list.map((n) => n[0]),
+    status: "ok", sessionDate: o.session || NIGHT, generatedAt: GENERATED_AT, hz: o.hz === undefined ? HORIZON_SESSIONS : o.hz, ahead: aheadOf(o.session || NIGHT), t: list.map((n) => n[0]),
     cols: {
       chg: list.map((n) => Math.round(n[1] * 1e4)),
       iv30p: list.map((n) => (n[2] === null ? null : Math.round(n[2] * 1e4))),
@@ -57,6 +69,13 @@ export function universe(list, o = {}) {
     },
     units: { chg: ["frac", 1e4], iv30p: ["frac", 1e4], ed: ["sessions", 1], sig: ["fraction", 1e5], f2: ["days per 252", 1], f3: ["days per 252", 1] },
   };
+  if (list.some((n) => n[9] !== undefined)) {
+    body.cols.rd = list.map((n) => (n[9] === undefined ? null : n[9]));
+    body.units.rd = ["sessions", 1];
+  }
+  body.rdBasis = { unstated: Object.fromEntries(list.filter((n) => n[10] !== undefined).map((n) => [n[0], n[10]])) };
+  body.edUnstated = Object.fromEntries(list.filter((n) => n[11] !== undefined).map((n) => [n[0], n[11]]));
+  if (!o.noThrough) body.edUnstatedThrough = o.through === undefined ? LIVE_ELAPSED_MAX : o.through;
   if (!o.noSec) { body.sectors = sectors; body.sec = list.map((n) => (n[4] ? sectors.indexOf(n[4]) : null)); }
   if (!o.noCap) { body.cols.mcap = list.map((n) => (n[5] === null ? null : Math.round(n[5] / 1e8))); body.units.mcap = ["usd", 1e-8]; }
   return body;
@@ -69,6 +88,9 @@ export function decoded(body) {
     chg: body.cols.chg[i] / body.units.chg[1],
     iv: body.cols.iv30p[i] === null ? null : body.cols.iv30p[i] / body.units.iv30p[1],
     ed: body.cols.ed[i],
+    rd: body.cols.rd ? body.cols.rd[i] : null,
+    rdMax: body.rdBasis && body.rdBasis.unstated && Number.isInteger(body.rdBasis.unstated[t]) ? body.rdBasis.unstated[t] : null,
+    edMax: laterCandidate(body.edUnstated, body.edUnstatedThrough, t, body.cols.ed[i]),
     sig: body.cols.sig[i] === null ? null : body.cols.sig[i] / body.units.sig[1],
     f2: body.cols.f2[i], f3: body.cols.f3[i],
     cap: body.cols.mcap && body.cols.mcap[i] !== null ? body.cols.mcap[i] / body.units.mcap[1] : null,

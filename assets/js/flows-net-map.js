@@ -331,6 +331,7 @@
       if (n) {
         const r = readout(M, n);
         readEl.replaceChildren(r.text);
+        readEl.title = typeof r.text === "string" ? r.text : "";
         if (r.d.other) readEl.append(" ", h("button", { type: "button", class: "nm-link", "aria-haspopup": "dialog", onclick: () => drill(n) }, "Show members"));
       }
       legendFill();

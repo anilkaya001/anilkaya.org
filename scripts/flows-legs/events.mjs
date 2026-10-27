@@ -3,7 +3,9 @@ import {
   CALENDAR_SESSIONS, FDA_HORIZON_DAYS, earningsHistory, historyDigest, shapeEarningsCalendar,
   reactionGauge, shapeEconomicCalendar, shapeFdaCalendar,
 } from "../../shared/flows-catalysts.js";
-import { addDays, weekdaysAhead, priorWeekdayIso, vnum, compactNumbers, SILENCE } from "../../shared/flows-cross.js";
+import { addDays, vnum, compactNumbers, SILENCE } from "../../shared/flows-cross.js";
+import { addSessions } from "../../shared/flows-calendar.js";
+import { reactionPlan } from "../../shared/flows-reports.js";
 import { pathFor } from "../../shared/flows-vendor-ops.js";
 
 export const FDA_LIMIT = 200;
@@ -43,22 +45,19 @@ export function fitEventsAdditions(additions, { budgetBytes = EVENTS_ADDITIONS_B
   return additions;
 }
 
-export function calendarPlan(sessionDate, { sessions = CALENDAR_SESSIONS } = {}) {
+export function calendarPlan(sessionDate, { sessions = CALENDAR_SESSIONS, ledgerAsOf = null } = {}) {
   if (!sessionDate) return [];
-  const plan = [
-    { route: "premarket", date: sessionDate, role: "reaction" },
-    { route: "afterhours", date: priorWeekdayIso(sessionDate), role: "reaction" },
-    { route: "afterhours", date: sessionDate, role: "upcoming" },
-  ];
-  for (const d of weekdaysAhead(sessionDate, sessions)) {
-    plan.push({ route: "premarket", date: d, role: "upcoming" });
-    plan.push({ route: "afterhours", date: d, role: "upcoming" });
+  const plan = [...reactionPlan(sessionDate, ledgerAsOf), { route: "afterhours", date: sessionDate, role: "upcoming" }];
+  for (let i = 1; i <= sessions; i++) {
+    const d = addSessions(sessionDate, i);
+    if (!d) break;
+    plan.push({ route: "premarket", date: d, role: "upcoming" }, { route: "afterhours", date: d, role: "upcoming" });
   }
   return plan;
 }
 
 export async function readCatalysts(uw, {
-  sessionDate = null, earningsTickers = [], deadline = null, pool = null, width = 1,
+  sessionDate = null, earningsTickers = [], deadline = null, pool = null, width = 1, reactions = null, ledgerAsOf = null,
 } = {}) {
   const raw = { calls: 0, calendar: [], earnings: new Map() };
   const get = async (path, params, opts) => {
@@ -71,7 +70,9 @@ export async function readCatalysts(uw, {
     ...(sessionDate ? { target_date_min: sessionDate, target_date_max: addDays(sessionDate, FDA_HORIZON_DAYS) } : {}),
     limit: FDA_LIMIT,
   });
-  for (const step of calendarPlan(sessionDate)) {
+  for (const step of calendarPlan(sessionDate, { ledgerAsOf })) {
+    const held = step.role === "reaction" && reactions && reactions.byKey ? reactions.byKey.get(`${step.route}|${step.date}`) : null;
+    if (held) { raw.calendar.push(held); continue; }
     const res = await get(pathFor(step.route === "premarket" ? "earnings-premarket" : "earnings-afterhours"), { date: step.date, limit: 100 });
     raw.calendar.push({ ...step, res });
   }

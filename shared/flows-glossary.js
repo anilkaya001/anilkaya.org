@@ -1,3 +1,5 @@
+import { HORIZON_SESSIONS, horizonWords } from "./flows-horizon.js";
+
 const HOME = { file: "assets/js/flows-overview.js", page: "Home", href: "/flows/" };
 const EVENTS = { file: "assets/js/flows-events.js", page: "Events", href: "/flows/events/" };
 const MARKET = { file: "assets/js/flows-market.js", page: "Market", href: "/flows/market/" };
@@ -56,7 +58,7 @@ export const GLOSSARY = Object.freeze([
   { key: "sector-median", term: "Sector median", ...MOVES, lines: [
     "Each sector's median move, and its names beyond 2 IV-days.",
     "Median is signed, in IV-days.",
-    "Names reporting within 21 sessions are left out of every row.",
+    horizonWords(HORIZON_SESSIONS).leftOut,
   ] },
   { key: "sided-coverage", term: "Sided coverage", file: "assets/js/flows-net.js", page: "Unusual", href: "/flows/unusual/", lines: [
     "Premium with no stated side is not drawn as a node.",
