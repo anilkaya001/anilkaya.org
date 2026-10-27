@@ -282,7 +282,9 @@ async function main() {
   await runAlerts(ctx);
   await runContext(ctx);
   await runCards(ctx);
-  ctx.beforeFocus = () => runPmNames(ctx);
+  ctx.beforeFocus = async () => {
+    await runPmNames(ctx);
+  };
   await runFocus(ctx);
   await runOraclePrep(ctx);
   await runCompute(ctx);

@@ -8,9 +8,6 @@ import { makeMacroFakeVendor } from "../../flows-legs/macro-fake.mjs";
 import { pmCapOf, runPrivateNames, runPrivateSectors, sleepingUntil, wakeSession } from "../../flows-legs/private.mjs";
 import { PM_NAMES_CAP, buildPm, fitPm } from "../../../shared/flows-private.js";
 
-export const MACRO_STAGE_ID = "macro";
-export const PM_NAMES_STAGE_ID = "pm-names";
-export const PM_SECTORS_STAGE_ID = "pm-sectors";
 
 export const PRIOR_READ_LIMIT = 120;
 
@@ -23,11 +20,11 @@ const calendarOf = (ctx) => {
 export async function runMacroStage(ctx) {
   const { stages, sessionDate, deadline } = ctx;
   if (!macroBuildOn()) {
-    stages.skip(MACRO_STAGE_ID, "FLOWS_MACRO_BUILD is off");
+    stages.skip("macro", "FLOWS_MACRO_BUILD is off");
     return;
   }
   ctx.macroMeta = { build: true, written: false, calls: 0, ops: {} };
-  await stages.run(MACRO_STAGE_ID, async () => {
+  await stages.run("macro", async () => {
     const generatedAt = stampNow();
     const feed = DRY_RUN ? makeMacroFakeVendor({ sessionDate }) : uw;
     const run = await runMacro({
@@ -61,10 +58,10 @@ export async function runMacroStage(ctx) {
 export async function runPmNames(ctx) {
   const { stages, sessionDate, deadline, cardX, cardTickers } = ctx;
   if (!macroBuildOn()) {
-    stages.skip(PM_NAMES_STAGE_ID, "FLOWS_MACRO_BUILD is off");
+    stages.skip("pm-names", "FLOWS_MACRO_BUILD is off");
     return;
   }
-  await stages.run(PM_NAMES_STAGE_ID, async () => {
+  await stages.run("pm-names", async () => {
     const cap = pmCapOf();
     const names = (cardTickers || []).slice(0, PRIOR_READ_LIMIT);
     const candidates = [];
@@ -98,10 +95,10 @@ export async function runPmNames(ctx) {
 export async function runPmSectors(ctx) {
   const { stages, sessionDate, deadline, marketLegs } = ctx;
   if (!macroBuildOn()) {
-    stages.skip(PM_SECTORS_STAGE_ID, "FLOWS_MACRO_BUILD is off");
+    stages.skip("pm-sectors", "FLOWS_MACRO_BUILD is off");
     return;
   }
-  await stages.run(PM_SECTORS_STAGE_ID, async () => {
+  await stages.run("pm-sectors", async () => {
     const cap = pmCapOf();
     const used = ctx.pmNamesRun ? ctx.pmNamesRun.calls : 0;
     const held = await readStored("pm");

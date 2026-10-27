@@ -185,8 +185,8 @@ const MODULES = ["m-worlds", "m-signal", "m-gamma", "m-hedge", "m-vol", "m-flow"
   const body = block.slice(0, block.indexOf("};"));
   const map = new Map([...body.matchAll(/([A-Za-z_][A-Za-z0-9_]*): "([a-zA-Z-]+)"/g)].map((m) => [m[1], m[2]]));
   const built = new Set([...TICKER_SRC.matchAll(/mod\(\{ id: "(m-[a-z]+)"/g)].map((m) => m[1]).filter((id) => id !== "m-ideas"));
-  eq([...built].sort().join(" "), [...MODULES, "m-screen"].sort().join(" "),
-     "the page builds exactly the twelve dossier modules this contract sweeps, plus the lite page's Screen, swept by its own block below, and the glance's Ideas tab, which only holds the verdict");
+  eq([...built].sort().join(" "), [...MODULES, "m-screen", "m-private"].sort().join(" "),
+     "the page builds exactly the twelve dossier modules this contract sweeps, plus the private-markets lens, which exists only behind its switch and has its own suite, plus the lite page's Screen, swept by its own block below, and the glance's Ideas tab, which only holds the verdict");
   for (const p of TICKER_PANELS) {
     ok(map.has(p.key), `registry panel "${p.key}" is placed in a module by the page's panel map — a panel no module reads is a vendor call nobody sees`);
     ok(built.has(map.get(p.key)) || map.get(p.key) === "ftHero", `and "${p.key}" is placed in ${map.get(p.key)}, a module the page actually builds`);
