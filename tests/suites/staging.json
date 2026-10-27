@@ -1,1 +1,1 @@
-{"name": "staging", "class": "N", "group": "shard", "timing": false, "medianS": 6.7, "shard": 11, "files": ["staging-contract.mjs"], "covers": ["worker.js","wrangler.staging.toml","wrangler.toml"]}
+{"name": "staging", "class": "N", "group": "shard", "timing": false, "medianS": 6.7, "shard": 8, "files": ["staging-contract.mjs"], "covers": ["worker.js","wrangler.staging.toml","wrangler.toml"]}
