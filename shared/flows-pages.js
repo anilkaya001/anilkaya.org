@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "405";
+export const ASSET_VERSION = "406";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";

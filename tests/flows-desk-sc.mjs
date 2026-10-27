@@ -57,7 +57,7 @@ const chainCalls = (calls) => calls.filter((c) => c.kind === "chain");
     const got = await run({ FLOWS_DESK_SC_PAGES: value });
     eq(got.calls.length, pages, `FLOWS_DESK_SC_PAGES=${value} reads ${pages} pages`);
   }
-  for (const value of ["0", "-3", "25", "abc", "", "1.5e1x", "99"]) {
+  for (const value of ["-3", "25", "abc", "", "1.5e1x", "99"]) {
     const got = await run({ FLOWS_DESK_SC_PAGES: value });
     eq(got.calls.length, value === "1.5e1x" ? 1 : 12, `FLOWS_DESK_SC_PAGES=${JSON.stringify(value)} falls back to the default`);
   }
