@@ -50,6 +50,8 @@ const GLOBALS = [
   global("scoretrack"),
   global("calib"),
   global("dispersion"),
+  global("macro", { capBytes: 96 * 1024, required: ["v", "session"] }),
+  global("pm", { capBytes: 64 * 1024, required: ["v", "session"] }),
   global("flowalerts"),
   global("pulse"),
   global("political"),

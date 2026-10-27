@@ -42,6 +42,9 @@ import { flowsAiRows } from "./server/routes/flows-ai.js";
 import { flowsReadyRows } from "./server/routes/flows-ready.js";
 import { flowsOracleRows } from "./server/routes/flows-oracle.js";
 import { flowsLedgerRows } from "./server/routes/flows-ledger.js";
+import { flowsMacroRows } from "./server/routes/flows-macro.js";
+import { buildLive, BOARD_FUTURES, BOARD_CRYPTO } from "./shared/flows-macro-live.js";
+import { FX_PAIRS } from "./shared/flows-macro.js";
 import { flowsMeRows } from "./server/routes/flows-me.js";
 import { createMemberStore } from "./server/member-store.js";
 import { flowsDispatchRows } from "./server/routes/flows-dispatch.js";
@@ -991,7 +994,7 @@ const LAST_GOOD_REFRESH_MS = 10 * 60 * 1000;
 const LAST_GOOD_MAX_KEYS = 256;
 const LAST_GOOD_PATHS = new Set(["board", "market", "events", "scoretrack", "calib", "dispersion", "meta", "flowalerts", "pulse", "political", "unusual",
   "movers", "sectors", "sector-premium", "universe", "regime", "ideas", "focus", "roster", "news", "record", "card", "card-x",
-  "hist"].map((name) => "/api/flows/" + name));
+  "hist", "macro"].map((name) => "/api/flows/" + name));
 
 function lastGoodKey(request, url) {
   if (request.method !== "GET" || !LAST_GOOD_PATHS.has(url.pathname)) return null;
@@ -1003,6 +1006,11 @@ function lastGoodKey(request, url) {
     const ticker = tickerParam(url);
     if (!TICKER_RE.test(ticker)) return null;
     tail = "?t=" + ticker;
+  } else if (url.pathname === "/api/flows/macro") {
+    const part = url.searchParams.get("part") || "all";
+    const sector = url.searchParams.get("sector") || "";
+    if (!/^[a-z]{1,16}$/.test(part) || sector.length > 60) return null;
+    tail = "?part=" + part + (sector ? "&sector=" + encodeURIComponent(sector) : "");
   }
   return internalKey("lastgood", url.pathname.slice(1) + tail);
 }
@@ -3058,6 +3066,74 @@ async function renderCourse(request, env, url, meta, ctx) {
 
 const rtServe = (request, env, url) => serveRt(request, env, url, { json, HttpError, requireSameOrigin, getSession: () => currentFlowsUser(request, env) });
 
+const UW_MACRO_DEADLINE_MS = 6000;
+
+const macroMode = (env, name) => String((env && env[name]) || "").trim().toLowerCase();
+
+const macroOn = (env, owner) => {
+  const mode = macroMode(env, "FLOWS_MACRO");
+  return mode === "on" || (mode === "owner" && owner === true);
+};
+
+const macroLiveOn = (env, owner) => {
+  const mode = macroMode(env, "FLOWS_MACRO_LIVE");
+  return mode === "on" || (mode === "owner" && owner === true);
+};
+
+async function buildMacroNow(env, vf, { part, pair, symbols }) {
+  const call = (id, pathParams, params) => async () => {
+    try {
+      return { status: "ok", body: await vf(pathFor(id, pathParams), params, { deadlineMs: UW_MACRO_DEADLINE_MS }) };
+    } catch (error) {
+      if (error instanceof VendorRefused) throw error;
+      const upstream = error && Number.isInteger(error.upstream) ? error.upstream : 0;
+      return { status: upstream === 429 ? "limited" : "failed", why: String(upstream || (error && error.code) || "failed") };
+    }
+  };
+  const run = async (jobs, width = 3) => {
+    const out = new Array(jobs.length);
+    for (let i = 0; i < jobs.length; i += width) {
+      const slice = jobs.slice(i, i + width);
+      const got = await Promise.all(slice.map((j) => j.run()));
+      got.forEach((r, k) => { out[i + k] = r; });
+    }
+    return out;
+  };
+  const raws = {};
+  if (part === "board") {
+    const jobs = [];
+    raws.fx = {};
+    raws.crypto = {};
+    raws.futures = {};
+    for (const p of FX_PAIRS) jobs.push({ run: call("fx-rate", {}, { from: p.slice(0, 3), to: p.slice(3) }), set: (r) => { raws.fx[p] = r; } });
+    for (const p of BOARD_CRYPTO) jobs.push({ run: call("crypto-state", { pair: p }, {}), set: (r) => { raws.crypto[p] = r; } });
+    for (const p of BOARD_FUTURES) if (symbols && symbols[p]) jobs.push({ run: call("futures-stats", { contract: symbols[p] }, {}), set: (r) => { raws.futures[p] = r; } });
+    const got = await run(jobs);
+    got.forEach((r, i) => jobs[i].set(r));
+  } else if (part === "futures") {
+    const jobs = [{ run: call("futures-flow", {}, { limit: 500, include_spreads: "false", products: "ES,NQ,RTY,YM", min_size: 50 }), set: (r) => { raws.flow = r; } }];
+    if (symbols && symbols.ES) {
+      jobs.push({ run: call("futures-trades", { contract: symbols.ES }, { limit: 500 }), set: (r) => { raws.trades = r; } });
+      jobs.push({ run: call("futures-candles", { contract: symbols.ES }, { interval: "5m", range: "1d" }), set: (r) => { raws.candles = r; } });
+    }
+    const got = await run(jobs);
+    got.forEach((r, i) => jobs[i].set(r));
+  } else if (part === "crypto") {
+    const jobs = [
+      { run: call("crypto-ohlc", { pair: "BTC-USD", candle_size: "5m" }, { limit: 288 }), set: (r) => { raws.ohlc = r; } },
+      { run: call("digital-intraday", {}, { symbol: "BTC", market: "USD", interval: "5min" }), set: (r) => { raws.digital = r; } },
+      { run: call("crypto-whales", {}, { limit: 100 }), set: (r) => { raws.whales = r; } },
+      { run: call("crypto-whale-tx", {}, { limit: 100 }), set: (r) => { raws.transfers = r; } },
+    ];
+    const got = await run(jobs);
+    got.forEach((r, i) => jobs[i].set(r));
+  } else {
+    const [r] = await run([{ run: call("fx-intraday", {}, { from: pair.slice(0, 3), to: pair.slice(3), interval: "60min" }) }]);
+    raws.intraday = r;
+  }
+  return buildLive(part, raws, { now: Date.now(), symbols, pair, test: vendorRedirected(env) });
+}
+
 const ROUTER = createRouter(flowsReadRows({ readServed, readFlowsPayload, readWithOverlay, passthrough, recallLastGood, storeGone,
   absentKey, cardWithEngine, briefWithLive, briefFeedsAhead, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK }),
 flowsDeskRows({ scRefreshAllowed, vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }),
@@ -3080,6 +3156,7 @@ flowsOpsRows({ ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitch
 flowsOracleRows({ store: FLOWS_STORE, ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), nightlyFreshHeaders, recallLastGood }),
 flowsLedgerRows({ store: FLOWS_STORE, ensureFlowsTables, readLiveRows: FLOWS_LIVE.readLiveRows, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsMeRows({ store: MEMBER_STORE, flowsStore: FLOWS_STORE, readLiveRows: FLOWS_LIVE.readLiveRows, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
+flowsMacroRows({ readServed, passthrough, macroOn, macroLiveOn, serveCachedVendorRead, vendorGate, buildNow: buildMacroNow, nightlyFreshHeaders, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsFilmRows(),
 flowsPageRows({ currentFlowsUser, readFlowsSummary: readHomeSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
   scenesOn: (env, username) => {

@@ -34,6 +34,7 @@ import { runDeepenLedger, runDeepenPlan } from "./flows-nightly/sections/deepen.
 import { pathFor } from "../shared/flows-vendor-ops.js";
 import { processCpuMs, runCompute } from "./flows-nightly/sections/compute.mjs";
 import { runOraclePrep, runOraclePublish } from "./flows-nightly/sections/oracle.mjs";
+import { runMacroStage, runPmSectors } from "./flows-nightly/sections/macro.mjs";
 
 export {
   CALL_BUDGET, CALL_COST, CALL_OVERRUN_MARGIN, CHAIN_RESERVE_MS, DEADLINE_MS, DEEP_NAMES, DEEP_RULE,
@@ -275,6 +276,7 @@ async function main() {
     console.warn(`  deepen: ${error.message} — no rotation tonight`);
   });
   await runMarket(ctx);
+  await runMacroStage(ctx);
   await runRecord(ctx);
   await runChains(ctx);
   await runAlerts(ctx);
@@ -284,6 +286,7 @@ async function main() {
   await runOraclePrep(ctx);
   await runCompute(ctx);
   await runOraclePublish(ctx);
+  await runPmSectors(ctx);
   await stages.run("deepen-ledger", () => runDeepenLedger(ctx), (error) => {
     console.warn(`  deepen ledger: ${error.message} — the next run re-reads what the store holds`);
   });

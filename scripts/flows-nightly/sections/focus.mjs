@@ -1,4 +1,5 @@
 import { num } from "../../../shared/flows-features.js";
+import { runPmNames } from "./macro.mjs";
 import { buildCard, SURFACE_EXPIRIES } from "../../../shared/flows-card.js";
 import { runFlowLeg } from "../../flows-legs/flow.mjs";
 import { makeFlowFakeVendor, makeFlowFakeStore } from "../../flows-legs/flow-fake.mjs";
@@ -176,6 +177,7 @@ export async function runFocus(ctx) {
     console.log(`  dossiers: ${say("index")}; ${say("fund")}` +
       Object.entries(dossiers.shed).map(([t, keys]) => `; ${t} shed ${keys.join(", ")}`).join(""));
   }
+  await runPmNames(ctx);
   {
     const featuresFor = new Map(enriched.map((e) => [e.features.ticker, e.features]));
     for (const [t, f] of dossierFeatures) featuresFor.set(t, f);

@@ -177,6 +177,7 @@ export async function runClose(ctx) {
       cardsBuilt, cardsFailed, cardsSkipped,
       ...(neuronLedger ? { neuron: neuronLedger } : {}),
       ...(extrasSummary ? { extras: extrasSummary } : {}),
+      ...(ctx.macroMeta ? { macro: ctx.macroMeta } : {}),
       ...(deepen && deepen.plan ? { deepen: {
         mode: deepen.mode, chosen: deepen.plan.n, built: rotationCards ? rotationCards.built : 0,
         failed: rotationCards ? rotationCards.failed : 0, carried: carriedDeep.size, never: deepen.plan.never ?? 0,
