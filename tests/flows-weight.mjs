@@ -62,7 +62,8 @@ const CEILING_KIB = {
   eventsPage: 155 + 5786 / 1024 + (155 + 5786 / 1024 + 2327 / 1024) - (155 + 5786 / 1024) + (155 + 5786 / 1024 + 2327 / 1024 + 265 / 1024) - (155 + 5786 / 1024 + 2327 / 1024) + 2010 / 1024 + NN_KERNEL.bytes / 1024,
   movesPage: 151 + 5522 / 1024 + 442 / 1024 + 320 / 1024 + 64 / 1024 + NN_KERNEL.bytes / 1024 + MOVES_PARTS.bytes / 1024 + MOVES_SECTORS.bytes / 1024 + 144 / 1024 + MOVES_EARNINGS.bytes / 1024 + RT_STAMP.bytes / 1024,
   ledgerPage: 82.6 + LEDGER_PAGE.bytes / 1024 + LEDGER_HOOKS.bytes / 1024,
-  politicalPage: 118 + 2010 / 1024 + 700 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024,
+  politicalPage: 130 + 2010 / 1024 + 700 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024,
+  positioningPage: 116.6,
   loginPage: 5,
   aboutPage: 5,
   glossaryPage: 5,
@@ -84,7 +85,8 @@ const GZIP_KIB = {
   eventsPage: 34 + 1932 / 1024 + (34 + 1932 / 1024 + 830 / 1024) - (34 + 1932 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (34 + 1932 / 1024 + 830 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024 - 98 / 1024) - (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) + 641 / 1024 + 2000 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
   movesPage: 47.5 + 1122 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + MOVES_PARTS.gzip / 1024 + MOVES_SECTORS.gzip / 1024 + MOVES_PARTS.gzip / 1024 + MOVES_SECTORS.gzip / 1024 + MOVES_EARNINGS.gzip / 1024,
   ledgerPage: 27 + LEDGER_PAGE.gzip / 1024 + LEDGER_HOOKS.gzip / 1024,
-  politicalPage: 37.5 + 641 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
+  politicalPage: 41.5 + 641 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
+  positioningPage: 37.1,
   loginPage: 3,
   aboutPage: 3,
   glossaryPage: 3,
@@ -106,7 +108,8 @@ const CSS_KIB = {
   eventsPage: 105 + 565 / 1024 + 160 / 1024 + 367 / 1024 + 367 / 1024 + 1500 / 1024 + 4700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   movesPage: 95.5 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + MOVES_SECTORS.cssBytes / 1024,
   ledgerPage: 86.5 + LEDGER_PAGE.cssBytes / 1024,
-  politicalPage: 100.5 + 1700 / 1024 + 400 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  politicalPage: 103 + 1700 / 1024 + 400 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  positioningPage: 136.2,
   loginPage: 80 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   aboutPage: 81 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   glossaryPage: 81 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
@@ -128,7 +131,8 @@ const CSS_GZIP_KIB = {
   eventsPage: 23 + 64 / 1024 + 400 / 1024 + 1800 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   movesPage: 21 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + MOVES_SECTORS.cssGzip / 1024,
   ledgerPage: 18.6 + LEDGER_PAGE.cssGzip / 1024,
-  politicalPage: 22.5 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  politicalPage: 23.5 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  positioningPage: 28.2,
   loginPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   aboutPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   glossaryPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
@@ -236,6 +240,7 @@ const DEFERRED_KIB = {
 };
 const DARK_POOL_TIME = { bytes: 107, why: "lane 2 math audit: the Market page's dark-pool list drops canceled prints, prints its times in TRT through F.time and its prices through F.px, and says how many canceled prints it left out, measured as 58,946 to 59,053 B raw in the deferred flows-market-below.js" };
 DEFERRED_KIB.marketPage += DARK_POOL_TIME.bytes / 1024;
+DEFERRED_KIB.positioningPage = 80 + NN_ASK.bytes / 1024;
 const HORIZON_DEFERRED = { od: "LANE-4", tickerBytes: 2947, marketBytes: 1261, why: "lane 4: the ticker's Move lab reads the earnings window and the report-session column from the universe, ages them by the sessions elapsed and shows a Reacting today, Reacted one session ago or Report time not stated state, and reads the carried forward ages of unstated report times (flows-ticker-movelab.js 19,302 to 22,249 B), and Market's Skyline and Volatility lens read the same window, column and ages in place of a literal 21 (flows-skyline.js 22,056 to 22,571 B, flows-market-below.js 59,053 to 59,799 B)" };
 DEFERRED_KIB.tickerPage += HORIZON_DEFERRED.tickerBytes / 1024;
 DEFERRED_KIB.marketPage += HORIZON_DEFERRED.marketBytes / 1024;

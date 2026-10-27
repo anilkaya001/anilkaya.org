@@ -27,7 +27,7 @@ const compile = (path) => {
 const MATCHERS = OPS.filter((o) => o.path.startsWith("/api/")).map((o) => ({ id: o.id, ...compile(o.path) }))
   .sort((a, b) => a.names.length - b.names.length || b.re.source.length - a.re.source.length);
 
-export function route(path) {
+export function positioningRoute(path) {
   for (const m of MATCHERS) {
     const hit = m.re.exec(path);
     if (hit) return { id: m.id, params: Object.fromEntries(m.names.map((n, i) => [n, decodeURIComponent(hit[i + 1])])) };
@@ -54,7 +54,7 @@ export function fakePositioningUw() {
   const fx = positioningFixture();
   return async function uw(path) {
     touch("positioning-fake");
-    const hit = route(path);
+    const hit = positioningRoute(path);
     if (!hit) throw new Error(`${path} -> HTTP 404`);
     const entry = fx.ops[hit.id];
     if (!entry) throw new Error(`${path} -> HTTP 404`);

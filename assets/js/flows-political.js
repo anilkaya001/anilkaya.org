@@ -144,7 +144,7 @@
   const spct = (v) => F.pct(v, 1, true);
   const plural = (n, a, b) => n + " " + (n === 1 ? a : b);
 
-  let P = null, ALL = [], carded = new Set(), WIN = null, ASOF = null, minFilers = 3, seen = null, recent = [], tapeNamed = [];
+  let P = null, ALL = [], carded = new Set(), WIN = null, ASOF = null, minFilers = 3, seen = null, recent = [], feedNamed = [];
   const S = { tab: "acc", view: "map", size: "usd", funds: false, sort: null, sel: null, win: 90, topN: 10, tabs: null };
   const cards = new Map();
   let tiles = [];
@@ -539,7 +539,7 @@
   function setView(v) {
     $("plStage").dataset.view = v;
     for (const b of $("plSeg5").children) b.setAttribute("aria-selected", String(b.dataset.v === v));
-    requestAnimationFrame(() => { if (v === "stocks") renderMain(); else if (v === "tape") renderTape(); else renderSel(); });
+    requestAnimationFrame(() => { if (v === "stocks") renderMain(); else if (v === "feed") renderFeed(); else renderSel(); });
   }
 
   function openAll() {
@@ -552,7 +552,7 @@
     if (f) f.focus();
   }
 
-  function tapeRow(r) {
+  function feedRow(r) {
     const buy = r.side === "buy", sell = r.side === "sell";
     const inAll = ALL.some((a) => a.t === r.t);
     const act = inAll ? "Select " + r.t : "Open the " + r.t + " ticker page";
@@ -560,31 +560,31 @@
     return '<button type="button" class="pl-trow" data-t="' + esc(r.t) + '" tabindex="-1" aria-label="' + esc(r.t + " " + side + ", " + usd(r.lo) + " to " + usd(r.hi) + ", traded " + fday(r.txnDate) + ", filed " + fday(r.filedDate) + ", " + (r.lagDays === null || r.lagDays === undefined ? "lag unknown" : r.lagDays + " days late") + ". " + act) + '" title="' + esc(act) + '"><span class="pl-tk"><span class="gl ' + (buy ? "up" : sell ? "down" : "mut") + '-t">' + (buy ? "▲" : sell ? "▼" : "◆") + "</span>" + esc(r.t) + '</span><span class="bd"><span>' + usd(r.lo) + "–" + usd(r.hi) + "</span><small>" + fday(r.txnDate) + " → " + fday(r.filedDate) + '</small></span><span class="lg2">' + (r.lagDays === null || r.lagDays === undefined ? DASH : r.lagDays + " d") + '</span><span class="pl-mono t" title="' + esc((r.who || "") + ", " + CHAMBER[chOf(r.memberType)]) + '"><b aria-hidden="true">' + esc(initials(r.who)) + "</b></span></button>";
   }
 
-  function renderTape() {
-    const box = $("plTapeList");
+  function renderFeed() {
+    const box = $("plFeedList");
     const rh = mobile() || coarse() ? 44 : 36;
     const n = Math.max(4, Math.floor(box.clientHeight / rh));
-    box.innerHTML = tapeNamed.slice(0, n).map(tapeRow).join("");
+    box.innerHTML = feedNamed.slice(0, n).map(feedRow).join("");
     const f = box.querySelector(".pl-trow");
     if (f) f.tabIndex = 0;
-    const un = recent.length - tapeNamed.length;
-    $("plTapeNote").textContent = recent.length + " latest · " + tapeNamed.length + " name a stock";
-    $("plTapeFoot").textContent = un + " of " + recent.length + " carry no ticker (bonds, funds, private assets).";
-    $("plTapeAll").textContent = "Show all " + recent.length;
-    $("plTapeAll").style.display = recent.length ? "" : "none";
+    const un = recent.length - feedNamed.length;
+    $("plFeedNote").textContent = recent.length + " latest · " + feedNamed.length + " name a stock";
+    $("plFeedFoot").textContent = un + " of " + recent.length + " carry no ticker (bonds, funds, private assets).";
+    $("plFeedAll").textContent = "Show all " + recent.length;
+    $("plFeedAll").style.display = recent.length ? "" : "none";
   }
 
-  function openTape() {
-    $("plTapeT").textContent = "All " + recent.length + " newest filings";
+  function openFeed() {
+    $("plFeedT").textContent = "All " + recent.length + " newest filings";
     const first = recent.reduce((a, r) => (r.filedDate && r.filedDate < a ? r.filedDate : a), "9999");
-    $("plTapeP").textContent = "Every disclosure filed " + fday(first) + " to " + fday(ASOF) + ". Filers appear as initials; the stock is the subject.";
-    $("plTapeL").innerHTML = recent.map((r) => {
+    $("plFeedP").textContent = "Every disclosure filed " + fday(first) + " to " + fday(ASOF) + ". Filers appear as initials; the stock is the subject.";
+    $("plFeedL").innerHTML = recent.map((r) => {
       const g = r.side === "buy" ? '<span class="up-t">▲</span>' : r.side === "sell" ? '<span class="down-t">▼</span>' : '<span class="mut-t">◆</span>';
       const nm = r.t || (r.notes ? String(r.notes).replace(/\s*\[[A-Z]+\]\s*$/, "") : "Unnamed asset");
       return "<li>" + g + "<div><span><b>" + esc(nm) + "</b></span><small>" + fday(r.txnDate) + " → " + fday(r.filedDate) + '<span class="ch"> · ' + esc(CHAMBER[chOf(r.memberType)]) + "</span></small></div><span>" + usd(r.lo) + "–" + usd(r.hi) + "</span></li>";
     }).join("");
-    $("plTapeDlg").showModal();
-    $("plTapeX").focus();
+    $("plFeedDlg").showModal();
+    $("plFeedX").focus();
   }
 
   function openInfo() {
@@ -661,14 +661,14 @@
       if (n) n.focus();
     });
     $("plAllX").addEventListener("click", () => $("plAllDlg").close());
-    listKeys($("plTapeList"), ".pl-trow");
-    $("plTapeList").addEventListener("click", (e) => {
+    listKeys($("plFeedList"), ".pl-trow");
+    $("plFeedList").addEventListener("click", (e) => {
       const b = e.target.closest(".pl-trow");
       if (!b) return;
       if (!reveal(b.dataset.t)) go(b.dataset.t); else if (mobile()) setView("detail");
     });
-    $("plTapeAll").addEventListener("click", openTape);
-    $("plTapeX").addEventListener("click", () => $("plTapeDlg").close());
+    $("plFeedAll").addEventListener("click", openFeed);
+    $("plFeedX").addEventListener("click", () => $("plFeedDlg").close());
     $("plInfoBtn").addEventListener("click", openInfo);
     $("plInfoX").addEventListener("click", () => $("plInfoDlg").close());
     for (const d of document.querySelectorAll(".pl-dlg")) d.addEventListener("click", (e) => { if (e.target === d) d.close(); });
@@ -688,7 +688,7 @@
       rz = setTimeout(() => {
         const v = $("plStage").dataset.view;
         if (!mobile() || v === "stocks") renderMain();
-        if (!mobile() || v === "tape") renderTape();
+        if (!mobile() || v === "feed") renderFeed();
         if (!mobile() || v === "detail") renderSel();
       }, 60);
     });
@@ -732,7 +732,7 @@
     seen = p.clusters && finite(p.clusters.namesSeen) !== null ? p.clusters.namesSeen : null;
     carded = new Set((Array.isArray(p.carded) ? p.carded : []).map(cardKey));
     recent = rowsOfFeed(p.recent);
-    tapeNamed = recent.filter((r) => r.t);
+    feedNamed = recent.filter((r) => r.t);
     const src = new Map();
     for (const r of assets) src.set(r.t, r);
     for (const r of clusters) if (!src.has(r.t)) src.set(r.t, r);
@@ -741,7 +741,169 @@
     wire();
     status.textContent = "Disclosures read: " + ALL.length + " stocks.";
     renderMain();
-    renderTape();
+    renderFeed();
+  }
+
+  const LAYERS_ON = typeof document !== "undefined" && !!document.getElementById("plLayerSeg");
+  const TAG_WORD = { cc: "Committee tie", fp: "First to trade", lm: "Small company", ui: "Unusual industry", ul: "Large trade", fd: "Donation tie", other: "Other flag" };
+  const LAYER_LINE = {
+    late: "Filed after the 45-day limit.",
+    lag: "Lag counted in exchange sessions from the trade.",
+    flags: "Flags are the feed's; the page does not judge them.",
+    since: "Measured from the trade date, which no reader knew until the filing.",
+    money: "Company money, not the filers on this page.",
+  };
+  const LAYER_WHY = {
+    failed: "The feed did not answer tonight.",
+    plan: "The site's data plan does not include this.",
+    budget: "Tonight's read budget ran out before this.",
+    unread: "Not read yet; names are read in rotation.",
+    pending: "The first read lands after tonight's run.",
+    quiet: "Nothing in the window qualifies.",
+  };
+  let layer = "none";
+  const layerData = () => (layer === "none" || !P ? null : P[layer] || null);
+  const layerReady = (d) => d && (d.status === "ok" || d.status === "partial");
+  const layerReason = (d) => (!d ? LAYER_WHY.pending : d.status === "quiet" ? LAYER_WHY.quiet : LAYER_WHY[d.why] || (d.status === "pending" ? LAYER_WHY.pending : LAYER_WHY.failed));
+  const sessText = (v) => (v === null || v === undefined ? DASH : String(v));
+  const pctSigned = (v) => (finite(v) === null ? DASH : F.pct(v, 1, true));
+
+  function badgeFor(t) {
+    const d = layerData();
+    if (!layerReady(d) || !d.byT || !d.byT[t]) return null;
+    const e = d.byT[t];
+    if (layer === "late") return { text: "L " + sessText(e.maxS), cls: "", title: "Filed " + sessText(e.maxS) + " sessions after the trade, past the 45-day limit" + (e.maxS === null ? ". Outside the session calendar." : "") };
+    if (layer === "unusual") return { text: "U " + e.n, cls: "u", title: e.n + " flagged " + (e.n === 1 ? "disclosure" : "disclosures") + ". " + LAYER_LINE.flags };
+    return null;
+  }
+
+  function layerPass() {
+    if (!LAYERS_ON) return;
+    for (const old of document.querySelectorAll(".pl-bdg")) old.remove();
+    const active = layer === "late" || layer === "unusual";
+    for (const el of document.querySelectorAll(".pl-tile[data-t], .pl-row[data-t]")) {
+      const b = active && layerReady(layerData()) ? badgeFor(el.dataset.t) : null;
+      el.classList.toggle("dim", active && layerReady(layerData()) && !b);
+      if (!b) continue;
+      const span = document.createElement("span");
+      span.className = "pl-bdg " + b.cls;
+      span.textContent = b.text;
+      span.title = b.title;
+      (el.classList.contains("pl-row") ? el.querySelector(".pl-tk") : el).append(span);
+      el.setAttribute("aria-label", (el.getAttribute("aria-label") || "") + ". " + b.title);
+    }
+    const seg = document.getElementById("plLayerSeg");
+    for (const b of seg.children) b.setAttribute("aria-pressed", String(b.dataset.layer === layer));
+  }
+
+  function layerRowHTML(r) {
+    const buy = r.side === "buy", sell = r.side === "sell";
+    const lag = layer === "late" ? "L " + sessText(r.lagS) : "U";
+    let extra;
+    if (layer === "late") extra = fday(r.txn) + " \u2192 " + fday(r.filed) + " \u00b7 " + (r.lagD === null ? DASH : r.lagD + " d");
+    else extra = (r.tags || []).map((c) => TAG_WORD[c] || TAG_WORD.other).join(", ") + " \u00b7 since the trade " + pctSigned(r.r) + " \u00b7 against SPY " + pctSigned(r.ex);
+    const label = r.t + " " + (buy ? "bought" : sell ? "sold" : "filed") + ", " + usd(r.lo) + " to " + usd(r.hi) + ", traded " + fday(r.txn) + ", filed " + fday(r.filed) + ", " + (layer === "late" ? "lag " + sessText(r.lagS) + " sessions" : extra);
+    return '<button type="button" class="pl-trow pl-lrow" data-t="' + esc(r.t) + '" tabindex="-1" aria-label="' + esc(label) + '"><span class="pl-tk"><span class="gl ' + (buy ? "up" : sell ? "down" : "mut") + '-t">' + (buy ? "\u25b2" : sell ? "\u25bc" : "\u25c6") + "</span>" + esc(r.t) + '</span><span class="bd"><span>' + usd(r.lo) + "\u2013" + usd(r.hi) + "</span><small>" + esc(extra) + '</small></span><span class="lg2">' + esc(lag) + '</span><span class="pl-mono t" title="' + esc((r.who || "") + (r.ch ? ", " + (CHAMBER[r.ch] || "") : "")) + '"><b aria-hidden="true">' + esc(r.who || "?") + "</b></span></button>";
+  }
+
+  function layerFeed() {
+    if (!LAYERS_ON || (layer !== "late" && layer !== "unusual")) return false;
+    const d = layerData();
+    const box = $("plFeedList");
+    const head = document.querySelector("#plFeed .pl-ph h2");
+    if (head) head.textContent = layer === "late" ? "Late filings" : "Flagged disclosures";
+    if (!layerReady(d) || !Array.isArray(d.rows) || !d.rows.length) {
+      box.innerHTML = '<div class="pl-empty">' + esc(layerReason(d)) + "</div>";
+      $("plFeedNote").textContent = "";
+      $("plFeedFoot").textContent = layer === "late" ? LAYER_LINE.late : LAYER_LINE.flags;
+      $("plFeedAll").style.display = "none";
+      return true;
+    }
+    const rh = mobile() || coarse() ? 44 : 36;
+    const n = Math.max(4, Math.floor(box.clientHeight / rh));
+    box.innerHTML = d.rows.slice(0, n).map(layerRowHTML).join("");
+    const f = box.querySelector(".pl-trow");
+    if (f) f.tabIndex = 0;
+    $("plFeedNote").textContent = d.rows.length + (layer === "late" ? " late" : " flagged");
+    $("plFeedFoot").textContent = layer === "late" ? LAYER_LINE.late + " " + LAYER_LINE.lag : LAYER_LINE.flags + " " + LAYER_LINE.since;
+    $("plFeedAll").textContent = "Show all " + d.rows.length;
+    $("plFeedAll").style.display = "";
+    return true;
+  }
+
+  function layerRail() {
+    if (!LAYERS_ON || layer === "none" || !S.sel) return;
+    const rail = $("plRail");
+    const old = rail.querySelector(".pl-rc.layer");
+    if (old) old.remove();
+    const d = layerData();
+    const box = document.createElement("div");
+    box.className = "pl-rc layer";
+    const kv = (a, b) => '<div class="kv"><span>' + esc(a) + "</span><b>" + b + "</b></div>";
+    if (layer === "late") {
+      box.innerHTML = "<h3>Late filers</h3>";
+      const e = layerReady(d) && d.byT ? d.byT[S.sel] : null;
+      if (!e) box.innerHTML += kv("Late filers", esc(layerReady(d) ? LAYER_WHY.quiet : layerReason(d)));
+      else {
+        for (const w of e.who) {
+          const f = (d.filers || []).find((x) => x.who === w);
+          box.innerHTML += kv(w, f && f.all ? esc(f.late + " of " + f.all + " late this year") : DASH);
+        }
+        box.innerHTML += kv("Longest lag", esc(sessText(e.maxS) + (e.maxS === null ? "" : " sessions")));
+      }
+    } else if (layer === "unusual") {
+      box.innerHTML = "<h3>Flagged disclosures</h3>";
+      const e = layerReady(d) && d.byT ? d.byT[S.sel] : null;
+      if (!e) box.innerHTML += kv("Flags", esc(layerReady(d) ? LAYER_WHY.quiet : layerReason(d)));
+      else {
+        box.innerHTML += kv("Flagged", String(e.n)) + kv("Flags", esc(e.tags.map((c) => TAG_WORD[c] || TAG_WORD.other).join(", ")));
+        box.innerHTML += '<div class="sub">' + esc(LAYER_LINE.since) + "</div>";
+      }
+    } else if (layer === "money") {
+      box.innerHTML = "<h3>Company political money, cycle " + esc(d && d.cycle ? d.cycle : DASH) + "</h3>";
+      const e = layerReady(d) && d.byT ? d.byT[S.sel] : null;
+      if (!e) box.innerHTML += kv("Money", esc(layerReady(d) ? "No company row for this stock." : layerReason(d)));
+      else {
+        const m = (v) => (finite(v) === null ? DASH : usd(v));
+        box.innerHTML += kv("PAC total", m(e.pac)) + kv("PAC count", finite(e.pacN) === null ? DASH : String(e.pacN)) + kv("Contributions", finite(e.pacC) === null ? DASH : String(e.pacC));
+        const parts = [e.dem, e.rep, e.other];
+        const tot = parts.reduce((a, v) => a + (finite(v) || 0), 0);
+        box.innerHTML += '<div class="pl-seg-fill" role="img" aria-label="Split of the money by recipient kind">' + parts.map((v) => '<i style="width:' + (tot > 0 ? ((finite(v) || 0) / tot) * 100 : 0).toFixed(1) + '%"></i>').join("") + "</div>";
+        box.innerHTML += kv("To Democratic candidates", m(e.dem)) + kv("To Republican candidates", m(e.rep)) + kv("To other candidates", m(e.other));
+        box.innerHTML += kv("Lobbying", m(e.lobby)) + kv("Employees' giving (estimated)", m(e.emp)) + kv("Candidates counted", finite(e.cands) === null ? DASH : String(e.cands));
+      }
+      box.innerHTML += '<div class="sub">' + esc(LAYER_LINE.money) + "</div>";
+    }
+    rail.append(box);
+  }
+
+  function setLayer(next, quiet) {
+    layer = ["none", "late", "unusual", "money"].includes(next) ? next : "none";
+    if (!quiet) { try { history.replaceState(null, "", layer === "none" ? location.pathname + location.search : "#layer=" + layer); } catch (error) { void error; } }
+    renderMain();
+    renderFeed();
+    if (S.sel) renderSel();
+  }
+
+  if (LAYERS_ON) {
+    const baseMain = renderMain, baseFeed = renderFeed, baseSel = renderSel, baseOpenFeed = openFeed;
+    renderMain = function () { baseMain(); layerPass(); };
+    renderFeed = function () { if (!layerFeed()) baseFeed(); layerPass(); };
+    renderSel = function () { baseSel(); layerRail(); };
+    openFeed = function () {
+      if (layer !== "late" && layer !== "unusual") { baseOpenFeed(); return; }
+      const d = layerData();
+      const rows = layerReady(d) && Array.isArray(d.rows) ? d.rows : [];
+      $("plFeedT").textContent = (layer === "late" ? "All late filings" : "All flagged disclosures") + ": " + rows.length;
+      $("plFeedP").textContent = layer === "late" ? LAYER_LINE.late + " " + LAYER_LINE.lag : LAYER_LINE.flags + " " + LAYER_LINE.since;
+      $("plFeedL").innerHTML = rows.map((r) => "<li><span>" + esc(r.t) + "</span><div><span><b>" + usd(r.lo) + "\u2013" + usd(r.hi) + "</b></span><small>" + fday(r.txn) + " \u2192 " + fday(r.filed) + " \u00b7 " + esc(layer === "late" ? "lag " + sessText(r.lagS) + " sessions" : "since the trade " + pctSigned(r.r) + ", against SPY " + pctSigned(r.ex)) + "</small></div><span>" + esc(r.who || "?") + "</span></li>").join("");
+      $("plFeedDlg").showModal();
+      $("plFeedX").focus();
+    };
+    document.getElementById("plLayerSeg").addEventListener("click", (e) => { const b = e.target.closest("button[data-layer]"); if (b) setLayer(b.dataset.layer); });
+    const fromHash = () => { const m = /layer=(late|unusual|money)/.exec(location.hash); return m ? m[1] : "none"; };
+    layer = fromHash();
+    addEventListener("hashchange", () => setLayer(fromHash(), true));
   }
 
   get("/api/flows/political").then((p) => {

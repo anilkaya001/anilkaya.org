@@ -119,6 +119,10 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
     for (const m of text.matchAll(/\b(?:pathFor|opById)\(([^,)]*)/g)) {
       for (const q of m[1].matchAll(/"([a-z0-9-]+)"/g)) refs.set(q[1], [...(refs.get(q[1]) || []), f]);
     }
+    for (const m of text.matchAll(/\bask\(\s*"([a-z0-9-]+)"/g)) {
+      bad.push([f, m[1]]);
+      refs.set(m[1], [...(refs.get(m[1]) || []), f]);
+    }
     for (const m of text.matchAll(/\bsourceOf\(\s*"[^"]*"\s*,\s*"([^"]*)"/g)) {
       bad.push([f, m[1]]);
       refs.set(m[1], [...(refs.get(m[1]) || []), f]);
@@ -223,7 +227,8 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
 
   eq(Object.hasOwn(JSON.parse(fs.readFileSync(probe.LIST_PATH, "utf8")), "reads"), false, "the probe list file carries no reads of its own");
   const derived = {};
-  for (const e of OPS) if (e.reads) derived[e.op] = [...e.reads];
+  const liveOps = new Set(list.probes.filter((p) => p.tier !== "planned").map((p) => p.op));
+  for (const e of OPS) if (e.reads && liveOps.has(e.op)) derived[e.op] = [...e.reads];
   deep(list.reads, derived, "THE PROBE DERIVES ITS STRICT READ LIST FROM THE REGISTRY: loadList returns exactly the registry's reads");
   eq(Object.keys(list.reads).length, 31, "for the 31 operations whose fields the code reads");
   deep(probe.SESSION_PROBE.path, pathFor("ohlc-1d", { ticker: "SPY" }), "and the session probe is the registry's daily candle for SPY");
@@ -250,7 +255,7 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
   eq(PLAN.startup.perDay, 80000, "and its day line");
 
   const entitled = list.entitlement;
-  deep(entitled.slice().sort(), ["/api/congress/unusual-trades", "/api/futures/{contract}/stats", "/api/lit-flow/{ticker}",
+  deep(entitled.slice().sort(), ["/api/futures/{contract}/stats", "/api/lit-flow/{ticker}",
     "/api/option-trades", "/api/stock/{ticker}/flow-per-strike-intraday", "/api/stock/{ticker}/option-stance", "/api/stock/{ticker}/quote",
     "/api/stock/{ticker}/stock-volume-price-levels", "/api/stock/{ticker}/volatility/context"],
     "ENTITLEMENT: the order-flow, quote, trade-stance, volatility-context, futures and unusual-congress routes are asked, not assumed");
@@ -259,8 +264,8 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
   const asked = expanded.filter((p) => entitled.includes(p.op)).map((p) => p.id);
   deep(asked, ["option-trades:AAPL", "option-trades:NVDA", "lit-flow:AAPL", "lit-flow:NVDA", "quote:AAPL", "quote:NVDA",
     "flow-per-strike-intraday:AAPL", "flow-per-strike-intraday:NVDA", "stock-volume-price-levels:AAPL",
-    "stock-volume-price-levels:NVDA", "option-stance:AAPL", "option-stance:NVDA", "volatility-context:AAPL", "volatility-context:NVDA", "futures-stats", "congress-unusual"],
-    "each per-name route is asked for AAPL and NVDA, the gold future and the unusual congressional trades once");
+    "stock-volume-price-levels:NVDA", "option-stance:AAPL", "option-stance:NVDA", "volatility-context:AAPL", "volatility-context:NVDA", "futures-stats"],
+    "each per-name route is asked for AAPL and NVDA, the gold future once");
   ok(expanded.filter((p) => entitled.includes(p.op)).every((p) => p.entitlement && !p.gated),
     "and each carries the entitlement mark into its run");
   eq(expanded.length + 1, 210, "a weekly strict run is 209 list calls plus the session call: thirty more than the 180 before (the 25 planned positioning probes, five of them per name for AAPL and NVDA)");
@@ -1272,7 +1277,7 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
   }
   deep(valueShaped, [], "it holds snake-case names and the probe's type tokens, nothing that is a value");
   ok(!/\d{4}/.test(JSON.stringify({ ...committed, observed: null, run: null })), "VALUE-FREE: no run of four digits anywhere but the day and the run it records");
-  const registryOps = new Set(OPS.map((e) => e.op));
+  const registryOps = new Set(OPS.filter((e) => list.probes.some((p) => p.op === e.op && p.tier !== "planned")).map((e) => e.op));
   const unrecorded = [...registryOps].filter((o) => !committed.ops[o]).sort();
   deep(unrecorded, ["/api/companies/{ticker}/dividends", "/api/companies/{ticker}/splits", "/api/earnings/afterhours", "/api/earnings/premarket", "/api/etfs/{ticker}/exposure",
     "/api/net-flow/expiry", "/api/politician-portfolios/holders/{ticker}", "/api/stock/{ticker}/interpolated-iv"],

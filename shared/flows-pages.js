@@ -1310,7 +1310,7 @@ function escapeHTML(value) {
   })[c]);
 }
 
-export function politicalPage({ username = "" } = {}) {
+export function politicalPage({ username = "", layers = false } = {}) {
   return flowsDocument({
     title: "Political",
     description: "The stocks politicians disclosed buying and selling, with the range each filing stated, how many people filed, and the delay since the trade.",
@@ -1325,12 +1325,12 @@ export function politicalPage({ username = "" } = {}) {
     <div class="pl-title" data-fx-hero>
       <h1 id="fxTitle">Political</h1>
       <div class="pl-stamp" id="plStamp"></div>
-      <div class="pl-chips" id="plChips"><span class="pl-chip warn">Ranges, not amounts</span><span class="pl-chip mut opt"><span class="l">Not advice \u00b7 not positions</span><span class="s">Not advice</span></span><span class="pl-chip mut" title="The vendor feed carries no party field, so no Republican or Democrat split is shown or inferred.">No party in feed</span></div>
+      <div class="pl-chips" id="plChips"><span class="pl-chip warn">Ranges, not amounts</span><span class="pl-chip mut opt"><span class="l">Not advice \u00b7 not positions</span><span class="s">Not advice</span></span><span class="pl-chip mut" title="The feed carries no party per filing, so no party split is shown or inferred.">No party in feed</span>${layers ? '<a class="pl-chip" id="plPosChip" href="/flows/positioning/">Positioning</a>' : ""}</div>
       <button type="button" class="pl-ibtn" id="plInfoBtn" aria-label="How to read this page" aria-haspopup="dialog">${glyph("info")}</button>
     </div>
     <p class="pl-note" id="plNote" hidden></p>
     <div class="pl-seg5" role="tablist" aria-label="Panels" id="plSeg5">
-      <button type="button" role="tab" aria-selected="true" aria-controls="plMain" data-v="stocks">Stocks</button><button type="button" role="tab" aria-selected="false" aria-controls="plTape" data-v="tape">Filings</button><button type="button" role="tab" aria-selected="false" aria-controls="plRail" data-v="detail">Detail</button>
+      <button type="button" role="tab" aria-selected="true" aria-controls="plMain" data-v="stocks">Stocks</button><button type="button" role="tab" aria-selected="false" aria-controls="plFeed" data-v="feed">Filings</button><button type="button" role="tab" aria-selected="false" aria-controls="plRail" data-v="detail">Detail</button>
     </div>
     <div class="pl-stage" id="plStage" data-view="stocks">
       <section class="pl-panel" id="plMain" aria-label="Stocks by disclosed net position">
@@ -1338,7 +1338,7 @@ export function politicalPage({ username = "" } = {}) {
           <div class="pl-seg" role="tablist" aria-label="Show stocks that are" id="plTabs"></div>
           <div class="r">
             <div class="pl-seg sm" role="group" aria-label="View" id="plViewSeg"><button type="button" data-view="map" aria-pressed="true">Map</button><button type="button" data-view="list" aria-pressed="false">List</button></div>
-            <div class="pl-seg sm" role="group" aria-label="Tile size" id="plSizeSeg"><button type="button" data-size="usd" aria-pressed="true">Dollars</button><button type="button" data-size="fil" aria-pressed="false">Filers</button></div>
+            <div class="pl-seg sm" role="group" aria-label="Tile size" id="plSizeSeg"><button type="button" data-size="usd" aria-pressed="true">Dollars</button><button type="button" data-size="fil" aria-pressed="false">Filers</button></div>${layers ? '<div class="pl-seg sm" role="group" aria-label="Layer" id="plLayerSeg"><button type="button" data-layer="none" aria-pressed="true">None</button><button type="button" data-layer="late" aria-pressed="false">Late</button><button type="button" data-layer="unusual" aria-pressed="false">Unusual</button><button type="button" data-layer="money" aria-pressed="false">Money</button></div>' : ""}
           </div>
         </div>
         <div class="pl-map" id="plMap" role="group" aria-label="Treemap of stocks. Arrow keys move, Enter opens the ticker page."></div>
@@ -1349,16 +1349,16 @@ export function politicalPage({ username = "" } = {}) {
         <button type="button" class="pl-selbar" id="plSelbar" aria-label="Open detail for the selected stock"></button>
         <div class="pl-foot"><div class="pl-lg" id="plLegend"></div><span class="pl-fnote" id="plFnote"></span><span class="pl-acts"><button type="button" class="link q" id="plFundBtn" aria-pressed="false"></button><button type="button" class="link" id="plAllBtn" aria-haspopup="dialog"></button></span></div>
       </section>
-      <section class="pl-panel" id="plTape" aria-label="Newest filings">
-        <div class="pl-ph"><h2>Newest filings</h2><span class="note" id="plTapeNote"></span></div>
-        <div class="pl-listbox" id="plTapeList" role="group" aria-label="Newest filings that name a stock"></div>
-        <div class="pl-foot"><span class="pl-fnote" id="plTapeFoot"></span><span class="pl-acts"><button type="button" class="link" id="plTapeAll" aria-haspopup="dialog"></button></span></div>
+      <section class="pl-panel" id="plFeed" aria-label="Newest filings">
+        <div class="pl-ph"><h2>Newest filings</h2><span class="note" id="plFeedNote"></span></div>
+        <div class="pl-listbox" id="plFeedList" role="group" aria-label="Newest filings that name a stock"></div>
+        <div class="pl-foot"><span class="pl-fnote" id="plFeedFoot"></span><span class="pl-acts"><button type="button" class="link" id="plFeedAll" aria-haspopup="dialog"></button></span></div>
       </section>
       <section class="pl-panel pl-rail" id="plRail" aria-label="Selected stock"></section>
     </div>
   </div>
   <dialog class="pl-dlg" id="plAllDlg" aria-labelledby="plAllT"><div class="dg"><h2 id="plAllT">All stocks</h2><p id="plAllP"></p><div class="pl-grid3" id="plAllG"></div><div class="x"><button type="button" class="link" id="plAllX">Close</button></div></div></dialog>
-  <dialog class="pl-dlg" id="plTapeDlg" aria-labelledby="plTapeT"><div class="dg"><h2 id="plTapeT">All filings</h2><p id="plTapeP"></p><ul class="pl-tl" id="plTapeL"></ul><div class="x"><button type="button" class="link" id="plTapeX">Close</button></div></div></dialog>
+  <dialog class="pl-dlg" id="plFeedDlg" aria-labelledby="plFeedT"><div class="dg"><h2 id="plFeedT">All filings</h2><p id="plFeedP"></p><ul class="pl-tl" id="plFeedL"></ul><div class="x"><button type="button" class="link" id="plFeedX">Close</button></div></div></dialog>
   <dialog class="pl-dlg" id="plInfoDlg" aria-labelledby="plInfoT"><div class="dg"><h2 id="plInfoT">How to read this page</h2><div class="body" id="plInfoB"></div><div class="x"><button type="button" class="link" id="plInfoX">Close</button></div></div></dialog>
 `,
   });

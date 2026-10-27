@@ -415,7 +415,7 @@ async function layoutProblems(browser, o = {}) {
     chk(L0.orb, tag + ": the orb is on the page");
     const compact = L0.plW < 900;
     chk(L0.switch === compact, tag + ": the panel switch shows exactly when the page is under 900 px wide (" + Math.round(L0.plW) + " px, switch " + L0.switch + ")");
-    const views = compact ? ["stocks", "tape", "detail"] : ["stocks"];
+    const views = compact ? ["stocks", "feed", "detail"] : ["stocks"];
     for (const v of views) {
       if (compact) { await page.click('#plSeg5 [data-v="' + v + '"]'); await page.waitForTimeout(150); }
       const tabs = v === "stocks" ? ["acc", "red", "cvg"] : [null];
@@ -511,7 +511,7 @@ for (const [w, h, extra] of VIEWPORTS) {
     eq(cl, [], w + "x" + h + " " + label + ": nothing clipped or past its panel");
     states.push(label);
   };
-  const views = phone ? ["stocks", "tape", "detail"] : ["stocks"];
+  const views = phone ? ["stocks", "feed", "detail"] : ["stocks"];
   for (const v of views) {
     if (phone) { await page.click('#plSeg5 [data-v="' + v + '"]'); await page.waitForTimeout(120); }
     if (v === "stocks") {
@@ -567,13 +567,13 @@ for (const [w, h, extra] of VIEWPORTS) {
       await check("info dialog");
       await page.keyboard.press("Escape");
     }
-    if ((phone && v === "tape") || (!phone && v === "stocks")) {
+    if ((phone && v === "feed") || (!phone && v === "stocks")) {
       const named = RECENT.filter((r) => r.t);
-      const shown = await page.locator("#plTapeList .pl-trow").count();
+      const shown = await page.locator("#plFeedList .pl-trow").count();
       const rh = phone ? 44 : 36;
-      const fits = await page.evaluate((x) => Math.max(4, Math.floor(document.getElementById("plTapeList").clientHeight / x)), rh);
-      eq(shown, Math.min(named.length, fits), "the tape shows only filings that name a stock, as many as fit");
-      const collide = await page.evaluate(() => Array.from(document.querySelectorAll("#plTapeList .pl-trow"), (row) => {
+      const fits = await page.evaluate((x) => Math.max(4, Math.floor(document.getElementById("plFeedList").clientHeight / x)), rh);
+      eq(shown, Math.min(named.length, fits), "the feed shows only filings that name a stock, as many as fit");
+      const collide = await page.evaluate(() => Array.from(document.querySelectorAll("#plFeedList .pl-trow"), (row) => {
         const box = (sel) => { const e = row.querySelector(sel); return e ? e.getBoundingClientRect() : null; };
         const a = box(".pl-tk"), b = box(".bd"), c = box(".lg2");
         const bad = [];
@@ -583,13 +583,13 @@ for (const [w, h, extra] of VIEWPORTS) {
         return bad.length ? row.dataset.t + ": " + bad.join(", ") : null;
       }).filter(Boolean));
       eq(collide, [], "no row of the newest filings has its ticker, range and lag on top of one another or a lag on two lines");
-      eq(await page.locator("#plTapeNote").innerText(), "24 latest \u00b7 " + named.length + " name a stock", "its note counts both");
-      await page.click("#plTapeAll");
+      eq(await page.locator("#plFeedNote").innerText(), "24 latest \u00b7 " + named.length + " name a stock", "its note counts both");
+      await page.click("#plFeedAll");
       await page.waitForTimeout(80);
-      eq(await page.locator("#plTapeL li").count(), 24, "the tape dialog lists every filing");
-      const unnamed = await page.evaluate(() => Array.from(document.querySelectorAll("#plTapeL li b"), (e) => e.textContent).filter((t) => /Treasury/.test(t)).length);
+      eq(await page.locator("#plFeedL li").count(), 24, "the feed dialog lists every filing");
+      const unnamed = await page.evaluate(() => Array.from(document.querySelectorAll("#plFeedL li b"), (e) => e.textContent).filter((t) => /Treasury/.test(t)).length);
       eq(unnamed, 24 - named.length, "an unnamed filing shows its asset text");
-      await check("tape dialog");
+      await check("feed dialog");
       await page.keyboard.press("Escape");
     }
     await check(v);
