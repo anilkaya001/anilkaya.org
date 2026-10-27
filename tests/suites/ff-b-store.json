@@ -1,0 +1,1 @@
+{"name": "ff-b-store", "class": "N", "group": "shard", "timing": false, "medianS": 2, "shard": 6, "command": "node --disable-warning=ExperimentalWarning ff-b-store.mjs", "files": ["ff-b-store.mjs"], "covers": ["docs/ff/contract.md","schema.sql"]}
