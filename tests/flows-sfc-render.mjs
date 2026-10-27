@@ -8,7 +8,7 @@ import * as PAGES from "../shared/flows-pages.js";
 import { flowsPageRows, FLOWS_PAGE_SLUGS } from "../server/routes/flows-pages.js";
 import { ledgerView, parseScope } from "../shared/flows-sfc-view.js";
 import * as COPY from "../shared/flows-sfc-copy.js";
-import { moneyShort } from "../shared/flows-sfc-display.js";
+import { moneyShort, moneyOut, leanBounds } from "../shared/flows-sfc-display.js";
 import { lintText, htmlToText, stringLeaves, tooLong } from "./lib/copy-lint.mjs";
 import { loadVariant } from "./lib/sfc-variant.mjs";
 import { storedInput, NOW_INTRADAY } from "./lib/sfc-stored.mjs";
@@ -37,7 +37,7 @@ const STATIC_DIALOG = /<dialog[\s\S]*?<\/dialog>/g;
   ok(/href="\/flows\/ledger\/"/.test(PAGES.marketPage({ username: "test" })) && /href="\/flows\/ledger\/"/.test(PAGES.movesPage({ username: "test" })), "and every other page links it");
   ok(/\/assets\/js\/flows-sfc\.js\?v=\d+/.test(HTML) && /\/assets\/css\/flows-sfc\.css\?v=\d+/.test(HTML), "the controller and the sheet are versioned");
   ok(!/flows-chart\.js|flows-feeds\.css|flows-rt\.js/.test(HTML), "no chart library, feeds sheet or rail");
-  for (const id of ["sf", "sfStatus", "sfStamp", "sfPeriod", "sfCrumbs", "sfScope", "sfChecks", "sfCheckLine", "sfNote", "sfTabs", "sfStage", "sfLedger", "sfSide", "sfRead", "sfMatrix", "sfGroups", "sfCellLine", "sfBody", "sfView", "sfReadBox", "sfInfoDlg", "sfInfoBtn", "sfInfoX"]) ok(new RegExp('id="' + id + '"').test(HTML), "the page carries #" + id);
+  for (const id of ["sf", "sfStatus", "sfStamp", "sfPeriod", "sfCrumbs", "sfScope", "sfHero", "sfLean", "sfLeanV", "sfLeanVerdict", "sfLeanBar", "sfLeanFig", "sfLeanLine", "sfCells", "sfChecks", "sfCheckLine", "sfNote", "sfTabs", "sfStage", "sfLedger", "sfSide", "sfRead", "sfMatrix", "sfGroups", "sfCellLine", "sfBody", "sfView", "sfReadBox", "sfStrip", "sfInfoDlg", "sfInfoBtn", "sfInfoX"]) ok(new RegExp('id="' + id + '"').test(HTML), "the page carries #" + id);
   const text = htmlToText(HTML.replace(/<aside class="fx-side"[\s\S]*?<\/aside>/, "").replace(/<aside class="ak-dock"[\s\S]*?<\/aside>/, "").replace(/<header[\s\S]*?<\/header>/, ""));
   eq(lintText(text).map((h) => `${h.rule} ${JSON.stringify(h.match)} :: ${h.sentence.slice(0, 80)}`), [], "the served page text passes every copy rule: no unsided, no tape, no sector transfer, nothing leaving, no forecast word, sentences of at most fourteen words");
   const dialog = (HTML.match(STATIC_DIALOG) || []).join(" ");
@@ -51,7 +51,9 @@ const STATIC_DIALOG = /<dialog[\s\S]*?<\/dialog>/g;
   ok(!/(^|[^-\w])transition\b/.test(CSS.replace(/@media \(prefers-reduced-motion: no-preference\) \{[\s\S]*?\n\}/, "")), "every transition sits inside no-preference");
   ok(!/\bglobalThis\.|(?<![\w.])window\.[A-Za-z]+\s*=(?!=)/.test(JS.replace(/globalThis\.__LedgerTest/, "")), "no new global");
   ok(!/\/\*|(^|[^:"'`])\/\/\s/.test(CSS + JS), "no comment in the sheet or the script");
-  ok(!/overflow(-y)?:\s*(auto|scroll)/.test(CSS.replace(/\n\.sf-dlg \{[^}]*\}/, "")), "the sheet scrolls nothing but the info dialog, which can be taller than a phone");
+  const scrollers = (sheet) => /overflow(-y)?:\s*(auto|scroll)/.test(sheet.replace(/\n\.sf-dlg \{[^}]*\}/, "").replace(/\n\.sf-mat \{ overflow-x: hidden; overflow-y: auto; \}/, "").replace(/^\.flows-body\[data-flows-page="ledger"\] \.flows-main \{[^}]*\}/, ""));
+  ok(!scrollers(CSS), "the sheet scrolls nothing but the info dialog, which can be taller than a phone, the ledger's own slot and the page's own area, which scroll only where a zoomed or tiny window leaves them less than their content needs");
+  ok(scrollers(CSS + "\n.sf-st { overflow-y: auto; }") && scrollers(CSS + "\n.sf-body { overflow: scroll; }"), "and the scan catches a planted scroller elsewhere");
   ok(!/\btape\b/i.test(JS + CSS), "the word tape is nowhere in the controller or the sheet");
   const literals = [...JS.matchAll(/"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)'|`((?:[^`\\]|\\.)*)`/g)].map((m) => m[1] ?? m[2] ?? m[3])
     .filter((x) => x.split(/\s+/).filter((w) => /^[A-Za-z]{2,}/.test(w)).length >= 2 && !/[<>=;{}[\]#]/.test(x.replace(/\$\{[^}]*\}/g, "")));
@@ -101,12 +103,6 @@ const T = (() => {
   eq(w, [T.ARROW_MAX, T.ARROW_MAX / 2, 0, T.ARROW_MAX / 4], "arrow widths are one linear scale; a zero amount has no arrow");
   eq(T.arrowWidths([1, 100], 100)[0], T.ARROW_MIN, "a tiny amount keeps a visible arrow");
   eq(T.arrowWidths([5], 0), [0], "no maximum, no arrows");
-  const groups = COPY.GROUPS.map((g) => ({ id: g.id, cols: [...g.cols] }));
-  eq([T.groupColumns(groups, "held"), T.groupColumns(groups, "noside"), T.groupColumns(groups, "outside"), T.groupColumns(groups, "zzz")], [[0, 1], [2, 3], [4, 5], [0, 1, 2, 3, 4, 5]], "column groups, and all six for an unknown one");
-  const mk = (blanks, always = false) => ({ always, cells: Array.from({ length: 6 }, (_, c) => ({ s: blanks.includes(c) ? "blank" : "ok" })) });
-  const rows = [mk([2, 3, 4, 5]), mk([0, 1, 4, 5]), mk([0, 1, 2, 3]), mk([], true)];
-  eq(T.rowsFor(rows, [0, 1]).length, 2, "the held group shows its rows and the always rows");
-  eq(T.rowsFor(rows, [4, 5]).length, 2, "the outside group shows its rows and the always rows");
   const grid = [[true, true, false, false], [false, true, true, false], [true, false, false, true]];
   eq(T.nextCell(grid, 0, 1, "ArrowRight"), null, "right of the last non-blank cell of a row there is nothing, the blanks are skipped and the edge stops it");
   eq(T.nextCell(grid, 0, 0, "ArrowRight"), [0, 1], "right");
@@ -137,21 +133,49 @@ const audit = (page) => page.evaluate(() => {
   for (const host of document.querySelectorAll(".sf-mat, .sf-body, .sf-fl")) {
     if (vis(host) && host.scrollHeight > host.clientHeight + 1) out.push("rows clipped in " + host.id + ": " + host.scrollHeight + " over " + host.clientHeight);
   }
-  for (const panel of document.querySelectorAll(".sf-panel")) {
+  for (const pop of document.querySelectorAll(".sf-checks")) {
+    const r = pop.getBoundingClientRect();
+    if (vis(pop) && (r.left < -1 || r.right > innerWidth + 1 || r.bottom > innerHeight + 1)) out.push("the checks leave the screen");
+  }
+  for (const panel of document.querySelectorAll(".sf-panel, .sf-hero, .sf-strip, .sf-checkrow")) {
     if (!vis(panel)) continue;
     const pr = panel.getBoundingClientRect();
     for (const el of panel.querySelectorAll("*")) {
-      if (!vis(el) || (el.closest("svg") && el.tagName !== "svg")) continue;
+      if (!vis(el) || (el.closest("svg") && el.tagName !== "svg") || el.closest(".visually-hidden, .vh")) continue;
+      if (el.closest(".sf-checks") && matchMedia("(max-width:899px)").matches) continue;
       const r = el.getBoundingClientRect();
       if (r.bottom > pr.bottom + 1 || r.right > pr.right + 1 || r.left < pr.left - 1 || r.top < pr.top - 1) out.push("outside " + panel.id + ": " + el.tagName + "." + el.className + " by " + Math.round(r.bottom - pr.bottom) + "," + Math.round(r.right - pr.right));
-      if (el.matches("th[scope=row], thead th, td.c, td.n, td.tl .tv, .sf-chk, .sf-seg button, .sf-crumbs button, .sf-tabs button, .sf-drill, .fl-lab") && el.scrollWidth > el.clientWidth + 1) out.push("text cut: " + el.textContent.trim().slice(0, 30));
     }
+  }
+  for (const el of document.querySelectorAll(".sf *")) {
+    if (!vis(el) || el.closest("svg") || el.closest(".visually-hidden") || el.closest("dialog") || el.clientWidth <= 4) continue;
+    const s = getComputedStyle(el);
+    if ((s.overflow !== "visible" || s.textOverflow === "ellipsis") && el.scrollWidth > el.clientWidth && el.textContent.trim() !== "") out.push("text cut: " + el.textContent.trim().slice(0, 40) + " [" + el.scrollWidth + ">" + el.clientWidth + "]");
   }
   return out;
 });
 
-const tableCells = (page, selector) => page.evaluate((sel) => [...document.querySelectorAll(sel + " tbody tr:not(.sub), " + sel + " tfoot tr")].map((tr) => ({
-  cls: tr.className, cells: [...tr.children].map((c) => ({ t: c.textContent.trim(), s: c.dataset.s || null, x: c.dataset.x || c.title || null, hidden: getComputedStyle(c).display === "none" })),
+const obscured = (page) => page.evaluate(() => {
+  const out = [];
+  const lift = document.createElement("style");
+  lift.textContent = ".sf, .sf * { pointer-events: auto !important; }";
+  document.head.append(lift);
+  for (const el of document.querySelectorAll(".sf a[href], .sf button, .sf [tabindex='0']")) {
+    const r = el.getBoundingClientRect();
+    if (el.closest("dialog") || r.width === 0 || r.height === 0 || getComputedStyle(el).visibility === "hidden") continue;
+    const d = Math.min(5, r.width / 4, r.height / 4);
+    const pts = [[r.left + r.width / 2, r.top + r.height / 2], [r.left + d, r.top + d], [r.right - d, r.top + d], [r.left + d, r.bottom - d], [r.right - d, r.bottom - d]];
+    for (const [x, y] of pts) {
+      const top = document.elementsFromPoint(x, y)[0];
+      if (top && top !== el && !el.contains(top) && !top.contains(el)) { out.push((el.id ? "#" + el.id : el.tagName.toLowerCase()) + "." + String(el.className).split(" ")[0] + " under " + top.tagName.toLowerCase() + "." + String(top.className).split(" ")[0]); break; }
+    }
+  }
+  lift.remove();
+  return out;
+});
+
+const tableCells = (page, selector) => page.evaluate((sel) => [...document.querySelectorAll(sel + " tbody tr:not(.sub), " + sel + " tfoot tr")].filter((tr) => tr.getClientRects().length > 0).map((tr) => ({
+  cls: tr.className, cells: [...tr.children].filter((c) => getComputedStyle(c).display !== "none").map((c) => ({ t: (() => { const k = c.cloneNode(true); k.querySelectorAll(".pf, .visually-hidden").forEach((e) => e.remove()); return k.textContent.trim(); })(), s: c.dataset.s || null, x: c.dataset.x || c.title || null })),
 })), selector);
 
 const num = (t) => (t === "~0" || t === "0" || t === "" || t === DASH ? 0 : (t.startsWith(MINUS) ? -1 : 1) * Number(t.replace(MINUS, "").replace(/[,+]/g, "").replace(".", "")));
@@ -167,11 +191,12 @@ const expected = (w, url) => respondWith(w)(new URL("https://x.test" + url));
     const problems = await audit(m.page);
     eq(problems, [], `${w}x${h}: the first paint is one screen, nothing clipped, nothing cut`);
     eq(m.errors, [], `${w}x${h}: no page error and no failed request`);
+    eq(await obscured(m.page), [], `${w}x${h}: nothing focusable is covered by the Ask dock, the shell bar or anything else (WCAG 2.4.11)`);
     const view = expected(world, "/api/flows/ledger?scope=all");
     eq(await m.page.textContent("#sfStamp"), view.period.label, `${w}x${h}: the stamp is the period label`);
     eq(await m.page.textContent("#sfScope"), view.scope.line, `${w}x${h}: and the scope line`);
     eq(await m.page.$$eval("#sfChecks .sf-chk", (a) => a.map((x) => [x.dataset.id, x.dataset.state])), view.checks.items.map((i) => [i.id, i.state]), `${w}x${h}: seven check chips with the view's states`);
-    ok(/^Internal checks · \d+ pass( · \d+ fail)?( · \d+ not checked)?$/.test(await m.page.textContent("#sfCheckLine")), `${w}x${h}: the one-line summary of the checks`);
+    ok(/^(Internal checks|Checks) · \d+ pass( · \d+ fail)?( · \d+ not checked)?$/.test(await m.page.textContent("#sfCheckLine")), `${w}x${h}: the one-line summary of the checks`);
     eq(await m.page.$eval("#sfCheckLine", (e) => [e.getAttribute("role"), e.getAttribute("tabindex"), e.hasAttribute("aria-expanded")]), w < 900 ? ["button", "0", true] : [null, null, false], `${w}x${h}: the summary line is a button exactly where it opens the chips`);
     ok(await m.page.$eval("#sfPeriod [data-p=intraday]", (b) => b.getAttribute("aria-pressed") === "true"), `${w}x${h}: Intraday is pressed`);
     eq(await m.page.$$eval("#sfPeriod button", (a) => a.map((b) => b.getAttribute("aria-disabled"))), ["false", "true", "true"], `${w}x${h}: Session and 5 sessions are named unavailable`);
@@ -186,8 +211,8 @@ const expected = (w, url) => respondWith(w)(new URL("https://x.test" + url));
   const L = view.ledger;
   eq(rows.length, 12, "the ledger shows ten entries, net before balancing and the balancing entry");
   eq(rows.map((r) => r.cells[0].t), [...L.rows.slice(0, 10).map((r) => r.short), L.net.label, L.rows[10].label], "row labels in order, net before balancing above the balancing entry");
-  eq(await m.page.$$eval(".sf-lt tr.sub td", (a) => a.map((x) => [x.textContent, x.colSpan])), [[COPY.GROUP_ROWS.side.label, 7]], "the four rows whose side is unknown sit under one sub-heading that names them");
-  eq(await m.page.$$eval(".sf-lt tbody tr", (a) => a.map((tr) => tr.className.split(" ")[0] + (tr.classList.contains("in") ? ".in" : ""))).then((a) => a.slice(4, 10)), ["sub", ".in", ".in", ".in", ".in", ""], "and the four rows are indented beneath it");
+  eq(await m.page.$$eval(".sf-lt tr.sub", (a) => a.map((r) => [r.cells[0].textContent, r.cells.length])), [[COPY.GROUP_ROWS.side.label, 7]], "the four rows whose side is unknown sit under one sub-heading that names them");
+  eq(await m.page.$$eval(".sf-lt tbody tr", (a) => a.map((tr) => (tr.classList.contains("sub") ? "sub" : tr.classList.contains("in") ? "in" : ""))).then((a) => a.slice(4, 10)), ["sub", "in", "in", "in", "in", ""], "and the four rows are indented beneath it");
   const flat = [...L.rows.slice(0, 10), L.net, L.rows[10]];
   rows.forEach((row, i) => row.cells.slice(1).forEach((cell, c) => {
     const want = flat[i].cells[c];
@@ -204,7 +229,7 @@ const expected = (w, url) => respondWith(w)(new URL("https://x.test" + url));
   eq(await m.page.textContent("#sfCap"), L.caption, "the caption states the unit");
   const sect = await tableCells(m.page, ".sf-st");
   eq(sect.length, 14, "thirteen sectors and the total");
-  eq(sect.map((r) => r.cells[0].t), [...view.sectors.rows.map((r) => r.label), "Total"], "sector rows in order, then the total");
+  eq(sect.map((r) => r.cells[0].t), [...view.sectors.rows.map((r) => r.short), "Total"], "sector rows in order, in the short names a 537 px panel can hold, then the total");
   const taker = sect.slice(0, 13).map((r) => num(r.cells[1].t));
   const total = num(sect[13].cells[1].t);
   eq(taker.reduce((a, b) => a + b, 0), total, "the displayed taker net adds to its displayed total");
@@ -308,6 +333,29 @@ const expected = (w, url) => respondWith(w)(new URL("https://x.test" + url));
   await re.ctx.close();
 }
 
+for (const [w, h, tab] of [[320, 568, null], [640, 360, "ledger"], [1000, 540, null]]) {
+  const m = await mount(browser, w, h);
+  if (tab) { await m.page.click(`#sfTabs [data-v="${tab}"]`); await m.page.waitForTimeout(250); }
+  const label = `${w}x${h}`;
+  const r = await m.page.evaluate(() => { const main = document.querySelector(".flows-main"); return { page: document.scrollingElement.scrollWidth - innerWidth, scrolls: main.scrollHeight > main.clientHeight + 1, stage: document.getElementById("sfStage").getBoundingClientRect().height, valve: [document.getElementById("sfMatrix").getAttribute("tabindex"), document.getElementById("sfMatrix").getAttribute("role")] }; });
+  ok(r.page <= 0, `${label}: nothing scrolls sideways`);
+  if (tab || w >= 900) ok(r.stage >= 260, `${label}: the panels keep a height a reader can use (${r.stage})`);
+  ok(r.scrolls, `${label}: a window too short for the page scrolls the page's own area, it does not cut the page off`);
+  eq(await m.page.evaluate(() => { const out = []; for (const el of document.querySelectorAll(".sf button, .sf [tabindex='0']")) { if (!el.getClientRects().length || el.closest("dialog")) continue; el.scrollIntoView({ block: "nearest" }); const b = el.getBoundingClientRect(); if (b.bottom > innerHeight + 1 || b.top < -1 || b.right > innerWidth + 1 || b.left < -1) out.push(el.id || el.className); } return out; }), [], `${label}: and every control can be scrolled into view`);
+  eq((await audit(m.page)).filter((p) => !/^page scrolls vertically|^a container scrolls|^rows clipped in sfMatrix|^outside sfLedger/.test(p)), [], `${label}: with no text cut and nothing outside its panel`);
+  if (tab || w >= 900) {
+    const mat = await m.page.evaluate(() => { const e = document.getElementById("sfMatrix"); return { over: e.scrollHeight > e.clientHeight + 1, tab: e.getAttribute("tabindex"), role: e.getAttribute("role") }; });
+    ok(!mat.over || (mat.tab === "0" && mat.role === "region"), `${label}: a ledger slot that has to scroll can be reached and scrolled by keyboard`);
+    if (mat.over) {
+      await m.page.focus("#sfMatrix");
+      await m.page.keyboard.press("PageDown");
+      await m.page.waitForTimeout(150);
+      ok(await m.page.evaluate(() => document.getElementById("sfMatrix").scrollTop > 0), `${label}: PageDown scrolls it`);
+    }
+  }
+  await m.ctx.close();
+}
+
 {
   const m = await mount(browser, 1440, 820);
   const first = await m.page.$eval(".sf-lt td[tabindex='0']", (el) => el.getAttribute("aria-label"));
@@ -344,24 +392,30 @@ const expected = (w, url) => respondWith(w)(new URL("https://x.test" + url));
 
 {
   const m = await mount(browser, 390, 844);
-  eq(await m.page.$$eval("#sfTabs button", (a) => a.map((b) => [b.dataset.v, b.getAttribute("aria-selected")])), [["ledger", "true"], ["side", "false"], ["read", "false"]], "three tabs, Ledger first");
-  eq(await m.page.$$eval(".sf-panel", (a) => a.map((p) => getComputedStyle(p).display)), ["flex", "none", "none"], "only the Ledger panel is shown");
+  eq(await m.page.$$eval("#sfTabs button", (a) => a.map((b) => [b.dataset.v, b.getAttribute("aria-selected")])), [["balance", "true"], ["ledger", "false"], ["side", "false"]], "three tabs, Balance first");
+  eq(await m.page.$$eval(".sf-panel", (a) => a.map((p) => getComputedStyle(p).display)), ["none", "none", "flex"], "the Balance tab shows the reading under the hero and no table");
+  eq(await m.page.$eval("#sfHero", (e) => getComputedStyle(e).display), "grid", "and the hero");
+  eq(await audit(m.page), [], "the Balance tab is one clean screen");
+  ok((await m.page.textContent("#sfLeanLine")).includes(expected(world, "/api/flows/ledger").lean.line.text), "and carries the lean sentence");
+  await m.page.click('#sfTabs [data-v="ledger"]');
+  eq(await m.page.$eval("#sfHero", (e) => getComputedStyle(e).display), "none", "the hero is shown on the Balance tab alone");
+  eq(await m.page.$$eval(".sf-panel", (a) => a.map((p) => getComputedStyle(p).display)), ["flex", "none", "none"], "the Ledger tab shows the ledger");
   eq(await m.page.$$eval("#sfGroups button", (a) => a.map((b) => [b.textContent, b.getAttribute("aria-pressed")])), [["Held", "true"], ["Side unknown", "false"], ["Outside", "false"]], "three column groups, Held pressed");
   const held = await tableCells(m.page, ".sf-lt");
   eq(held.map((r) => r.cells.length), Array(held.length).fill(3), "two columns and a label in the held group");
   eq(held.map((r) => r.cells[0].t), ["Calls, ask side", "Calls, bid side", "Puts, ask side", "Puts, bid side", "Net before balancing", "Balancing entry, defined"], "the held group shows its four entries, net and balancing");
+  eq(await audit(m.page), [], "the held group is one clean screen");
   await m.page.click('#sfGroups [data-g="noside"]');
   eq((await tableCells(m.page, ".sf-lt")).map((r) => r.cells[0].t), COPY.ROW_COPY.slice(4, 8).map((r) => r.short).concat(["Net before balancing", "Balancing entry, defined"]), "the side-unknown group shows its four reasons, net and balancing");
   eq(await audit(m.page), [], "and is still one clean screen");
   await m.page.click('#sfGroups [data-g="outside"]');
   eq((await tableCells(m.page, ".sf-lt")).length, 4, "the outside group shows two entries, net and balancing");
+  eq(await audit(m.page), [], "and so is the outside group");
   await m.page.click('#sfTabs [data-v="side"]');
   eq(await m.page.$$eval(".sf-panel", (a) => a.map((p) => getComputedStyle(p).display)), ["none", "flex", "none"], "the Sectors tab shows the sectors");
   eq(await audit(m.page), [], "the sectors tab is one clean screen");
   eq(await m.page.$$eval(".sf-st tbody tr", (a) => a.length), 13, "all thirteen sectors are on screen");
-  await m.page.click('#sfTabs [data-v="read"]');
-  eq(await audit(m.page), [], "the reading tab is one clean screen");
-  ok((await m.page.textContent("#sfReadBox")).includes(expected(world, "/api/flows/ledger").lean.line.text), "and carries the lean sentence");
+  await m.page.click('#sfTabs [data-v="balance"]');
   eq(await m.page.$eval("#sfChecks", (e) => getComputedStyle(e).display), "none", "the chips are folded away on a phone");
   await m.page.click("#sfCheckLine");
   eq(await m.page.$eval("#sfChecks", (e) => getComputedStyle(e).display), "flex", "and open when the summary is pressed");
@@ -371,7 +425,7 @@ const expected = (w, url) => respondWith(w)(new URL("https://x.test" + url));
   const small = await t.page.evaluate(() => [...document.querySelectorAll(".sf-seg button, .sf-tabs button, #sfInfoBtn, .sf-crumbs button")].filter((el) => el.getBoundingClientRect().width > 0).map((el) => [el.textContent.trim().slice(0, 12), Math.round(el.getBoundingClientRect().height)]).filter(([, h]) => h < 44));
   eq(small, [], "on a coarse pointer every control is at least 44 px tall");
   await t.page.click('#sfTabs [data-v="side"]');
-  const rowsH = await t.page.$$eval(".sf-st tbody tr", (a) => a.map((r) => r.getBoundingClientRect().height));
+  const rowsH = await t.page.$$eval(".sf-st tbody tr", (a) => a.filter((r) => r.getClientRects().length > 0).map((r) => r.getBoundingClientRect().height));
   ok(Math.min(...rowsH) >= 24, "and every sector row, the target of a drill, is at least 24 px: " + Math.round(Math.min(...rowsH)));
   eq(await audit(t.page), [], "the touch layout is one clean screen");
   await t.ctx.close();
@@ -396,6 +450,10 @@ const expected = (w, url) => respondWith(w)(new URL("https://x.test" + url));
   ok((await flaky.page.textContent("#sfNote")).includes("No figures are shown rather than old ones"), "that shows no old figures");
   eq(await flaky.page.$("#sfRetry") !== null, true, "and offers Retry");
   eq(await flaky.page.$eval("#sfCheckLine", (e) => [e.textContent, e.getAttribute("role")]), ["", null], "and leaves no empty button behind");
+  eq(await flaky.page.$$eval("#sf [data-s=pending], #sf table, #sf .hr-v, #sf .hc-v b", (a) => a.filter((e) => e.getClientRects().length > 0).length), 0, "and no waiting cell, table or figure is left on the screen: nothing stays pending behind a failed read");
+  eq(await audit(flaky.page), [], "and the failed screen is one clean screen");
+  const strip = await flaky.page.$$eval("#sfStrip .sf-sc", (a) => a.map((c) => [c.dataset.k, c.dataset.s]));
+  eq(strip.slice(0, 3), [["windows", "unavailable"], ["held", "withheld"], ["tide", "withheld"]], "the strip says the windows are unreadable and the held set and tide are withheld");
   await flaky.ctx.close();
 
   const gone = await mount(browser, 1440, 820, { input: { breadth: null } });
@@ -413,7 +471,7 @@ const expected = (w, url) => respondWith(w)(new URL("https://x.test" + url));
   const closed = await mount(browser, 1440, 820, { respond: (url) => V.view.ledgerView({ ...input, scope: V.view.parseScope(url.searchParams.get("scope")) || { kind: "all", key: "all" }, period: url.searchParams.get("period") || null }) });
   eq(await closed.page.getAttribute("#sf", "data-state"), "failed", "a ledger that does not close is a failed page");
   ok(/logged as [0-9a-f]{8}/.test(await closed.page.textContent("#sfNote")), "with the logged hash in words");
-  eq(await closed.page.$$("table"), [], "and no table, so no figure at all");
+  eq(await closed.page.$$eval("#sf table, #sf .hr-v, #sf .hc-v b, #sf .hr-fv, #sf .sf-bar", (a) => a.filter((e) => e.getClientRects().length > 0).length), 0, "and no table, bar or hero figure is on screen, so no figure at all");
   await closed.ctx.close();
 }
 
@@ -438,6 +496,145 @@ const expected = (w, url) => respondWith(w)(new URL("https://x.test" + url));
   eq(await audit(m.page), [], "forced colours: one clean screen");
   const bars = await m.page.$$eval(".sf-bar .sf-bd", (a) => a.length);
   ok(bars >= 8, "and the bands are drawn");
+  await m.ctx.close();
+}
+
+const BUMPED = { ...world, rows: world.rows.map((r, i) => (i % 9 === 0 && r.prem ? { ...r, prem: r.prem + 4000, raw: { ...r.raw, prem: String(r.prem + 4000) } } : r)) };
+let flipped = false;
+
+const BARE = { ...world, rows: world.rows.map((r) => ({ ...r, askPrem: null, bidPrem: null, raw: { ...r.raw, askPrem: null, bidPrem: null } })) };
+
+const heroCents = (view) => {
+  const [callsAsk, putsAsk, callsBid, putsBid] = view.flow.arrows.map((a) => a.cents);
+  const A = callsAsk + putsAsk, B = callsBid + putsBid, U = view.flow.noside.cents;
+  return { A, B, U, T: A + B + U, callsNet: callsAsk - callsBid, putsNet: putsAsk - putsBid };
+};
+
+const heroDom = (page) => page.evaluate(() => {
+  const svg = document.getElementById("sfLeanBar");
+  const box = svg.getBoundingClientRect();
+  const r = (cls) => { const b = svg.querySelector("." + cls).getBoundingClientRect(); return [b.left - box.left, b.width]; };
+  return {
+    v: document.getElementById("sfLeanV").textContent, verdict: document.getElementById("sfLeanVerdict").textContent, line: document.getElementById("sfLeanLine").textContent,
+    width: box.width, a: r("a"), u: r("u"), b: r("b"), tick: getComputedStyle(svg.querySelector(".tk")).display === "none" ? null : r("tk")[0],
+    figs: [...document.querySelectorAll("#sfLeanFig .hr-fv")].map((e) => e.textContent),
+    cells: [...document.querySelectorAll("#sfCells .hc")].map((c) => ({ id: c.dataset.id, v: c.querySelector(".hc-v b").textContent, g: c.querySelector(".hc-v i").textContent, r: c.querySelector(".hc-r").textContent, s: c.querySelector(".hc-s").textContent, proof: c.dataset.proof })),
+  };
+});
+
+{
+  const printedPositive = (t) => t !== "$0" && !t.startsWith(MINUS);
+  const proofOf = (n, U) => (U === 0 ? (n > 0 ? "up" : n < 0 ? "down" : "even") : printedPositive(moneyOut(n - U, "down")) ? "up" : moneyOut(n + U, "up").startsWith(MINUS) ? "down" : "open");
+  const GLYPH_OF = { up: "▲", down: "▼", open: "◇", even: "=" };
+  const cases = [["a day with side unknown larger than the stated net", world], ["a day whose sides are mostly stated", tight]];
+  for (const [title, w] of cases) {
+    const m = await mount(browser, 1440, 820, { world: w });
+    const view = expected(w, "/api/flows/ledger?scope=all");
+    const { A, B, U, T, callsNet, putsNet } = heroCents(view);
+    eq([view.hero.lean.A, view.hero.lean.B, view.hero.lean.U, view.hero.lean.T], [A, B, U, T], `${title}: the hero's totals are the flow view's own arrows`);
+    const d = await heroDom(m.page);
+    eq(d.v, leanBounds(A, B, U).text, `${title}: the interval is A over T rounded down and (A + U) over T rounded up, written so it never contradicts the verdict`);
+    const near = (a, b, tol, msg) => ok(Math.abs(a - b) <= tol, msg + ` (${a.toFixed(3)} against ${b.toFixed(3)})`);
+    near(d.a[1] / d.width, A / T, 0.002, `${title}: the ask segment is A over T of the bar`);
+    near(d.u[1] / d.width, U / T, 0.002, `${title}: the hatched span is U over T`);
+    near(d.b[1] / d.width, B / T, 0.002, `${title}: the bid segment is B over T`);
+    near(d.u[0] / d.width, A / T, 0.002, `${title}: the hatch starts where the ask ends`);
+    near(d.b[0] / d.width, (A + U) / T, 0.002, `${title}: and ends where the bid begins`);
+    ok(d.a[1] + d.u[1] + d.b[1] >= d.width - 1 && d.a[1] + d.u[1] + d.b[1] <= d.width + 1, `${title}: the three segments fill the bar and no more`);
+    if (d.tick !== null) near(d.tick / d.width, A / (A + B), 0.004, `${title}: the stated-side tick stands at A over A + B`);
+    const proven = 2 * A > T ? "paid" : 2 * B > T ? "received" : "open";
+    const shown = ["paid", "received"].includes(proven) ? proven : view.hero.lean.verdict.id;
+    ok(["paid", "received", "open", "noSides", "lowCoverage", "smallClassified"].includes(shown), `${title}: the verdict is one of the six the copy holds: ${shown}`);
+    eq(d.verdict, COPY.HERO.lean.verdict[shown].short, `${title}: the verdict follows whether the interval clears 50%, in the copy's own words`);
+    ok(!/\bProven\b/.test(d.verdict), `${title}: and no verdict says proven`);
+    eq(d.figs, [moneyShort(A), moneyShort(U), moneyShort(B)], `${title}: the three figures under the bar are A, side unknown and B`);
+    eq(d.cells.map((c) => c.v), [moneyShort(T), (callsNet < 0 ? "−" : "+") + moneyShort(Math.abs(callsNet)), (putsNet < 0 ? "−" : "+") + moneyShort(Math.abs(putsNet))], `${title}: the cells are held premium, net calls and net puts in the view's own money`);
+    eq(d.cells.slice(1).map((c) => [c.proof, c.g]), [callsNet, putsNet].map((n) => [proofOf(n, U), GLYPH_OF[proofOf(n, U)]]), `${title}: a net is proven only when it is larger than side unknown`);
+    ok(!/NaN|undefined|null/.test(JSON.stringify(d)), `${title}: no cell prints a null`);
+    [callsNet, putsNet].forEach((n, i) => ok(d.cells[i + 1].r.endsWith(`${moneyOut(n - U, "down", { plus: true })} to ${moneyOut(n + U, "up", { plus: true })}`), `${title}: net ${["calls", "puts"][i]} names its outer bound, rounded outward: ${d.cells[i + 1].r}`));
+    const sec = await m.page.$$eval(".sf-st tbody td.c-taker", (a) => a.map((td) => td.dataset.proof || null));
+    eq(sec, view.sectors.rows.map((r) => (r.windows ? r.proof : null)), `${title}: every sector's taker net carries its own proof, from its own side unknown`);
+    ok(view.sectors.rows.every((r) => !r.windows || r.proof === proofOf(r.takerC, r.uC)), `${title}: and the view's proof is the same rule`);
+    const marks = await m.page.$$eval(".sf-st tbody td.c-taker", (a) => a.map((td) => ({ proof: td.dataset.proof || null, pf: [...td.querySelectorAll(".pf")].map((e) => e.textContent), say: [...td.querySelectorAll(".visually-hidden")].map((e) => e.textContent) })));
+    view.sectors.rows.forEach((r, i) => {
+      if (!r.windows) return;
+      const k = marks[i];
+      if (r.proof === "even") { ok(k.pf.length === 0, `${title} ${r.key}: a net of exactly zero carries no mark`); return; }
+      eq(k.pf, [GLYPH_OF[r.proof]], `${title} ${r.key}: every sector row with windows has exactly one state mark, and a decided mark points the way the figure does`);
+      ok(k.say.length === 1 && /undecided/.test(k.say[0]) === (r.proof === "open"), `${title} ${r.key}: and it is spoken: ${k.say[0]}`);
+      ok(r.proof === "open" || (r.proof === "up") === (r.takerC > 0), `${title} ${r.key}: a triangle's direction is the sign of the net it stands beside`);
+    });
+    await m.ctx.close();
+  }
+  const none = await mount(browser, 1440, 820, { world: BARE });
+  const nv = expected(BARE, "/api/flows/ledger?scope=all");
+  const nd = await heroDom(none.page);
+  eq([nv.hero.lean.A, nv.hero.lean.B], [0, 0], "a day with no stated side: nothing is booked to a side");
+  eq(nd.v, "0–100%", "its interval is the whole bar, not a guess");
+  eq(nd.tick, null, "it draws no stated-side tick");
+  ok(nd.u[1] / nd.width > 0.99, "and the hatch covers the bar");
+  eq(nd.verdict, COPY.HERO.lean.verdict.noSides.short, "and says every side is unknown");
+  eq(nd.cells.slice(1).map((c) => c.proof), ["open", "open"], "and neither net is proven");
+  eq(await audit(none.page), [], "and is one clean screen");
+  await none.ctx.close();
+}
+
+{
+  const m = await mount(browser, 1440, 820);
+  const view = expected(world, "/api/flows/ledger?scope=all");
+  const chips = await m.page.$$eval("#sfStrip .sf-sc", (a) => a.map((c) => [c.dataset.k, c.dataset.s, c.querySelector(".sc-t").textContent]));
+  eq(chips.map((c) => c[0]), ["windows", "held", "tide", "poll"], "the strip names four sources: windows, the held set, the sector tide and the last poll");
+  eq(chips[0][2], "as of " + view.period.asOfText, "the windows chip says when the windows are from, in TRT");
+  const seen = view.scope.seen, held = view.scope.held;
+  eq(chips[1], ["held", seen === null ? "withheld" : seen > held ? "partial" : "fresh", seen !== null && seen > held ? `${held} of ${seen} held` : seen === null ? `${held} held, shed count not recorded` : `${held} held`], "the held chip says how many of the seen windows are held");
+  eq(chips[2][2], "as of " + view.tide.at, "the tide chip carries the tide's own time");
+  ok(/^\d\d:\d\d:\d\d TRT$/.test(chips[3][2]) && chips[3][1] === "fresh", "the poll chip is a static TRT stamp to the second, fresh: " + chips[3][2]);
+  ok(await m.page.$$eval("#sfStrip .sf-sc", (a) => a.every((c) => c.querySelector("i") && c.querySelector("b").textContent.length > 0)), "every chip carries a glyph and its name, so colour is never the only cue");
+  eq(await m.page.evaluate(() => document.getAnimations().filter((a) => a.effect && a.effect.target && a.effect.target.closest && a.effect.target.closest("#sf")).length), 0, "and nothing on the page animates at rest");
+  await m.ctx.close();
+
+  const c = await mount(browser, 1440, 820, { clock: "2026-10-23T14:50:00Z", phase: { phase: "rth", endsAt: "2026-10-23T20:00:00Z" }, settle: 200 });
+  const poll = () => c.page.$eval('#sfStrip [data-k="poll"]', (e) => [e.dataset.s, e.querySelector(".sc-t").textContent]);
+  eq((await poll())[0], "fresh", "the poll chip starts fresh");
+  await c.page.route("**/api/flows/now*", (r) => r.abort());
+  await c.page.route("**/api/flows/ledger*", (r) => r.abort());
+  await c.page.clock.runFor(60000);
+  eq((await poll())[0], "fresh", "and is still fresh a minute after the read");
+  await c.page.clock.runFor(30000);
+  const late = await poll();
+  eq(late[0], "stale", "past 75 s with no read it says so");
+  ok(late[1].startsWith("late, "), "in words: " + late[1]);
+  await c.page.clock.runFor(240000);
+  const stopped = await poll();
+  eq(stopped[0], "unavailable", "past five minutes it says it stopped");
+  ok(stopped[1].startsWith("no reply since "), "in words, and without claiming the data stopped: " + stopped[1]);
+  await c.ctx.close();
+}
+
+{
+  let second = false;
+  const respond = (url) => respondWith(second ? BUMPED : world)(url);
+  const m = await mount(browser, 1440, 820, { respond, context: { reducedMotion: "no-preference" } });
+  eq(await m.page.$$eval(".sf-lt td.chg, .sf-st td.chg, .hc.chg, .hr-f.chg", (a) => a.length), 0, "nothing flashes on the first paint");
+  const first = await m.page.$$eval(".sf-lt tbody td.c:not(.b)", (a) => a.map((e) => e.textContent));
+  second = true;
+  await m.page.click("#sfPeriod [data-p=intraday]");
+  await m.page.waitForSelector("#sf[data-busy='false']");
+  const next = await m.page.$$eval(".sf-lt tbody td.c:not(.b)", (a) => a.map((e) => [e.textContent, e.classList.contains("chg")]));
+  const changed = next.filter(([t], i) => t !== first[i]).length;
+  ok(changed > 0 && changed < next.length, "a bigger window changes some of the ledger's figures: " + changed);
+  eq(next.filter(([, f]) => f).length, changed, "and the cells that flash are exactly the cells whose text changed");
+  eq(await m.page.$$eval(".sf-lt td.chg", (a) => [...new Set(a.map((e) => getComputedStyle(e).animationName))]), ["sf-chg"], "by a paint-only background flash on the cell itself");
+  eq(await m.page.$$eval(".sf-lt td.chg", (a) => [...new Set(a.map((e) => getComputedStyle(e, "::before").content + "|" + getComputedStyle(e).position + "|" + getComputedStyle(e).zIndex))]), ["none|static|auto"], "which adds no pseudo-element, no positioning and no stacking context, so a focus ring is never covered by the next cell");
+  await m.page.waitForTimeout(2300);
+  eq(await m.page.$$eval(".sf-lt td.chg, .sf-st td.chg, .hc.chg, .hr-f.chg", (a) => a.length), 0, "which leaves nothing behind");
+  await m.page.focus('.sf-drill[data-scope="sector:Energy"]');
+  const markupBefore = await m.page.$eval("#sfBody", (e) => e.innerHTML);
+  second = false;
+  await m.page.evaluate(() => { location.hash = ""; });
+  await m.page.waitForFunction((b) => document.getElementById("sfBody").innerHTML !== b, markupBefore);
+  await m.page.waitForTimeout(200);
+  eq(await m.page.evaluate(() => document.activeElement && document.activeElement.dataset.scope), "sector:Energy", "a refresh that rebuilds the sector table hands focus back to the button that had it");
   await m.ctx.close();
 }
 
@@ -492,21 +689,31 @@ const DEEP_ROWS = respondWith(DEEP)(new URL("https://x.test/api/flows/ledger?sco
     ["a proven fill drawn to R instead of R minus W", "js", [["if (verdict === \"above\") fill = { x: 0, width: u(c - w) };", "if (verdict === \"above\") fill = { x: 0, width: u(c) };"]], async (page) => { const g = await page.evaluate(() => [...document.querySelectorAll(".sf-st tbody tr")].map((tr) => { const f = tr.querySelector(".sf-fo.up"); const b = tr.querySelector(".sf-bd"); const k = tr.querySelector(".sf-tk"); return f ? [Number(f.getAttribute("width")), Number(k.getAttribute("x1")), Number(b.getAttribute("x"))] : null; }).filter(Boolean)); return g.length > 0 && g.every(([w, tick, lo]) => Math.abs(w - lo) < 0.02); }],
     ["a fill under an undetermined verdict", "js", [["let fill = null;\n    if (verdict === \"above\")", "let fill = verdict === \"undetermined\" ? { x: 0, width: u(c) } : null;\n    if (verdict === \"above\")"]], async (page) => (await page.$$eval("td.tl[data-v=undetermined] .sf-fo", (a) => a.length)) === 0],
     ["the verdict glyph left out of the cell", "js", [["'</span><span class=\"vd\"><i aria-hidden=\"true\">' + esc(cell.glyph) + '</i><em> '", "'</span><span class=\"vd\"><i aria-hidden=\"true\"></i><em> '"]], async (page) => (await page.$$eval("td.tl .vd i", (a) => a.every((x) => x.textContent.length > 0)))],
-    ["an absent figure drawn as a zero", "js", [['+ DASH + "</span></td>"', '+ "0</span></td>"']], async (page) => (await page.$$eval(".sf-lt td.a", (a) => a.length > 0 && a.every((x) => x.textContent.trim() === "—")))],
-    ["net before balancing drawn without its sign flipped", "js", [["const body = L.rows.slice(0, 10).concat([{ ...L.net, always: true, kind: \"net\" }", "const body = L.rows.slice(0, 10).concat([{ ...L.rows[10], label: L.net.label, hover: L.net.hover, always: true, kind: \"net\" }"]], async (page) => { const rows = await page.$$eval(".sf-lt tbody tr", (a) => a.slice(-2).map((r) => [...r.querySelectorAll("td")].map((c) => c.textContent.trim()))); return rows[0].every((t, i) => t === rows[1][i] || (t === "0" && rows[1][i] === "0") || t === rows[1][i].replace("−", "").replace(/^(?!−)/, "−")) && rows[0].some((t, i) => t !== rows[1][i]); }],
+    ["an absent figure drawn as a zero", "js", [["const text = absent ? DASH : cell.t;", 'const text = absent ? "0" : cell.t;']], async (page) => (await page.$$eval(".sf-lt td.a", (a) => a.length > 0 && a.every((x) => x.textContent.trim() === "—")))],
+    ["net before balancing drawn without its sign flipped", "js", [["const body = L.rows.slice(0, 10).concat([{ ...L.net, always: true }", "const body = L.rows.slice(0, 10).concat([{ ...L.rows[10], label: L.net.label, hover: L.net.hover, always: true }"]], async (page) => { const rows = await page.$$eval(".sf-lt tbody tr", (a) => a.slice(-2).map((r) => [...r.querySelectorAll("td")].map((c) => c.textContent.trim()))); return rows[0].every((t, i) => t === rows[1][i] || (t === "0" && rows[1][i] === "0") || t === rows[1][i].replace("−", "").replace(/^(?!−)/, "−")) && rows[0].some((t, i) => t !== rows[1][i]); }],
     ["the period button loads even when it is unavailable", "js", [["if (period.getAttribute(\"aria-disabled\") === \"true\") { setNote(period.title || \"\", false); return; }", "if (false) { return; }"]], async (page, asked) => !asked.some((u) => u.includes("period=session"))],
     ["arrow widths not proportional", "js", [["return cents.map((c) => (max > 0 && c > 0 ? Math.max(ARROW_MIN, (cap * c) / max) : 0));", "return cents.map((c) => (max > 0 && c > 0 ? cap : 0));"]], async (page) => { const w = await page.$$eval(".fl-ar", (a) => a.map((x) => Number(x.dataset.w))); return new Set(w.filter((x) => x > 0)).size > 1; }, "#w=flow"],
     ["the summary line is a button even when empty or on a wide screen", "js", [["if (small() && el.textContent !== \"\") {", "if (true) {"]], async (page) => (await page.$eval("#sfCheckLine", (e) => e.getAttribute("role"))) === null],
-    ["the sub-heading of the side-unknown rows left out", "js", [["if (group) html += '<tr class=\"sub\"", "if (false) html += '<tr class=\"sub\""]], async (page) => (await page.$$("tr.sub")).length === 1],
+    ["the sub-heading of the side-unknown rows left blank", "js", [["put(sub, L.groupRows.side.label);", 'put(sub, "");']], async (page) => (await page.$eval("tr.sub td", (e) => e.textContent)) === COPY.GROUP_ROWS.side.label],
     ["rows given padding they cannot fit, so the last ones are cut", "css", [[".sf-t th, .sf-t td { padding: 0 4px;", ".sf-t th, .sf-t td { padding: 12px 4px;"]], async (page) => (await audit(page)).length === 0],
     ["the row fitter switched off, so a long table is cut silently", "js", [["if (!table || !table.tBodies[0] || host.clientHeight === 0) return;", "return;"]], async (page) => (await audit(page)).length === 0, "#scope=name%3A" + BUSIEST, { mount: { world: DEEP } }],
     ["the total keeps its plain name when rows are set aside", "js", [["if (foot) foot.cells[0].textContent = WORDS.totalAll;", "if (foot) foot.cells[0].textContent = WORDS.total;"]], async (page) => { await page.click('#sfTabs [data-v="side"]'); await page.waitForTimeout(300); return (await page.$eval(".sf-st tfoot th", (e) => e.textContent)) === COPY_TOTAL_ALL; }, "", { w: 390, h: 664 }],
     ["the dialog holds only the rows that were shown", "js", [["$(\"sfAllBody\").innerHTML = S.sideHtml;", "$(\"sfAllBody\").innerHTML = $(\"sfBody\").innerHTML;"]], async (page) => { await page.click("#sfAll"); return (await page.$$eval("#sfAllBody .sf-st tbody tr", (a) => a.filter((r) => getComputedStyle(r).display !== "none").length)) === DEEP_ROWS; }, "#scope=name%3A" + BUSIEST, { mount: { world: DEEP } }],
     ["the flow view keeps its node boxes on a short phone, so the lanes are squeezed", "css", [[".fl-node { display: none; }", ".fl-node { display: flex; }"]], async (page) => { await page.click('#sfTabs [data-v="side"]'); await page.waitForTimeout(300); await page.click('#sfView [data-w="flow"]'); await page.waitForTimeout(300); return (await audit(page)).length === 0; }, "", { w: 390, h: 664 }],
     ["an old read overwriting a newer one", "js", [["if (seq !== S.seq) return null;\n        freshFrom(res, body);", "freshFrom(res, body);"]], null],
-    ["the sheet lets the page scroll", "css", [[".flows-body[data-flows-page=\"ledger\"] .flows-main {\n  --sf-pad-b: var(--sp-4);\n  height: 100vh;\n  height: 100dvh;\n  padding-bottom: var(--sf-pad-b);\n  display: flex;\n  flex-direction: column;\n  overflow: hidden;\n}", ".flows-body[data-flows-page=\"ledger\"] .flows-main {\n  --sf-pad-b: var(--sp-4);\n  padding-bottom: var(--sf-pad-b);\n}"], [".sf { flex: 1; min-height: 0; display: flex;", ".sf { flex: 1; min-height: 130vh; display: flex;"]], async (page) => (await audit(page)).length === 0],
+    ["the sheet lets the page scroll", "css", [[".flows-body[data-flows-page=\"ledger\"] .flows-main {\n  --sf-pad-b: var(--sp-4);\n  height: 100vh;\n  height: 100svh;\n  height: 100dvh;\n  padding-bottom: var(--sf-pad-b);\n  display: flex;\n  flex-direction: column;\n  overflow-x: hidden;\n  overflow-y: auto;\n  overscroll-behavior: contain;\n}", ".flows-body[data-flows-page=\"ledger\"] .flows-main {\n  --sf-pad-b: var(--sp-4);\n  padding-bottom: var(--sf-pad-b);\n}"], [".sf { --sf-gap: 8px; flex: 1; min-height: 0; display: flex;", ".sf { --sf-gap: 8px; flex: 1; min-height: 130vh; display: flex;"]], async (page) => (await audit(page)).length === 0],
+    ["the hatched span drawn out to the end of the interval instead of its width", "js", [['at("u", pc(lo), pc(hi - lo));', 'at("u", pc(lo), pc(hi));']], async (page) => { const d = await heroDom(page); const { U, T } = heroCents(expected(world, "/api/flows/ledger?scope=all")); return Math.abs(d.u[1] / d.width - U / T) < 0.002; }],
+    ["a stated-side tick drawn when no side is stated", "js", [['tk.style.display = L.tick === null ? "none" : "";', 'tk.style.display = "";']], async (page) => (await heroDom(page)).tick === null, "", { mount: { world: BARE } }],
+    ["the last poll never goes late", "js", [["if (age >= late) {", "if (false) {"]], async (page) => { await page.route("**/api/flows/now*", (r) => r.abort()); await page.route("**/api/flows/ledger*", (r) => r.abort()); await page.clock.runFor(100000); return (await page.$eval('#sfStrip [data-k="poll"]', (e) => e.dataset.s)) === "stale"; }, "", { mount: { clock: "2026-10-23T14:50:00Z", phase: { phase: "rth", endsAt: "2026-10-23T20:00:00Z" } } }],
+    ["every figure flashes on the first read", "js", [["return put(td, text) && was !== undefined && was !== \"pending\";", "return put(td, text);"], ["const quiet = S.key !== key;", "const quiet = false;"]], async (page) => (await page.$$eval(".sf-lt td.chg", (a) => a.length)) === 0],
+    ["a new view flashes like a refresh", "js", [["const quiet = S.key !== key;", "const quiet = false;"]], async (page) => { await page.click('.sf-drill[data-scope="sector:Energy"]'); await page.waitForFunction(() => document.getElementById("sfSideT").textContent === "Names"); return (await page.$$eval("td.chg", (a) => a.length)) === 0; }],
+    ["a see-through strip floats over the panels and takes no clicks", "css", [[".sf-strip { display: flex; flex: none;", ".sf-strip { position: fixed; right: 12px; bottom: 140px; width: 70%; pointer-events: none; z-index: 4; display: flex; flex: none;"]], async (page) => (await obscured(page)).length === 0],
+    ["the strip floats over the panels and covers what can take focus", "css", [[".sf-strip { display: flex; flex: none;", ".sf-strip { position: fixed; right: 12px; bottom: 140px; width: 70%; background: var(--mat-opaque); z-index: 4; display: flex; flex: none;"]], async (page) => (await obscured(page)).length === 0],
+    ["a rebuilt sector table drops the keyboard's place", "js", [["if (back) back.focus({ preventScroll: true });", ""]], async (page) => { await page.focus('.sf-drill[data-scope="sector:Energy"]'); const before = await page.$eval("#sfBody", (e) => e.innerHTML); flipped = true; await page.evaluate(() => { location.hash = "#period=intraday"; }); await page.waitForFunction((b) => document.getElementById("sfBody").innerHTML !== b, before); await page.waitForTimeout(200); return (await page.evaluate(() => document.activeElement && document.activeElement.dataset.scope)) === "sector:Energy"; }, "", { mount: { respond: (u) => respondWith(flipped ? BUMPED : world)(u) } }],
+    ["an undecided sign left silent for a screen reader", "js", [["'</span><span class=\"visually-hidden\">, ' + esc(pf[1].toLowerCase()) + \"</span>\" : \"\") + \"</td>\";", "'</span>' : \"\") + \"</td>\";"]], async (page) => (await page.$$eval(".sf-st td.c-taker .visually-hidden", (a) => a.length)) > 0],
+    ["the ledger slot scrolls but tells no keyboard", "js", [['attr(mat, "tabindex", "0");', 'mat.removeAttribute("tabindex");']], async (page) => { await page.setViewportSize({ width: 1000, height: 540 }); await page.waitForTimeout(300); return (await page.$eval("#sfMatrix", (e) => e.scrollHeight > e.clientHeight + 1 && e.getAttribute("tabindex") === "0")); }],
     ["the label column squeezed", "css", [["@media (min-width: 1280.01px) {\n  .sf-lt .gr > td:first-child, .sf-lt .corner { width: 30%; }", "@media (min-width: 1280.01px) {\n  .sf-lt .gr > td:first-child, .sf-lt .corner { width: 6%; }"]], async (page) => (await audit(page)).length === 0],
-    ["the sector column squeezed", "css", [[".sf-st th:first-child { width: 31%; }\n  .sf-st .h-taker, .sf-st .c-taker { width: 10%; }", ".sf-st th:first-child { width: 6%; }\n  .sf-st .h-taker, .sf-st .c-taker { width: 10%; }"]], async (page) => (await audit(page)).length === 0],
+    ["the sector column squeezed", "css", [[".sf-st th:first-child { width: 28%; }\n  .sf-st .h-taker, .sf-st .c-taker { width: 13%; }", ".sf-st th:first-child { width: 6%; }\n  .sf-st .h-taker, .sf-st .c-taker { width: 13%; }"]], async (page) => (await audit(page)).length === 0],
   ];
   for (const [title, kind, transforms, holds, hash, extra] of plants) {
     let js = JS, css = CSS;

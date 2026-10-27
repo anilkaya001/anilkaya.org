@@ -64,35 +64,75 @@ export function respondWith(world, overrides = {}) {
   };
 }
 
+export const SAMPLER = `(() => {
+  const out = (window.__fp = { frames: [], styled: [], t0: performance.now() });
+  const sized = /(^|;|\\s)(min-|max-)?(height|block-size)\\s*:/;
+  new MutationObserver((list) => {
+    for (const r of list) { const v = r.target.getAttribute("style") || ""; if (sized.test(v)) out.styled.push(r.target.tagName + "." + String(r.target.className) + " " + v); }
+  }).observe(document, { attributes: true, attributeFilter: ["style"], subtree: true });
+  const rect = (el) => { const b = el.getBoundingClientRect(); return [b.left, b.top, b.width, b.height]; };
+  const boxes = [".sf-title", ".sf-ctl", "#sfHero", ".sf-checkrow", "#sfStage", "#sfLedger", "#sfSide", "#sfRead", "#sfStrip"];
+  const tick = () => {
+    const sf = document.getElementById("sf");
+    const lt = document.querySelector("#sfMatrix table");
+    const st = document.querySelector("#sfBody table");
+    if (sf && lt && st) {
+      out.frames.push({
+        t: performance.now() - out.t0,
+        state: sf.dataset.state || null,
+        anim: document.getAnimations().filter((a) => a.effect && a.effect.target && a.effect.target.closest && a.effect.target.closest("#sf")).length,
+        boxes: boxes.map((q) => { const el = document.querySelector(q); return el ? rect(el) : null; }),
+        ledger: [lt, ...lt.querySelectorAll("thead tr, tbody tr")].map(rect),
+        sectors: [st, ...st.querySelectorAll("thead tr, tbody tr, tfoot tr")].map(rect),
+        slots: ["#sfMatrix", "#sfBody"].map((q) => { const el = document.querySelector(q); if (!el) return null; const b = el.getBoundingClientRect(); return [b.left, b.top, b.width, b.height]; }),
+        spread: [lt, st].map((t) => { const sum = [...t.children].filter((e) => /^(THEAD|TBODY|TFOOT)$/.test(e.tagName)).reduce((a, e) => a + e.getBoundingClientRect().height, 0); return Math.abs(t.getBoundingClientRect().height - sum); }),
+        scroll: document.scrollingElement.scrollHeight - innerHeight,
+      });
+    }
+    if (performance.now() - out.t0 < 20000) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+})();`;
+
 export async function mount(browser, w, h, o = {}) {
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, reducedMotion: "reduce", ...(o.context || {}) });
   const page = await ctx.newPage();
   if (o.now) await page.clock.setFixedTime(new Date(o.now));
+  if (o.clock) await page.clock.install({ time: new Date(o.clock) });
   const errors = [];
   const asked = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
   const world = o.world || realisticWorld();
   const respond = o.respond || respondWith(world, o.input || {});
+  if (o.init) await page.addInitScript(o.init);
   await page.route("**/*", async (r) => {
     const u = new URL(r.request().url());
+    if (o.fontDelay && u.pathname.startsWith("/assets/fonts/")) await new Promise((done) => setTimeout(done, o.fontDelay));
     if (u.pathname === "/assets/js/flows-sfc.js" && o.js) return r.fulfill({ contentType: "text/javascript", body: o.js });
     if (u.pathname === "/assets/css/flows-sfc.css" && o.css) return r.fulfill({ contentType: "text/css", body: o.css });
     if (u.pathname.startsWith("/assets/")) {
       const f = path.join(ROOT, u.pathname);
       if (!fs.existsSync(f)) return r.fulfill({ status: 404, body: "" });
+      if (o.patch && o.patch[u.pathname]) {
+        let src = fs.readFileSync(f, "utf8");
+        for (const [from, to] of o.patch[u.pathname]) { if (!src.includes(from)) throw new Error("mutant anchor missing: " + from); src = src.replaceAll(from, to); }
+        return r.fulfill({ body: src, contentType: MIME[path.extname(f)] });
+      }
       return r.fulfill({ path: f, contentType: MIME[path.extname(f)] || "application/octet-stream" });
     }
     if (u.pathname.startsWith("/api/")) asked.push(u.pathname + u.search);
     if (u.pathname === "/api/flows/ledger") {
       if (o.fail) return r.fulfill({ status: o.fail, contentType: "application/json", body: "{}" });
       const body = await respond(u);
+      if (o.hold) await o.hold(page);
+      else if (o.delay) await new Promise((done) => setTimeout(done, o.delay));
       return r.fulfill({ contentType: "application/json", body: JSON.stringify(body), headers: { "X-Payload-Updated": String(NOW_INTRADAY) } });
     }
-    if (u.pathname === "/api/flows/now") return r.fulfill({ contentType: "application/json", body: JSON.stringify({ serverNow: NOW_INTRADAY, phase: null, keys: {} }) });
+    if (u.pathname === "/api/flows/now") return r.fulfill({ contentType: "application/json", body: JSON.stringify({ serverNow: NOW_INTRADAY, phase: o.phase || null, keys: {} }) });
     if (u.pathname === "/api/flows/meta") return r.fulfill({ contentType: "application/json", body: JSON.stringify({ status: "pending" }) });
     if (u.pathname.startsWith("/api/")) return r.fulfill({ status: 404, contentType: "application/json", body: "{}" });
-    return r.fulfill({ contentType: "text/html; charset=utf-8", body: HTML });
+    return r.fulfill({ contentType: "text/html; charset=utf-8", body: o.html || HTML });
   });
   await page.goto("https://example.test/flows/ledger/" + (o.hash || ""));
   await page.waitForSelector("#sf[data-busy='false']", { timeout: 15000 });
