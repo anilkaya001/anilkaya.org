@@ -435,7 +435,7 @@ const NOW = Date.parse("2026-10-20T21:45:00Z");
   ok(tight.cone && tight.gex && tight.contracts, "and the engine's own sections are intact");
   const tighter = cardXPayload("SYX101", { ...parts, dx, vx }, { generatedAt: F.GENERATED, sessionDate: F.SESSION, readAt: F.GENERATED, budgetBytes: own.bytes - 25000 });
   same(tighter.shed.slice(0, 2), ["dx.parts", "vx.parts"], "then vx, in that order");
-  same(CARD_X_SHED.slice(0, 2).map((e) => e[0]), ["dx.parts", "vx.parts"], "which is the order the table declares");
+  same(CARD_X_SHED.slice(1, 3).map((e) => e[0]), ["dx.parts", "vx.parts"], "which is the order the table declares");
   const next = composeCardXPayload(base("SYX101"), cardXPayload("SYX101", { dx, vx, short: { status: "ok" } }, { generatedAt: F.GENERATED, sessionDate: F.SESSION, readAt: F.GENERATED }));
   ok(next.dx && next.vx && next.engine && next.short, "composing the market legs' sections onto a same-session base keeps both");
 }

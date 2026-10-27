@@ -61,7 +61,7 @@
     for (const k of kids) if (k !== null && k !== undefined) n.append(k);
     return n;
   };
-  const sgn = (x, dp) => (x < 0 ? MINUS : x > 0 ? "+" : "") + F.num(Math.abs(x), false, dp);
+  const sgn = (x, dp) => (x < 0 ? MINUS : x > 0 ? "+" : "") + F.px(Math.abs(x), dp);
   const r2 = (x) => (x < 0 ? MINUS : "") + F.px(Math.abs(x), 2);
   const pct1 = (x) => F.pct(x, 1);
 
@@ -140,7 +140,7 @@
     const root = svg("svg", { class: "vd-svg", width: W, height: H, viewBox: `0 0 ${W} ${H}`, role: "img", "aria-hidden": "true", focusable: "false" });
     for (let v = lo; v <= hi + 1e-9; v += step) {
       root.append(svg("line", { x1: L, x2: L + pw, y1: y(v), y2: y(v), class: "vd-grid" }));
-      root.append(svg("text", { x: L - 6, y: y(v) + 3.5, class: "vd-ax", "text-anchor": "end" }, document.createTextNode(F.num(v, false, step < 1 ? 1 : 0) + "%")));
+      root.append(svg("text", { x: L - 6, y: y(v) + 3.5, class: "vd-ax", "text-anchor": "end" }, document.createTextNode(F.px(v, step < 1 ? 1 : 0) + "%")));
     }
     for (const d of TICKS_X) root.append(svg("text", { x: x(d), y: H - 6, class: "vd-ax", "text-anchor": "middle" }, document.createTextNode(String(d))));
     for (const d of [30, 90]) {
@@ -186,11 +186,11 @@
     const root = svg("svg", { class: "vd-svg", width: W, height: H, viewBox: `0 0 ${W} ${H}`, "aria-hidden": "true", focusable: "false" });
     for (let v = lo; v <= hi + 1e-9; v += step) {
       root.append(svg("line", { x1: L, x2: L + pw, y1: y(v), y2: y(v), class: "vd-grid" }));
-      root.append(svg("text", { x: L - 6, y: y(v) + 3.5, class: "vd-ax", "text-anchor": "end" }, document.createTextNode(F.num(v, false, step < 1 ? 1 : 0))));
+      root.append(svg("text", { x: L - 6, y: y(v) + 3.5, class: "vd-ax", "text-anchor": "end" }, document.createTextNode(F.px(v, step < 1 ? 1 : 0))));
     }
     if (isNum(part.spot)) {
       root.append(svg("line", { x1: L, x2: L + pw, y1: y(part.spot), y2: y(part.spot), class: "vd-spot" }));
-      root.append(svg("text", { x: L + pw, y: y(part.spot) - 4, class: "vd-gl", "text-anchor": "end" }, document.createTextNode("Index level " + F.num(part.spot, false, 1))));
+      root.append(svg("text", { x: L + pw, y: y(part.spot) - 4, class: "vd-gl", "text-anchor": "end" }, document.createTextNode("Index level " + F.px(part.spot, 1))));
     }
     root.append(svg("path", { d: pts.map((p, i) => (i ? "L" : "M") + x(p[1]).toFixed(1) + " " + y(p[2]).toFixed(1)).join(""), class: "vd-fut" }));
     for (const p of pts) {
@@ -220,7 +220,7 @@
       svg("defs", null, svg("pattern", { id: "vdHatch", width: 5, height: 5, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" }, svg("line", { x1: 0, y1: 0, x2: 0, y2: 5, class: "vd-hatch" }))));
     if (!document.getElementById("vdHatch")) document.body.append(defs);
 
-    const silentFor = (st, label, height) => UI.silent(st, label, height);
+    const silentFor = (st, label, height) => h("div", { class: "vd-silent" }, UI.silent(st, label, height), st.reason ? h("p", { class: "vd-reason", role: "note" }, st.reason) : null);
 
     function stampEl() {
       const el = h("span", { class: "vd-stamp" });
@@ -256,7 +256,7 @@
         if (st.state !== "ok") { host.replaceChildren(silentFor(st, "Futures curve", 150)); return; }
         const part = M.futures.part;
         const roll = isNum(part.roll30);
-        const line = roll === null ? null : say("futures.roll", { sign: roll < 0 ? MINUS : roll > 0 ? "+" : "", x: F.num(Math.abs(roll) * 100, false, 2) });
+        const line = roll === null ? null : say("futures.roll", { sign: roll < 0 ? MINUS : roll > 0 ? "+" : "", x: F.px(Math.abs(roll) * 100, 2) });
         const chartBox = h("div", { class: "vd-chart vd-fchart" });
         const read = h("p", { class: "vd-read", role: "status", "aria-live": "polite" }, line || DASH);
         host.replaceChildren(h("div", { class: "vd-term" }, chartBox, read));
@@ -359,7 +359,7 @@
           h("i", { class: "vd-range", style: { left: pos(stats.ivLow), width: ((stats.ivHigh - stats.ivLow) / (hi - lo || 1) * 100).toFixed(1) + "%" } }),
           h("i", { class: "vd-iv", style: { left: pos(row.iv) } }),
           h("i", { class: "vd-rv", style: { left: pos(row.rv) } }));
-        if (isNum(stats.ivPlace) !== null) tip.push(say("ivrv.place", { p: F.num(stats.ivPlace * 100, false, 0) }));
+        if (isNum(stats.ivPlace) !== null) tip.push(say("ivrv.place", { p: F.px(stats.ivPlace * 100, 0) }));
       } else {
         bar = h("span", { class: "vd-bar vd-nobar" }, DASH, " ", h("span", { class: "vd-why" }, "no 1-year range"));
       }
@@ -501,7 +501,7 @@
 
     function charList(title, rows, cls) {
       const dl = h("dl", { class: "vd-dl " + cls, "aria-label": title });
-      for (const [t, label, hl, hu] of rows) dl.append(charRow(t, label, "half-life " + F.num(hl, false, 1) + " sessions · Hurst " + F.px(hu, 2)));
+      for (const [t, label, hl, hu] of rows) dl.append(charRow(t, label, "half-life " + F.px(hl, 1) + " sessions · Hurst " + F.px(hu, 2)));
       return h("section", { class: "vd-blk", "aria-label": title }, h("h3", { class: "vd-h" }, title), dl);
     }
 
@@ -560,7 +560,7 @@
       if (Array.isArray(c.movers)) {
         const dl = h("dl", { class: "vd-dl vd-mv", "aria-label": "Changed since last session" });
         for (const [t, label, prevLabel, hl, phl, kind] of c.movers) {
-          dl.append(charRow(t, kind === "label" ? prevLabel + " → " + label : "half-life " + F.num(phl, false, 1) + " → " + F.num(hl, false, 1) + " sessions", null));
+          dl.append(charRow(t, kind === "label" ? prevLabel + " → " + label : "half-life " + F.px(phl, 1) + " → " + F.px(hl, 1) + " sessions", null));
         }
         kids.push(h("section", { class: "vd-blk vd-movers", "aria-label": "Changed since last session" }, h("h3", { class: "vd-h" }, "Changed since last session"), c.movers.length ? dl : h("p", { class: "vd-none" }, "No name crossed the line.")));
       } else {

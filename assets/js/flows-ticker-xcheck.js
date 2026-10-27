@@ -59,7 +59,7 @@
   const FMT = Object.freeze({
     spot: { label: "Spot", v: (x) => F.px(x, 2), gap: (g) => F.pct(g, 2), tol: (t) => F.pct(t, 2) },
     delta: { label: "Delta", v: (x) => F.px(x, 3), gap: (g) => F.signed(g, 3), tol: (t) => F.px(t, 3) },
-    iv: { label: "IV", v: (x) => F.num(x, false, 1) + "%", gap: (g) => F.signed(g, 1) + " pts", tol: (t) => F.num(t, false, 1) + " pts" },
+    iv: { label: "IV", v: (x) => F.px(x, 1) + "%", gap: (g) => F.signed(g, 1) + " pts", tol: (t) => F.px(t, 1) + " pts" },
     gamma: { label: "Gamma", v: sig4, gap: (g) => F.pct(g, 1), tol: (t) => F.pct(t, 1) },
     oiExpiry: { label: "OI expiry", v: (x) => F.int(x), gap: (g) => F.pct(g, 2), tol: (t) => F.pct(t, 1) },
     oiAll: { label: "OI all", v: (x) => F.int(x), gap: (g) => F.pct(g, 2), tol: (t) => F.pct(t, 1) },

@@ -104,6 +104,8 @@
 .vd-sm { font-size: 8.5px; }
 
 .mk-panel[data-panel="voldesk"] .ui-silent { min-height: 0; }
+.vd-silent { display: flex; flex-direction: column; gap: var(--sp-2); }
+.vd-reason { margin: 0; color: var(--label-2); font: var(--t-footnote); }
 @media (pointer: coarse) { .vd-row { min-height: 48px; } }
 @media (forced-colors: active) {
   .vd-line, .vd-fut { stroke: CanvasText; } .vd-mark, .vd-fm, .vd-end, .vd-val, .vd-ax { fill: CanvasText; }

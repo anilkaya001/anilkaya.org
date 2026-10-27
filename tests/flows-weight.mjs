@@ -176,6 +176,12 @@ for (const name of ["deskPage", "sidePage", "watchPage"]) {
   GZIP_KIB[name] += MEMBER_EXPORT_JS.gzip / 1024;
 }
 
+const VOLDESK_MARKET = { od: "WP3", bytes: 1500, gzip: 600, cssBytes: 100, cssGzip: 120, why: "WP3 volatility structure: flows-market.js opens the Vol desk tab on first use (one optional fetch, the deferred volDesk group and the short sub-switch labels) and flows-market.css shows the tab's panel and sizes eleven tabs on a phone; the desk itself and the cross-check strip are deferred groups with their own sheets and add nothing eager" };
+CEILING_KIB.marketPage += VOLDESK_MARKET.bytes / 1024;
+GZIP_KIB.marketPage += VOLDESK_MARKET.gzip / 1024;
+CSS_KIB.marketPage += VOLDESK_MARKET.cssBytes / 1024;
+CSS_GZIP_KIB.marketPage += VOLDESK_MARKET.cssGzip / 1024;
+
 const RATCHET_KIB = { raw: 12, gzip: 3, css: 3, cssGzip: 3 };
 const HELD_RAW_KIB = { eventsPage: 50 };
 
@@ -206,9 +212,9 @@ const judge = (row, bases = BASES) => {
 };
 
 const DEFERRED = {
-  tickerPage: { groups: { surface: "/assets/js/flows-ticker-surface.js", movelab: "/assets/js/flows-ticker-movelab.js", network: "/assets/js/flows-ticker-network.js", live: "/assets/js/flows-ticker-live.js", "nn-orb": "/assets/js/flows-nn-orb.js" } },
+  tickerPage: { groups: { surface: "/assets/js/flows-ticker-surface.js", movelab: "/assets/js/flows-ticker-movelab.js", network: "/assets/js/flows-ticker-network.js", live: "/assets/js/flows-ticker-live.js", "nn-orb": "/assets/js/flows-nn-orb.js", xcheck: "/assets/js/flows-ticker-xcheck.js" } },
   unusualPage: { groups: { net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js", "flow-below": "/assets/js/flows-unusual-below.js" }, modules: ["uaTimelineCard", "uaNamesCard", "uaUrgencyCard", "uaFeedCard", "uaSurpriseCard"] },
-  marketPage: { groups: { floor: "/assets/js/flows-market-floor.js", river: "/assets/js/flows-market-river.js", "market-below": "/assets/js/flows-market-below.js", net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" }, modules: ["mkSectorsCard", "mkGroupsCard", "mkExpiryCard", "mkVolCard", "mkRadarCard", "mkAdvCard", "mkVolumeCard", "mkAgainstCard", "mkMoversCard", "mkOiCard", "mkDarkCard", "mkImpactCard", "mkInsidersCard", "mkSeasonCard"] },
+  marketPage: { groups: { voldesk: "/assets/js/flows-voldesk.js", floor: "/assets/js/flows-market-floor.js", river: "/assets/js/flows-market-river.js", "market-below": "/assets/js/flows-market-below.js", net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" }, modules: ["mkSectorsCard", "mkGroupsCard", "mkExpiryCard", "mkVolCard", "mkRadarCard", "mkAdvCard", "mkVolumeCard", "mkAgainstCard", "mkMoversCard", "mkOiCard", "mkDarkCard", "mkImpactCard", "mkInsidersCard", "mkSeasonCard"] },
   networkPage: { groups: { net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" } },
   deskPage: { groups: { "desk-calls": "/assets/js/flows-desk-calls.js" } },
   ledgerPage: { groups: { "ledger-live": ["/assets/js/flows-rt.js", "/assets/js/flows-ledger.bundle.js", "/assets/js/flows-sfc-live.js"] } },
@@ -239,6 +245,9 @@ DEFERRED_KIB.marketPage += DARK_POOL_TIME.bytes / 1024;
 const HORIZON_DEFERRED = { od: "LANE-4", tickerBytes: 2947, marketBytes: 1261, why: "lane 4: the ticker's Move lab reads the earnings window and the report-session column from the universe, ages them by the sessions elapsed and shows a Reacting today, Reacted one session ago or Report time not stated state, and reads the carried forward ages of unstated report times (flows-ticker-movelab.js 19,302 to 22,249 B), and Market's Skyline and Volatility lens read the same window, column and ages in place of a literal 21 (flows-skyline.js 22,056 to 22,571 B, flows-market-below.js 59,053 to 59,799 B)" };
 DEFERRED_KIB.tickerPage += HORIZON_DEFERRED.tickerBytes / 1024;
 DEFERRED_KIB.marketPage += HORIZON_DEFERRED.marketBytes / 1024;
+const VOLDESK_DEFERRED = { od: "WP3", tickerBytes: 11500, marketBytes: 35518, why: "WP3 volatility structure: the Vol desk controller (flows-voldesk.js) and the ticker's engine cross-check strip (flows-ticker-xcheck.js) are deferred groups, requested on the first open of the Vol desk tab and when the Surface tab opens" };
+DEFERRED_KIB.tickerPage += VOLDESK_DEFERRED.tickerBytes / 1024;
+DEFERRED_KIB.marketPage += VOLDESK_DEFERRED.marketBytes / 1024;
 
 const FLOOR_BYTES = 1024;
 const EAGER_KERNEL = [
@@ -309,7 +318,7 @@ const measured = [];
 for (const name of pageNames) {
   let html;
   try {
-    html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", scenes: name === "tickerPage" }));
+    html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", scenes: name === "tickerPage", xcheck: name === "tickerPage", voldesk: name === "marketPage" }));
   } catch (error) {
     assert.fail(`${name} threw while rendering: ${error && error.message}`);
   }
@@ -501,7 +510,7 @@ for (const name of Object.keys(CEILING_KIB)) {
       ok(pageNames.includes(name) && !chartRoutes.includes(name), `${name} does not link flows-chart.js`);
     }
     for (const name of CHART_ROUTES) {
-      const html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", scenes: name === "tickerPage" }));
+      const html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", scenes: name === "tickerPage", xcheck: name === "tickerPage", voldesk: name === "marketPage" }));
       const order = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1].split("?")[0]);
       const at = order.indexOf("/assets/js/flows-ui.js");
       ok(at >= 0 && order[at + 1] === "/assets/js/flows-chart.js",
@@ -683,7 +692,7 @@ for (const name of Object.keys(CEILING_KIB)) {
       }
     }
     if (TICKER_RAISE) {
-      const grouped = Object.entries(DEFERRED.tickerPage.groups).filter(([g]) => g !== "surface" && g !== "movelab" && g !== "network" && g !== "live" && g !== "nn-orb").map(([, f]) => f).flat().reduce((a, f) => a + bytesOf(f), 0);
+      const grouped = Object.entries(DEFERRED.tickerPage.groups).filter(([g]) => g !== "surface" && g !== "movelab" && g !== "network" && g !== "live" && g !== "nn-orb" && g !== "xcheck").map(([, f]) => f).flat().reduce((a, f) => a + bytesOf(f), 0);
       ok(TICKER_RAISE.bytes <= 1613, `the ticker's raise (${TICKER_RAISE.od}) is at most the 1,613 B it was made with`);
       ok(grouped < TICKER_RAISE.bytes, `THE TICKER'S ${TICKER_RAISE.bytes} B RAISE STAYS ONLY WHILE THE TICKER DEFERS LESS THAN IT: ${grouped} B of group files are deferred; once they reach the raise, delete TICKER_RAISE (${TICKER_RAISE.od}) and the ceiling returns to 400 KiB`);
       console.log(`  ticker ceiling carries a pending ${TICKER_RAISE.od} deduction of ${TICKER_RAISE.bytes} B: ${TICKER_RAISE.why}`);
