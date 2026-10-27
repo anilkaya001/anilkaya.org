@@ -245,7 +245,7 @@ DEFERRED_KIB.marketPage += DARK_POOL_TIME.bytes / 1024;
 const HORIZON_DEFERRED = { od: "LANE-4", tickerBytes: 2947, marketBytes: 1261, why: "lane 4: the ticker's Move lab reads the earnings window and the report-session column from the universe, ages them by the sessions elapsed and shows a Reacting today, Reacted one session ago or Report time not stated state, and reads the carried forward ages of unstated report times (flows-ticker-movelab.js 19,302 to 22,249 B), and Market's Skyline and Volatility lens read the same window, column and ages in place of a literal 21 (flows-skyline.js 22,056 to 22,571 B, flows-market-below.js 59,053 to 59,799 B)" };
 DEFERRED_KIB.tickerPage += HORIZON_DEFERRED.tickerBytes / 1024;
 DEFERRED_KIB.marketPage += HORIZON_DEFERRED.marketBytes / 1024;
-const VOLDESK_DEFERRED = { od: "WP3", tickerBytes: 11500, marketBytes: 35518, why: "WP3 volatility structure: the Vol desk controller (flows-voldesk.js) and the ticker's engine cross-check strip (flows-ticker-xcheck.js) are deferred groups, requested on the first open of the Vol desk tab and when the Surface tab opens" };
+const VOLDESK_DEFERRED = { od: "WP3", tickerBytes: 11500, marketBytes: 37200, why: "WP3 volatility structure: the Vol desk controller (flows-voldesk.js) and the ticker's engine cross-check strip (flows-ticker-xcheck.js) are deferred groups, requested on the first open of the Vol desk tab and when the Surface tab opens" };
 DEFERRED_KIB.tickerPage += VOLDESK_DEFERRED.tickerBytes / 1024;
 DEFERRED_KIB.marketPage += VOLDESK_DEFERRED.marketBytes / 1024;
 
