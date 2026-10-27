@@ -8,9 +8,51 @@ const TICKER = { file: "assets/js/flows-ticker.js", page: "each name's Ticker pa
 const POLITICAL = { file: "assets/js/flows-political.js", page: "Political", href: "/flows/political/" };
 const MOVES = { file: "assets/js/flows-moves.js", page: "Moves", href: "/flows/moves/" };
 const UNUSUAL = { file: "assets/js/flows-unusual.js", page: "Unusual", href: "/flows/unusual/" };
+const MACRO = { file: "shared/flows-macro-copy.js", page: "Macro", href: "/flows/macro/" };
 const BOARDS = { file: "assets/js/flows-board.js", page: "the Bullish and Bearish boards", href: "/flows/long/" };
 
 export const GLOSSARY = Object.freeze([
+  { key: "aggressor-side", term: "Aggressor side", ...MACRO, lines: [
+    "Unsided: the feed gives no aggressor side.",
+    "Crossed-quote prints are counted apart, never sided.",
+  ] },
+  { key: "contango", term: "Contango (futures)", ...MACRO, lines: [
+    "Index futures usually sit above spot by carry.",
+  ] },
+  { key: "dollar-breadth", term: "Dollar breadth", ...MACRO, lines: [
+    "Dollar up against {up} of {n} majors over the last day.",
+    "The feed carries no dollar index; this count is not one.",
+  ] },
+  { key: "coin-flip", term: "Distinguishable from a coin", ...MACRO, lines: [
+    "Indistinguishable from a coin flip.",
+    "{s} of {n} names remain distinguishable from a coin after correction.",
+  ] },
+  { key: "disclosed-investor", term: "Disclosed investor", ...MACRO, lines: [
+    "Disclosed investor in {n} private companies.",
+    "Not listed as a disclosed private-markets investor.",
+  ] },
+  { key: "implied-mark", term: "Implied per-share mark", ...MACRO, lines: [
+    "The feed's implied per-share price on {date}; not a trade.",
+  ] },
+  { key: "inverted-curve", term: "Inverted curve", ...MACRO, lines: [
+    "Inverted: the 2-year yields more than the 10-year.",
+  ] },
+  { key: "most-active-contract", term: "Most active contract", ...MACRO, lines: [
+    "Most active contract, as the feed ranks them.",
+  ] },
+  { key: "prediction-price", term: "Prediction-market price", ...MACRO, lines: [
+    "Prediction-market price {p}: the market's number, not a forecast.",
+  ] },
+  { key: "spread-2s10s", term: "2s10s spread", ...MACRO, lines: [
+    "Normal: the 10-year yields more than the 2-year.",
+    "Flat: within 5 bp.",
+  ] },
+  { key: "thin-market", term: "Thin market", ...MACRO, lines: [
+    "Thin market: under $50K of liquidity or a spread above 5 points.",
+  ] },
+  { key: "wilson-interval", term: "Wilson interval", ...MACRO, lines: [
+    "Up in {k} of {n} years: {lo} to {hi} at 95%.",
+  ] },
   { key: "advancers", term: "Advancers", ...MARKET_BELOW, lines: [
     "The session's price change for every eligible name in the screened universe, in half-point bins.",
   ] },
@@ -146,4 +188,4 @@ export const GLOSSARY = Object.freeze([
   ] },
 ]);
 
-export const GLOSSARY_PAGES = Object.freeze([HOME.page, MARKET.page, MOVES.page, UNUSUAL.page, POLITICAL.page, EVENTS.page, BOARDS.page, TICKER.page]);
+export const GLOSSARY_PAGES = Object.freeze([HOME.page, MARKET.page, MOVES.page, UNUSUAL.page, POLITICAL.page, EVENTS.page, BOARDS.page, TICKER.page, MACRO.page]);

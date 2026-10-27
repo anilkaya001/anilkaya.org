@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "408";
+export const ASSET_VERSION = "410";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -466,6 +466,7 @@ export function aboutPage() {
       <li><strong>Moves.</strong> Every name's move today against its own typical day and against the day its options implied, with how often a move that size has happened in the last year, and each sector&#39;s median move beside the list of names.</li>
       <li><strong>Unusual.</strong> The option windows the vendor flagged, drawn as a flow network from sector through the side of the quote and name to lean, and the contracts trading far above their open interest.</li>
       <li><strong>Ledger.</strong> The flagged option premium booked as a closed ledger: takers on one side, liquidity providers on the other, so every row and column sums to zero. It sets each sector's share against its market-cap share, with the bounds it can prove.</li>
+      <li><strong>Macro.</strong> Rates, currencies, commodities, crypto and futures on one screen, with prediction-market odds beside each scheduled release and seasonality shown with its intervals. A figure the feed does not carry is a dash with its reason.</li>
       <li><strong>Events.</strong> Earnings, economic prints and FDA dates for the coming sessions, with the move each report is priced for.</li>
       <li><strong>Political.</strong> Stocks that members of Congress disclosed buying or selling, in the dollar ranges the filings give, with how late each filing arrives.</li>
       <li><strong>Ticker.</strong> One name's dossier: price against the priced move, the dealer book, volatility, flow and positioning, and a written reading of how they fit together.</li>
@@ -1093,10 +1094,10 @@ ${shell("Events", "events", username, `${feedHead("ev", "Events")}
   </div>
   <div class="fd-chips" id="evChips"></div>
 ${feedTabs([["week", "Week", "evWeekCard"], ["earn", "Earnings", "evEarnCard"], ["macro", "Macro", "evMacroCard"], ["fda", "FDA", "evFdaCard"], ["react", "Reaction", "evReactCard"]])}
-  <div class="fd-stage" id="fdStage" data-view="week"${odds ? ' data-odds="on"' : ""}>
+  <div class="fd-stage" id="fdStage" data-view="week">
 ${feedModule("evWeekCard", "Week ahead", `<div class="fd-body" id="evWeek"></div>`, { tab: "week" })}
 ${feedModule("evEarnCard", "Earnings", `<div class="fd-body" id="evEarn"></div>`, { tab: "earn" })}
-${feedModule("evMacroCard", "Macro", `<div class="fd-body" id="evMacro"></div>`, { tab: "macro" })}
+${feedModule("evMacroCard", "Macro", `<div class="fd-body" id="evMacro"></div>`, { tab: "macro" }).replace('id="evMacroCard"', odds ? 'id="evMacroCard" data-odds="on"' : 'id="evMacroCard"')}
 ${feedModule("evFdaCard", "FDA", `<div class="fd-body" id="evFda"></div>`, { tab: "fda" })}
 ${feedModule("evReactCard", "Reaction", `<div class="fd-body" id="evReact"></div>`, { tab: "react" })}
   </div>

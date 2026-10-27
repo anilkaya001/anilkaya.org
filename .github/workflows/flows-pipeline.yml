@@ -95,6 +95,8 @@ jobs:
           FLOWS_REPUBLISH_SESSION: ${{ github.event_name == 'workflow_dispatch' && inputs.republish_session && '1' || '' }}
           FLOWS_UNUSUAL_V2: ${{ vars.FLOWS_UNUSUAL_V2 }}
           FLOWS_DEEPEN: ${{ vars.FLOWS_DEEPEN }}
+          FLOWS_MACRO_BUILD: ${{ vars.FLOWS_MACRO_BUILD }}
+          FLOWS_PM_CAP: ${{ vars.FLOWS_PM_CAP }}
           FLOWS_EXTRAS: ${{ vars.FLOWS_EXTRAS }}
           FLOWS_EXTRAS_CAP: ${{ vars.FLOWS_EXTRAS_CAP }}
           FLOWS_DEEPEN_CAP: ${{ (github.event_name == 'workflow_dispatch' && inputs.deepen_cap) || vars.FLOWS_DEEPEN_CAP }}

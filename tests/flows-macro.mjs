@@ -15,6 +15,8 @@ import { addSessions } from "../shared/flows-calendar.js";
 import { OPS, BUDGETS } from "../shared/flows-vendor-ops.js";
 import { COPY } from "../shared/flows-macro-copy.js";
 import { loadMutated } from "./truth/mutants.mjs";
+import { buildPeersPacket, buildMacroPacket } from "../shared/flows-dossier.js";
+import { dossierStatements, DOSSIER_SQL } from "../shared/flows-dossier-worker.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FX = JSON.parse(fs.readFileSync(path.join(ROOT, "tests/fixtures-macro.json"), "utf8"));
@@ -517,6 +519,39 @@ const MUTANTS = [
   ["fixtures-allowed", "shared/flows-macro.js", [['if (bad && !test) throw new Error("fixture name " + bad);', "if (false) throw new Error(\"fixture name \" + bad);"]],
     (m) => { try { m.buildMacro(world(), {}); return false; } catch { return true; } }],
 ];
+
+{
+  const NOW = Date.parse("2026-10-27T21:40:00Z");
+  const factOf = (packet, k) => packet.facts.find((f) => f.k === k);
+  const pm = P.pmCardSection({ at: NOW - 86400000, session: "2026-10-27", match: { name: "Sample Fund", companyCount: 11 }, companies: [["SYPM01", "Sample Robotics", "Robotics"]] });
+  const peers = buildPeersPacket({ ticker: "AAPL", now: NOW, expectedSession: "2026-10-27", held: { cardX: { sessionDate: "2026-10-27", pm } } });
+  eq(factOf(peers, "pm.investor").v, 11, "the peers packet carries the disclosed-investor count at grade 2 inside the refresh age");
+  eq(factOf(peers, "pm.investor").grade, 2, "grade 2 inside the refresh age");
+  ok(!JSON.stringify(peers).includes("leader"), "no leader name reaches the packet");
+  const old = P.pmCardSection({ at: NOW - 45 * 86400000, session: "2026-09-10", match: { name: "Sample Fund", companyCount: 11 }, companies: [] });
+  eq(factOf(buildPeersPacket({ ticker: "AAPL", now: NOW, expectedSession: "2026-10-27", held: { cardX: { sessionDate: "2026-10-27", pm: old } } }), "pm.investor").grade, 1, "and grade 1 past it");
+  const stale = P.pmCardSection({ at: NOW - 70 * 86400000, session: "2026-08-10", match: { name: "Sample Fund", companyCount: 11 }, companies: [] });
+  ok(!factOf(buildPeersPacket({ ticker: "AAPL", now: NOW, expectedSession: "2026-10-27", held: { cardX: { sessionDate: "2026-10-27", pm: stale } } }), "pm.investor"), "an expired section gives no fact");
+  const none = buildPeersPacket({ ticker: "AAPL", now: NOW, expectedSession: "2026-10-27", held: { cardX: { sessionDate: "2026-10-27", pm: P.pmCardSection({ at: NOW - 1000, session: "2026-10-27", match: null, why: "plan" }) } } });
+  ok(none.withheld.some((w) => w.k === "pm" && /plan/.test(w.reason)), "a plan refusal is held with its reason");
+  const mc = { sessionDate: "2026-10-27", s2s10: 29, ten: ["10year", 4.31, "2026-10-27"], breadth: { up: 3, n: 7 }, es: 0.003, btc: -0.0014, events: [{ at: "2026-10-29T18:00:00Z", event: "FOMC Interest Rate Decision", price: 0.62, thin: false }] };
+  const macro = buildMacroPacket({ ticker: "AAPL", now: NOW, expectedSession: "2026-10-27", held: { macro: mc } });
+  eq(factOf(macro, "rates.s2s10").display, "+29 bp", "the macro packet prints the spread in basis points");
+  eq(factOf(macro, "rates.10y").display, "4.31%", "and the ten-year yield in percent");
+  ok(/62%/.test(factOf(macro, "odds.next").v) && /not a forecast/.test(factOf(macro, "odds.next").note), "the odds fact is the market's number, not a forecast");
+  const behind = buildMacroPacket({ ticker: "AAPL", now: NOW, expectedSession: "2026-10-29", held: { macro: mc } });
+  ok(!factOf(behind, "rates.s2s10"), "a macro board two sessions behind gives no fact");
+  eq(buildMacroPacket({ ticker: "AAPL", now: NOW, expectedSession: "2026-10-27", held: {} }).facts.some((f) => f.k.startsWith("rates.")), false, "with no macro held the packet is what it was");
+}
+
+{
+  const db = { prepare: (sql) => ({ bind: (...b) => ({ sql, b }) }) };
+  eq(dossierStatements(db, "AAPL").length, 13, "with the switch off the dossier batch is the thirteen statements it was");
+  const on = dossierStatements(db, "AAPL", true);
+  eq(on.length, 14, "with it on the batch gains one primary-key read of the macro row");
+  ok(/WHERE id = 'macro'$/.test(on[13].sql) && !/json_each/.test(on[13].sql), "and that read is a primary key lookup with no json_each");
+  ok(!/\$\.pm/.test(DOSSIER_SQL.regime) && /\$\.pm/.test(DOSSIER_SQL.cardX), "the pm section rides on the card-x row already read");
+}
 
 const killed = [];
 for (const [id, target, transforms, check] of MUTANTS) {

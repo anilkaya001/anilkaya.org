@@ -129,6 +129,7 @@ const SPECS = [
   { id: "desk", fn: "deskPage", url: "/flows/desk/" },
   { id: "ticker", fn: "tickerPage", url: "/flows/ticker/?t=NVDA" },
   { id: "ledger", fn: "ledgerPage", url: "/flows/ledger/" },
+  { id: "macro", fn: "macroPage", url: "/flows/macro/" },
   { id: "status", fn: "statusPage", url: "/flows/status/" },
 ];
 

@@ -1815,6 +1815,7 @@ function dossierDeps(env, ctx, session) {
     allowed: () => gate(),
     quote: async (t) => (await quoteResponse(env, ctx, t, gate)).json(),
     admit: (t) => vendorAdmits(env, ctx, t, gate),
+    macro: macroOn(env, rtIsOwner(rtSwitches(env), session && session.username)),
   };
 }
 

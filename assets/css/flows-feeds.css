@@ -335,6 +335,8 @@ a.fe-erow:hover, a.fe-frow:hover { background: var(--fill-4); }
 .fe-pair > i.is-none { width: 100%; background: repeating-linear-gradient(90deg, var(--label-4) 0 2px, transparent 2px 6px); opacity: 0.7; animation: none; }
 .is-still .fe-pair > i, .is-still .fe-chip-bar { animation: none; }
 .fe-mrow { grid-template-columns: 44px minmax(0, 1fr) 62px 54px; }
+#evMacroCard[data-odds="on"] .fe-mrow { grid-template-columns: 44px minmax(0, 1fr) 62px 54px 64px; }
+.fe-modd { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .fe-mname { display: flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap; }
 .fe-mname b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
 .fe-mname small { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--label-3); font: var(--t-caption); }

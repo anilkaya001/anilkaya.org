@@ -79,7 +79,7 @@ export const DOSSIER_SQL = Object.freeze({
     "COALESCE(json_extract(payload, '$.readAt'), json_extract(payload, '$.generatedAt')) AS read_iso FROM flows_payload WHERE id = ?",
   cardX: "SELECT updated_at, json_extract(payload, '$.sessionDate') AS session, json_extract(payload, '$.generatedAt') AS generated, " +
     "json_extract(payload, '$.engine') AS engine, json_extract(payload, '$.short') AS short, json_extract(payload, '$.insiders') AS insiders, " +
-    "json_extract(payload, '$.earnings') AS earnings, json_extract(payload, '$.dx') AS dx, json_extract(payload, '$.vx') AS vx FROM flows_payload WHERE id = ?",
+    "json_extract(payload, '$.earnings') AS earnings, json_extract(payload, '$.dx') AS dx, json_extract(payload, '$.vx') AS vx, json_extract(payload, '$.pm') AS pm FROM flows_payload WHERE id = ?",
   universe: "SELECT p.updated_at AS updated_at, json_extract(p.payload, '$.sessionDate') AS session, json_extract(p.payload, '$.generatedAt') AS generated, " +
     "json_extract(p.payload, '$.n') AS n, json_extract(p.payload, '$.units') AS units, x.i AS i, " +
     UNIVERSE_KEYS.map((k) => "json_extract(p.payload, '$.cols." + k + "[' || x.i || ']') AS c_" + k).join(", ") + ", " +
@@ -102,6 +102,12 @@ export const DOSSIER_SQL = Object.freeze({
     "(SELECT substr(r, 1, instr(r, '{\"t\":\"' || ?1 || '\"')) AS pre FROM (SELECT json_extract(payload, '$.rows') AS r FROM flows_payload WHERE id = 'events') " +
     "WHERE instr(r, '{\"t\":\"' || ?1 || '\"') > 0)) || ']') AS row FROM flows_payload WHERE id = 'events'",
   roster: "SELECT json_extract(payload, '$.depth.\"' || ? || '\"') AS depth FROM flows_payload WHERE id = 'roster'",
+  macro: "SELECT updated_at, json_extract(payload, '$.session') AS session, json_extract(payload, '$.generatedAt') AS generated, " +
+    "json_extract(payload, '$.rates.spreads.s2s10') AS s2s10, json_extract(payload, '$.rates.curve[4]') AS ten, json_extract(payload, '$.fx.breadth') AS breadth, " +
+    "json_extract(payload, '$.futures.products.ES.chg1') AS es, json_extract(payload, '$.crypto.BTC.chg1') AS btc, " +
+    [0, 1, 2, 3].map((i) => "json_object('at', json_extract(payload, '$.odds.events[" + i + "].at'), 'event', json_extract(payload, '$.odds.events[" + i + "].event'), " +
+      "'price', json_extract(payload, '$.odds.events[" + i + "].markets[0].price'), 'thin', json_extract(payload, '$.odds.events[" + i + "].markets[0].thin')) AS e" + i).join(", ") + " " +
+    "FROM flows_payload WHERE id = 'macro'",
   strips: "SELECT read_at, session, json_extract(payload, '$.rows.\"' || ?1 || '\"') AS row, json_extract(payload, '$.fields') AS fields FROM flows_live WHERE id = 'live:strips'",
   market: "SELECT read_at, session, json_extract(payload, '$.tide.status') AS tide_status, json_extract(payload, '$.last.tideNet') AS tide_net, " +
     "json_extract(payload, '$.tide.lastAt') AS tide_last, json_extract(payload, '$.sectors.rows') AS sectors FROM flows_live WHERE id = 'live:market'",
@@ -116,15 +122,32 @@ export const DOSSIER_WRITE_SQL =
   "INSERT INTO flows_dossier_cache (ticker, kind, fetched_at, payload) VALUES (?, ?, ?, ?) " +
   "ON CONFLICT(ticker, kind) DO UPDATE SET fetched_at = excluded.fetched_at, payload = excluded.payload";
 
-export function dossierStatements(db, ticker) {
+export function dossierStatements(db, ticker, withMacro = false) {
   const q = (name, ...binds) => db.prepare(DOSSIER_SQL[name]).bind(...binds);
-  return [
+  const list = [
     q("card", "card:" + ticker), q("cardX", "card-x:" + ticker), q("universe", ticker), q("regime"), q("events", ticker), q("roster", ticker),
     q("strips", ticker), q("market"), q("alerts", ticker), q("liveNews", ticker), q("news", ticker), q("tape", ticker), q("cache", ticker),
   ];
+  if (withMacro) list.push(q("macro"));
+  return list;
 }
 
-const STATEMENT_NAMES = Object.freeze(["card", "cardX", "universe", "regime", "events", "roster", "strips", "market", "alerts", "liveNews", "news", "tape", "cache"]);
+const STATEMENT_NAMES = Object.freeze(["card", "cardX", "universe", "regime", "events", "roster", "strips", "market", "alerts", "liveNews", "news", "tape", "cache", "macro"]);
+
+function decodeMacro(row) {
+  if (!row) return null;
+  const events = [0, 1, 2, 3].map((i) => tryParse(row["e" + i], null)).filter((e) => isObj(e) && typeof e.at === "string" && typeof e.event === "string");
+  return {
+    sessionDate: typeof row.session === "string" ? row.session.slice(0, 10) : null,
+    generatedAt: typeof row.generated === "string" ? row.generated : null,
+    s2s10: isNum(row.s2s10) ? row.s2s10 : null,
+    ten: tryParse(row.ten, null),
+    breadth: tryParse(row.breadth, null),
+    es: isNum(row.es) ? row.es : null,
+    btc: isNum(row.btc) ? row.btc : null,
+    events,
+  };
+}
 
 const first = (res) => (res && res.results && res.results[0] ? res.results[0] : null);
 
@@ -425,7 +448,7 @@ async function runAssembly(env, ctx, ticker, deps, opts) {
   const budget = { ...BUDGET, ...(opts.budget || {}) };
   const cacheOnly = opts.cacheOnly === true;
   const trace = { trips: 0, vendorCalls: 0, calls: [], pending: [], queued: [], skipped: [], stale: [], wrote: [], limited: [], failed: false, own: opts.own === true, cacheOnly };
-  const statements = env.DB ? dossierStatements(env.DB, ticker) : [];
+  const statements = env.DB ? dossierStatements(env.DB, ticker, deps.macro === true) : [];
   const read = env.DB ? await batchWithClock(env.DB, statements, now) : { results: null, clock: memoizedClock(now) };
   trace.trips = 1;
   const clock = read.clock;
@@ -442,7 +465,7 @@ async function runAssembly(env, ctx, ticker, deps, opts) {
     sessionDate: typeof xRow.session === "string" ? xRow.session.slice(0, 10) : null,
     generatedAt: typeof xRow.generated === "string" ? xRow.generated : null,
     engine: tryParse(xRow.engine, null), short: tryParse(xRow.short, null), insiders: tryParse(xRow.insiders, null), earnings: tryParse(xRow.earnings, null),
-    dx: tryParse(xRow.dx, null), vx: tryParse(xRow.vx, null),
+    dx: tryParse(xRow.dx, null), vx: tryParse(xRow.vx, null), pm: deps.macro === true ? tryParse(xRow.pm, null) : null,
   } : null;
   if (card) card = mergeEngine(card, cardX);
   const universe = decodeUniverse(first(rows.universe));
@@ -477,7 +500,7 @@ async function runAssembly(env, ctx, ticker, deps, opts) {
   const nightly = nightlyView(cache, cardX, now);
   trace.nightly = nightly.used;
   const held = {
-    expected, card, cardX, universe, regime: decodeRegime(first(rows.regime)), events: decodeEvents(first(rows.events)),
+    expected, card, cardX, universe, regime: decodeRegime(first(rows.regime)), events: decodeEvents(first(rows.events)), macro: deps.macro === true ? decodeMacro(first(rows.macro)) : null,
     strip, market, sectorEtf, alerts, tape, newsRows, neuron, liveBehind,
   };
   const events = held.events;

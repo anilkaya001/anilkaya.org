@@ -185,7 +185,7 @@
   .flows-body[data-flows-page="macro"] .flows-main { --mc-pad-b: calc(var(--tab-h) + var(--safe-b) + var(--sp-3)); }
 }
 @media (pointer: coarse) {
-  .mc-tab, .mc-sub button, .mc-seg button, .mc-all, .mc-dlg .link { min-height: 44px; }
+  .mc[data-fit] .mc-tab, .mc-sub button, .mc-seg button, .mc-all, .mc-dlg .link { min-height: 44px; }
   .mc-odds { min-height: 44px; }
 }
 @media (prefers-reduced-motion: no-preference) {

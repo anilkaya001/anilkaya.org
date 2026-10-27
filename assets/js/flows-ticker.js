@@ -2904,6 +2904,16 @@
     UI.defer("movelab", { when: "visible", el: host, label: "The move lab" }).then(() => window.FlowsUI.moveLab && window.FlowsUI.moveLab.mount(host, raw));
   }
 
+  const PRIVATE = { host: null };
+
+  function buildPrivate(card) {
+    if (isIndex(card) || !UI.defer || !$("ftPrivate")) return;
+    const host = PRIVATE.host || (PRIVATE.host = h("div", { class: "is-slot" }, UI.silent(ST("quiet", "The private-markets lens loads when this module comes into view."), "Private markets", 140)));
+    const raw = { pm: STATE.cardX && STATE.cardX.pm ? STATE.cardX.pm : null, sector: typeof card.sector === "string" && card.sector ? card.sector : null };
+    mod({ id: "m-private", title: "Private markets", span: [12, 12], st: OK, body: [host], index: 5 });
+    UI.defer("private", { when: "visible", el: host, label: "The private-markets lens" }).then(() => { const f = window.FlowsUI.privateLens; if (f) f.mount(host, raw); });
+  }
+
   const NETWORK = { host: null };
 
   function buildNetwork(card) {
@@ -2944,7 +2954,7 @@
     showGrid();
     parkVerdict();
     for (const node of [...gridEl.children]) node.remove();
-    const builders = [buildIdeas, buildWorlds, buildSignal, buildGamma, buildHedging, buildVol, buildFlow, buildTape, buildEvents, buildPositioning, buildContext, buildMoveLab, buildNetwork];
+    const builders = [buildIdeas, buildWorlds, buildSignal, buildGamma, buildHedging, buildVol, buildFlow, buildTape, buildEvents, buildPositioning, buildContext, buildMoveLab, buildNetwork, buildPrivate];
     for (const b of builders) {
       try { b(card); } catch (e) { console.error("flows-ticker: " + b.name + " failed", e); }
     }

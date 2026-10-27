@@ -81,7 +81,7 @@ export async function runPmNames(ctx) {
     candidates.sort((a, b) => names.indexOf(a.ticker) - names.indexOf(b.ticker));
     const feed = DRY_RUN ? makeMacroFakeVendor({ sessionDate }) : uw;
     const run = await runPrivateNames({
-      uw: feed, candidates, session: sessionDate, now: Date.now(), deadline, budget: Math.min(cap, PM_NAMES_CAP * 2), sleeping, log: (line) => console.log(line),
+      uw: feed, candidates, session: sessionDate, now: Date.parse(stampNow()), deadline, budget: Math.min(cap, PM_NAMES_CAP * 2), sleeping, log: (line) => console.log(line),
     });
     const sections = new Map(run.sections);
     for (const c of candidates) if (!sections.has(c.ticker) && c.pm) sections.set(c.ticker, c.pm);
@@ -112,7 +112,7 @@ export async function runPmSectors(ctx) {
     const feed = DRY_RUN ? makeMacroFakeVendor({ sessionDate }) : uw;
     const run = asleep
       ? { sectors: prior ? prior.sectors : {}, investors: prior ? prior.investors : undefined, calls: 0, plan: false, sector: null }
-      : await runPrivateSectors({ uw: feed, session: sessionDate, prior, sectors, cap, used, deadline, log: (line) => console.log(line) });
+      : await runPrivateSectors({ uw: feed, session: sessionDate, now: Date.parse(stampNow()), prior, sectors, cap, used, deadline, log: (line) => console.log(line) });
     const plan = run.plan || (ctx.pmNamesRun && ctx.pmNamesRun.plan) || false;
     const payload = buildPm({
       session: sessionDate, generatedAt: stampNow(), sectors: run.sectors, investors: run.investors,

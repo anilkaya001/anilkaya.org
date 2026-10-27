@@ -727,7 +727,7 @@ export function buildMacro(input, { test = false } = {}) {
   };
 
   const payload = {
-    v: 1, session, generatedAt: input.generatedAt || new Date().toISOString(),
+    v: 1, session, generatedAt: input.generatedAt || null,
     ...(test ? { fixture: true } : {}),
     rates, economy, commodities, fx, crypto, futures, movers,
     seasonality: season, odds,

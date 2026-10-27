@@ -63,7 +63,32 @@
     return null;
   };
 
-  const S = { payload: null, cx: new Map(), asked: false, staleDays: null, divLane: null };
+  const S = { payload: null, cx: new Map(), asked: false, staleDays: null, divLane: null, odds: null, oddsAsked: false };
+  const ODDS_COPY = { none: "No prediction market matches this release.", thin: "Few trades back this price." };
+  const oddsOn = () => { const el = document.getElementById("evMacroCard"); return !!el && el.dataset.odds === "on"; };
+
+  function oddsCell(m) {
+    const table = S.odds === null ? null : S.odds;
+    if (table === null) return h("span", { class: "fe-modd", title: "Market price loading" }, DASH);
+    const hit = table.get(String(m.at) + "|" + String(m.event));
+    const mk = hit && hit.markets && hit.markets[0] ? hit.markets[0] : null;
+    if (!mk || n(mk.price) === null) return h("span", { class: "fe-modd", title: ODDS_COPY.none }, DASH, h("span", { class: "visually-hidden" }, " " + ODDS_COPY.none));
+    const label = Math.round(mk.price * 100) + "%" + (mk.thin ? " \u25cb" : "");
+    return h("span", { class: "fe-modd", title: "Market price " + Math.round(mk.price * 100) + "%." + (mk.thin ? " " + ODDS_COPY.thin : "") }, label);
+  }
+
+  function loadOdds() {
+    if (S.oddsAsked || !oddsOn()) return;
+    S.oddsAsked = true;
+    fetch("/api/flows/macro?part=odds", { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body) => {
+        const list = body && body.odds && Array.isArray(body.odds.events) ? body.odds.events : null;
+        S.odds = new Map((list || []).map((e) => [String(e.at) + "|" + String(e.event), e]));
+        if (S.payload) paintMacro(S.payload);
+      })
+      .catch(() => { S.odds = new Map(); if (S.payload) paintMacro(S.payload); });
+  }
 
   const setModuleState = (hostEl, st, label) => {
     const card = hostEl && hostEl.closest(".fd-mod");
@@ -433,10 +458,11 @@
         h("span", { class: "fe-mname" }, h("i", { class: "fe-dot", style: { "--c": UI.cssVar(tag ? tag[1] : "--label-4") } }),
           h("b", null, tag ? tag[0] : String(m.event || DASH).replace(/\s*\((MoM|YoY|QoQ)\)/, "")), tag ? h("small", null, String(m.event || "")) : null),
         cell(m.forecastRaw, "No consensus forecast in the vendor calendar", { class: "fu-v fu-strong" }),
-        cell(m.prevRaw, "No prior reading in the vendor calendar", V));
+        cell(m.prevRaw, "No prior reading in the vendor calendar", V),
+        oddsOn() ? oddsCell(m) : null);
     });
     host.macro.replaceChildren(
-      h("div", { class: "fe-mrow fu-head", ...HIDE }, h("span", null, "When"), h("span", null, "Print"), h("span", V, "Forecast"), h("span", V, "Prior")),
+      h("div", { class: "fe-mrow fu-head", ...HIDE }, h("span", null, "When"), h("span", null, "Print"), h("span", V, "Forecast"), h("span", V, "Prior"), oddsOn() ? h("span", V, "Market price") : null),
       withList(UI.list(items, { visible: 7, label: "Economic prints after the close" })));
   }
 
@@ -751,6 +777,7 @@
     paintWeek(payload);
     paintEarnings(payload, true);
     paintMacro(payload);
+    loadOdds();
     paintFda(payload);
     paintReact(payload);
     wireInfos();

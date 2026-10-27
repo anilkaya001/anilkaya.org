@@ -233,6 +233,7 @@ export function showValue(v, unit, o = {}) {
     case "ratio": return plus + signed(v, Math.abs(v).toFixed(d ?? 2));
     case "x": return plus + signed(v, Math.abs(v).toFixed(d ?? 1)) + "x";
     case "index100": return Math.abs(v).toFixed(d ?? 1) + " of 100";
+    case "bp": return plus + signed(v, String(Math.abs(Math.round(v)))) + " bp";
     case "pctile": return Math.round(v) + "th percentile";
     case "sessions": return Math.round(v) + (Math.round(v) === 1 ? " session" : " sessions");
     case "days": return Math.round(v) + (Math.round(v) === 1 ? " day" : " days");
@@ -1320,6 +1321,8 @@ export function buildPositioningPacket(inp) {
   }, rec);
 }
 
+const PM_REFRESH_S = 30 * 86400;
+const PM_MAX_S = 60 * 86400;
 const dirWord = (v) => (!isNum(v) || v === 0 ? "flat" : v > 0 ? "bullish premium" : "bearish premium");
 
 const lastOf = (a) => (Array.isArray(a) && a.length ? a[a.length - 1] : null);
@@ -1485,6 +1488,20 @@ export function buildPeersPacket(inp) {
     const curve = arr(iv.x.tenors).filter((e) => Array.isArray(e) && isNum(e[0]) && isNum(e[1])).slice(0, 8);
     if (curve.length > 1) rec.fact("ivp.curve", "Implied volatility percentile of its own past year, by tenor (vendor)", curve.map((e) => e[0] + "d " + Math.round(e[1])).join(", "), "text", { grade: g, silent: true });
   }
+  const pm = h.cardX && isObj(h.cardX.pm) ? h.cardX.pm : null;
+  if (pm && xGapP < 2) {
+    const age = isNum(pm.at) && isNum(ctx.now) ? (ctx.now - pm.at) / 1000 : null;
+    const pg = age === null || age > PM_MAX_S ? 0 : age <= PM_REFRESH_S ? 2 : 1;
+    if (pg === 0) rec.hold("pm", why("expired", "the private-markets section is older than its maximum age"));
+    else if (pm.match && isObj(pm.match)) {
+      if (!parts.some((q) => q.key === "card-x:" + ctx.ticker)) parts.push({ kind: "nightly", key: "card-x:" + ctx.ticker });
+      rec.fact("pm.investor", "Disclosed investor in private companies", pm.match.companyCount, "count", { grade: pg, note: "the feed's count of private companies this firm is listed as an investor in" });
+      const names = arr(pm.match.companies).filter((e) => Array.isArray(e) && typeof e[1] === "string").slice(0, 5).map((e) => cleanLabel(e[1], 60)).filter(Boolean);
+      if (names.length) rec.fact("pm.peers", "Private companies it is listed as investing in", names.join(", "), "text", { grade: pg, silent: true, note: "names only; ordered as the feed lists them" });
+    } else {
+      rec.hold("pm", why(pm.why === "plan" ? "plan" : pm.why === "none" ? "empty" : "absent", pm.why === "plan" ? "the private-markets route needs a feed plan the site does not hold" : "this name is not listed as a disclosed private-markets investor"));
+    }
+  }
   const etf = h.sectorEtf && isObj(h.sectorEtf) ? h.sectorEtf : null;
   let asOf = null;
   if (etf) {
@@ -1545,6 +1562,24 @@ export function buildMacroPacket(inp) {
     rec.hold("regime", why("expired", "the regime payload describes " + rg.sessionDate));
   } else {
     rec.hold("regime", why("absent", "no regime payload is held"));
+  }
+  const mc = h.macro && isObj(h.macro) ? h.macro : null;
+  if (mc) {
+    const mgap = behindBy(mc.sessionDate, ctx.expected);
+    if (mgap < 2) {
+      const mg = gradeBySession(mgap);
+      parts.push({ kind: "nightly", key: "macro" });
+      if (isNum(mc.s2s10)) rec.fact("rates.s2s10", "Ten-year less two-year Treasury yield", mc.s2s10, "bp", { signed: true, grade: mg, note: "basis points, from one date's yields" });
+      const ten = Array.isArray(mc.ten) && isNum(mc.ten[1]) ? mc.ten[1] : null;
+      if (ten !== null) rec.fact("rates.10y", "Ten-year Treasury yield", ten, "pct", { grade: mg, digits: 2 });
+      if (isObj(mc.breadth) && isNum(mc.breadth.up) && isNum(mc.breadth.n) && mc.breadth.n > 0) rec.fact("fx.breadth", "Majors the dollar rose against over the last day", mc.breadth.up + " of " + mc.breadth.n, "text", { grade: mg, silent: true, note: "a count of seven pairs, not an index" });
+      if (isNum(mc.es)) rec.fact("futures.ES.chg1", "S&P 500 futures, one-day change", mc.es, "fraction", { signed: true, grade: mg, silent: true });
+      if (isNum(mc.btc)) rec.fact("crypto.BTC.chg1", "Bitcoin, one-day change", mc.btc, "fraction", { signed: true, grade: mg, silent: true });
+      const next = arr(mc.events).find((e) => isNum(e.price));
+      if (next) rec.fact("odds.next", "Prediction-market price for the next matched release", Math.round(next.price * 100) + "% for " + cleanLabel(next.event, 60), "text", { grade: next.thin === true ? Math.min(mg, 1) : mg, silent: true, note: "the market's number, not a forecast" });
+    } else {
+      rec.hold("macro", why("expired", "the macro board describes " + mc.sessionDate));
+    }
   }
   return build("macro", inp, {
     title: "Market backdrop", source: parts.some((p) => p.kind === "live") ? liveSource("live:market", parts) : nightlySource("regime", parts),

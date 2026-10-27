@@ -13,7 +13,7 @@ const { HttpError, redirect, requireMethod } = K;
 const STUB = { currentFlowsUser: async () => null, readFlowsSummary: async () => null, isOwner: () => false };
 const table = createRouter(flowsPageRows(STUB));
 
-const SLUGS = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "unusual", "ledger", "events", "political", "status"];
+const SLUGS = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "unusual", "ledger", "macro", "events", "political", "status"];
 eq(FLOWS_PAGE_SLUGS, SLUGS, "the page list is the gated pages in their old order, the Network and Flagged now pop-outs after Market and the owner-gated moves page before unusual");
 eq(FLOWS_PUBLIC_SLUGS, ["about", "glossary"], "and the public front door is the two pages a signed-out reader gets");
 const expectedPaths = ["/flows", "/flows/login/"];
@@ -73,6 +73,7 @@ function oldChain(path, rc, d) {
       "/flows/moves/": (u) => FLOWS_PAGES.movesPage({ username: u }),
       "/flows/unusual/": (u, summary, owner) => FLOWS_PAGES.unusualPage({ username: u, owner }),
       "/flows/ledger/": (u) => FLOWS_PAGES.ledgerPage({ username: u }),
+      "/flows/macro/": (u) => FLOWS_PAGES.macroPage({ username: u }),
       "/flows/events/": (u) => FLOWS_PAGES.eventsPage({ username: u }),
       "/flows/political/": (u) => FLOWS_PAGES.politicalPage({ username: u }),
       "/flows/status/": (u) => FLOWS_PAGES.statusPage({ username: u }),
@@ -85,6 +86,7 @@ function oldChain(path, rc, d) {
         const mode = String(env[gateOf] || "owner").trim().toLowerCase();
         if (mode === "off" || (mode !== "on" && !d.isOwner(env, session.username))) throw HttpError.of("not_found");
       }
+      if (session && path === "/flows/macro/") { d.isOwner(env, session.username); throw HttpError.of("not_found"); }
       const summary = session && path === "/flows/" ? await d.readFlowsSummary(env, "board") : null;
       const owner = session ? d.isOwner(env, session.username) : false;
       if (session && path === "/flows/status/" && !owner) throw new HttpError(404, "not_found", "Not found");
@@ -95,7 +97,7 @@ function oldChain(path, rc, d) {
     if (path === "/flows/long" || path === "/flows/short" || path === "/flows/desk"
         || path === "/flows/watch"
         || path === "/flows/market" || path === "/flows/network" || path === "/flows/now" || path === "/flows/ticker"
-        || path === "/flows/moves" || path === "/flows/unusual" || path === "/flows/ledger" || path === "/flows/events"
+        || path === "/flows/moves" || path === "/flows/unusual" || path === "/flows/ledger" || path === "/flows/macro" || path === "/flows/events"
         || path === "/flows/political"
         || path === "/flows/strategy"
         || path === "/flows/status" || path === "/flows/about" || path === "/flows/glossary") {
@@ -210,11 +212,11 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
   eq(await gate({ username: "anilkaya" }), [200, "page"], "the Status page is served to an owner");
   eq(await gate({ username: "member<x>" }), [404, "not_found"], "a signed-in member who is not an owner gets the unknown-page 404");
   eq(await gate(null), [200, "login"], "and an anonymous visitor gets the sign-in page like every gated page");
-  const SIDEBAR_PAGES = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "unusual", "ledger", "events", "political", "status"];
+  const SIDEBAR_PAGES = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "unusual", "ledger", "macro", "events", "political", "status"];
   for (const slug of SIDEBAR_PAGES) {
     const path = "/flows/" + (slug ? slug + "/" : "");
-    const env = { FLOWS_MOVES: "on", FLOWS_LEDGER: "on" };
-    const call = (deps) => createRouter(flowsPageRows(deps)).find(path).handler({ ...rc(path), env }).then((r) => r.text());
+    const env = { FLOWS_MOVES: "on", FLOWS_LEDGER: "on", FLOWS_MACRO: "on" };
+    const call = (deps) => createRouter(flowsPageRows({ ...deps, macroOn: (e) => e.FLOWS_MACRO === "on" })).find(path).handler({ ...rc(path), env }).then((r) => r.text());
     const asOwner = await call(scenario({ username: "anilkaya" }).deps);
     if (slug === "status") {
       ok(asOwner.includes('id="railOps"') && asOwner.split('id="railOps"').length === 2, "the status page carries the Operations group once");
@@ -245,7 +247,25 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
   eq(await ledgerAs({ username: "anilkaya" }, { FLOWS_LEDGER: "off" }), [404, "not_found"], "off closes it to the owner too");
   eq(await ledgerAs({ username: "member<x>" }, { FLOWS_LEDGER: "members" }), [404, "not_found"], "a value that is not on, off or owner fails closed for a member");
   eq(await ledgerAs(null, {}), [200, "login"], "and an anonymous visitor is answered with the sign-in page whatever the switch says");
+  const macroAs = async (user, env, deps = {}) => {
+    const sc = scenario(user);
+    const t = createRouter(flowsPageRows({ ...sc.deps, macroOn: (e, owner) => { const m = String(e.FLOWS_MACRO || "").trim().toLowerCase(); return m === "on" || (m === "owner" && owner === true); }, ...deps }));
+    try {
+      const res = await t.find("/flows/macro/").handler({ ...rc("/flows/macro/"), env });
+      return [res.status, (await res.text()) === FLOWS_PAGES.loginPage() ? "login" : "page"];
+    } catch (e) {
+      return [e.status, e.code];
+    }
+  };
+  eq(await macroAs({ username: "member<x>" }, { FLOWS_MACRO: "owner" }), [404, "not_found"], "the Macro page is closed to a member while FLOWS_MACRO is owner");
+  eq(await macroAs({ username: "anilkaya" }, { FLOWS_MACRO: "owner" }), [200, "page"], "and open to an owner");
+  eq(await macroAs({ username: "member<x>" }, { FLOWS_MACRO: "on" }), [200, "page"], "on opens it to a member");
+  eq(await macroAs({ username: "anilkaya" }, { FLOWS_MACRO: "off" }), [404, "not_found"], "off closes it to the owner too");
+  eq(await macroAs({ username: "anilkaya" }, {}), [404, "not_found"], "an unset switch is off");
+  eq(await macroAs({ username: "member<x>" }, { FLOWS_MACRO: "members" }), [404, "not_found"], "a value that is not on, off or owner fails closed");
+  eq(await macroAs(null, {}), [200, "login"], "an anonymous visitor is answered with the sign-in page whatever the switch says");
   const wrangler = (await import("node:fs")).readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
+  ok(/^FLOWS_MACRO = "owner"$/m.test(wrangler) && /^FLOWS_MACRO_LIVE = "owner"$/m.test(wrangler), "wrangler.toml ships both Macro switches at owner");
   ok(/^FLOWS_LEDGER = "owner"$/m.test(wrangler), "wrangler.toml ships the switch at owner: the page is the owner's until the production checks pass and the value is changed to on");
   const bare = await router.find("/flows/political").handler(rc("/flows/political"));
   eq([bare.status, bare.headers.get("Location")], [308, "https://anilkaya.org/flows/political/"], "a bare page path is a 308 to its slash form");
@@ -259,7 +279,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     absent(text, new RegExp('path === "' + p.replace(/[-/]/g, "\\$&") + '"'), { anchor: /path === "\/flows\/login"/, why: p + " is a table row and no longer a branch of the chain" });
   }
   absent(text, /\bFLOWS_ROUTES\b|\bFLOWS_READER_FROM\b/, { anchor: /path === "\/flows\/logout"/, why: "the page table moved out of the Worker" });
-  absent(text, /FLOWS_PAGES\.(overviewPage|sidePage|watchPage|marketPage|networkPage|nowPage|deskPage|strategyPage|tickerPage|unusualPage|movesPage|ledgerPage|eventsPage|politicalPage|statusPage)/, { anchor: /FLOWS_PAGES\.loginPage\(/, why: "the Worker renders only the sign-in page itself" });
+  absent(text, /FLOWS_PAGES\.(overviewPage|sidePage|watchPage|marketPage|networkPage|nowPage|deskPage|strategyPage|tickerPage|unusualPage|movesPage|ledgerPage|macroPage|eventsPage|politicalPage|statusPage)/, { anchor: /FLOWS_PAGES\.loginPage\(/, why: "the Worker renders only the sign-in page itself" });
   const src = moduleSource("server/routes/flows-pages.js");
   ok(!/from "\.\.\/\.\.\/worker\.js"|cloudflare:|\bfetch\(|\benv\.DB\b/.test(src), "the family imports neither the Worker nor the platform and reads no store: the session and the summary are injected");
   ok(!/\bsetCookie\b|Set-Cookie|\.json\(/.test(src), "and sets no cookie and answers no JSON");

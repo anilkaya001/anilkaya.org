@@ -77,6 +77,8 @@ tag = "v1"
 new_sqlite_classes = ["Pulse"]
 
 [vars]
+FLOWS_MACRO = "on"
+FLOWS_MACRO_LIVE = "off"
 FLOWS_SESSION_EPOCH = "1"
 FLOWS_READ_MODE = "off"
 FLOWS_LIVE_MODE = "off"
