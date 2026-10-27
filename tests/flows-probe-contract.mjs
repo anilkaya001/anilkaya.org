@@ -44,9 +44,9 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
     if (opTier.has(p.op)) eq(opTier.get(p.op), p.tier, `${p.op} carries one tier across its probes`);
     opTier.set(p.op, p.tier);
   }
-  eq(byTier.used.size, 79, "every one of the 79 operations a production call site reads is probed and labelled used: the 38 labelled before, the 37 the nightly legs read that were still filed under Tiers 1 and 2, the unusual-activity leg's one, and the four the extras leg reads (dividends, splits, interpolated implied volatility, ETF exposure), less the VIX term structure the nightly no longer calls");
+  eq(byTier.used.size, 95, "every one of the 95 operations a production call site reads over REST is probed and labelled used: the 79 before, the sixteen the event-risk package reads (the quote moved up from Tier 2), less none");
   eq(byTier["1"].size, 2, "the Tier 1 operation of the adoption plan that no code reads yet is probed, and the VIX term structure, which the nightly dropped and this probe keeps watching for the add-on");
-  eq(byTier["2"].size, 11, "the two Tier 2 operations no code reads yet are probed, plus the nine entitlement probes (the trade-stance ranking joined them), and Tier 3 is left out");
+  eq(byTier["2"].size, 10, "the one Tier 2 operation no code reads yet is probed, plus the nine entitlement probes (the trade-stance ranking joined them), and Tier 3 is left out");
   for (const [op, names] of Object.entries(list.expect)) {
     eq(new Set(names).size, names.length, `${op}: the documented names are listed once each`);
   }
@@ -128,12 +128,13 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
   eq(ids.size, OPS.length, "every registry id is unique");
   deep(bad.filter(([, id]) => !ids.has(id)), [], "and every id a call site names is in the registry");
   const registered = new Set(OPS.map((e) => e.op));
+  const restRegistered = new Set(OPS.filter((e) => e.envelope !== null).map((e) => e.op));
   const tierOf = new Map(list.probes.map((p) => [p.op, p.tier]));
-  deep([...registered].filter((op) => tierOf.get(op) !== "used"), [], "USED IS TRUE: every registered operation has a probe labelled used");
-  deep(listOps.filter((op) => tierOf.get(op) === "used" && !registered.has(op)), [],
+  deep([...restRegistered].filter((op) => tierOf.get(op) !== "used"), [], "USED IS TRUE: every registered operation has a probe labelled used");
+  deep(listOps.filter((op) => tierOf.get(op) === "used" && !restRegistered.has(op)), [],
     "and no operation is labelled used that the registry does not carry");
-  eq(registered.size, 79, "79 operations are registered and read in production");
-  eq(OPS.length, 79, "one entry for each");
+  eq(registered.size, 96, "96 operations are registered: the 95 read over REST and the halt channel's socket path");
+  eq(OPS.length, 97, "one entry for each, the listings path carrying two for its active and delisted reads");
   const dossierIds = new Set([...Object.values(DOSSIER_OPS), ...SOURCES.map((s) => s.op)]);
   const read = new Set([...refs.keys(), ...dossierIds]);
   deep(OPS.filter((e) => !read.has(e.id)).map((e) => e.id), [], "READ IS TRUE: every registered id is named by a production call site or a dossier source");
@@ -147,12 +148,13 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
     heads.forEach((m, i) => blocks.set(m[1], specText.slice(m.index, i + 1 < heads.length ? heads[i + 1].index : specText.length)));
   }
   for (const e of OPS) {
-    ok(e.path.startsWith("/api/") && e.method === "GET" && e.envelope === "data", `${e.id}: a GET under /api/ with the data envelope`);
+    ok(e.path.startsWith("/api/") && e.method === "GET" && (e.envelope === "data" || (e.envelope === null && e.liveOnly === true && e.path.startsWith("/api/socket/"))), `${e.id}: a GET under /api/ with the data envelope`);
     ok(LICENCES.includes(e.licence) && PLANS.includes(e.plan) && Object.hasOwn(PACKET_CLASSES, e.klass), `${e.id}: licence, plan and freshness class come from the declared sets`);
     ok(e.limiter === null || LIMITERS.includes(e.limiter), `${e.id}: exactly one limiter class (${e.limiter})`);
     ok(e.maxBytes === null || (Number.isInteger(e.maxBytes) && e.maxBytes > 0), `${e.id}: a byte cap is a positive integer or absent`);
     ok(e.reads === null || (Array.isArray(e.reads) && e.reads.length > 0 && new Set(e.reads).size === e.reads.length), `${e.id}: reads are absent or distinct names`);
     const inSpec = blocks.has(e.op);
+    if (e.envelope === null) { ok(inSpec, `${e.id}: the socket path is in the committed spec`); continue; }
     eq(e.liveOnly, !inSpec, `${e.id}: ${e.op} is liveOnly exactly when the committed spec lacks it`);
     if (inSpec) ok(specDigest.ops[`GET ${e.op}`] && !specDigest.ops[`GET ${e.op}`].deprecated, `${e.id}: ${e.op} is in the committed spec and not deprecated`);
     const tokens = (e.path.match(/\{[a-z_]+\}/g) || []);
@@ -161,7 +163,7 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
       `${e.id}: the call path only fixes template segments of its operation`);
     ok(tokens.every((t) => opTokens.includes(t)), `${e.id}: its path parameters are the operation's`);
   }
-  deep(list.liveOnly.filter((op) => registered.has(op)).sort(), OPS.filter((e) => e.liveOnly).map((e) => e.op).sort(),
+  deep(list.liveOnly.filter((op) => registered.has(op)).sort(), OPS.filter((e) => e.liveOnly && e.envelope !== null).map((e) => e.op).sort(),
     "the probe list's liveOnly and the registry's agree on every registered operation; the volatility context is probed and not yet read");
 
   const onDemandFiles = new Set(["worker.js", "shared/flows-live-worker.js"]);
