@@ -13,6 +13,9 @@ const PRECEDENCE = Object.freeze([
 ]);
 const RANK = new Uint8Array(REASONS.length);
 PRECEDENCE.forEach((r, i) => { RANK[CODE[r]] = i; });
+const SYMBOL_RE = /^[A-Z0-9.-]{1,10}$/;
+const OCC_MAX = 40;
+const SECTOR_OK = (s) => typeof s === "string" && s.length >= 1 && s.length <= 40 && !/[:|]/.test(s);
 const NAN = NaN;
 const TRUE = 1;
 const FALSE = 0;
@@ -65,13 +68,23 @@ export function prepare(snap) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(snap.session || "")) throw new TypeError("snapshot: session is YYYY-MM-DD");
   const symbols = Array.isArray(snap.symbols) ? snap.symbols : [];
   const n = symbols.length;
-  const sectorOf = Array.isArray(snap.sector) ? snap.sector : [];
+  const rawSector = Array.isArray(snap.sector) ? snap.sector : [];
+  const sectorOf = new Array(n);
   const symIdx = new Map();
   const bySector = new Map();
+  const good = [];
+  const badNames = [];
   for (let i = 0; i < n; i++) {
-    symIdx.set(symbols[i], i);
-    const s = sectorOf[i];
-    if (typeof s === "string" && s) {
+    const sym = symbols[i];
+    const s = rawSector[i];
+    sectorOf[i] = SECTOR_OK(s) ? s : null;
+    if (typeof sym !== "string" || !SYMBOL_RE.test(sym)) {
+      badNames.push(typeof sym === "string" ? sym.slice(0, 16) : "?");
+      continue;
+    }
+    good.push(i);
+    symIdx.set(sym, i);
+    if (sectorOf[i] !== null) {
       if (!bySector.has(s)) bySector.set(s, []);
       bySector.get(s).push(i);
     }
@@ -83,7 +96,7 @@ export function prepare(snap) {
     const r = rows[w];
     wsym[w] = r && symIdx.has(r.symbol) ? symIdx.get(r.symbol) : -1;
     try {
-      wkeys[w] = r && typeof r.occ === "string" && r.occ ? subjectKey("c", r.symbol, r.occ) : null;
+      wkeys[w] = r && typeof r.symbol === "string" && SYMBOL_RE.test(r.symbol) && typeof r.occ === "string" && r.occ.length <= OCC_MAX ? subjectKey("c", r.symbol, r.occ) : null;
     } catch {
       wkeys[w] = null;
     }
@@ -106,6 +119,8 @@ export function prepare(snap) {
     sectorOf,
     symIdx,
     bySector,
+    good: badNames.length ? Int32Array.from(good) : null,
+    badNames,
     win: { rows, count: rows.length, symIdx: wsym, keys: wkeys },
     sect,
     sectIdx,
@@ -257,7 +272,7 @@ function elementsOf(wire, P) {
     }
     return { els: Int32Array.from(out), absent, sig: null };
   }
-  if (scope.kind === "universe") return { els: null, count: P.n, absent, sig: "u" };
+  if (scope.kind === "universe") return { els: P.good, count: P.n, absent: P.badNames, sig: "u" };
   if (scope.kind === "sector") return { els: Int32Array.from(P.bySector.get(scope.sector) || []), absent, sig: "s:" + scope.sector };
   const out = [];
   for (const s of scope.symbols) {
@@ -434,12 +449,8 @@ function evidenceJson(e) {
   delete slim.sources;
   delete slim.wireSentence;
   text = canonicalJson(slim);
-  if (utf8Length(text) <= LIMITS.evidenceBytes) return text;
-  slim.clauses = slim.clauses.map((c) => ({ m: c.m, op: c.op, x: c.x, value: c.value, unit: c.unit, label: c.label.slice(0, 24), subject: c.subject, ok: c.ok }));
-  text = canonicalJson(slim);
-  if (utf8Length(text) <= LIMITS.evidenceBytes) return text;
-  for (const k of ["symbol", "sector", "occ", "subject"]) if (typeof slim[k] === "string") slim[k] = slim[k].slice(0, 64);
-  return canonicalJson(slim);
+  if (utf8Length(text) > LIMITS.evidenceBytes) throw new RangeError("evidence is over " + LIMITS.evidenceBytes + " bytes");
+  return text;
 }
 
 function newState(over) {
@@ -513,7 +524,18 @@ const changed = (row, next, live) => {
 };
 
 function capRank(a, b) {
-  return a.rankIn - b.rankIn || (a.hit.hit_id < b.hit.hit_id ? -1 : a.hit.hit_id > b.hit.hit_id ? 1 : 0);
+  return a.rankIn - b.rankIn || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+function makeHit(c, P, env) {
+  const { wire, info } = c;
+  return {
+    stream: wire.stream, hit_id: c.id, wire_id: wire.id, wire_version: wire.version, member_id: wire.memberId,
+    subject: c.subject, symbol: info.symbol, sector: info.sector, dedupe_key: c.dk, session: P.session,
+    session_label: sessionLabel(P.session, P.asOf), fired_at: P.now, data_as_of: P.asOf, evaluator: P.evaluator,
+    evaluator_version: P.evaluatorVersion, evidence_json: evidenceJson(evidenceFor(wire, P, c.el, c.j, c.sc, c.fam, info)),
+    state: env.hold || wire.switch === "hold" ? "held" : "delivered",
+  };
 }
 
 export function capHits(hits, capUsed = {}) {
@@ -524,19 +546,22 @@ export function capHits(hits, capUsed = {}) {
   };
   const byWire = new Map();
   for (const h of hits) {
-    if (!byWire.has(h.hit.wire_id)) byWire.set(h.hit.wire_id, []);
-    byWire.get(h.hit.wire_id).push(h);
+    if (!byWire.has(h.wire.id)) byWire.set(h.wire.id, []);
+    byWire.get(h.wire.id).push(h);
   }
   const kept = [];
   const capped = [];
   for (const [id, list] of byWire) {
-    list.sort((a, b) => b.rank - a.rank || (a.hit.subject < b.hit.subject ? -1 : a.hit.subject > b.hit.subject ? 1 : 0));
+    list.sort((a, b) => b.rank - a.rank || (a.subject < b.subject ? -1 : a.subject > b.subject ? 1 : 0));
     const w = list[0].wire;
     const cap = w.layer === "house" ? LIMITS.hitsPerHouseWirePerSession[w.cadence] : LIMITS.hitsPerMemberWirePerSession;
     const room = Math.max(0, cap - (used.wire.get(id) || 0));
     list.forEach((h, i) => {
       h.rankIn = i;
-      (i < room ? kept : capped).push(h);
+      if (i < room) {
+        h.id = hitId(h.wire.id, h.dk);
+        kept.push(h);
+      } else capped.push(h);
     });
   }
   const members = new Map();
@@ -624,20 +649,7 @@ function runWire(wire, P, env) {
       const inf = info || subjectInfo(wire, P, el);
       const dk = keyFor({ layer: wire.layer, subject: key, session: P.session, clauseHash: wire.clauseHash });
       if (env.existing.has(wire.id + "|" + dk)) r.dup++;
-      else {
-        out.hits.push({
-          wire,
-          rank: rankV,
-          rankIn: 0,
-          hit: {
-            stream: wire.stream, hit_id: hitId(wire.id, dk), wire_id: wire.id, wire_version: wire.version, member_id: wire.memberId,
-            subject: key, symbol: inf.symbol, sector: inf.sector, dedupe_key: dk, session: P.session,
-            session_label: sessionLabel(P.session, P.asOf), fired_at: P.now, data_as_of: P.asOf, evaluator: P.evaluator,
-            evaluator_version: P.evaluatorVersion, evidence_json: evidenceJson(evidenceFor(wire, P, el, j, sc, fam, inf)),
-            state: env.hold || wire.switch === "hold" ? "held" : "delivered",
-          },
-        });
-      }
+      else out.hits.push({ wire, rank: rankV, rankIn: 0, subject: key, dk, el, j, info: inf, sc, fam, id: null });
     }
     if (step.next === null) {
       if (row) out.deletes.push({ wire_id: wire.id, subject: key });
@@ -720,11 +732,25 @@ export function evaluate(snapshot, wires, options = {}) {
     }
   }
   const { kept, capped } = capHits(raw, options.capUsed);
+  const failed = new Set();
+  for (const h of kept) {
+    if (failed.has(h.wire.id)) continue;
+    try {
+      h.row = makeHit(h, P, env);
+    } catch (err) {
+      failed.add(h.wire.id);
+      errors.push({ wire_id: h.wire.id, error: String(err && err.message ? err.message : err).slice(0, 160) });
+    }
+  }
   const keptBy = new Map();
   const cappedBy = new Map();
-  for (const h of kept) keptBy.set(h.wire.id, (keptBy.get(h.wire.id) || 0) + 1);
+  for (const h of kept) if (!failed.has(h.wire.id)) keptBy.set(h.wire.id, (keptBy.get(h.wire.id) || 0) + 1);
   for (const h of capped) cappedBy.set(h.wire.id, (cappedBy.get(h.wire.id) || 0) + 1);
   for (const [id, { wire, out }] of perWire) {
+    if (failed.has(id)) {
+      receipts.push(notEvaluated(wire, P, "evaluator_error"));
+      continue;
+    }
     out.stat.hits = keptBy.get(id) || 0;
     out.stat.capped = cappedBy.get(id) || 0;
     receipts.push(receiptFor(wire, P, out.stat));
@@ -732,13 +758,13 @@ export function evaluate(snapshot, wires, options = {}) {
     deletes.push(...out.deletes);
   }
   const bySubject = (a, b) => (a.wire_id < b.wire_id ? -1 : a.wire_id > b.wire_id ? 1 : a.subject < b.subject ? -1 : a.subject > b.subject ? 1 : 0);
-  const hits = kept.map((h) => h.hit).sort((a, b) => bySubject(a, b));
+  const hits = kept.filter((h) => !failed.has(h.wire.id)).map((h) => h.row).sort((a, b) => bySubject(a, b));
   upserts.sort(bySubject);
   deletes.sort(bySubject);
   receipts.sort((a, b) => (a.wire_id < b.wire_id ? -1 : a.wire_id > b.wire_id ? 1 : a.version - b.version));
   return {
     hits,
-    capped: capped.map((h) => ({ wire_id: h.hit.wire_id, subject: h.hit.subject, hit_id: h.hit.hit_id })).sort(bySubject),
+    capped: capped.map((h) => ({ wire_id: h.wire.id, subject: h.subject })).sort(bySubject),
     receipts,
     state: { upserts, deletes },
     errors,

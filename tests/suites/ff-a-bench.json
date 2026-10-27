@@ -1,0 +1,1 @@
+{"name": "ff-a-bench", "class": "N", "group": "shard", "timing": true, "medianS": 130, "timeoutS": 600, "shard": 5, "command": "node --disable-warning=ExperimentalWarning ff-a-bench.mjs", "files": ["ff-a-bench.mjs"], "covers": []}

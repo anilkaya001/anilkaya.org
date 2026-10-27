@@ -1,4 +1,6 @@
+import { DatabaseSync } from "node:sqlite";
 import { METRICS } from "../../shared/ff-contract.js";
+import { FF_SCHEMA_SQL } from "../../shared/ff-schema.js";
 
 export const SECTORS = Object.freeze(["Technology", "Energy", "Utilities", "Financials", "Health Care", "Industrials"]);
 
@@ -22,7 +24,15 @@ export function snapshotOf(world, M) {
   };
 }
 
+const HIT_COLUMNS = "stream, seq, hit_id, wire_id, wire_version, member_id, subject, symbol, sector, dedupe_key, session, session_label, fired_at, data_as_of, evaluator, evaluator_version, evidence_json, state";
+const STATE_COLUMNS = "wire_id, subject, version, phase, cnt, last_session, cool_until, detector_json";
+const RECEIPT_COLUMNS = "wire_id, version, session, status, reason, looks, looks_expected, names_evaluated, names_absent, absent_json, hits, hits_capped, late, evaluated_at, run_id";
+
+const marks = (n) => Array.from({ length: n }, () => "?").join(", ");
+
 export class Store {
+  static mirror = false;
+
   constructor() {
     this.rows = new Map();
     this.hits = [];
@@ -32,6 +42,34 @@ export class Store {
     this.conflicts = 0;
     this.writes = 0;
     this.bySession = new Map();
+    this.db = null;
+    if (Store.mirror) {
+      this.db = new DatabaseSync(":memory:");
+      for (const statement of FF_SCHEMA_SQL) this.db.exec(statement);
+      this.seq = new Map();
+      this.insertHit = this.db.prepare(`INSERT INTO ff_hit (${HIT_COLUMNS}) VALUES (${marks(18)})`);
+      this.upsertState = this.db.prepare(`INSERT OR REPLACE INTO ff_state (${STATE_COLUMNS}) VALUES (${marks(8)})`);
+      this.deleteState = this.db.prepare("DELETE FROM ff_state WHERE wire_id = ? AND subject = ?");
+      this.upsertReceipt = this.db.prepare(`INSERT OR REPLACE INTO ff_receipt (${RECEIPT_COLUMNS}) VALUES (${marks(15)})`);
+    }
+  }
+
+  mirrorOut(result, merged) {
+    this.db.exec("BEGIN");
+    try {
+      for (const h of result.hits) {
+        const seq = (this.seq.get(h.stream) || 0) + 1;
+        this.seq.set(h.stream, seq);
+        this.insertHit.run(h.stream, seq, h.hit_id, h.wire_id, h.wire_version, h.member_id, h.subject, h.symbol, h.sector, h.dedupe_key, h.session, h.session_label, h.fired_at, h.data_as_of, h.evaluator, h.evaluator_version, h.evidence_json, h.state);
+      }
+      for (const d of result.state.deletes) this.deleteState.run(d.wire_id, d.subject);
+      for (const u of result.state.upserts) this.upsertState.run(u.wire_id, u.subject, u.version, u.phase, u.cnt, u.last_session, u.cool_until, u.detector_json);
+      for (const r of merged) this.upsertReceipt.run(r.wire_id, r.version, r.session, r.status, r.reason, r.looks, r.looks_expected, r.names_evaluated, r.names_absent, r.absent_json, r.hits, r.hits_capped, r.late, r.evaluated_at, r.run_id);
+      this.db.exec("COMMIT");
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
   }
 
   options(session, extra = {}) {
@@ -48,6 +86,8 @@ export class Store {
   }
 
   apply(result, snapshot) {
+    const accepted = [];
+    const merged = [];
     for (const h of result.hits) {
       const k = h.wire_id + "|" + h.dedupe_key;
       if (this.keys.has(k)) {
@@ -56,6 +96,7 @@ export class Store {
       }
       this.keys.add(k);
       this.hits.push(h);
+      accepted.push(h);
       this.writes++;
     }
     for (const d of result.state.deletes) {
@@ -71,9 +112,11 @@ export class Store {
       const prev = this.receipts.get(key);
       if (r.mode === "accumulate" && prev) this.receipts.set(key, { ...r, looks: prev.looks + 1, hits: prev.hits + r.hits, hits_capped: prev.hits_capped + r.hits_capped });
       else this.receipts.set(key, { ...r });
+      merged.push(this.receipts.get(key));
       if (r.status === "evaluated" && !this.firstLook.has(r.wire_id + "@" + r.version)) this.firstLook.set(r.wire_id + "@" + r.version, r.session);
       this.writes++;
     }
+    if (this.db) this.mirrorOut({ hits: accepted, state: result.state }, merged);
     return result;
   }
 

@@ -131,6 +131,9 @@ function hVectors(M, R) {
   };
   const fire = S.robustZ({ x: 1444700, baseline: zBase, floor });
   const quiet = S.robustZ({ x: 1443900, baseline: zBase, floor });
+  R.near(fire.z, 2.99946, 5e-6, "H1 x = $1.4447M gives z = 2.99946");
+  R.near(quiet.z, 2.99406, 5e-6, "H1 x = $1.4439M gives z = 2.99406");
+  R.eq([fire.zq, quiet.zq], [3, 2.99], "H1 shown 3.00 and 2.99");
   const a = oneName(fire.z);
   const b = oneName(quiet.z);
   R.eq([a.hits.length, b.hits.length], [1, 0], "H1 the displayed 3.00 fires and the displayed 2.99 does not");
@@ -433,11 +436,19 @@ function receiptShape(M, R) {
   R.eq(Object.values(parsed).reduce((n, v) => n + v.n, 0), 800, "and never drops a count");
   R.eq(Object.keys(parsed).length, 10, "ten reasons");
   R.ok(Object.values(parsed).every((v) => v.sample.length === 5), "five names kept for each");
-  const longs = big.map((s) => s + "X".repeat(50));
-  const lr = new Store().run(M, snapshotOf({ kind: "nightly", session: "2026-03-09", symbols: longs, cols: { [Z]: cols }, n: { [Z]: big.map(() => 20) }, why: { [Z]: why } }, M), [wire]).receipts[0];
+  const reasons12 = ["stale", "missing", "thin", "warming", "out_of_range", "not_carded", "not_in_live_set", "record_truncated", "event_inside_window", "sector_coverage", "short_history", "unit_unverified"];
+  const sectorNames = Array.from({ length: 60 }, (_, i) => "S" + String(i).padStart(2, "0") + "x".repeat(37));
+  const sectorWhy = {};
+  sectorNames.forEach((_, i) => {
+    const r = reasons12[i % 12];
+    (sectorWhy[r] || (sectorWhy[r] = [])).push(i);
+  });
+  const sw = wireOf(M, { id: "w-aaaaaaaaaaaaaaaa", body: bodyOf("nightly", [{ m: "sector.breadth_pos", op: ">=", x: 0.6 }]) });
+  const sectorSnap = snapshotOf({ kind: "nightly", session: "2026-03-09", symbols: [], sectors: { names: sectorNames, cols: { "sector.breadth_pos": sectorNames.map(() => null) }, why: { "sector.breadth_pos": sectorWhy } } }, M);
+  const lr = new Store().run(M, sectorSnap, [sw]).receipts[0];
   const lp = JSON.parse(lr.absent_json);
-  R.ok(lr.absent_json.length <= 2048, "with names too long for samples the histogram still fits 2 KiB: " + lr.absent_json.length);
-  R.eq([Object.values(lp).reduce((n, v) => n + v.n, 0), Object.values(lp).some((v) => "sample" in v)], [800, false], "the samples go first and no count is lost");
+  R.ok(lr.absent_json.length <= 2048, "with twelve reasons and sector names of forty characters the histogram still fits 2 KiB: " + lr.absent_json.length);
+  R.eq([Object.keys(lp).length, Object.values(lp).reduce((n, v) => n + v.n, 0), Object.values(lp).some((v) => "sample" in v)], [12, 60, false], "the samples go first and no count is lost");
   const two = bodyOf("nightly", [{ m: Z, op: ">=", x: 3 }, { m: CHG, op: ">=", x: 3 }]);
   const tw = wireOf(M, { id: "w-aaaaaaaaaaaaaaaa", body: two });
   const t2 = new Store().run(M, snapshotOf({
@@ -520,14 +531,15 @@ function evidenceAndReplay(M, R) {
   R.eq(ev.clauses.length, 8, "all eight clauses are in it");
   R.eq(M.engine.replayDecision(ev), { ok: true, reasons: [] }, "re-evaluating the frozen clause values reproduces the decision");
   const bytes = (s) => new TextEncoder().encode(s).length;
-  const withSector = (len) => new Store().run(M, snapshotOf({ kind: "nightly", session: "2026-03-09", symbols: ["SYA000", "SYB001"], cols, n, floored: { [Z]: [1, 0] }, sectorOf: ["S".repeat(len), "T"] }, M), [wire]).hits[0].evidence_json;
-  const l1 = withSector(2300);
-  R.ok(bytes(l1) <= 4096 && !("sources" in JSON.parse(l1)) && !("wireSentence" in JSON.parse(l1)), "an oversize record drops its sources and sentence first: " + bytes(l1));
-  const l2 = withSector(2600);
-  R.ok(bytes(l2) <= 4096 && !("floored" in JSON.parse(l2).clauses[0]), "then shortens its clauses: " + bytes(l2));
-  const l3 = withSector(5000);
-  R.ok(bytes(l3) <= 4096 && JSON.parse(l3).sector.length === 64, "and as a last resort cuts a name that is far too long, so the row never breaks its length check: " + bytes(l3));
-  R.eq(M.sentence.renderHit(JSON.parse(l3)).rows.length, 8, "a slimmed record still renders");
+  R.ok(bytes(text) > 1500 && bytes(text) < 2500, "eight clauses with their sentence and sources are about 2 KiB: " + bytes(text));
+  const wordy = wireOf(M, { id: "w-aaaaaaaaaaaaaaaa", body: eight, over: { sentence: "x".repeat(3700) } });
+  const slim = new Store().run(M, snap, [wordy]).hits[0].evidence_json;
+  R.ok(bytes(slim) <= 4096 && !("sources" in JSON.parse(slim)) && !("wireSentence" in JSON.parse(slim)), "an oversize record drops its sources and sentence: " + bytes(slim));
+  R.eq(M.sentence.renderHit(JSON.parse(slim)).rows.length, 8, "and still renders");
+  const hostile = { ...wire, clauses: wire.clauses.map((c) => ({ ...c, label: "L".repeat(600) })) };
+  const steady = wireOf(M, { id: "w-bbbbbbbbbbbbbbbb", body: bodyOf("nightly", [{ m: Z, op: ">=", x: 3 }], { scope: { kind: "names", symbols: ["SYA000"] } }) });
+  const refused = new Store().run(M, snap, [hostile, steady]);
+  R.eq([refused.errors.map((e) => e.wire_id), refused.receipts.find((r) => r.wire_id === wire.id).reason, refused.state.upserts.some((u) => u.wire_id === wire.id), refused.hits.map((h) => h.wire_id)], [[wire.id], "evaluator_error", false, ["w-bbbbbbbbbbbbbbbb"]], "a record that cannot fit costs that wire its night, loudly, with no state moved, and no other wire");
   const bad = clone(ev);
   bad.clauses[0].value = 2.5;
   R.eq(M.engine.replayDecision(bad), { ok: false, reasons: [Z] }, "a changed value fails the replay");
@@ -606,8 +618,11 @@ function windowScenarios(M, R) {
   R.eq([s2.hits.length, stays.hits.length], [1, 0], "a contract that is still TRUE in one window next night is still firing");
   const exits = s2.run(M, snapW("2026-03-11", [{ premium: 100 }, { premium: 200 }]), [wire()]);
   R.eq([exits.state.deletes.length, s2.rows.size], [1, 0], "it exits only when every window is FALSE");
-  const bad = new Store().run(M, snapW("2026-03-09", [{ premium: 1500000 }, { premium: 1500000, k: 1, extra: { occ: "" } }, { premium: 1500000, k: 2, extra: { occ: "A:B" } }]), [wire()]);
-  R.eq([bad.hits.length, bad.receipts[0].names_evaluated, bad.receipts[0].names_absent], [1, 1, 2], "a window with no usable contract id is absent, never a hit");
+  const bad = new Store().run(M, snapW("2026-03-09", [
+    { premium: 1500000 }, { premium: 1500000, k: 1, extra: { occ: "" } }, { premium: 1500000, k: 2, extra: { occ: "A:B" } },
+    { premium: 1500000, k: 3, extra: { occ: "O".repeat(41) } }, { premium: 1500000, k: 4, extra: { symbol: "bad sym" } },
+  ]), [wire()]);
+  R.eq([bad.hits.length, bad.receipts[0].names_evaluated, bad.receipts[0].names_absent], [1, 1, 4], "a window with no usable contract id or name is absent, never a hit");
   const wrong = new Store().run(M, snapW("2026-03-09", [{ premium: 1500000 }]), [windowWire(M, { cadence: "nightly", id: "w-bbbbbbbbbbbbbbbb", scope: { kind: "names", symbols: ["SYB001"] }, over: { cooldown: { unit: "session", n: 1 } } })]);
   R.eq([wrong.hits.length, wrong.receipts[0].names_evaluated], [0, 0], "a names scope filters the windows");
   const sector = new Store().run(M, snapW("2026-03-09", [{ premium: 1500000 }]), [windowWire(M, { cadence: "nightly", id: "w-bbbbbbbbbbbbbbbb", scope: { kind: "sector", sector: SECTORS[0] }, over: { cooldown: { unit: "session", n: 1 } } })]);
@@ -776,6 +791,26 @@ function modeScenarios(M, R) {
   R.eq(lr.hits[0].dedupe_key, "c:SYA000:" + occOf("SYA000", 0) + ":2026-03-09:" + live2.clauseHash, "its dedupe key");
 }
 
+function unusableNames(M, R) {
+  const symbols = ["SYA000", "bad sym", "TOOLONGSYMBOL", "SYB001", "A:B", "SYC002"];
+  const sectors = ["Technology", "Y:Z", "Energy", "X".repeat(41), "Utilities", "Q|R"];
+  const wire = wireOf(M, { id: "w-aaaaaaaaaaaaaaaa", body: bodyOf("nightly", [{ m: Z, op: ">=", x: 3 }]) });
+  const snap = snapshotOf({ kind: "nightly", session: "2026-03-09", symbols, sectorOf: sectors, cols: { [Z]: symbols.map(() => 9) }, n: { [Z]: symbols.map(() => 20) } }, M);
+  const res = new Store().run(M, snap, [wire]);
+  R.eq(res.hits.map((h) => h.symbol), ["SYA000", "SYB001", "SYC002"], "a name that cannot be a ticker is never a hit");
+  R.eq(res.hits.map((h) => h.sector), ["Technology", null, null], "and a sector that cannot be stored (too long, or holding a separator) is none");
+  const rc = res.receipts[0];
+  R.eq([rc.names_evaluated, rc.names_absent, JSON.parse(rc.absent_json)], [3, 3, { not_carded: { n: 3, sample: ["A:B", "TOOLONGSYMBOL", "bad sym"] } }], "the unusable names are counted as not carded");
+  const energy = wireOf(M, { id: "w-bbbbbbbbbbbbbbbb", body: bodyOf("nightly", [{ m: Z, op: ">=", x: 3 }], { scope: { kind: "sector", sector: "Energy" } }) });
+  const er = new Store().run(M, snap, [energy]);
+  R.eq([er.hits.length, er.receipts[0].names_evaluated, er.receipts[0].status], [0, 0, "evaluated"], "a sector scope does not take a name whose symbol is unusable");
+  const named = wireOf(M, { id: "w-cccccccccccccccc", body: bodyOf("nightly", [{ m: Z, op: ">=", x: 3 }], { scope: { kind: "names", symbols: ["SYA000", "bad sym"] } }) });
+  const nr = new Store().run(M, snap, [named]);
+  R.eq([nr.hits.length, nr.receipts[0].names_absent], [1, 1], "nor a names scope");
+  const p = M.engine.preview(snap, wire);
+  R.eq([p.subjects, p.unknown, p.wouldHit], [6, 3, 3], "and the preview agrees");
+}
+
 function previewScenarios(M, R) {
   const symbols = symbolsOf(30);
   const wire = wireOf(M, { id: "w-aaaaaaaaaaaaaaaa", body: bodyOf("nightly", [{ m: CHG, op: ">=", x: 3 }]) });
@@ -797,6 +832,7 @@ function previewScenarios(M, R) {
 }
 
 async function battery(M, R) {
+  Store.mirror = R.heavy === true;
   vectorCases(M, R);
   diffNightly(M, R);
   diffLive(M, R);
@@ -814,6 +850,7 @@ async function battery(M, R) {
   stateEdgeScenarios(M, R);
   rerunScenarios(M, R);
   modeScenarios(M, R);
+  unusableNames(M, R);
   previewScenarios(M, R);
 }
 

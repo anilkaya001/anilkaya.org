@@ -32,8 +32,9 @@ export function recorder(heavy = true) {
   return api;
 }
 
-export async function runBattery(battery, overrides = null, heavy = true) {
+export async function runBattery(battery, overrides = null, heavy = true, only = null) {
   const R = recorder(heavy);
+  R.only = only;
   const mods = overrides ? await loadGraph(overrides) : await loadReal();
   try {
     await battery(mods, R);
@@ -52,9 +53,10 @@ export async function holdsAndPlants(label, battery, plants, log = console.log) 
   let caught = 0;
   const survivors = [];
   for (const p of plants) {
-    const r = await runBattery(battery, { [p.target]: p.transforms }, p.heavy === true);
+    const r = await runBattery(battery, p.overrides || { [p.target]: p.transforms }, p.heavy === true, p.only || null);
     if (r.fails.length) caught++;
     else survivors.push(p.name);
+    if (process.env.FF_A_VERBOSE) log(`  plant ${JSON.stringify(p.name)}: ${r.fails.length} of ${r.checks} checks fail${r.fails.length ? ", first: " + r.fails[0] : ""}`);
   }
   if (survivors.length) throw new Error(`${label}: planted wrong builds that no check caught: ${survivors.join("; ")}`);
   log(`${label}: ${real.checks} checks hold on the real modules; ${caught} of ${plants.length} planted wrong builds fail`);
