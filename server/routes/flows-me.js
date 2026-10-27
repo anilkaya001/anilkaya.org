@@ -25,7 +25,7 @@ const payloadOf = (map, key) => {
 };
 
 export function flowsMeRows(deps) {
-  const { store, flowsStore, readLiveRows, isOwner, now = Date.now } = deps;
+  const { store: memberStore, flowsStore, readLiveRows, isOwner, now = Date.now } = deps;
 
   const gate = async (ctx, { limiter, flag, write }) => {
     const { request, env, session } = ctx;
@@ -85,7 +85,7 @@ export function flowsMeRows(deps) {
 
   const getState = async (ctx) => {
     const id = await gate(ctx, { limiter: "MEMBER_STATE_READ", flag: "FLOWS_MEMBER_STATE", write: false });
-    const row = await store.read(ctx.env, id);
+    const row = await memberStore.read(ctx.env, id);
     if (row === undefined) throw HttpError.of("store_unreadable");
     return reply(await stateView(ctx.env, row, id));
   };
@@ -105,12 +105,12 @@ export function flowsMeRows(deps) {
     if (!toDevice && !toServer) throw HttpError.of("invalid_watchlist");
     const t = now();
     if (toServer && !secretUsable(env.MEMBER_STATE_KEY)) throw HttpError.of("member_state_unavailable");
-    const stored = await store.read(env, id);
+    const stored = await memberStore.read(env, id);
     if (stored === undefined) throw HttpError.of("store_unreadable");
     const view = await stateView(env, stored, id);
     if (view.unreadable && replaceUnreadable !== true) throw stored !== null && stored.version === expected ? HttpError.of("unreadable_row") : stale(stored);
     if (toDevice) {
-      const wrote = await store.put(env, id, { expected, kid: null, iv: null, ct: null, deviceOnly: true, now: t });
+      const wrote = await memberStore.put(env, id, { expected, kid: null, iv: null, ct: null, deviceOnly: true, now: t });
       if (wrote === undefined) throw HttpError.of("store_unreadable");
       if (!wrote.ok) throw stale(wrote.row);
       return reply(await stateView(env, wrote.row, id));
@@ -127,7 +127,7 @@ export function flowsMeRows(deps) {
       throw HttpError.of("invalid_watchlist", undefined, undefined, details);
     }
     const sealed = await seal(env.MEMBER_STATE_KEY, id, expected + 1, checked.names);
-    const wrote = await store.put(env, id, { expected, kid: sealed.kid, iv: sealed.iv, ct: sealed.ct, deviceOnly: false, now: t });
+    const wrote = await memberStore.put(env, id, { expected, kid: sealed.kid, iv: sealed.iv, ct: sealed.ct, deviceOnly: false, now: t });
     if (wrote === undefined) throw HttpError.of("store_unreadable");
     if (!wrote.ok) throw stale(wrote.row);
     return reply(await stateView(env, wrote.row, id));
@@ -135,7 +135,7 @@ export function flowsMeRows(deps) {
 
   const deleteState = async (ctx) => {
     const id = await gate(ctx, { limiter: "MEMBER_STATE_WRITE", flag: "FLOWS_MEMBER_STATE", write: true });
-    const removed = await store.remove(ctx.env, id, now());
+    const removed = await memberStore.remove(ctx.env, id, now());
     if (removed === undefined) throw HttpError.of("store_unreadable");
     return json({
       deleted: { state: removed.state },
@@ -150,7 +150,7 @@ export function flowsMeRows(deps) {
   const visit = async (ctx) => {
     const id = await gate(ctx, { limiter: "MEMBER_STATE_WRITE", flag: "FLOWS_MEMBER_STATE", write: true });
     const at = now();
-    const seen = await store.visit(ctx.env, id, at);
+    const seen = await memberStore.visit(ctx.env, id, at);
     if (seen === undefined) throw HttpError.of("store_unreadable");
     const row = seen.row;
     return json({
@@ -170,7 +170,7 @@ export function flowsMeRows(deps) {
   const since = async (ctx) => {
     const { env } = ctx;
     const id = await gate(ctx, { limiter: "MEMBER_STATE_READ", flag: "FLOWS_MEMBER_STATE", write: false });
-    const row = await store.read(env, id);
+    const row = await memberStore.read(env, id);
     if (row === undefined) throw HttpError.of("store_unreadable");
     const rows = await gather(env, ["universe", "scoretrack", "events", "flowalerts"]);
     const at = now();
@@ -195,10 +195,10 @@ export function flowsMeRows(deps) {
     const { env } = ctx;
     const id = await gate(ctx, { limiter: "MEMBER_STATE_READ", flag: "FLOWS_EXPORTS", write: false });
     const at = now();
-    const list = await store.listExports(env, id, at);
-    const used = await store.exportsInWindow(env, id, at);
+    const list = await memberStore.listExports(env, id, at);
+    const used = await memberStore.exportsInWindow(env, id, at);
     if (list === undefined || used === undefined) throw HttpError.of("store_unreadable");
-    const frees = used >= MEMBER_LIMITS.exportsPer24h ? await store.exportFrees(env, id, at, used, MEMBER_LIMITS.exportsPer24h) : null;
+    const frees = used >= MEMBER_LIMITS.exportsPer24h ? await memberStore.exportFrees(env, id, at, used, MEMBER_LIMITS.exportsPer24h) : null;
     return json({
       exports: list, retentionDays: MEMBER_LIMITS.exportLogDays,
       window: { used, cap: MEMBER_LIMITS.exportsPer24h, freesAtMs: frees },
@@ -207,7 +207,7 @@ export function flowsMeRows(deps) {
   };
 
   const limited = async (env, id, at, used) => {
-    const frees = await store.exportFrees(env, id, at, used, MEMBER_LIMITS.exportsPer24h);
+    const frees = await memberStore.exportFrees(env, id, at, used, MEMBER_LIMITS.exportsPer24h);
     const seconds = frees === null || frees === undefined ? MEMBER_PERIOD_S : Math.max(1, Math.ceil((frees - at) / 1000));
     return HttpError.of("export_limit", undefined, { "Retry-After": String(seconds) }, { freesAtMs: frees === undefined ? null : frees, serverNow: at });
   };
@@ -221,13 +221,13 @@ export function flowsMeRows(deps) {
     const hold = pageHold(body.page);
     if (hold !== null) throw HttpError.of("export_held", undefined, undefined, { hold: hold.reason });
     const at = now();
-    const used = await store.exportsInWindow(env, id, at);
+    const used = await memberStore.exportsInWindow(env, id, at);
     if (used === undefined) throw HttpError.of("store_unreadable");
     if (used >= MEMBER_LIMITS.exportsPer24h) throw await limited(env, id, at, used);
     const rows = await gather(env, EXPORT_SOURCES[body.page]);
     const sources = Object.fromEntries(EXPORT_SOURCES[body.page].map((key) => [key, payloadOf(rows, key)]));
     const built = buildExport(body.page, sources, { now: at, format: body.format });
-    const logged = await store.logExport(env, id, { page: body.page, rows: built.rows.length, cols: built.header, now: at, cap: MEMBER_LIMITS.exportsPer24h });
+    const logged = await memberStore.logExport(env, id, { page: body.page, rows: built.rows.length, cols: built.header, now: at, cap: MEMBER_LIMITS.exportsPer24h });
     if (logged === undefined) throw HttpError.of("store_unreadable");
     if (!logged) throw await limited(env, id, at, MEMBER_LIMITS.exportsPer24h);
     return new Response(built.body, {
