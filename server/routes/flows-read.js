@@ -1,5 +1,6 @@
 import { HttpError, json, requireTicker, internalKey, edgeCache } from "../http.js";
 import { projectionColumns, projectUniverse } from "../../shared/flows-cross.js";
+import { stripEr } from "./flows-eventrisk.js";
 import * as FLOWS_ASK from "../../shared/flows-ask.js";
 import * as FLOWS_LIVE from "../../shared/flows-live-worker.js";
 
@@ -36,7 +37,7 @@ const row = (name, handler) => ({ id: "flows." + name, path: "/api/flows/" + nam
 
 export function flowsReadRows(deps) {
   const { readServed, readFlowsPayload, readWithOverlay, passthrough, recallLastGood, storeGone, absentKey, cardWithEngine,
-    briefWithLive, briefFeedsAhead, nightlyFreshHeaders, splitEngineMark } = deps;
+    briefWithLive, briefFeedsAhead, nightlyFreshHeaders, splitEngineMark, erClosed } = deps;
 
   const nightly = (key, pending) => async ({ env }) => {
     const stored = await readServed(env, key);
@@ -113,6 +114,7 @@ export function flowsReadRows(deps) {
     const ticker = requireTicker(url);
     const stored = await readServed(env, kind + ":" + ticker);
     if (stored === null) return absentKey(env, ctx, kind, ticker, session);
+    if (kind === "card-x" && typeof erClosed === "function" && erClosed(env, session)) return passthrough(stripEr(stored));
     if (!stored.payload.includes(splitEngineMark)) return passthrough(stored);
     const trace = {};
     const merged = await cardWithEngine(env, ticker, stored, trace);

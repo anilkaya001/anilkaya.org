@@ -19,6 +19,7 @@ export const ERRORS = Object.freeze({
   fixture_payload: entry(422, "Fixture payloads are never stored"),
   fixture_ticker: entry(422, "Fixture ticker names are never stored"),
   coverage_off: entry(404, "The coverage view is off"),
+  eventrisk_off: entry(404, "The event-risk console is off"),
   forbidden: entry(403, "Forbidden"),
   internal_error: entry(500, "Internal server error"),
   hash_mismatch: entry(400, "The body does not match its X-Content-Hash"),

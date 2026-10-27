@@ -1063,7 +1063,11 @@ const feedHead = (key, title) => `
     <p class="fd-meta" id="${key}Meta"></p>
   </header>`;
 
-export function eventsPage({ username = "" } = {}) {
+const ER_TABS = Object.freeze([["week", "Week", "evWeekCard"], ["earn", "Earnings", "evEarnCard"], ["risk", "Risk", "erRiskCard"], ["macro", "Macro", "evMacroCard"], ["fda", "FDA", "evFdaCard"], ["issues", "New issues", "erIssuesCard"], ["policy", "Policy", "erPolicyCard"], ["halts", "Halts", "erHaltsCard"], ["react", "Reaction", "evReactCard"]]);
+
+const erSkeleton = (n, what) => `<p class="er-load" data-er-load>${what}</p>${Array.from({ length: n }, () => `<div class="er-sk" aria-hidden="true"><i></i><i></i><i></i></div>`).join("")}`;
+
+export function eventsPage({ username = "", eventrisk = false, halts = false } = {}) {
   return `${head("Flows — Events", "What reports next, what is priced into it, and what else is on the calendar.", FEEDS_CSS)}
 ${shell("Events", "events", username, `${feedHead("ev", "Events")}
   <p class="visually-hidden" id="evStatus" role="status">Loading the calendar…</p>
@@ -1076,15 +1080,20 @@ ${shell("Events", "events", username, `${feedHead("ev", "Events")}
     completed session&#39;s close. Nothing here is a forecast.</p>
   </div>
   <div class="fd-chips" id="evChips"></div>
-${feedTabs([["week", "Week", "evWeekCard"], ["earn", "Earnings", "evEarnCard"], ["macro", "Macro", "evMacroCard"], ["fda", "FDA", "evFdaCard"], ["react", "Reaction", "evReactCard"]])}
+${feedTabs(eventrisk ? ER_TABS : [["week", "Week", "evWeekCard"], ["earn", "Earnings", "evEarnCard"], ["macro", "Macro", "evMacroCard"], ["fda", "FDA", "evFdaCard"], ["react", "Reaction", "evReactCard"]])}
   <div class="fd-stage" id="fdStage" data-view="week">
 ${feedModule("evWeekCard", "Week ahead", `<div class="fd-body" id="evWeek"></div>`, { tab: "week" })}
-${feedModule("evEarnCard", "Earnings", `<div class="fd-body" id="evEarn"></div>`, { tab: "earn" })}
+${feedModule("evEarnCard", "Earnings", `<div class="fd-body" id="evEarn"></div>`, { tab: "earn" })}${eventrisk ? feedModule("erRiskCard", "Report risk", `<div class="fd-body er-body" id="erRisk">${erSkeleton(1, "Loading the event-risk read.")}</div>`, { tab: "risk" }) : ""}
 ${feedModule("evMacroCard", "Macro", `<div class="fd-body" id="evMacro"></div>`, { tab: "macro" })}
-${feedModule("evFdaCard", "FDA", `<div class="fd-body" id="evFda"></div>`, { tab: "fda" })}
+${feedModule("evFdaCard", "FDA", `<div class="fd-body" id="evFda"></div>`, { tab: "fda" })}${eventrisk ? `
+${feedModule("erIssuesCard", "New issues", `<div class="fd-body er-body" id="erIssues">${erSkeleton(1, "Loading the event-risk read.")}</div>`, { tab: "issues" })}
+${feedModule("erPolicyCard", "Policy calendar", `<div class="fd-body er-body" id="erPolicy">${erSkeleton(1, "Loading the event-risk read.")}</div>`, { tab: "policy" })}
+${feedModule("erHaltsCard", "Halts", `<div class="fd-body er-body" id="erHalts">${erSkeleton(1, "Loading the event-risk read.")}</div>`, { tab: "halts" })}` : ""}
 ${feedModule("evReactCard", "Reaction", `<div class="fd-body" id="evReact"></div>`, { tab: "react" })}
   </div>
-`, { chrome: false })}
+`, { chrome: false })}${eventrisk ? `
+<dialog class="er-sheet" id="erDrill" aria-labelledby="erDrillT"><div class="er-sheet-in"><header><h2 id="erDrillT">Detail</h2><button type="button" class="er-x" data-er-close>Close</button></header><div class="er-sheet-b" id="erDrillB"></div></div></dialog>
+<i hidden data-defer="er" data-src="${v("/assets/js/flows-er.js")}" data-css="${v("/assets/css/flows-er.css")}" id="erDefer" data-halts="${halts ? "on" : "off"}"></i>` : ""}
 ${UI_SCRIPT}
 <script src="${v("/assets/js/flows-feed-os.js")}" defer></script>
 <script src="${v("/assets/js/flows-events.js")}" defer></script>
