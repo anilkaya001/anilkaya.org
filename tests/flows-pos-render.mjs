@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { launch } from "./lib/browser.mjs";
 import { ROOT, SIZES, openPos, payload } from "./lib/pos-world.mjs";
+
+const require = createRequire(import.meta.url);
+const AXE = fs.readFileSync(require.resolve("axe-core/axe.min.js"), "utf8");
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -160,6 +164,130 @@ try {
     await ctx.close();
   }
 
+  const cssSrc = fs.readFileSync(path.join(ROOT, "assets/css/flows-pos.css"), "utf8");
+  ok(!/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|\boklch\(/.test(cssSrc), "THE SHEET HOLDS TOKENS ONLY: no colour literal in flows-pos.css");
+
+  const trtOf = (iso) => { const d = new Date(Date.parse(iso) + 3 * 3600e3); return String(d.getUTCHours()).padStart(2, "0") + ":" + String(d.getUTCMinutes()).padStart(2, "0"); };
+  const gappy = () => { const b = payload(); b.insiders.sectors[1].days = b.insiders.sectors[1].days.map((d, i) => (i < 3 ? [d[0], null, null] : d)); b.filings.rows[0].top[0].dv = null; return b; };
+  const scenario = async (o = {}) => {
+    const out = {};
+    const { ctx, page } = await openPos(browser, 1440, 820, o);
+    out.stamp = await page.evaluate(() => document.getElementById("posStamp").textContent);
+    out.info = await page.evaluate(() => document.getElementById("posInfoB").textContent);
+    await view(page, "insiders");
+    out.heatX = await page.evaluate(() => document.querySelectorAll(".pos-heatg .pos-hc[data-t=\"x\"]").length);
+    await view(page, "rotation");
+    out.chg = await page.evaluate(() => [...document.querySelectorAll("#posRot .pos-row")].map((r) => [r.dataset.s, r.querySelector(".chg").textContent]));
+    await view(page, "filings");
+    out.chips = await page.evaluate(() => [...document.querySelectorAll("#posFilCardB .pos-cp")].map((c) => ({ t: c.dataset.t, text: c.textContent, title: c.title })));
+    const chip = page.locator("#posFilCardB .pos-cp").first();
+    const label = await chip.getAttribute("data-t");
+    await chip.click();
+    await page.waitForSelector("#posDrill[open]");
+    await page.waitForTimeout(250);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(100);
+    out.focus = await page.evaluate(() => (document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.t : null));
+    out.label = label;
+    await view(page, "short");
+    out.legend = await page.evaluate(() => [...document.querySelectorAll(".pos-leg span")].map((x) => x.textContent));
+    await ctx.close();
+    return out;
+  };
+  const six = P.shorts.venues.mix.length > 6 ? 7 : P.shorts.venues.mix.length;
+  const clean = await scenario({ body: gappy() });
+  ok(clean.stamp.includes(trtOf(P.generatedAt) + " TRT") && !/\bUTC\b|\bET\b/.test(clean.stamp), `THE STAMP IS TÜRKİYE TIME: ${clean.stamp} for ${P.generatedAt}`);
+  ok(!/vendor|tape|unusual whales/i.test(clean.info), "the info dialog names no provider and never says vendor");
+  ok(clean.heatX > 0, `a missing insider date is drawn unread (${clean.heatX} cells), never as a quiet one`);
+  const dRows = clean.chg.filter((r) => r[1] !== "—");
+  ok(dRows.length > 3 && dRows.every((r) => /^[▲▼◆] /.test(r[1])), "every printed rotation change carries a triangle beside its sign, so colour is never the only channel");
+  const GB = gappy();
+  const noPrice = new Set(GB.filings.rows.flatMap((r) => (r.top || []).filter((c) => c.dv === null || c.dv === undefined).map((c) => c.t)));
+  const priced = new Set(GB.filings.rows.flatMap((r) => (r.top || []).filter((c) => c.dv !== null && c.dv !== undefined).map((c) => c.t)));
+  ok(noPrice.size > 0 && priced.size > 0, "the fixture has changes with a price and changes without one");
+  for (const c of clean.chips) {
+    if (c.title.startsWith("No price on the report date")) ok(/ sh$/.test(c.text) && !c.text.includes("$"), `a change with no price is in shares and carries no dollar sign: ${c.text}`);
+    else ok(c.text.includes("$") && !/ sh$/.test(c.text), `a priced change is in dollars: ${c.text}`);
+  }
+  eq(clean.focus, clean.label, "closing the drill returns focus to the chip");
+  eq(clean.legend.length, six, "the venue legend lists the six largest venues and Other venues, none dropped");
+
+  {
+    const behind = async (session, now) => {
+      const { ctx, page } = await openPos(browser, 1440, 820, { body: payload({ sessionDate: session }), now });
+      const t = await page.evaluate(() => ({ text: document.getElementById("posStamp").textContent, stale: document.getElementById("posStamp").dataset.stale || null }));
+      await ctx.close();
+      return t;
+    };
+    const holiday = await behind("2026-11-25", "2026-11-28T03:30:00Z");
+    eq(holiday.stale, null, "A PAYLOAD FROM THE WEDNESDAY BEFORE THANKSGIVING READ ON THE FRIDAY IS ONE SESSION BEHIND AND NOT STALE: " + holiday.text);
+    const old = await behind("2026-11-20", "2026-11-28T03:30:00Z");
+    eq([old.stale, old.text], ["1", "From the 2026-11-20 session"], "a payload four sessions behind is stale and names its session");
+  }
+
+  {
+    const { ctx, page } = await openPos(browser, 1440, 820, { drillFail: true });
+    await view(page, "filings");
+    await page.locator("#posFilCardB .pos-cp").first().click();
+    await page.waitForSelector("#posDrill[open]");
+    await page.waitForSelector("#posDrillB button");
+    const msg = await page.locator("#posDrillB").innerText();
+    ok(/did not answer/i.test(msg) && /Retry/.test(msg), "a failed drill read says the feed did not answer and offers Retry");
+    await page.locator("#posDrillB button").click();
+    await page.waitForTimeout(400);
+    const after = await page.locator("#posDrillB").innerText();
+    ok(!/did not answer/i.test(after) && after.length > 20, "Retry asks again and the drill fills");
+    await ctx.close();
+  }
+
+  for (const [w, h] of SIZES) {
+    const { ctx, page } = await openPos(browser, w, h);
+    for (const tab of TABS) {
+      await view(page, tab);
+      const text = await page.evaluate(() => document.querySelector("#pos").innerText);
+      ok(!/\b(EST|EDT|ET|UTC|GMT)\b/.test(text), `${w}x${h} ${tab}: no zone but Türkiye time is named`);
+      ok(!/\bnull\b|\bundefined\b|\bNaN\b|\[object/.test(text), `${w}x${h} ${tab}: no stray null, NaN or object in the text`);
+      const btn = page.locator(".pos-mod:not([inert]) .fd-all:visible").first();
+      if (await btn.count()) {
+        await btn.click();
+        await page.waitForSelector(".fd-dlg[open]");
+        const g = await page.evaluate(() => {
+          const d = document.querySelector(".fd-dlg[open]").getBoundingClientRect();
+          const de = document.documentElement;
+          return { in: d.left >= -1 && d.top >= -1 && d.right <= innerWidth + 1 && d.bottom <= innerHeight + 1, page: de.scrollHeight - innerHeight, side: de.scrollWidth - innerWidth, text: document.querySelector(".fd-dlg[open]").innerText };
+        });
+        eq([g.in, g.page <= 0, g.side <= 0], [true, true, true], `${w}x${h} ${tab}: the Show all dialog stays inside the screen and moves nothing`);
+        ok(!/\b(EST|EDT|ET|UTC|GMT)\b/.test(g.text) && !/vendor|tape/i.test(g.text), `${w}x${h} ${tab}: and its copy is clean`);
+        await page.keyboard.press("Escape");
+      }
+    }
+    await ctx.close();
+  }
+
+  for (const w of [390, 1440]) {
+    const { ctx, page } = await openPos(browser, w, w === 390 ? 844 : 820);
+    await page.evaluate(AXE);
+    for (const tab of TABS) {
+      await view(page, tab);
+      const n = await page.evaluate(async () => (await window.axe.run(document, { runOnly: { type: "rule", values: ["color-contrast", "button-name", "aria-valid-attr-value", "aria-required-children", "aria-required-parent", "label", "tabindex", "svg-img-alt", "heading-order", "link-name"] }, resultTypes: ["violations"] })).violations.map((v) => v.id + ":" + v.nodes.length));
+      eq(n, [], `axe finds no violation in ${tab} at ${w}`);
+    }
+    await ctx.close();
+  }
+
+  {
+    const { ctx, page } = await openPos(browser, 1440, 820, { context: { forcedColors: "active", reducedMotion: "reduce" } });
+    await view(page, "rotation");
+    const fills = await page.evaluate(() => [...document.querySelectorAll("#posRot svg rect.p, #posRot svg rect.m")].map((r) => getComputedStyle(r).fill));
+    ok(fills.length > 0 && new Set(fills).size === 1, `forced colours draw every bar in one system colour: ${[...new Set(fills)]}`);
+    await view(page, "insiders");
+    const cell = await page.evaluate(() => { const c = document.querySelector(".pos-hc[data-t]"); return getComputedStyle(c).outlineStyle; });
+    ok(cell !== "none", "and a heat cell keeps an outline of its own");
+    const moving = await page.evaluate(() => [...document.querySelectorAll("#pos *")].filter((e) => { const cs = getComputedStyle(e); return parseFloat(cs.transitionDuration) > 0 || parseFloat(cs.animationDuration) > 0; }).map((e) => e.tagName + "." + e.className + ":" + getComputedStyle(e).transitionDuration + "/" + getComputedStyle(e).animationName));
+    eq(moving, [], "under reduced motion nothing on the page transitions or animates");
+    await ctx.close();
+  }
+
   const Q = payload();
   Q.rotation.sectors[0].dW = null;
   Q.rotation.sectors[0].wNow = null;
@@ -200,8 +328,43 @@ try {
     ok(bad, "PLANTED WRONG BUILD FAILS: " + title);
     await ctx.close();
   }
+  const plantedMore = [
+    ["colour as the only sign channel", { js: [["chg.textContent = has ? shape(s.dW) + \" \" + fmtPts(s.dW, true) : DASH;", "chg.textContent = has ? fmtPts(s.dW, true) : DASH;"]] }],
+    ["a missing insider date drawn as a neutral cell", { js: [["if (b === null || s === null) return \"x\";", "if (b === null || s === null) return \"z\";"]] }],
+    ["a UTC stamp", { js: [["const built = UI.F.stamp ? UI.F.stamp(Date.parse(p.generatedAt)) : null;", "const built = new Date(p.generatedAt).toISOString().slice(11, 16) + \" UTC\";"]] }],
+    ["the word vendor in the info dialog", { html: [["from public filings the feed collects.", "from public filings the vendor collects."]] }],
+    ["the drill not returning focus", { js: [["if (f && f.isConnected) f.focus();", "if (f && f.isConnected && document.activeElement) document.activeElement.blur();"]] }],
+    ["a Filings chip in shares with a dollar sign", { js: [["shares(Math.abs(c.du)) + \" sh\";", "\"$\" + shares(Math.abs(c.du)) + \" sh\";"]] }],
+    ["the venue legend dropping small segments", { js: [["...(other > 0 ? [[\"Other venues\", other]] : [])", ""]] }],
+    ["the stage scrolling", { css: ".pos-hero { min-height: 1000px; }\n" }],
+    ["stale counted in weekdays", { js: [["return list.filter((d) => d > session && d <= expected).length;", "let n = 0; for (let t = Date.parse(session + \"T00:00:00Z\") + 864e5; t <= Date.parse(expected + \"T00:00:00Z\"); t += 864e5) { const w = new Date(t).getUTCDay(); if (w !== 0 && w !== 6) n++; } return n;"]] }],
+  ];
+  for (const [title, kind] of plantedMore) {
+    let js = sources, css, html;
+    for (const [from, to] of kind.js || []) { assert.equal(js.split(from).length - 1, 1, "plant target occurs once: " + title); js = js.replace(from, to); }
+    if (kind.css) css = cssSrc + kind.css;
+    if (kind.html) { html = (await import("./lib/pos-world.mjs")).html(); for (const [from, to] of kind.html) { assert.equal(html.split(from).length - 1, 1, "plant target occurs once: " + title); html = html.replace(from, to); } }
+    let bad = false;
+    if (title === "the stage scrolling") {
+      const { ctx, page } = await openPos(browser, 1024, 768, { css });
+      for (const tab of TABS) { await view(page, tab); const f = await fit(page); if (f.page > 0 || f.problems.length) bad = true; }
+      await ctx.close();
+    } else if (title === "stale counted in weekdays") {
+      const { ctx, page } = await openPos(browser, 1440, 820, { js, body: payload({ sessionDate: "2026-11-25" }), now: "2026-11-28T03:30:00Z" });
+      if (await page.evaluate(() => Boolean(document.getElementById("posStamp").dataset.stale))) bad = true;
+      await ctx.close();
+    } else {
+      const o = await scenario({ js, html, body: gappy() });
+      if (!o.stamp.includes(trtOf(P.generatedAt) + " TRT") || /vendor/i.test(o.info) || o.heatX === 0) bad = true;
+      if (!o.chg.filter((r) => r[1] !== "—").every((r) => /^[▲▼◆] /.test(r[1]))) bad = true;
+      if (o.focus !== o.label) bad = true;
+      if (o.legend.length !== six) bad = true;
+      for (const c of o.chips) if (c.title.startsWith("No price on the report date") ? c.text.includes("$") : !c.text.includes("$")) bad = true;
+    }
+    ok(bad, "PLANTED WRONG BUILD FAILS: " + title);
+  }
 } finally {
   await browser.close();
 }
 
-console.log(`✓ flows-pos-render: ${checks} assertions — the Positioning page at 1920x1080, 1440x820, 1024x768 and 390x844 in all four views with no page scroll, sideways scroll or clipped content, the hero and every rotation bar against independent computations from the payload, dashes for missing figures, the pending and failed states, the drill sheet and info dialog with focus returned, the heat strip by keyboard, no barred word or other zone, and six planted wrong builds that each fail`);
+console.log(`✓ flows-pos-render: ${checks} assertions — the Positioning page at 1920x1080, 1440x820, 1024x768 and 390x844 in all four views with no page scroll, sideways scroll or clipped content, the hero and every rotation bar against independent computations from the payload, dashes for missing figures, the pending and failed states, the drill sheet and info dialog with focus returned, the heat strip by keyboard, no barred word or other zone, the stale stamp counted in sessions across a holiday, the drill Retry, the Show all dialogs at four sizes, only Türkiye time, axe at 390 and 1440, forced colours, reduced motion, a sheet of tokens only, and fifteen planted wrong builds that each fail`);

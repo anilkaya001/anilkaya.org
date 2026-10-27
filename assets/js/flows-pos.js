@@ -77,14 +77,26 @@
     if (!a || !b) return null;
     return a.slice(0, 2) + " vs " + b.slice(0, 2) + " " + a.slice(3);
   }
-  function weekdaysBehind(session, expected) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(session || "") || !/^\d{4}-\d{2}-\d{2}$/.test(expected || "") || session >= expected) return 0;
-    let n = 0;
-    for (let t = Date.parse(session + "T00:00:00Z") + 864e5; t <= Date.parse(expected + "T00:00:00Z"); t += 864e5) {
-      const d = new Date(t).getUTCDay();
-      if (d !== 0 && d !== 6) n++;
-    }
-    return n;
+  function calendarList() {
+    const el = document.getElementById("ftCal");
+    return el && typeof el.dataset.sessions === "string" ? el.dataset.sessions.split(",").filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)) : [];
+  }
+  function expectedSession() {
+    const list = calendarList();
+    if (!list.length) return null;
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).formatToParts(new Date()).map((x) => [x.type, x.value]));
+    const day = parts.year + "-" + parts.month + "-" + parts.day;
+    const cutoff = Number(parts.hour) * 60 + Number(parts.minute) >= 1260 ? day : new Date(Date.parse(day + "T12:00:00Z") - 864e5).toISOString().slice(0, 10);
+    const done = list.filter((d) => d <= cutoff);
+    return done.length ? done[done.length - 1] : null;
+  }
+  function sessionsBehind(session, expected) {
+    const iso = /^\d{4}-\d{2}-\d{2}$/;
+    if (!iso.test(session || "") || !iso.test(expected || "") || session >= expected) return 0;
+    const list = calendarList();
+    if (!list.length) return 0;
+    if (session < list[0]) return 99;
+    return list.filter((d) => d > session && d <= expected).length;
   }
 
   function heatTone(b, s) {
@@ -186,7 +198,7 @@
     const stamp = $("posStamp");
     if (!p || !p.generatedAt) { stamp.textContent = DASH; return; }
     const built = UI.F.stamp ? UI.F.stamp(Date.parse(p.generatedAt)) : null;
-    const behind = weekdaysBehind(p.sessionDate, S.expected);
+    const behind = sessionsBehind(p.sessionDate, S.expected);
     if (behind >= 2) {
       stamp.dataset.stale = "1";
       stamp.textContent = "From the " + p.sessionDate + " session";
@@ -636,8 +648,7 @@
 
   function paint(p) {
     S.payload = p;
-    const m = UI.market ? UI.market() : null;
-    S.expected = m ? m.expected : null;
+    S.expected = expectedSession();
     paintStamp(p);
     paintHero(heroModel(p, S.expected));
     paintRotation(p);
@@ -682,7 +693,7 @@
       .catch(() => fail(WHY.failed));
   }
 
-  const model = Object.freeze({ heroModel, heatTone, axisOf, weekdaysBehind, quarterLabel, quarterPair });
+  const model = Object.freeze({ heroModel, heatTone, axisOf, sessionsBehind, quarterLabel, quarterPair });
   const fmt = Object.freeze({ pts: fmtPts, ratio: fmtRatio, net: fmtNet });
 
   if (typeof document === "undefined") {

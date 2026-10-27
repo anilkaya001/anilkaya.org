@@ -74,6 +74,7 @@ export async function openPos(browser, w, h, o = {}) {
     const u = new URL(r.request().url());
     if (u.pathname.startsWith("/assets/")) {
       if (o.js && u.pathname === "/assets/js/flows-pos.js") return r.fulfill({ contentType: "text/javascript", body: o.js });
+      if (o.css && u.pathname === "/assets/css/flows-pos.css") return r.fulfill({ contentType: "text/css", body: o.css });
       const f = path.join(ROOT, u.pathname);
       if (!fs.existsSync(f)) return r.fulfill({ status: 404, body: "" });
       return r.fulfill({ path: f, contentType: MIME[path.extname(f)] || "application/octet-stream" });

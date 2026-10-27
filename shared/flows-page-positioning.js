@@ -39,10 +39,11 @@ const tabs = () => `
 
 const sectorRows = (cols) => SECTOR_ORDER.map((s) => `<div class="pos-row" data-s="${esc(s)}"><span class="nm">${esc(s)}</span>${cols}</div>`).join("");
 
-export function positioningBody(glyph) {
+export function positioningBody(glyph, sessions = []) {
   const loading = `<p class="pos-load">${esc(STATE_SENTENCES.loading)}</p>`;
   return `
   <p class="visually-hidden" id="posStatus" role="status">${esc(STATE_SENTENCES.loading)}</p>
+  <i hidden id="ftCal" data-sessions="${esc(sessions.join(","))}"></i>
   <div class="pos" id="pos">
     <header class="pos-head" data-fx-hero>
       <h1 id="fxTitle">Positioning</h1>

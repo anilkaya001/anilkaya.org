@@ -291,8 +291,7 @@
 .pl-lrow .lg2 { text-align: right; white-space: nowrap; color: var(--label-2); }
 .pl-lrow .sg-up { color: var(--up); }
 .pl-lrow .sg-down { color: var(--down); }
-.pl-seg-fill { display: flex; height: 8px; border-radius: 3px; overflow: hidden; margin: 4px 0; }
-.pl-seg-fill i { display: block; height: 100%; }
-.pl-seg-fill i:nth-child(1) { background: var(--label-1); }
-.pl-seg-fill i:nth-child(2) { background: var(--label-2); }
-.pl-seg-fill i:nth-child(3) { background: var(--label-3); }
+.pl-seg-fill { display: flex; gap: 2px; height: 18px; border-radius: 3px; overflow: hidden; margin: 4px 0; }
+.pl-seg-fill i { display: flex; align-items: center; justify-content: center; height: 100%; min-width: 0; overflow: hidden; background: var(--fill-3); box-shadow: inset 0 0 0 1px var(--label-3); font: var(--t-caption); color: var(--label-1); white-space: nowrap; }
+.pl-seg-fill i span { padding: 0 4px; }
+.pl-seg-leg { display: flex; flex-wrap: wrap; gap: 2px 12px; margin: 0 0 6px; font: var(--t-caption); color: var(--label-2); }

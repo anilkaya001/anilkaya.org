@@ -33,10 +33,15 @@
   const finite = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const chOf = (m) => (m === "senate" ? "S" : m === "executive" ? "E" : "H");
   const cardKey = (t) => String(t === null || t === undefined ? "" : t).toUpperCase().replace(/[.\-\s]/g, "");
+  const NOT_NAME = new Set(["hon", "rep", "sen", "mr", "mrs", "ms", "dr", "representative", "senator", "jr", "sr", "ii", "iii", "iv"]);
   const initials = (name) => {
-    const parts = String(name || "").replace(/\b(Hon\.|Jr\.?|Sr\.?|III|II)\b/g, "").trim().split(/\s+/).filter(Boolean);
-    return parts.length ? (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase() : "?";
+    if (typeof name !== "string") return "?";
+    const words = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/\s+/).map((w) => w.replace(/[^A-Za-z]/g, "")).filter((w) => w && !NOT_NAME.has(w.toLowerCase()));
+    if (!words.length) return "?";
+    return words.length === 1 ? words[0][0].toUpperCase() : words[0][0].toUpperCase() + words[words.length - 1][0].toUpperCase();
   };
+
+  const whoOf = (v) => (typeof v === "string" && /^[A-Z?]{1,3}$/.test(v) ? v : initials(v));
 
   function netBounds(r) {
     const B = finite(r.bought), S = finite(r.sold) || 0, lo = finite(r.boughtLo), hi = finite(r.boughtHi);
@@ -803,7 +808,7 @@
     if (layer === "late") extra = fday(r.txn) + " \u2192 " + fday(r.filed) + " \u00b7 " + (r.lagD === null ? DASH : r.lagD + " d");
     else extra = (r.tags || []).map((c) => TAG_WORD[c] || TAG_WORD.other).join(", ") + " \u00b7 since the trade " + pctSigned(r.r) + " \u00b7 against SPY " + pctSigned(r.ex);
     const label = r.t + " " + (buy ? "bought" : sell ? "sold" : "filed") + ", " + usd(r.lo) + " to " + usd(r.hi) + ", traded " + fday(r.txn) + ", filed " + fday(r.filed) + ", " + (layer === "late" ? "lag " + sessText(r.lagS) + " sessions" : extra);
-    return '<button type="button" class="pl-trow pl-lrow" data-t="' + esc(r.t) + '" tabindex="-1" aria-label="' + esc(label) + '"><span class="pl-tk"><span class="gl ' + (buy ? "up" : sell ? "down" : "mut") + '-t">' + (buy ? "\u25b2" : sell ? "\u25bc" : "\u25c6") + "</span>" + esc(r.t) + '</span><span class="bd"><span>' + usd(r.lo) + "\u2013" + usd(r.hi) + "</span><small>" + esc(extra) + '</small></span><span class="lg2">' + esc(lag) + '</span><span class="pl-mono t" title="' + esc((r.who || "") + (r.ch ? ", " + (CHAMBER[r.ch] || "") : "")) + '"><b aria-hidden="true">' + esc(r.who || "?") + "</b></span></button>";
+    return '<button type="button" class="pl-trow pl-lrow" data-t="' + esc(r.t) + '" tabindex="-1" aria-label="' + esc(label) + '"><span class="pl-tk"><span class="gl ' + (buy ? "up" : sell ? "down" : "mut") + '-t">' + (buy ? "\u25b2" : sell ? "\u25bc" : "\u25c6") + "</span>" + esc(r.t) + '</span><span class="bd"><span>' + usd(r.lo) + "\u2013" + usd(r.hi) + "</span><small>" + esc(extra) + '</small></span><span class="lg2">' + esc(lag) + '</span><span class="pl-mono t" title="' + esc((r.who ? whoOf(r.who) : "") + (r.ch ? ", " + (CHAMBER[r.ch] || "") : "")) + '"><b aria-hidden="true">' + esc(r.who ? whoOf(r.who) : "?") + "</b></span></button>";
   }
 
   function layerFeed() {
@@ -847,7 +852,7 @@
       else {
         for (const w of Array.isArray(e.who) ? e.who : []) {
           const f = (d.filers || []).find((x) => x.who === w);
-          box.innerHTML += kv(w, f && f.all ? esc(f.late + " of " + f.all + " late this year") : DASH);
+          box.innerHTML += kv(whoOf(w), f && f.all ? esc(f.late + " of " + f.all + " late this year") : DASH);
         }
         box.innerHTML += kv("Longest lag", esc(sessText(e.maxS) + (e.maxS === null ? "" : " sessions")));
       }
@@ -868,7 +873,10 @@
         box.innerHTML += kv("PAC total", m(e.pac)) + kv("PAC count", finite(e.pacN) === null ? DASH : String(e.pacN)) + kv("Contributions", finite(e.pacC) === null ? DASH : String(e.pacC));
         const parts = [e.dem, e.rep, e.other];
         const tot = parts.reduce((a, v) => a + (finite(v) || 0), 0);
-        box.innerHTML += '<div class="pl-seg-fill" role="img" aria-label="Split of the money by recipient kind">' + parts.map((v) => '<i style="width:' + (tot > 0 ? ((finite(v) || 0) / tot) * 100 : 0).toFixed(1) + '%"></i>').join("") + "</div>";
+        const names = ["Democratic", "Republican", "Other"];
+        const pct = parts.map((v) => (tot > 0 ? ((finite(v) || 0) / tot) * 100 : 0));
+        box.innerHTML += '<div class="pl-seg-fill" role="img" aria-label="Split of the money by recipient kind">' + pct.map((w, i) => '<i style="width:' + w.toFixed(1) + '%">' + (w >= 24 ? "<span>" + names[i] + " " + Math.round(w) + "%</span>" : "") + "</i>").join("") + "</div>";
+        box.innerHTML += '<div class="pl-seg-leg">' + pct.map((w, i) => "<span>" + names[i] + " " + (tot > 0 ? Math.round(w) + "%" : DASH) + "</span>").join("") + "</div>";
         box.innerHTML += kv("To Democratic candidates", m(e.dem)) + kv("To Republican candidates", m(e.rep)) + kv("To other candidates", m(e.other));
         box.innerHTML += kv("Lobbying", m(e.lobby)) + kv("Employees' giving (estimated)", m(e.emp)) + kv("Candidates counted", finite(e.cands) === null ? DASH : String(e.cands));
       }

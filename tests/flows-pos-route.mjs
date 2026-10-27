@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { createHash } from "node:crypto";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRouter } from "../server/router.js";
 import { flowsPositioningRows } from "../server/routes/flows-positioning.js";
 import { flowsReadRows } from "../server/routes/flows-read.js";
@@ -10,6 +14,9 @@ const ok = (c, m) => { assert.ok(c, m); checks++; };
 const eq = (a, b, m) => { assert.deepEqual(a, b, m); checks++; };
 
 const POS = JSON.stringify({ v: 1, sessionDate: "2026-10-26", basis: { asOf: "2026-10-26" }, rotation: { rows: [] } });
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+const POL_SPACED = JSON.stringify({ rows: [{ t: "SYX101" }, { t: "SYX102" }], note: "stored as written" }, null, 1);
+const CARDX_SPACED = JSON.stringify({ sessionDate: "2026-10-26", ticker: "SYX101", dx: { parts: {} } }, null, 1);
 const POL = JSON.stringify({ rows: [{ t: "SYX101" }], late: [{ t: "SYX101" }], unusual: [], money: [], held: [], plan: { n: 1 } });
 const POL_OLD = JSON.stringify({ rows: [{ t: "SYX101" }] });
 const CARDX = JSON.stringify({ sessionDate: "2026-10-26", ticker: "SYX101", dx: { parts: {} }, ps: { parts: { ftd: { at: 1, rv: 1, x: { ok: true } } } } });
@@ -39,7 +46,7 @@ async function posCall(w, pathAndQuery, { user = "member", env = {} } = {}) {
   }
 }
 
-async function readCall(w, path, { user = "member", env = {}, open }) {
+async function readCall(w, path, { user = "member", env = {}, open, text = false }) {
   const table = createRouter(flowsReadRows({
     readServed: w.readServed, readFlowsPayload: w.readServed, readWithOverlay: async () => null, passthrough: w.passthrough, recallLastGood: async () => null,
     storeGone: w.storeGone, absentKey: async () => new Response("{}", { status: 404 }), cardWithEngine: async () => ({ card: null }),
@@ -50,7 +57,7 @@ async function readCall(w, path, { user = "member", env = {}, open }) {
   const request = new Request(url);
   const gates = { flows: async () => ({ username: user }) };
   const res = await table.handle({ request, env, url, ctx: {} }, gates);
-  return res.json();
+  return text ? res.text() : res.json();
 }
 
 const battery = async (rowsModule) => {
@@ -161,4 +168,102 @@ const readBattery = async () => {
   }
 }
 
-console.log(`✓ flows-pos-route: ${checks} assertions — the positioning route's gate for each spelling and caller, the whole payload and per-name projection with absent and pending states, the read rows stripping the layers and ps for a closed reader and passing an older payload byte for byte, and eight planted wrong builds that each fail`);
+{
+  const table = (w) => createRouter(flowsPositioningRows({ readServed: w.readServed, passthrough: w.passthrough, storeGone: w.storeGone, isOwner: w.isOwner }));
+  const bare = async (w, method, pq, user, env = {}) => {
+    const url = new URL("https://anilkaya.test" + pq);
+    try { const res = await table(w).handle({ request: new Request(url, { method }), env, url, ctx: {} }, { flows: async () => (user ? { username: user } : null) }); return res.status; } catch (e) { return e.status; }
+  };
+  const w1 = world({ positioning: POS, "card-x:SYX101": CARDX });
+  eq([await bare(w1, "POST", "/api/flows/positioning", null), await bare(w1, "DELETE", "/api/flows/positioning", "owner"), w1.reads.length], [405, 405, 0], "A WRONG METHOD IS 405 BEFORE THE SESSION IS ASKED, and reads nothing");
+  eq(await bare(w1, "GET", "/api/flows/positioning", null), 401, "a signed-out GET is 401");
+  eq(w1.reads.length, 0, "and still reads nothing");
+  eq(await bare(w1, "GET", "/api/flows/positioning", "member", { FLOWS_POSITIONING: "owner" }), 404, "a member under owner is refused");
+  eq(w1.reads.length, 0, "THE GATE ANSWERS BEFORE ANY STORE READ");
+  const w2 = world({ positioning: POS, "card-x:SYX101": CARDX });
+  await bare(w2, "GET", "/api/flows/positioning", "owner");
+  eq(w2.reads, ["positioning"], "the whole payload costs one row read, of the positioning key");
+  const w3 = world({ positioning: POS, "card-x:SYX101": CARDX });
+  await bare(w3, "GET", "/api/flows/positioning?t=SYX101", "owner");
+  eq(w3.reads, ["card-x:SYX101"], "a name costs one row read, of its card-x key");
+  const one = await posCall(world({ "card-x:SYX101": CARDX }), "/api/flows/positioning?t=SYX101", { user: "owner" });
+  eq(Object.keys(one.body).sort(), ["ps", "sessionDate", "t"], "and answers only the section, the session and the name");
+  ok(!("dx" in one.body.ps) && !("dx" in one.body), "the rest of the card-x is not sent");
+
+  const w4 = world({ political: POL_SPACED, "card-x:SYX101": CARDX_SPACED });
+  eq(await readCall(w4, "/api/flows/political", { user: "member", open: true, env: { FLOWS_POSITIONING: "off" }, text: true }), POL_SPACED, "WITH THE SWITCH OFF THE POLITICAL ROUTE ANSWERS THE STORED BYTES");
+  eq(await readCall(w4, "/api/flows/card-x?t=SYX101", { user: "member", open: true, env: { FLOWS_POSITIONING: "off" }, text: true }), CARDX_SPACED, "and the card-x route answers the stored bytes");
+  eq(await readCall(w4, "/api/flows/political", { user: "owner", open: true, text: true }), POL_SPACED, "an owner reads the stored bytes too when nothing is layered");
+
+  const readPlant = await loadMutated("server/routes/flows-read.js", [["if (typeof stored.payload !== \"string\" || !stored.payload.includes(mark)) return stored;", "if (typeof stored.payload !== \"string\") return stored;"]]);
+  const wp = world({ political: POL_SPACED });
+  const planted = createRouter(readPlant.flowsReadRows({
+    readServed: wp.readServed, readFlowsPayload: wp.readServed, readWithOverlay: async () => null, passthrough: wp.passthrough, recallLastGood: async () => null,
+    storeGone: wp.storeGone, absentKey: async () => new Response("{}", { status: 404 }), cardWithEngine: async () => ({ card: null }),
+    briefWithLive: async () => null, nightlyFreshHeaders: () => ({}), splitEngineMark: "\u0000no-split",
+    positioningOpen: (e, session) => positioningMode(e, Boolean(session) && wp.isOwner(e, session.username)),
+  }));
+  const url = new URL("https://anilkaya.test/api/flows/political");
+  const res = await planted.handle({ request: new Request(url), env: {}, url, ctx: {} }, { flows: async () => ({ username: "member" }) });
+  ok((await res.text()) !== POL_SPACED, "PLANTED WRONG BUILD FAILS: every political body parsed and written again");
+
+  const gateAfter = await loadMutated("server/routes/flows-positioning.js", [
+    ["    if (!positioningMode(env, isOwner(env, session && session.username))) throw HttpError.of(\"positioning_off\");\n", ""],
+    ["    const stored = await readServed(env, \"positioning\");\n", "    const stored = await readServed(env, \"positioning\");\n    if (!positioningMode(env, isOwner(env, session && session.username))) throw HttpError.of(\"positioning_off\");\n"],
+  ]);
+  const wg = world({ positioning: POS });
+  const tg = createRouter(gateAfter.flowsPositioningRows({ readServed: wg.readServed, passthrough: wg.passthrough, storeGone: wg.storeGone, isOwner: wg.isOwner }));
+  const ug = new URL("https://anilkaya.test/api/flows/positioning");
+  try { await tg.handle({ request: new Request(ug), env: {}, url: ug, ctx: {} }, { flows: async () => ({ username: "member" }) }); } catch { }
+  ok(wg.reads.length > 0, "PLANTED WRONG BUILD FAILS: the gate after the store read");
+
+  const whole = await loadMutated("server/routes/flows-positioning.js", [["const ps = card.ps && typeof card.ps === \"object\" ? card.ps : null;", "const ps = card;"]]);
+  const ww = world({ "card-x:SYX101": CARDX });
+  const tw = createRouter(whole.flowsPositioningRows({ readServed: ww.readServed, passthrough: ww.passthrough, storeGone: ww.storeGone, isOwner: ww.isOwner }));
+  const uw = new URL("https://anilkaya.test/api/flows/positioning?t=SYX101");
+  const rw = await (await tw.handle({ request: new Request(uw), env: {}, url: uw, ctx: {} }, { flows: async () => ({ username: "owner" }) })).json();
+  ok("dx" in rw.ps, "PLANTED WRONG BUILD FAILS: the whole card-x served on a name");
+}
+
+{
+  const NORMALISE = [
+    [/\?v=\d+/g, "?v=0"],
+    [/plFeed/g, "plTape"],
+    [/data-v="feed"/g, 'data-v="tape"'],
+    ["The feed carries no party per filing, so no party split is shown or inferred.", "The vendor feed carries no party field, so no Republican or Democrat split is shown or inferred."],
+  ];
+  const render = async (root) => {
+    const saved = Date.now;
+    Date.now = () => Date.parse("2026-10-27T15:00:00Z");
+    try {
+      const M = await import(pathToFileURL(path.join(root, "shared/flows-pages.js")).href);
+      const out = {};
+      for (const [name, fn] of Object.entries(M.FLOWS_PAGES)) {
+        if (typeof fn !== "function" || name === "positioningPage") continue;
+        for (const [label, args] of [["member", { username: "test" }], ["owner", { username: "test", owner: true }]]) {
+          let html = fn(args);
+          for (const [from, to] of NORMALISE) html = html.replace(from, to);
+          out[name + ":" + label] = createHash("sha256").update(html).digest("hex");
+        }
+      }
+      return out;
+    } finally {
+      Date.now = saved;
+    }
+  };
+  const FIXTURE = path.join(ROOT, "tests/fixtures-pos-off-pages.json");
+  const at = process.argv.indexOf("--write");
+  if (at >= 0) {
+    const base = path.resolve(process.argv[at + 1]);
+    fs.writeFileSync(FIXTURE, JSON.stringify({ provenance: { nature: "sha256 of every page render of origin/main at a pinned clock, version tokens and the declared renames normalised", base: process.argv[at + 2] || null }, pages: await render(base) }, null, 1) + "\n");
+    console.log("wrote " + FIXTURE);
+    process.exit(0);
+  }
+  const want = JSON.parse(fs.readFileSync(FIXTURE, "utf8"));
+  const got = await render(ROOT);
+  eq(Object.keys(got).sort(), Object.keys(want.pages).sort(), "the baseline covers every page function but the new one, as member and as owner");
+  const moved = Object.keys(want.pages).filter((k) => want.pages[k] !== got[k]);
+  eq(moved, [], "WITH BOTH SWITCHES OFF EVERY EXISTING PAGE RENDERS BYTE FOR BYTE AS ORIGIN/MAIN RENDERS IT (version tokens and the declared renames aside): " + moved.join(", "));
+}
+
+console.log(`✓ flows-pos-route: ${checks} assertions — the positioning route's gate for each spelling and caller, the whole payload and per-name projection with absent and pending states, the read rows stripping the layers and ps for a closed reader and passing an older payload byte for byte, 405 before the session, one row read, the gate before the read, the stored bytes with the switches off, every other page unchanged against a committed baseline, and the planted wrong builds that each fail`);

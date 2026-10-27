@@ -16,6 +16,7 @@ import { flowsIngestRows } from "../server/routes/flows-ingest.js";
 import { flowsReadyRows } from "../server/routes/flows-ready.js";
 import { flowsOpsRows } from "../server/routes/flows-ops.js";
 import { flowsLedgerRows, LEDGER_ROW_CEILING } from "../server/routes/flows-ledger.js";
+import { flowsPositioningRows } from "../server/routes/flows-positioning.js";
 import { createRouter } from "../server/router.js";
 
 let checks = 0;
@@ -794,7 +795,8 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   await get("/api/flows/meta");
   W.memoClock({ day: SESSION, closedDays: [] }, Date.now());
   for (const key of ["ideas", "movers", "political", "unusual", "record", "sector:trix", "calib", "dispersion"]) f.put(key, { ...NIGHTLY, rows: [], state: { pending: [] } });
-  f.put("card-x:NVDA", { ...NIGHTLY, ticker: "NVDA", engine: { v: 1 } });
+  f.put("card-x:NVDA", { ...NIGHTLY, ticker: "NVDA", engine: { v: 1 }, ps: { v: 1, status: "ok", parts: { ftd: { at: 1, rv: 1, x: { rows: [["2026-10-01", 100, 1000]] } } } } });
+  f.put("positioning", { v: 1, ...NIGHTLY, rotation: { status: "quiet" } });
   f.put("brief", { v: 1, ...NIGHTLY, facts: [], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } });
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
@@ -807,9 +809,10 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   const ASK = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const getOwner = await client(f.D1, { FLOWS_RT_USERS: FIXTURE_ROSTER[0], FLOWS_OPS: "on", FLOWS_READY: "on", FLOWS_RT_MODE: "off" });
   const getBook = await client(f.D1, { FLOWS_RT_USERS: FIXTURE_ROSTER[0], FLOWS_LEDGER_LIVE: "owner" });
-  const cost = async (path, { init, vendor = false, owner = false, coverage = false, book = false } = {}) => {
+  const getPos = await client(f.D1, { FLOWS_POSITIONING: "on" });
+  const cost = async (path, { init, vendor = false, owner = false, coverage = false, book = false, pos = false } = {}) => {
     const n = f.trips.length;
-    const r = await (book ? getBook : coverage ? getCoverage : owner ? getOwner : vendor ? getVendor : get)(path, init);
+    const r = await (pos ? getPos : book ? getBook : coverage ? getCoverage : owner ? getOwner : vendor ? getVendor : get)(path, init);
     return { rows: f.rowsRead(n), trips: f.trips.length - n, status: r.res.status };
   };
   const CEILING = [
@@ -835,6 +838,9 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
     ["/api/flows/ledger", LEDGER_ROW_CEILING],
     ["/api/flows/ledger?part=book&v=1", LEDGER_ROW_CEILING, { book: true }],
     ["/api/flows/ledger?scope=sector%3AEnergy&period=session", LEDGER_ROW_CEILING],
+    ["/api/flows/positioning", 1, { pos: true }],
+    ["/api/flows/positioning?t=NVDA", 1, { pos: true }],
+    ["/api/flows/positioning?t=ZZZZ", 1, { pos: true }],
   ];
   let home = 0;
   for (const [path, ceiling, opts = {}] of CEILING) {
@@ -864,7 +870,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   const source = workerSource();
   expect(source, /path === "(\/api\/flows\/[a-z-]+)"/, { min: 3, why: "the Flows routes not yet in the table are declared in the Worker chain" });
   const stub = new Proxy({}, { get: () => () => null });
-  const routerPaths = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub), flowsIngestRows(stub), flowsReadyRows(stub), flowsPipelineRows(stub), flowsOpsRows(stub), flowsLedgerRows(stub))
+  const routerPaths = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub), flowsIngestRows(stub), flowsReadyRows(stub), flowsPipelineRows(stub), flowsOpsRows(stub), flowsLedgerRows(stub), flowsPositioningRows(stub))
     .rows.map((r) => r.path).filter((path) => path.startsWith("/api/flows/"));
   ok(routerPaths.length >= 24 && routerPaths.every((path) => /^\/api\/flows\/[a-z-]+$/.test(path)), "the router table holds the flows-read, flows-desk, flows-ai, ingest, ready and ops families: " + routerPaths.length + " rows");
   ok(routerPaths.includes("/api/flows/ready") && routerPaths.includes("/api/flows/ops"), "and the ready and ops routes are among them, so neither can escape the enumeration");

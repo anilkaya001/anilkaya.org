@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import vm from "node:vm";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -8,6 +9,9 @@ import * as PI from "../shared/flows-pos-insider.js";
 import * as PS from "../shared/flows-pos-short.js";
 import * as PL from "../shared/flows-pol-layers.js";
 import { loadMutated } from "./truth/mutants.mjs";
+import * as COPY from "../shared/flows-pos-copy.js";
+import { FORECAST_ALT, guardText } from "../shared/flows-ask.js";
+import { positioningBody } from "../shared/flows-page-positioning.js";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -54,7 +58,7 @@ function rotationBattery(M, take = ORACLE.rotation.length) {
   return fails;
 }
 
-const insiderRows = (rows) => Object.fromEntries(Object.entries(rows).map(([s, list]) => [s, list.map((r) => ({ date: r[0], buy_sell: r[1], transactions: r[2], uniq_insiders: r[3], volume: r[4] }))]));
+const insiderRows = (rows) => Object.fromEntries(Object.entries(rows).map(([s, list]) => [s, list.map((r) => ({ date: r[0], buy_sell: r[1], transactions: r[2], uniq_insiders: r[3], volume: r[4], premium: "250000.50", avg_price: "12.5" }))]));
 
 function insiderBattery(M) {
   const fails = [];
@@ -217,6 +221,8 @@ const failures = (b) => Object.values(b).flat();
     ["the plan reading the newest first", "shared/flows-pos-13f.js", [["picked.sort((a, b) => (a.g - b.g) ||", "picked.sort((a, b) => (b.g - a.g) ||"]], "P13"],
     ["the insider window per sector instead of the common one", "shared/flows-pos-insider.js", [["const from = mins.sort().pop();", "const from = mins.sort()[0];"]], "PI"],
     ["a missing insider date read as zero", "shared/flows-pos-insider.js", [["if (!c) { gaps++; out.push([d, null, null]); continue; }", "if (!c) { out.push([d, 0, 0]); continue; }"]], "PI"],
+    ["an unread filer read as a zero-weight book in the mean", "shared/flows-pos-13f.js", [["arr.map((v) => (v / used.length) * MICRO)", "arr.map((v) => (v / tracked.length) * MICRO)"]], "P13"],
+    ["insider volume including the premium field", "shared/flows-pos-insider.js", [["vol: r.volume };", "vol: r.volume + Number(r.premium || 0) };"]], "PI"],
     ["the insider net not normalised", "shared/flows-pos-insider.js", [["const net = buyers + sellers > 0 ? Math.round(((buyers - sellers) / (buyers + sellers)) * 1e4) / 1e4 : null;", "const net = buyers + sellers > 0 ? buyers - sellers : null;"]], "PI"],
     ["a failure notional with a missing price as zero", "shared/flows-pos-short.js", [["notional: pxC === null ? null : halfAway((r[1] * pxC) / 100),", "notional: halfAway((r[1] * (pxC || 0)) / 100),"]], "PS"],
     ["a share against an advance of zero", "shared/flows-pos-short.js", [["Number.isFinite(a) && a > 0 ? a : null;", "Number.isFinite(a) && a >= 0 ? a : null;"]], "PS"],
@@ -240,6 +246,43 @@ const failures = (b) => Object.values(b).flat();
     ok(failures(b).length > 0, "PLANTED WRONG BUILD FAILS: " + title);
   }
   eq(PLANTS.length >= 25, true, "at least twenty-five wrong builds are planted in the leaves");
+}
+
+{
+  const forecast = new RegExp("\\b(?:" + FORECAST_ALT + ")\\b", "i");
+  const barred = /\b(?:vendor|tape|unusual whales)\b/i;
+  ok(COPY.ALL_SENTENCES.length >= 33, "the copy module holds every sentence the page and the layers print: " + COPY.ALL_SENTENCES.length);
+  for (const sentence of COPY.ALL_SENTENCES) {
+    ok(sentence.split(/[;.]/).every((clause) => COPY.wordCount(clause) <= 14), `at most fourteen words in each clause: ${sentence}`);
+    ok(sentence === "Nothing here is advice or a forecast." || !forecast.test(guardText(sentence)), `no forecast or modal word: ${sentence}`);
+    ok(!barred.test(sentence), `no provider name, vendor or tape: ${sentence}`);
+  }
+  eq(COPY.INFO_SENTENCES.length, 11, "the info dialog holds the eleven sentences of the specification");
+  const pos = fs.readFileSync(path.join(ROOT, "assets/js/flows-pos.js"), "utf8");
+  const pol = fs.readFileSync(path.join(ROOT, "assets/js/flows-political.js"), "utf8");
+  const html = positioningBody((g) => g, ["2026-10-26"]);
+  for (const sentence of [...Object.values(COPY.WHY), ...Object.values(COPY.STATE_SENTENCES), ...Object.values(COPY.FOOTERS)]) ok(pos.includes(JSON.stringify(sentence)), `THE BROWSER'S COPY EQUALS THE LEAF'S (flows-pos.js): ${sentence}`);
+  for (const sentence of COPY.INFO_SENTENCES) ok(html.includes(sentence.replace(/'/g, "&#39;")), `the served page prints the info sentence: ${sentence}`);
+  for (const sentence of Object.values(COPY.LAYER_SENTENCES)) ok(pol.includes(JSON.stringify(sentence)), `THE BROWSER'S COPY EQUALS THE LEAF'S (flows-political.js): ${sentence}`);
+  for (const [file, text] of [["flows-pos.js", pos], ["flows-pos.css", fs.readFileSync(path.join(ROOT, "assets/css/flows-pos.css"), "utf8")], ["page", html]]) {
+    ok(!/\bTape\b|\btape\b|plTape/.test(text), `no tape in ${file}`);
+    ok(!/vendor|unusual whales/i.test(text), `no vendor or provider name in ${file}`);
+  }
+}
+
+{
+  const sandbox = { globalThis: null };
+  sandbox.globalThis = sandbox;
+  vm.runInNewContext(fs.readFileSync(path.join(ROOT, "assets/js/flows-political.js"), "utf8"), sandbox);
+  const browser = sandbox.__PoliticalTest.initials;
+  const given = ["Nancy", "Paul", "Maria", "José", "Zoë", "Renée", "O'Neil", "Van Der Berg", "Ana-Maria", "Li", "Wu"];
+  const family = ["Pelosi", "Ryan", "Cantwell", "García", "Müller", "Smith-Jones", "de la Cruz", "Nguyen", "Brown"];
+  const marks = ["", "Hon. ", "Rep. ", "Sen. ", "Dr. ", "Mrs. ", "Representative ", "Senator "];
+  const tails = ["", " Jr.", " Sr.", " III", " II", " IV"];
+  const names = [];
+  for (let i = 0; names.length < 300; i++) names.push(marks[i % marks.length] + given[i % given.length] + (i % 5 === 0 ? " " + given[(i * 3) % given.length] : "") + " " + family[(i * 7) % family.length] + tails[i % tails.length]);
+  names.push("", "   ", "Hon.", "Cher", "Jr.", "123", null, undefined, 42, "X Æ A-12");
+  for (const n of names) eq(browser(n), PL.initialsOf(n), `THE BROWSER'S INITIALS EQUAL THE LEAF'S: ${JSON.stringify(n)}`);
 }
 
 console.log(`✓ flows-pos-leaves: ${checks} assertions — every pure positioning leaf held to an exact rational oracle over 300 rotation worlds, 50 insider worlds, 100 short worlds, the exchange calendar's session lags, returns against the index and initials, plus the hand cases of the tracked set and the read plan, and ${25}+ planted wrong builds that each fail`);

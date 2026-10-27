@@ -1572,7 +1572,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 246 suites: 192 that need only Node (N), 39 that also
+`tests/suites/` registers 253 suites: 199 that need only Node (N), 39 that also
 need Playwright's Chromium (C) and 15 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1611,24 +1611,26 @@ flows-nn-render           flows-now-render          flows-oracle              fl
 flows-oracle-home-render  flows-oracle-live         flows-oracle-render       flows-overlay
 flows-payload-shape       flows-permits             flows-pipeline-chaos      flows-pipeline-mutants
 flows-plan-facts          flows-political           flows-political-render    flows-popout-render
-flows-positioning         flows-premium-rank        flows-probe               flows-public
-flows-pulse               flows-quant               flows-quant-audit         flows-quant-card
-flows-read-failures       flows-readers             flows-reading             flows-reading-worker
-flows-reads               flows-ready               flows-record              flows-registry-contract
-flows-relations-render    flows-reports             flows-round               flows-rt
-flows-scores              flows-sfc                 flows-sfc-render          flows-sfc-route
-flows-sfc-view            flows-sides               flows-sign                flows-skyline-render
-flows-starts              flows-stats               flows-stock               flows-tape-stats
-flows-targets             flows-time                flows-truth               flows-universe
-flows-variation           flows-vendor-budget       flows-vendor-extras       flows-verdict
-flows-vol                 flows-warnings            flows-weight              flows-ws-probe
-lab-write                 launch-readiness          markets                   mastery
-math-darkpool             math-dealer               math-duplicates           math-format
-math-print                math-short                math-sigma                math-time
-math-units                math-vol                  pipeline                  route-matrix
-server-ai                 server-desk               server-desk-sc            server-ingest
-server-kernel             server-log                server-ops                server-oracle
-server-pages              server-router             server-rt                 staging
+flows-pos-firstpaint      flows-pos-leaves          flows-pos-nightly         flows-pos-plan
+flows-pos-render          flows-pos-route           flows-pos-switch          flows-positioning
+flows-premium-rank        flows-probe               flows-public              flows-pulse
+flows-quant               flows-quant-audit         flows-quant-card          flows-read-failures
+flows-readers             flows-reading             flows-reading-worker      flows-reads
+flows-ready               flows-record              flows-registry-contract   flows-relations-render
+flows-reports             flows-round               flows-rt                  flows-scores
+flows-sfc                 flows-sfc-render          flows-sfc-route           flows-sfc-view
+flows-sides               flows-sign                flows-skyline-render      flows-starts
+flows-stats               flows-stock               flows-tape-stats          flows-targets
+flows-time                flows-truth               flows-universe            flows-variation
+flows-vendor-budget       flows-vendor-extras       flows-verdict             flows-vol
+flows-warnings            flows-weight              flows-ws-probe            lab-write
+launch-readiness          markets                   mastery                   math-darkpool
+math-dealer               math-duplicates           math-format               math-print
+math-short                math-sigma                math-time                 math-units
+math-vol                  pipeline                  route-matrix              server-ai
+server-desk               server-desk-sc            server-ingest             server-kernel
+server-log                server-ops                server-oracle             server-pages
+server-router             server-rt                 staging
 ```
 
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):

@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "409";
+export const ASSET_VERSION = "410";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -1179,7 +1179,7 @@ export function positioningPage({ username = "" } = {}) {
     chrome: false,
     styles: POSITIONING_STYLES,
     scripts: POSITIONING_SCRIPTS,
-    body: positioningBody(glyph),
+    body: positioningBody(glyph, sessionCalendar()),
   });
 }
 

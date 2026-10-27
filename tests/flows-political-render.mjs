@@ -743,8 +743,14 @@ const LAYERED = {
   held: { status: "ok", asOf: "2026-08-24", byT: { [LT[0]]: 3 }, portfolios: 6 },
   plan: {},
 };
+const pctExp = (v) => {
+  if (v === null || v === undefined) return "\u2014";
+  const c = Math.round(Math.abs(v) * 1000);
+  const body = Math.floor(c / 10) + "." + (c % 10) + "%";
+  return c === 0 ? body : (v < 0 ? "\u2212" : "+") + body;
+};
 const layerProbe = async (browser, js, o = {}) => {
-  const m = await mount(browser, 1440, 820, { html: LAYER_HTML, payload: o.payload || LAYERED, js });
+  const m = await mount(browser, o.w || 1440, o.h || 820, { html: LAYER_HTML, payload: o.payload || LAYERED, js, css: o.css });
   const problems = [];
   const need = (c, msg) => { if (!c && problems.length < 6) problems.push(msg); };
   need((await m.page.locator("#plLayerSeg button").count()) === 4, "the layer switch has four buttons");
@@ -763,15 +769,66 @@ const layerProbe = async (browser, js, o = {}) => {
   await m.page.waitForTimeout(200);
   const un = await m.page.evaluate(() => [...document.querySelectorAll(".pl-tile[data-t]")].map((t) => [t.dataset.t, (t.querySelector(".pl-bdg") || {}).textContent || null]));
   for (const [t, b] of un) { const e = unusualBy[t]; need(e ? b === "U " + e.n : b === null, `Unusual badge on ${t}: ${b}`); }
+  const unFeed = await m.page.evaluate(() => document.getElementById("plFeedList").textContent);
+  const unFoot = await m.page.evaluate(() => document.getElementById("plFeedFoot").textContent);
+  for (const r of unusualRows) {
+    need(unFeed.includes(pctExp(r.r)) && unFeed.includes(pctExp(r.ex)), `Unusual row ${r.id}: since the trade ${pctExp(r.r)} and against SPY ${pctExp(r.ex)} are printed with their signs`);
+  }
+  need(unFoot.includes("Measured from the trade date, which no reader knew until the filing."), "the sentence under the Unusual list is printed");
+  need((await fit(m.page)).v, "no page scroll with Unusual on");
   await m.page.click('#plLayerSeg [data-layer="money"]');
   await m.page.waitForTimeout(200);
   need((await m.page.locator(".pl-bdg").count()) === 0, "Money draws no tile badge");
+  const rail = await m.page.evaluate(() => {
+    const box = document.querySelector("#plRail .pl-rc.layer");
+    const segs = [...document.querySelectorAll("#plRail .pl-seg-fill i")];
+    return { text: box ? box.textContent : "", bg: segs.map((i) => getComputedStyle(i).backgroundColor), w: segs.map((i) => Math.round(i.getBoundingClientRect().width)), sel: (document.querySelector(".pl-tile[aria-selected=true], .pl-tile.sel") || {}).dataset ? (document.querySelector(".pl-tile[aria-selected=true], .pl-tile.sel") || {}).dataset.t : null };
+  });
+  const mny = LAYERED.money.byT[LT[0]];
+  need(rail.text.includes("Company political money, cycle 2026"), "the Money rail names the cycle");
+  need(rail.text.includes("Democratic 40%") && rail.text.includes("Republican 48%") && rail.text.includes("Other 12%"), "the Money rail labels each recipient segment with its share of " + (mny.dem + mny.rep + mny.other));
+  need(rail.bg.length === 3 && new Set(rail.bg).size === 1, `the three Money segments are one neutral colour, never a party colour: ${rail.bg}`);
+  need(rail.w.length === 3 && (rail.w.every((x) => x === 0) || (rail.w[1] > rail.w[0] && rail.w[0] > rail.w[2])), `and their widths follow the amounts: ${rail.w}`);
+  need(rail.text.includes("Company money, not the filers on this page."), "the Money rail says whose money it is");
+  need(rail.text.includes("Candidates counted") && /Candidatescounted\u2014/.test(rail.text.replace(/\s/g, "")), "a candidate count the feed did not send is a dash, never zero");
   await m.page.click('#plLayerSeg [data-layer="none"]');
   await m.page.waitForTimeout(200);
   need((await m.page.locator(".pl-bdg").count()) === 0 && (await m.page.locator(".pl-tile.dim").count()) === 0, "None clears every badge and dimming");
   need((await fit(m.page)).v, "no page scroll with a layer on");
   await m.ctx.close();
   return problems;
+};
+const TRAP = (() => {
+  const t = JSON.parse(JSON.stringify(LAYERED));
+  t.late.rows[0].who = "Fixture Member Alpha";
+  t.late.byT[LT[0]].who = ["Fixture Member Alpha", "FB"];
+  t.late.filers = [{ who: "Fixture Member Alpha", ch: "H", late: 7, all: 9, share: 0.7778 }, { who: "FB", ch: "S", late: 1, all: 2, share: 0.5 }];
+  t.unusual.rows[0].who = "Fixture Member Beta";
+  return t;
+})();
+const initialsProbe = async (browser, js) => {
+  const m = await mount(browser, 1440, 820, { html: LAYER_HTML, payload: TRAP, js });
+  const problems = [];
+  const need = (c, msg) => { if (!c && problems.length < 6) problems.push(msg); };
+  for (const layer of ["late", "unusual"]) {
+    await m.page.click(`#plLayerSeg [data-layer="${layer}"]`);
+    await m.page.waitForTimeout(200);
+    const t = await m.page.evaluate(() => ({ html: document.documentElement.outerHTML, mono: [...document.querySelectorAll(".pl-mono b")].map((b) => b.textContent) }));
+    need(!/Fixture Member/.test(t.html), `${layer}: no full name in any text node or attribute`);
+    need(t.mono.every((x) => /^[A-Z?]{1,3}$/.test(x)), `${layer}: every filer mark is initials: ${t.mono.join(",")}`);
+  }
+  await m.ctx.close();
+  return problems;
+};
+const noLayerProbe = async (browser, js) => {
+  const m = await mount(browser, 1440, 820, { html: HTML, payload: LAYERED, js });
+  await m.page.evaluate(() => { location.hash = "layer=late"; });
+  await m.page.reload();
+  await m.page.waitForSelector(".pl-tile");
+  await m.page.waitForTimeout(200);
+  const r = await m.page.evaluate(() => ({ badges: document.querySelectorAll(".pl-bdg").length, dim: document.querySelectorAll(".pl-tile.dim").length, seg: document.querySelectorAll("#plLayerSeg").length }));
+  await m.ctx.close();
+  return [r.badges, r.dim, r.seg];
 };
 {
   const none = await mount(browser, 1440, 820, { html: HTML });
@@ -781,17 +838,37 @@ const layerProbe = async (browser, js, o = {}) => {
   eq(await withL.page.locator("#plLayerSeg").count(), 1, "a page rendered with layers has the switch");
   ok((await withL.page.locator("#plPosChip").getAttribute("href")) === "/flows/positioning/", "and a link to Positioning");
   await withL.ctx.close();
+  for (const [w, h] of [[1920, 1080], [1440, 820], [1024, 768], [390, 844]]) eq(await layerProbe(browser, undefined, { w, h }), [], `THE LAYERS AT ${w}x${h}: badges, the Unusual figures, the Money rail and the page fit`);
+  eq(await initialsProbe(browser, undefined), [], "a name the payload should never carry is printed as initials only, in every text node and attribute of both layers");
+  eq(await noLayerProbe(browser, undefined), [0, 0, 0], "a page served without layers ignores #layer= in the address");
   eq(await layerProbe(browser, undefined), [], "THE LAYERS: Late and Unusual badge the named stocks and dim the rest, the feed lists the filings, Money adds no badge, None clears, the address follows");
   const wrongBuilds = [
     ["a badge on a stock the layer does not name", "const b = active && layerReady(layerData()) ? badgeFor(el.dataset.t) : null;", "const b = active && layerReady(layerData()) ? (badgeFor(el.dataset.t) || { text: \"L 0\", cls: \"\", title: \"\" }) : null;"],
     ["an unnamed stock left undimmed", "el.classList.toggle(\"dim\", active && layerReady(layerData()) && !b);", "el.classList.toggle(\"dim\", false);"],
     ["a missing lag drawn as zero", "const sessText = (v) => (v === null || v === undefined ? DASH : String(v));", "const sessText = (v) => (v === null || v === undefined ? \"0\" : String(v));"],
+    ["the Late badge in days", "text: \"L \" + sessText(e.maxS)", "text: \"L \" + sessText(e.maxS === null ? null : e.maxS * 1.4)"],
     ["the address never written", "if (!quiet) { try { history.replaceState(null, \"\", layer === \"none\" ? location.pathname + location.search : \"#layer=\" + layer); } catch (error) { void error; } }", ""],
   ];
   for (const [name, from, to] of wrongBuilds) {
     ok(JS.split(from).length === 2, "the planted build changes the module exactly once: " + name);
     const problems = await layerProbe(browser, JS.replace(from, to)).catch((e) => ["threw: " + String(e.message).split("\n")[0]]);
     ok(problems.length > 0, "PLANTED WRONG BUILD CAUGHT: " + name + " (first: " + problems[0] + ")");
+  }
+  {
+    const flip = ["the ex sign flipped", "pctSigned(r.ex)", "pctSigned(r.ex === null ? null : -r.ex)"];
+    ok(JS.split(flip[1]).length >= 2, "the planted build changes the module: " + flip[0]);
+    const problems = await layerProbe(browser, JS.replaceAll(flip[1], flip[2])).catch((e) => ["threw: " + String(e.message).split("\n")[0]]);
+    ok(problems.length > 0, "PLANTED WRONG BUILD CAUGHT: " + flip[0] + " (first: " + problems[0] + ")");
+    const party = await layerProbe(browser, undefined, { css: fs.readFileSync(path.join(ROOT, "assets/css/flows-political.css"), "utf8") + "\n.pl-seg-fill i:nth-child(1) { background: var(--up-mark); }\n.pl-seg-fill i:nth-child(2) { background: var(--down-mark); }\n" });
+    ok(party.length > 0, "PLANTED WRONG BUILD CAUGHT: Money coloured by party (first: " + party[0] + ")");
+    const whoFrom = "const whoOf = (v) => (typeof v === \"string\" && /^[A-Z?]{1,3}$/.test(v) ? v : initials(v));";
+    ok(JS.split(whoFrom).length === 2, "the planted build changes the module exactly once: names printed as sent");
+    const names = await initialsProbe(browser, JS.replace(whoFrom, "const whoOf = (v) => v;"));
+    ok(names.length > 0, "PLANTED WRONG BUILD CAUGHT: a full name printed as sent (first: " + names[0] + ")");
+    const on = "const LAYERS_ON = typeof document !== \"undefined\" && !!document.getElementById(\"plLayerSeg\");";
+    ok(JS.split(on).length === 2, "the planted build changes the module exactly once: layers on without the switch");
+    const shown = await noLayerProbe(browser, JS.replace(on, "const LAYERS_ON = typeof document !== \"undefined\";")).catch(() => [1, 0, 0]);
+    ok(shown[0] > 0 || shown[1] > 0, "PLANTED WRONG BUILD CAUGHT: layers shown with layers false (badges " + shown[0] + ")");
   }
 }
 
