@@ -536,6 +536,25 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   near(a.callShare, 0.7, 1e-12, "and the call share");
   near(a.urgency, 100 / 1e5, 1e-12, "urgency = premium that swept into volume above OI, over ADV$");
   eq(a.dots[0].p, 600, "dots are ranked by premium");
+  eq(a.dots[0].a, 0.5, "a dot carries its ask share of its own premium");
+  eq(a.dots[0].b, 0.333, "and its bid share, so the ticker network can draw the bid side instead of a rest bucket");
+  eq(a.u.b, "frac", "the bid share has its unit");
+  const noBid = alertsTape(rows.map((r) => ({ ...r, total_bid_side_prem: undefined })), "aapl", { sessionDate: SESSION, adv: 1e5 });
+  ok(noBid.dots.every((d) => d.b === null), "a window that states no bid side has no bid share, never a zero");
+  const noAsk = alertsTape(rows.map((r) => ({ ...r, total_ask_side_prem: undefined })), "aapl", { sessionDate: SESSION, adv: 1e5 });
+  ok(noAsk.dots.every((d) => d.a === null && d.b !== null), "and one that states no ask side has no ask share, never a zero");
+  for (const [name, transforms] of [
+    ["an unstated bid share counted as zero", [["b: a.prem > 0 && a.bidRaw !== null ? round(a.bidRaw / a.prem, 3) : null", "b: a.prem > 0 ? round((a.bidRaw ?? 0) / a.prem, 3) : null"]]],
+    ["the ask share read from the zero-filled field", [["a: a.prem > 0 && a.askRaw !== null ? round(a.askRaw / a.prem, 3) : null", "a: a.prem > 0 ? round(a.ask / a.prem, 3) : null"]]],
+    ["the bid share dropped", [["b: a.prem > 0 && a.bidRaw !== null ? round(a.bidRaw / a.prem, 3) : null, ", ""]]],
+  ]) {
+    const mod = await loadMutated("shared/flows-positioning.js", transforms);
+    const m = mod.alertsTape(rows, "aapl", { sessionDate: SESSION, adv: 1e5 });
+    const nb = mod.alertsTape(rows.map((r) => ({ ...r, total_bid_side_prem: undefined })), "aapl", { sessionDate: SESSION, adv: 1e5 });
+    const na = mod.alertsTape(rows.map((r) => ({ ...r, total_ask_side_prem: undefined })), "aapl", { sessionDate: SESSION, adv: 1e5 });
+    const caught = m.dots[0].b !== 0.333 || !nb.dots.every((d) => d.b === null) || !na.dots.every((d) => d.a === null);
+    ok(caught, `PLANTED WRONG BUILD FAILS THE DOT SIDE CHECKS: ${name}`);
+  }
   const live = alertsTape(FX.flowAlerts.data, "SYA101", { sessionDate: SESSION, adv: 1e10 });
   eq(live.n, 1, "the probe alert (start_time epoch-ms, 19:59:55Z) is inside the session");
   near(live.askShare, Number((2130 / 31862).toFixed(4)), 1e-12, "and its ask share reads from the string fields (its sides are the whole premium)");

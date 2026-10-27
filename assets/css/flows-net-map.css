@@ -16,7 +16,6 @@
 .nm-band { stroke: var(--label-3); stroke-opacity: 0.32; stroke-linecap: butt; transition: stroke-opacity 120ms; }
 .nm-band.b-bull { stroke: var(--up-mark); }
 .nm-band.b-bear { stroke: var(--down-mark); }
-.nm-band.b-nx { stroke: var(--label-3); }
 .nm-band.is-on { stroke-opacity: 0.75; }
 .nm-band.is-off { stroke-opacity: 0.07; }
 .nm-chip { cursor: pointer; outline: none; }
@@ -29,13 +28,11 @@
 .nm-fg { font: 400 11px / 1 var(--font-text); fill: var(--label-2); }
 .nm-mix.m-bull { fill: var(--up-mark); }
 .nm-mix.m-bear { fill: var(--down-mark); }
-.nm-mix.m-nx { fill: var(--label-3); }
 .nm-legend { flex: none; display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; font: var(--t-caption); color: var(--label-2); }
 .nm-lg { display: inline-flex; align-items: center; gap: 5px; }
 .nm-sw { display: inline-block; width: 14px; height: 8px; border-radius: 2px; }
 .nm-sw.s-bull { background: var(--up-mark); margin-right: -3px; }
 .nm-sw.s-bear { background: var(--down-mark); margin-left: -3px; }
-.nm-sw.s-nx { background: var(--label-3); margin: 0 -3px; }
 .nm-sw.s-band { width: 28px; height: 6px; background: var(--label-3); opacity: 0.7; border-radius: 0; }
 .nm-sw.s-other { width: 18px; height: 10px; border: 1px dashed var(--sep-strong); background: var(--fill-4); }
 .nm-conv { flex: 1 1 280px; color: var(--label-3); }

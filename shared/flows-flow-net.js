@@ -12,9 +12,9 @@ export const COLUMN_KEYS = Object.freeze(["side", "expiry", "money", "flags"]);
 
 export const SIDE_NODES = Object.freeze([
   { id: "side:ca", label: "Calls · ask side", cp: "C", ask: true },
-  { id: "side:cr", label: "Calls · rest", cp: "C", ask: false },
+  { id: "side:cb", label: "Calls · bid side", cp: "C", ask: false },
   { id: "side:pa", label: "Puts · ask side", cp: "P", ask: true },
-  { id: "side:pr", label: "Puts · rest", cp: "P", ask: false },
+  { id: "side:pb", label: "Puts · bid side", cp: "P", ask: false },
 ]);
 
 export const EXPIRY_NODES = Object.freeze([
@@ -49,7 +49,7 @@ export const TITLES = Object.freeze({ side: "Side", expiry: "Expiry", money: "St
 
 export const FACE_LINES = Object.freeze({
   gross: "Vendor-flagged windows, not every execution. Premium is gross; legs of a spread count separately.",
-  ask: "Ask side is the vendor's attribution of premium; the rest is bid, mid or unattributed. No lean on this page.",
+  ask: "Ask side is the vendor's attribution of premium; the bid side is the same attribution for the other quote. Premium with no stated side is not drawn and is counted apart. No lean on this page.",
   flags: "Opening: every trade in the window is flagged opening by the vendor. Sweep: the window contains a sweep.",
   spot: "One session spot, not the price at each window's time.",
 });
@@ -116,13 +116,18 @@ export function flagNode(sweep, opening) {
   return sweep && opening ? "flg:so" : sweep ? "flg:s" : opening ? "flg:o" : "flg:n";
 }
 
-export function sideSplit(cp, premium, ask) {
-  const a = finite(ask);
-  const valid = a !== null && a >= 0 && a <= 1;
-  const part = valid ? premium * a : 0;
-  const rest = premium - part;
+export function sideSplit(cp, premium, ask, bid) {
+  let a = finite(ask);
+  let b = finite(bid);
+  if (a !== null && !(a >= 0 && a <= 1)) a = null;
+  if (b !== null && !(b >= 0 && b <= 1)) b = null;
+  if (a !== null && b !== null && a + b > 1 + 1e-9) { a = null; b = null; }
+  const askPart = a === null ? 0 : premium * a;
+  const bidPart = b === null ? 0 : premium * b;
+  const noSide = Math.max(0, premium - askPart - bidPart);
+  const valid = a !== null && b !== null && noSide <= premium * 1e-9;
   const c = cp === "C";
-  return { valid, parts: [[c ? "side:ca" : "side:pa", part], [c ? "side:cr" : "side:pr", rest]].filter((x) => x[1] > 0) };
+  return { valid, noSide, parts: [[c ? "side:ca" : "side:pa", askPart], [c ? "side:cb" : "side:pb", bidPart]].filter((x) => x[1] > 0) };
 }
 
 export function shares(values) {
@@ -156,7 +161,7 @@ export function buildNet(alerts, ctx = {}) {
     return { state: "stale", reason: "The windows are for " + String(alerts.asOf).slice(0, 10) + ", not the card's session " + session + "." };
   }
   const sessionDay = session || (alerts.asOf ? String(alerts.asOf).slice(0, 10) : null);
-  const excluded = { window: 0, unattributed: 0, unflagged: 0 };
+  const excluded = { window: 0, noSide: 0, noSidePrem: 0, unflagged: 0 };
   const spot = finite(ctx.spot) !== null && ctx.spot > 0 ? ctx.spot : null;
   const iv30 = finite(ctx.iv30) !== null && ctx.iv30 > 0 ? ctx.iv30 : null;
   const termOn = Array.isArray(ctx.term) && ctx.term.some((r) => r && finite(r.vol) !== null && r.vol > 0 && finite(r.dte) !== null && r.dte > 0);
@@ -181,8 +186,8 @@ export function buildNet(alerts, ctx = {}) {
     if (moneyOn && money === null) { excluded.window++; return; }
     const flag = flagNode(d.sw, d.op);
     if (flag === "flg:u") excluded.unflagged++;
-    const split = sideSplit(cp, p, d.a);
-    if (!split.valid) excluded.unattributed++;
+    const split = sideSplit(cp, p, d.a, d.b);
+    if (!split.valid) { excluded.noSide++; excluded.noSidePrem += split.noSide; }
     for (const [side, v] of split.parts) parts.push({ w: i, v, nodes: [side, bucket, money, flag] });
   });
   const total = parts.reduce((a, x) => a + x.v, 0);
@@ -192,6 +197,7 @@ export function buildNet(alerts, ctx = {}) {
   if (prem !== null && sumAll > prem * 1.001 + 1) return { state: "inconsistent", reason: "The listed windows add to more than the name's flagged premium, so no network is drawn." };
   if (!(total > 0)) return { state: "unavailable", reason: sessionDay === null ? "The windows carry no session date, so days to expiry cannot be counted." : "No listed window could be placed: " + excluded.window + " had a missing or invalid price, side, strike or expiry." };
   const cover = prem !== null && prem > 0 ? total / prem : null;
+  const sidedShare = total + excluded.noSidePrem > 0 ? total / (total + excluded.noSidePrem) : null;
   const columns = [];
   const defs = [SIDE_NODES, EXPIRY_NODES, moneyOn ? MONEY_NODES[basis === "fixed" ? "fixed" : "scaled"] : null, FLAG_NODES];
   const keys = ["side", "expiry", "money", "flags"];
@@ -233,7 +239,7 @@ export function buildNet(alerts, ctx = {}) {
     state: drawnWindows < MIN_WINDOWS ? "thin" : "ok",
     reason: drawnWindows < MIN_WINDOWS ? "Too few windows for a map." : null,
     session: sessionDay, total, windows: drawnWindows, listed: seen, n: finite(alerts.n), complete: typeof alerts.complete === "boolean" ? alerts.complete : null,
-    cover, coverNote, gap: cover === null ? null : Math.max(0, Math.round(100 * (1 - cover))), prem,
+    cover, sidedShare, coverNote, gap: cover === null ? null : Math.max(0, Math.round(100 * (1 - cover))), prem,
     basis, spot, excluded, columns, bands, paths: pathList, parts,
   };
 }
