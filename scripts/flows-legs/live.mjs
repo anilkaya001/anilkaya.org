@@ -1,6 +1,6 @@
 import {
   LIVE_KEYS, LIVE_BUDGET, SECTOR_TIDES, shapeBreadth, shapeStrips, appendStripSeries, shapeVol,
-  indexRows, shapeMovers, mergeLiveAlerts, shapeAlertsHead, alertsPagePlan,
+  indexRows, shapeMovers, shapeFunds, mergeLiveAlerts, shapeAlertsHead, alertsPagePlan,
   oldestCreated, stripNames, rowsOf, failed, freshEnvelope, timeMs, isoSec, anyAnswered, BREADTH_ETFS, VERDICT,
   nightlySources, priorCloseBase,
 } from "../../shared/flows-live.js";
@@ -8,6 +8,7 @@ import { FOCUS_STRIP_FALLBACK, focusStripNames as focusNamesOf } from "../../sha
 import { phaseAt, closeMinutes, inferredEarlyClose, PHASE_MINUTES, LIVE_CLOCK, easternInstant, prevTradingDay } from "../../shared/flows-freshness.js";
 import { fakeLiveVendor, fakeBoards } from "./live-fake.mjs";
 import { pathFor } from "../../shared/flows-vendor-ops.js";
+import { nightlyFundsOn, readList } from "../../shared/flows-floor-funds.js";
 
 export const LIVE_READ_PACE_MS = LIVE_BUDGET.tier2PaceMs;
 
@@ -162,6 +163,9 @@ export async function runLive({
   const breadthAt = now();
   const strip = await read(pathFor("screener-stocks"), { ticker: plan.names.join(","), limit: 500 });
   const stripAt = now();
+  const fundsOn = nightlyFundsOn(process.env);
+  const fundsRaw = fundsOn ? await read(pathFor("screener-stocks"), { ticker: readList().join(","), limit: 500 }) : null;
+  const fundsAt = now();
 
   const prevAlerts = await readStored("live:alerts");
   const alertPlan = alertsPagePlan(prevAlerts && prevAlerts.payload, session);
@@ -269,6 +273,8 @@ export async function runLive({
     const head = typeof bytes["live:alerts"] === "number" ? shapeAlertsHead(merged.write, { writer }) : null;
     if (head) await put("live:alerts:head", head);
   } else log(`  live:alerts: NOT WRITTEN — ${merged.why}; ${merged.read} row(s) read, the held record stands`);
+
+  if (fundsOn) await put("live:funds", shapeFunds(fundsRaw, { at: fundsAt, session, writer }), { answered: !failed(fundsRaw) });
 
   if (typeof shapeNews === "function") {
     const news = failed(newsRaw)

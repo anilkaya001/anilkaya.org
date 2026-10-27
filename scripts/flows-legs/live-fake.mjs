@@ -1,6 +1,7 @@
 import { sessionOpen, easternInstant, PHASE_MINUTES, prevWeekdayDay } from "../../shared/flows-freshness.js";
 import { SECTOR_TIDES, INDEX_NAMES } from "../../shared/flows-live.js";
 import { touch } from "./taint.mjs";
+import { fakeFundsRead } from "./funds-fake.mjs";
 
 function mulberry(seed) {
   let a = seed >>> 0;
@@ -334,7 +335,8 @@ export function fakeLiveVendor({ now, session, nullPrev = false, aheadS = 0 }) {
     else if (path === "/api/market/sector-etfs") body = fakeSectorEtfs({ session });
     else if (path === "/api/screener/stocks") {
       const list = String(params.ticker || "").split(",").filter(Boolean);
-      body = fakeScreenerRows(list.filter((t) => !/^SYW012$/.test(t)), { session, dated: !!params.date, now: at, nullPrev, aheadS });
+      if (list.length >= 50 && list.includes("TLT")) body = fakeFundsRead(path, params, session);
+      else body = fakeScreenerRows(list.filter((t) => !/^SYW012$/.test(t)), { session, dated: !!params.date, now: at, nullPrev, aheadS });
     } else if (path === "/api/option-trades/flow-alerts") {
       const tickers = params.ticker_symbol ? String(params.ticker_symbol).split(",") : [];
       const count = params.older_than ? 40 : Math.min(Number(params.limit) || 200, tickers.length ? 30 : 200);
