@@ -17,10 +17,11 @@
   const money = (v) => F.money(v);
   const pct = (v) => (v > 0 && v < 0.005 ? "<1%" : Math.round(v * 100) + "%");
   const count = (v) => Math.round(v).toLocaleString("en-US");
+  const band = (lo, hi) => Math.floor(lo * 100 + 1e-9) + "\u2013" + Math.ceil(hi * 100 - 1e-9) + "%";
   const plural = (k, one, many) => (k === 1 ? one : many);
 
   const LAYER = { lean: ["Sector", "Side", "Name", "Lean"], dte: ["Sector", "Side", "Name", "Expiry"] };
-  const LEAN_WORD = { bull: "bullish", bear: "bearish", nx: "unsided" };
+  const LEAN_WORD = { bull: "bullish", bear: "bearish" };
   const NS = (tag, attrs, ...kids) => {
     const n = document.createElementNS(SVG, tag);
     if (attrs) for (const k in attrs) if (attrs[k] !== null && attrs[k] !== undefined && attrs[k] !== false) n.setAttribute(k, attrs[k]);
@@ -28,7 +29,7 @@
     return n;
   };
 
-  const dom = (n) => (n.bull >= n.bear && n.bull >= n.nx ? "bull" : n.bear >= n.nx ? "bear" : "nx");
+  const dom = (n) => (n.bull >= n.bear ? "bull" : "bear");
   const layerName = (mode, i) => LAYER[mode][i];
 
   function describe(M, n) {
@@ -58,7 +59,7 @@
 
   function readout(M, n) {
     const d = describe(M, n);
-    const parts = [d.title + " · " + d.layer + ": " + money(d.total) + " of " + money(M.total) + " flagged premium, " + pct(d.share)];
+    const parts = [d.title + " · " + d.layer + ": " + money(d.total) + " of " + money(M.total) + " sided premium, " + pct(d.share)];
     parts.push("from " + d.from);
     parts.push("to " + d.to);
     const bits = [count(d.windows) + plural(d.windows, " window", " windows")];
@@ -249,7 +250,7 @@
         },
           NS("title", null, (d.full || d.label) + (d.sec ? " (" + d.sec + ")" : "") + ": " + money(d.v) + ", " + pct(d.share) + (isOther ? ". Members: " + d.members.join(", ") : "")),
           NS("rect", { class: "nm-box", width: nd.w, height: nd.h, rx: 7 }));
-        const mix = [["bull", d.bull], ["nx", d.nx], ["bear", d.bear]];
+        const mix = [["bull", d.bull], ["bear", d.bear]];
         let mx = 0;
         for (const [k, v] of mix) {
           const w = d.v ? (v / d.v) * (nd.w - 12) : 0;
@@ -290,10 +291,10 @@
       const k = G ? G.k : 0;
       const ref = G && G.vMax ? niceRef(G.vMax) : null;
       const items = [
-        h("span", { class: "nm-lg" }, h("i", { class: "nm-sw s-bull" }), h("i", { class: "nm-sw s-nx" }), h("i", { class: "nm-sw s-bear" }), "Chip base and band colour: bullish, unsided, bearish premium"),
+        h("span", { class: "nm-lg" }, h("i", { class: "nm-sw s-bull" }), h("i", { class: "nm-sw s-bear" }), "Chip base and band colour: bullish and bearish sided premium"),
         h("span", { class: "nm-lg" }, h("i", { class: "nm-sw s-band", style: ref && !(G && G.phone) ? { height: Math.max(2, Math.round(ref * k)) + "px" } : null }), ref ? "Band width: premium, this thick is " + money(ref) : "Band width: premium"),
         h("span", { class: "nm-lg" }, h("i", { class: "nm-sw s-other" }), "Dashed chip: Other, opens its members"),
-        h("span", { class: "nm-lg" }, h("b", null, "$ \u00b7 %"), "Figure: flagged premium and its share of the total"),
+        h("span", { class: "nm-lg" }, h("b", null, "$ \u00b7 %"), "Figure: sided premium and its share of the sided total"),
         h("span", { class: "nm-lg nm-conv" }, "Lean is a convention: calls on the ask side and puts on the bid side read bullish, calls on the bid side and puts on the ask side bearish."),
       ];
       if (W < 640) {
@@ -354,10 +355,10 @@
       H = Math.round(stage.clientHeight || 0);
       if (W < 40 || H < 40) return;
       M = fitLayout();
-      if (!M || !M.total) { M = null; silent({ state: "quiet", reason: "The flagged windows carry no premium to route." }); return; }
+      if (!M || !M.total) { const fl = M && M.flagged; M = null; silent({ state: "quiet", reason: fl > 0 ? "No flagged premium has a stated side to route." : "The flagged windows carry no premium to route." }); return; }
       const ok = (id) => M.layers.some((l) => l.some((n) => n.id === id));
       if (!sel || !ok(sel)) sel = defaultSel();
-      stats.textContent = count(M.windows) + plural(M.windows, " window", " windows") + " · " + money(M.total) + " flagged · " + count(M.names) + plural(M.names, " name", " names") + (S.readAt ? " · read " + F.time(S.readAt) : "") +
+      stats.textContent = count(M.windows) + plural(M.windows, " window", " windows") + " · " + money(M.total) + " sided of " + money(M.flagged) + " flagged (" + pct(M.cover.share) + ") · lean " + band(M.cover.bullLo, M.cover.bullHi) + " bullish, " + band(M.cover.bearLo, M.cover.bearHi) + " bearish · " + count(M.names) + plural(M.names, " name", " names") + (S.readAt ? " · read " + F.time(S.readAt) : "") +
         (U.state === "fail" ? " · sectors unread" : "");
       paint();
     }

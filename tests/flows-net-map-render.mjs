@@ -13,25 +13,26 @@ const near = (a, b, msg) => { assert.ok(Math.abs(a - b) <= Math.max(1e-6, Math.a
 const MAP = "/assets/js/flows-net-map.js";
 const SRC = fs.readFileSync(path.join(ROOT, "assets/js/flows-net-map.js"), "utf8");
 
-const KIND = { ca: "Calls · ask side", pb: "Puts · bid side", nx: "Unsided", pa: "Puts · ask side", cb: "Calls · bid side" };
+const KIND = { ca: "Calls · ask side", pb: "Puts · bid side", pa: "Puts · ask side", cb: "Calls · bid side" };
 const SECTOR_OF = new Map(NAMES.map((n) => [n[0], n[1] || "No sector in the universe"]));
-const LEAN = { ca: "Bullish", pb: "Bullish", cb: "Bearish", pa: "Bearish", nx: "Unsided" };
+const LEAN = { ca: "Bullish", pb: "Bullish", cb: "Bearish", pa: "Bearish" };
 
 function expectedOf(alerts) {
-  const kinds = { ca: 0, pb: 0, nx: 0, pa: 0, cb: 0 };
-  const byName = new Map(), bySector = new Map(), byLean = { Bullish: 0, Bearish: 0, Unsided: 0 };
-  let total = 0, windows = 0;
+  const kinds = { ca: 0, pb: 0, pa: 0, cb: 0 };
+  const byName = new Map(), bySector = new Map(), byLean = { Bullish: 0, Bearish: 0 };
+  let total = 0, flagged = 0, windows = 0;
   const paths = new Map();
   for (const r of alerts.rows) {
     if (!(r.prem > 0)) continue;
     windows++;
-    total += r.prem;
+    flagged += r.prem;
     const a = r.askPrem || 0, b = r.bidPrem || 0;
     const k = a + b > r.prem ? r.prem / (a + b) : 1;
-    const parts = [[r.cp === "C" ? "ca" : "pa", a * k], [r.cp === "C" ? "cb" : "pb", b * k], ["nx", Math.max(0, r.prem - (a + b) * k)]];
+    const parts = [[r.cp === "C" ? "ca" : "pa", a * k], [r.cp === "C" ? "cb" : "pb", b * k]];
     for (const [kind, v] of parts) {
       if (!(v > r.prem * 1e-9)) continue;
       kinds[kind] += v;
+      total += v;
       byName.set(r.t, (byName.get(r.t) || 0) + v);
       const sec = SECTOR_OF.get(r.t);
       bySector.set(sec, (bySector.get(sec) || 0) + v);
@@ -40,7 +41,7 @@ function expectedOf(alerts) {
       paths.set(key, (paths.get(key) || 0) + v);
     }
   }
-  return { total, windows, kinds, byName, bySector, byLean, paths: [...paths.entries()].sort((x, y) => y[1] - x[1]) };
+  return { total, flagged, windows, kinds, byName, bySector, byLean, paths: [...paths.entries()].sort((x, y) => y[1] - x[1]) };
 }
 
 async function sceneOf(page) {
@@ -126,7 +127,16 @@ async function audit(page, exp, label) {
       if (Math.abs(b.w - want) > 1e-6) note("band " + b.a + " to " + b.b + " is not drawn at its premium");
     }
   }
-  if (!/ of \$[\d.,]+[KMB]? flagged premium, \d+%|<1%/.test(read) || !/ from /.test(read) || !/ to /.test(read) || !/window/.test(read) || !/convention/.test(read)) note("the readout does not state share, from, to, windows and the convention: " + read);
+  if (!/ of \$[\d.,]+[KMB]? sided premium, \d+%|<1%/.test(read) || !/ from /.test(read) || !/ to /.test(read) || !/window/.test(read) || !/convention/.test(read)) note("the readout does not state share, from, to, windows and the convention: " + read);
+  if (exp.byLean) {
+    const stats = await page.evaluate(() => document.querySelector("#mkNet .nm-stats").textContent);
+    const F = exp.flagged, bull = exp.byLean.Bullish, bear = exp.byLean.Bearish;
+    const lo = Math.floor((bull / F) * 100 + 1e-9), hi = Math.ceil(((F - bear) / F) * 100 - 1e-9);
+    const blo = Math.floor((bear / F) * 100 + 1e-9), bhi = Math.ceil(((F - bull) / F) * 100 - 1e-9);
+    if (!stats.includes(lo + "\u2013" + hi + "% bullish") || !stats.includes(blo + "\u2013" + bhi + "% bearish")) note("the stats line does not print the lean as a range from the sided premium: " + stats);
+    if (!stats.includes("sided of") || !stats.includes(Math.round((exp.total / F) * 100) + "%")) note("the stats line does not print the sided coverage: " + stats);
+    if (/unsided|unattributed/i.test(stats)) note("the stats line names an unsided bucket");
+  }
   return bad;
 }
 const eqCheck = (a, b, fail) => { if (JSON.stringify(a) !== JSON.stringify(b)) fail(); };
@@ -262,6 +272,8 @@ for (const [w, h] of [[1440, 820], [1024, 768]]) {
 }
 
 const MUTANTS = [
+  ["the bullish range counts unsided premium as bullish", [["band(M.cover.bullLo, M.cover.bullHi)", "band(M.cover.bullLo, 1)"]]],
+  ["the sided coverage dropped from the stats line", [[" sided of \" + money(M.flagged) + \" flagged (\" + pct(M.cover.share) + \") \u00b7 lean \"", " flagged \u00b7 lean \""]]],
   ["sector names always abbreviated", [["if (full && ctxW(full, \"600 12px\") <= avail) label = full;", ""]]],
   ["Other chips have no member drill", [["if (r.d.other) readEl.append", "if (false) readEl.append"]]],
   ["the readout drops where the premium goes", [["parts.push(\"to \" + d.to);", ""]]],
@@ -302,7 +314,8 @@ async function mutantFails(name, edits) {
 }
 for (const [name, edits] of MUTANTS) ok(await mutantFails(name, edits), `PLANTED WRONG BUILD FAILS THE IDENTIFICATION AUDIT: ${name}`);
 
-near(EXP.total, ALERTS.rows.reduce((a, r) => a + r.prem, 0), "the independent total is the sum of the windows' premium");
+near(EXP.flagged, ALERTS.rows.reduce((a, r) => a + r.prem, 0), "the independent flagged total is the sum of the windows' premium");
+ok(EXP.total < EXP.flagged, "and the sided total is the part of it with a stated side");
 ok(!/\bat (the )?(ask|bid)\b/i.test(SRC), "no vendor term in the module's source");
 
 await browser.close();

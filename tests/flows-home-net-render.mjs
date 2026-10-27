@@ -111,15 +111,16 @@ try {
       const M = window.FlowsUI.net.of(document.getElementById("hmNetHost")).model();
       const same = window.FlowsUI.net.model(res.rows, { out: "lean" });
       const sums = M.layers.map((l) => l.reduce((a, n) => a + n.v, 0));
-      return { want, total: M.total, same: same.total, sums, host: document.getElementById("hmNetHost").className };
+      return { want, total: M.flagged, sided: M.total, same: same.flagged, sidedSame: same.total, sums, host: document.getElementById("hmNetHost").className };
     });
     ok(cons.want > 0, "the fixture carries flagged premium");
-    ok(Math.abs(cons.total - cons.want) < 1, `THE MOUNTED MODEL HOLDS EVERY FLAGGED DOLLAR: ${cons.total} against ${cons.want}`);
+    ok(Math.abs(cons.total - cons.want) < 1, `THE MOUNTED MODEL KEEPS EVERY FLAGGED DOLLAR IN ITS FLAGGED TOTAL: ${cons.total} against ${cons.want}`);
     ok(Math.abs(cons.same - cons.total) < 1, "and equals the pure model on the same rows, so Home and Unusual share one model");
-    for (const s of cons.sums) ok(Math.abs(s - cons.want) < 1, `and every layer sums to the same premium (${s})`);
+    ok(cons.sided > 0 && cons.sided <= cons.want + 1 && Math.abs(cons.sidedSame - cons.sided) < 1, "the drawn total is the sided premium, never above the flagged premium");
+    for (const s of cons.sums) ok(Math.abs(s - cons.sided) < 1, `and every layer sums to the same sided premium (${s})`);
     ok(/is-slot/.test(cons.host), "the host keeps its reserved height while the network has rows");
     const idx = await page.evaluate(() => {
-      const row = (t, prem) => ({ t, cp: "C", k: 100, exp: "2026-10-23", prem, askPrem: 0, bidPrem: 0, spanStart: "2026-10-19T14:00:00Z" });
+      const row = (t, prem) => ({ t, cp: "C", k: 100, exp: "2026-10-23", prem, askPrem: prem, bidPrem: 0, spanStart: "2026-10-19T14:00:00Z" });
       const rows = [row("SPX", 119e6), row("SPXW", 9e6), row("VIX", 4e6), row("SPY", 30e6), row("QQQ", 20e6), row("SYX900", 5e6), row("SYX901", 3e6)];
       const sectors = (sectorOf) => {
         const M = window.FlowsUI.net.model(rows, { out: "lean", sectorOf });

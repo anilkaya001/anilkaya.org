@@ -315,7 +315,7 @@
     const top = [...by.values()].sort((x, y) => y.v - x.v || (x.t < y.t ? -1 : 1)).slice(0, 8);
     const lean = (e) => {
       const q = (e.up - e.down) / e.v;
-      return e.up + e.down < e.v / 2 ? ["–", "Unsided"] : q >= 0.1 ? ["▲", "Bullish"] : q <= -0.1 ? ["▼", "Bearish"] : ["–", "Mixed"];
+      return e.up + e.down < e.v / 2 ? ["–", "Side not stated"] : q >= 0.1 ? ["▲", "Bullish"] : q <= -0.1 ? ["▼", "Bearish"] : ["–", "Mixed"];
     };
     slotEl.replaceChildren(
       h("p", { class: "fn-slot-t" }, "Largest names by flagged premium"),
