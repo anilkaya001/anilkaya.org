@@ -147,11 +147,19 @@ jobs:
         if: steps.browser.outputs.needs == 'true'
         working-directory: tests
         run: npx playwright install --with-deps chromium
+      - name: Install WebKit and Firefox on the shard that holds the engine suite
+        if: steps.browser.outputs.needs == 'true'
+        working-directory: tests
+        run: |
+          pin="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync("suites/flows-sfc-firstpaint.json", "utf8")).shard))')"
+          if [ "$pin" = "${{ matrix.shard }}" ]; then npx playwright install --with-deps webkit firefox; fi
       - name: Check the contracts first
         working-directory: tests
         run: node run.mjs --only contracts
       - name: Run the shard
         working-directory: tests
+        env:
+          SFC_ENGINES: all
         run: node run.mjs --shard ${{ matrix.shard }}/12 ${{ steps.select.outputs.args }}
 
   test:

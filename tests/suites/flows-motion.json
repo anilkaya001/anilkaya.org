@@ -1,1 +1,1 @@
-{"name": "flows-motion", "class": "W", "group": "shard", "timing": false, "medianS": 14.5, "shard": 6, "files": ["flows-motion.mjs"], "covers": ["assets/css/base.css","assets/css/flows.css","schema.sql"]}
+{"name": "flows-motion", "class": "W", "group": "shard", "timing": false, "medianS": 14.5, "shard": 8, "files": ["flows-motion.mjs"], "covers": ["assets/css/base.css","assets/css/flows-*.css","assets/css/flows.css","schema.sql"]}

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { unitFor, formatUnits, cellText, exactDollars, exactCents, moneyShort, roundGrid, caption, niceScale, scaleText, MINUS, DASH } from "../shared/flows-sfc-display.js";
+import { unitFor, formatUnits, cellText, exactDollars, exactCents, moneyShort, moneyOut, netProof, leanBounds, roundGrid, caption, niceScale, scaleText, MINUS, DASH } from "../shared/flows-sfc-display.js";
 import { workedExample } from "./lib/sfc-golden.mjs";
 import { roundTable, footsRounded } from "../shared/flows-round.js";
 import { dayLabel, rangeLabel, trtOf, trtStamp, lastCompletedSession, expectedFive, periodPlan, sumSessions, NOT_ARCHIVED, LIVE_MAX_AGE_MS } from "../shared/flows-sfc-time.js";
@@ -452,6 +452,9 @@ const lintAll = (V) => {
     C.EMPTY.page.pending("Intraday"), C.EMPTY.page.quiet("Intraday"), C.EMPTY.page.failed("17:55 TRT"), C.EMPTY.page.unavailable("Five sessions", "Daily ledgers are not archived yet."),
     C.SCOPE_LINE.all("$1.00M", 10, 2, 12), C.SCOPE_LINE.all("$1.00M", 10, null, null), C.SCOPE_LINE.sector("$1.00M", 4, "Energy", 3), C.SCOPE_LINE.name("$1.00M", 4, "SYA101", null),
     ...Object.values(C.FLOW_LINES).flatMap((x) => (typeof x === "function" ? [x("$8.67M")] : [x])), C.KEY_LINE, C.ZERO_LINE, C.centsText(-1234),
+    ...stringLeaves(C.HERO.lean.verdict), ...stringLeaves(C.HERO.cells.proof), C.HERO.lean.head + C.HERO.lean.tail, C.HERO.lean.pending, C.HERO.lean.tick(59), C.HERO.lean.noTick("coverage is under two fifths"), C.HERO.lean.bar(38, 74), C.HERO.lean.bar(50, 50),
+    C.HERO.cells.held.label, C.HERO.cells.held.line1(331), C.HERO.cells.held.line2("$32.66M"), C.HERO.cells.range("−$32.95M", "+$50.63M"), C.HERO.cells.calls.label, C.HERO.cells.puts.label, C.PENDING_LINE,
+    C.STRIP.label, C.STRIP.windows.name, C.STRIP.windows.pending, C.STRIP.windows.asOf("17:55 TRT"), C.STRIP.held.name, C.STRIP.held.pending, C.STRIP.tide.name, C.STRIP.tide.pending, C.STRIP.tide.asOf("17:50 TRT"), C.STRIP.tide.none, C.STRIP.poll.name, C.STRIP.poll.pending,
   ];
   const hits = [...leaves, ...copy.map((s) => ["copy", s])].flatMap(([id, s]) => lintText(s).map((h) => ({ id, rule: h.rule, match: h.match, sentence: h.sentence })));
   return { hits, count: leaves.length + copy.length };
@@ -489,6 +492,181 @@ const lintAll = (V) => {
     const V = await loadVariant({ file, transforms }, "u-" + title);
     ok(!holds(V), `planted: ${title} is caught`);
   }
+}
+
+{
+  eq(leanBounds(0, 0, 0), null, "T12 bounds: no premium has no bounds");
+  eq(leanBounds(0, 0, 5).text, "0–100%", "T12 bounds: all unknown spans everything");
+  eq(leanBounds(1, 1, 0).text, "50%", "T12 bounds: an exact half with nothing unknown is 50%");
+  eq(leanBounds(99, 101, 0).text, "<50%", "T12 bounds: 49.5% with nothing unknown is under 50, never a bare 50");
+  eq(leanBounds(1004, 996, 0).text, ">50%", "T12 bounds: 50.2% with nothing unknown is over 50, never a bare 50");
+  eq(leanBounds(101, 99, 0).text, "51%", "T12 bounds: 50.5% with nothing unknown rounds to 51 and says so");
+  eq(leanBounds(62, 38, 0).text, "62%", "T12 bounds: nothing unknown is one figure");
+  eq(leanBounds(5004, 2000, 2996).text, ">50–80%", "T12 bounds: a low end of 50.04% is over 50, not 50, so it agrees with a stated direction");
+  eq(leanBounds(5040, 3960, 1000).text, "50.4–61%", "T12 bounds: a low end near one half keeps its tenth");
+  eq(leanBounds(2000, 5004, 2996).text, "20–<50%", "T12 bounds: a high end of 49.96% is under 50");
+  eq(leanBounds(50, 20, 30).text, "50–80%", "T12 bounds: an exact half at the low end is 50");
+  eq(leanBounds(3800, 2600, 3600).text, "38–74%", "T12 bounds: an exact 74% stays 74");
+  eq(leanBounds(3801, 2600, 3599).text, "38–74%", "T12 bounds: 38.01% floors to 38");
+  eq(leanBounds(3800, 2599, 3601).text, "38–75%", "T12 bounds: 74.01% ceils to 75");
+  eq(leanBounds(4, 1, 0).say, "80%", "T12 bounds: spoken as it is written");
+  eq(leanBounds(5004, 2000, 2996).say, "over 50 to 80%", "T12 bounds: over and under are spoken as words");
+  eq(leanBounds(2000, 5004, 2996).say, "20 to under 50%", "T12 bounds: under, too");
+  throws(() => leanBounds(-1, 0, 1), RangeError, "T12 bounds: a negative figure is refused");
+  throws(() => leanBounds(1.5, 0, 1), RangeError, "T12 bounds: and so is a fraction of a cent");
+  const rnd = mulberry32(31415);
+  const parse = (text) => {
+    const m = /^([<>])?(\d+(?:\.\d)?)(?:–(<)?(\d+(?:\.\d)?))?%$/.exec(text);
+    if (!m) return null;
+    const lo = { strict: m[1] === ">", n: m[2] };
+    return m[4] === undefined ? { lo, hi: { strict: m[1] === "<", n: m[2] }, single: true, bare: m[1] || "" } : { lo, hi: { strict: !!m[3], n: m[4] }, single: false };
+  };
+  const ten = (t) => { const [w, f = "0"] = t.split("."); return BigInt(w) * 10n + BigInt(f); };
+  for (let i = 0; i < 6000; i++) {
+    const t = 1 + Math.floor(rnd() * (rnd() < 0.5 ? 200 : 1e7));
+    const u = rnd() < 0.25 ? 0 : Math.floor(rnd() * (t + 1));
+    const a = Math.floor(rnd() * (t - u + 1));
+    const b = t - u - a;
+    const got = leanBounds(a, b, u);
+    const parsed = parse(got.text);
+    ok(parsed !== null, `T12 bounds ${a}/${b}/${u}: the text parses: ${got.text}`);
+    const T = BigInt(t), A = BigInt(a), B = BigInt(b), U = BigInt(u);
+    const lo = ten(parsed.lo.n), hi = ten(parsed.hi.n);
+    if (!parsed.single) {
+      ok(parsed.lo.strict ? 1000n * A > 500n * T && lo === 500n : lo * T <= 1000n * A, `T12 bounds ${a}/${b}/${u}: the low end never claims more than is proven: ${got.text}`);
+      ok(parsed.hi.strict ? 1000n * (A + U) < 500n * T && hi === 500n : hi * T >= 1000n * (A + U), `T12 bounds ${a}/${b}/${u}: the high end never claims less: ${got.text}`);
+      const lowZone = 1000n * A >= 490n * T && 1000n * A <= 510n * T;
+      const gap = 1000n * A - lo * T;
+      ok(parsed.lo.strict || gap < (lowZone ? 1n : 10n) * T, `T12 bounds ${a}/${b}/${u}: and the low end is as tight as its step allows: ${got.text}`);
+      ok((2n * A > T) === (parsed.lo.strict || lo > 500n), `T12 bounds ${a}/${b}/${u}: a low end over 50 shows exactly when buyers are ahead: ${got.text}`);
+      ok((2n * B > T) === (parsed.hi.strict || hi < 500n), `T12 bounds ${a}/${b}/${u}: a high end under 50 shows exactly when sellers are ahead: ${got.text}`);
+    } else {
+      ok(U === 0n, `T12 bounds ${a}/${b}/${u}: one figure only when nothing is unknown`);
+      ok(parsed.bare === ">" ? 2n * A > T : parsed.bare === "<" ? 2n * B > T : lo !== 500n || 2n * A === T, `T12 bounds ${a}/${b}/${u}: a bare 50 is an exact half: ${got.text}`);
+    }
+  }
+}
+
+{
+  eq(moneyOut(3295400000, "down", { plus: true }), "+$32.95M", "T12 money: a lower bound of $32.954M rounds down to $32.95M");
+  eq(moneyOut(-3295400000, "down"), `${MINUS}$32.96M`, "T12 money: a negative lower bound rounds away from zero, to $32.96M");
+  eq(moneyOut(5062510000, "up", { plus: true }), "+$50.63M", "T12 money: an upper bound of $50.6251M rounds up to $50.63M");
+  eq(moneyOut(-5062510000, "up"), `${MINUS}$50.62M`, "T12 money: a negative upper bound rounds toward zero, which is up");
+  eq(moneyOut(0, "down"), "$0", "T12 money: zero");
+  eq(moneyOut(-1, "up"), "$0", "T12 money: a cent below zero rounds up to zero");
+  eq(moneyOut(1, "up", { plus: true }), "+$1", "T12 money: a cent above zero rounds up to a dollar");
+  eq(moneyOut(99999999, "up"), "$1.00M", "T12 money: a figure that rounds up past its tier moves to the next");
+  eq(moneyOut(-99999999, "down"), `${MINUS}$1.00M`, "T12 money: and so does a negative one");
+  eq(moneyOut(12345, "down"), "$123", "T12 money: dollars floor");
+  eq(moneyOut(12345, "up"), "$124", "T12 money: dollars ceil");
+  eq(moneyOut(123456, "down"), "$1.2k", "T12 money: thousands floor to a tenth");
+  eq(moneyOut(123456, "up"), "$1.3k", "T12 money: thousands ceil to a tenth");
+  eq(moneyOut(1e11, "up"), "$1.00B", "T12 money: billions");
+  throws(() => moneyOut(1.5, "up"), RangeError, "T12 money: a fraction of a cent is refused");
+  throws(() => moneyOut(5, "nearest"), RangeError, "T12 money: only down and up are known");
+  const rnd = mulberry32(2718281);
+  const value = (t) => {
+    const m = /^([−+]?)\$([\d,]+(?:\.\d+)?)([kMB]?)$/.exec(t);
+    if (!m) return null;
+    const [w, f = ""] = m[2].replace(/,/g, "").split(".");
+    const scale = { "": 0, k: 3, M: 6, B: 9 }[m[3]];
+    return (m[1] === MINUS ? -1n : 1n) * BigInt(w + f) * 10n ** BigInt(Math.max(0, scale + 2 - f.length));
+  };
+  for (let i = 0; i < 4000; i++) {
+    const cents = Math.round((rnd() - 0.5) * Math.pow(10, 3 + Math.floor(rnd() * 11)));
+    const down = moneyOut(cents, "down"), up = moneyOut(cents, "up");
+    const dv = value(down), uv = value(up);
+    ok(dv !== null && uv !== null, `T12 money ${cents}: both ends parse: ${down} ${up}`);
+    ok(dv <= BigInt(cents) && uv >= BigInt(cents), `T12 money ${cents}: the range always holds the figure: ${down} to ${up}`);
+  }
+}
+
+{
+  const printedPositive = (t) => t !== "$0" && !t.startsWith(MINUS);
+  const printedNegative = (t) => t.startsWith(MINUS);
+  const proofOf = (n, u) => (u === 0 ? (n > 0 ? "up" : n < 0 ? "down" : "even") : printedPositive(moneyOut(n - u, "down")) ? "up" : printedNegative(moneyOut(n + u, "up")) ? "down" : "open");
+  eq(netProof(1000004, 1000000), "open", "T12 mark: a net 4 cents over side unknown prints a lower bound of $0, so no sign is claimed");
+  eq(netProof(-1000004, 1000000), "open", "T12 mark: and the same on the negative side");
+  eq(netProof(2000001, 1000000), "up", "T12 mark: a net a dollar and a cent over side unknown holds its sign in print");
+  eq(netProof(-2000001, 1000000), "down", "T12 mark: and below it");
+  eq(netProof(1000000, 1000000), "open", "T12 mark: a net equal to side unknown is undecided, never proven");
+  eq([netProof(5, 0), netProof(-5, 0), netProof(0, 0)], ["up", "down", "even"], "T12 mark: with nothing unknown the net is exact and its sign is stated, even when it prints as $0");
+  throws(() => netProof(1.5, 0), RangeError, "T12 mark: a fraction of a cent is refused");
+  throws(() => netProof(1, -1), RangeError, "T12 mark: and so is a negative side unknown");
+  {
+    const rnd = mulberry32(8675309);
+    for (let i = 0; i < 6000; i++) {
+      const mag = Math.pow(10, 2 + Math.floor(rnd() * 11));
+      const u = rnd() < 0.15 ? 0 : Math.floor(rnd() * mag);
+      const n = Math.round((rnd() - 0.5) * 3 * mag) + (rnd() < 0.2 ? (rnd() < 0.5 ? u : -u) + Math.round(rnd() * 5 - 2) : 0);
+      const mark = netProof(n, u);
+      const lo = moneyOut(n - u, "down"), hi = moneyOut(n + u, "up");
+      ok(mark === proofOf(n, u), `T12 mark ${n}/${u}: the mark is the sign of the printed bound: ${mark} ${lo} ${hi}`);
+      if (u > 0) {
+        ok(mark !== "up" || (n > u && printedPositive(lo)), `T12 mark ${n}/${u}: up means the net is over side unknown and the printed low end is above zero`);
+        ok(mark !== "down" || (n < -u && printedNegative(hi)), `T12 mark ${n}/${u}: down means it is under minus side unknown and the printed high end is below zero`);
+        ok(mark !== "open" || (!printedPositive(lo) && !printedNegative(hi)), `T12 mark ${n}/${u}: undecided means the printed range touches zero or crosses it`);
+      }
+    }
+  }
+  const arrowsOf = (v) => {
+    const [ca, pa, cb, pb] = v.flow.arrows.map((a) => a.cents);
+    const A = ca + pa, B = cb + pb, U = v.flow.noside.cents;
+    return { A, B, U, T: A + B + U, calls: ca - cb, puts: pa - pb };
+  };
+  const views = viewsOf(ledgerView).filter(([, v]) => v.status === "ok");
+  ok(views.length >= 10, "T12: enough views to mean something: " + views.length);
+  const GLYPH = { up: "▲", down: "▼", open: "◇", even: "=" };
+  for (const [id, v] of views) {
+    const { A, B, U, T, calls, puts } = arrowsOf(v);
+    const h = v.hero;
+    eq([h.lean.A, h.lean.B, h.lean.U, h.lean.T], [A, B, U, T], `T12 ${id}: the hero's totals are the flow view's arrows, in integer cents`);
+    eq(h.lean.parts.map((p) => p.cents), [A, U, B], `T12 ${id}: the three parts of the bar are ask, side unknown and bid`);
+    eq(h.lean.parts.reduce((a, p) => a + p.cents, 0), T, `T12 ${id}: and add to the total premium to the cent`);
+    eq(h.lean.bounds, leanBounds(A, B, U).text, `T12 ${id}: the interval is the exact bounds of ask, bid and side unknown`);
+    ok(h.lean.frac.lo <= h.lean.frac.hi && Math.abs(h.lean.frac.hi - h.lean.frac.lo - U / T) < 1e-12, `T12 ${id}: and its width is side unknown over the total`);
+    eq(h.lean.verdict.state, 2 * A > T ? "paid" : 2 * B > T ? "received" : "open", `T12 ${id}: a direction is stated only when the interval clears one half`);
+    ok(h.lean.verdict.long.includes(COPY.HERO.lean.basis), `T12 ${id}: the full verdict names where the sides come from`);
+    ok(h.lean.verdict.text.split(/\s+/).length <= 7 && h.lean.verdict.text.length <= 36, `T12 ${id}: the visible verdict is a complete short sentence: ${h.lean.verdict.text}`);
+    const shed = v.scope.shed;
+    ok(shed === 0 ? !h.lean.verdict.long.includes("shed") : h.lean.verdict.long.includes(shed === null ? COPY.HERO.lean.held.unrecorded : COPY.HERO.lean.held.shed(shed)), `T12 ${id}: the full verdict says so when the held set is partial or its shed count is not recorded`);
+    eq(h.cells.map((c) => c.cents), [T, calls, puts], `T12 ${id}: the cells are the held premium, the net of calls and the net of puts`);
+    eq(h.cells.slice(1).map((c) => c.proof), [calls, puts].map((n) => proofOf(n, U)), `T12 ${id}: a net is marked only when it is larger than side unknown, whatever its sign`);
+    ok(h.cells.slice(1).every((c) => c.glyph === GLYPH[c.proof] && c.line1.startsWith(COPY.HERO.cells.rangeLabel + " ") && c.line2.length > 0), `T12 ${id}: each mark has its glyph and each net names its range`);
+    for (const [c, n] of [[h.cells[1], calls], [h.cells[2], puts]]) {
+      eq(c.line1, COPY.HERO.cells.range(moneyOut(n - U, "down", { plus: true }), moneyOut(n + U, "up", { plus: true })), `T12 ${id} ${c.id}: the bound is the net less and plus side unknown, rounded outward`);
+    }
+    if (v.scope.kind === "all") {
+      const held = v.sectors.rows.filter((r) => r.windows > 0);
+      eq(held.reduce((a, r) => a + r.takerC, 0), A - B, `T12 ${id}: the sectors' taker nets add to the ledger's taker net, exactly`);
+      eq(held.reduce((a, r) => a + r.uC, 0), U, `T12 ${id}: and their side unknown to the ledger's`);
+    }
+    for (const r of v.sectors.rows) eq(r.proof, r.windows ? proofOf(r.takerC, r.uC) : null, `T12 ${id} ${r.key}: a sector's mark is its own net against its own side unknown`);
+  }
+  const SIGN_ONLY = { file: "shared/flows-sfc-view.js", transforms: [["const proof = netProof(n, U);", 'const proof = n > 0 ? "up" : n < 0 ? "down" : "open";']] };
+  const SECTOR_SIGN = { file: "shared/flows-sfc-view.js", transforms: [["proof: i >= 0 ? netProof(taker, unsidedOf(t)) : null,", 'proof: i >= 0 ? (taker > 0 ? "up" : taker < 0 ? "down" : "open") : null,']] };
+  const NEAREST = { file: "shared/flows-sfc-view.js", transforms: [["const bounds = leanBounds(A, B, U);", "const bounds = { text: `${Math.round((100 * A) / T)}–${Math.round((100 * (A + U)) / T)}%`, say: `${Math.round((100 * A) / T)} to ${Math.round((100 * (A + U)) / T)}%` };"]] };
+  const MID = { file: "shared/flows-sfc-view.js", transforms: [['const verdictId = lean.side === "buyers" ? "paid"', 'const verdictId = 2 * A >= B + U ? "paid"']] };
+  const WRONG_T = { file: "shared/flows-sfc-view.js", transforms: [["const T = totals.T;\n  const A = totals.AC + totals.AP;", "const T = totals.T + 1;\n  const A = totals.AC + totals.AP;"]] };
+  const INWARD = { file: "shared/flows-sfc-view.js", transforms: [['moneyOut(n - U, "down", { plus: true })', 'moneyOut(n - U, "up", { plus: true })']] };
+  const EXACT_MARK = { file: "shared/flows-sfc-display.js", transforms: [['if (printedSign(net - unknown, "down") > 0) return "up";', 'if (net - unknown > 0) return "up";'], ['if (printedSign(net + unknown, "up") < 0) return "down";', 'if (net + unknown < 0) return "down";']] };
+  const NO_HELD = { file: "shared/flows-sfc-view.js", transforms: [["...(heldNote ? [heldNote] : []), ", ""]] };
+  const caught = async (plant, name, probe) => {
+    const V = await loadVariant(plant, name);
+    const out = viewsOf(V.view.ledgerView).filter(([, v]) => v.status === "ok");
+    return out.some(([, v]) => probe(v));
+  };
+  ok(await caught(SIGN_ONLY, "t12-sign", (v) => v.hero.cells.slice(1).some((c) => c.proof !== proofOf(c.cents, arrowsOf(v).U))), "planted: a net marked by its sign alone is caught");
+  ok(await caught(SECTOR_SIGN, "t12-sector", (v) => v.sectors.rows.some((r) => r.windows > 0 && r.proof !== proofOf(r.takerC, r.uC))), "planted: a sector marked by its sign alone is caught");
+  ok(await caught(NEAREST, "t12-nearest", (v) => { const { A, B, U } = arrowsOf(v); return v.hero.lean.bounds !== leanBounds(A, B, U).text; }), "planted: an interval rounded to the nearest, which can show more than is proven, is caught");
+  ok(await caught(MID, "t12-mid", (v) => { const { A, B, T } = arrowsOf(v); return v.hero.lean.verdict.state !== (2 * A > T ? "paid" : 2 * B > T ? "received" : "open"); }), "planted: a verdict that splits side unknown evenly is caught");
+  ok(await caught(WRONG_T, "t12-total", (v) => v.hero.lean.T !== arrowsOf(v).T), "planted: a total that is off by a cent is caught");
+  ok(await caught(INWARD, "t12-inward", (v) => { const { U, calls } = arrowsOf(v); return v.hero.cells[1].line1 !== COPY.HERO.cells.range(moneyOut(calls - U, "down", { plus: true }), moneyOut(calls + U, "up", { plus: true })); }), "planted: a bound rounded inward is caught");
+  {
+    const V = await loadVariant(EXACT_MARK, "t12-exact-mark");
+    ok(V.display.netProof(1000004, 1000000) !== "open" && V.display.netProof(-1000004, 1000000) !== "open", "planted: a mark decided on exact cents while the printed bound reads $0 is caught");
+  }
+  ok(await caught(NO_HELD, "t12-held", (v) => v.scope.shed !== 0 && !v.hero.lean.verdict.long.includes(v.scope.shed === null ? COPY.HERO.lean.held.unrecorded : COPY.HERO.lean.held.shed(v.scope.shed))), "planted: a verdict that hides a partial held set is caught");
 }
 
 console.log(`✓ flows-sfc-view: ${checks} assertions`);

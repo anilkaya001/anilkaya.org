@@ -6,7 +6,7 @@ import { leanRead } from "./flows-sides.js";
 import { periodPlan, trtStamp, dayLabel } from "./flows-sfc-time.js";
 import { sessionClose } from "./flows-freshness.js";
 import { readTides, sectorTides } from "./flows-sfc-tide.js";
-import { unitFor, cellText, formatUnits, exactDollars, moneyShort, roundGrid, caption, niceScale, scaleText, MINUS, DASH } from "./flows-sfc-display.js";
+import { unitFor, cellText, formatUnits, exactDollars, moneyShort, moneyOut, netProof, leanBounds, roundGrid, caption, niceScale, scaleText, MINUS, DASH } from "./flows-sfc-display.js";
 import { NO_OPEN_INTEREST } from "./flows-sfc-stock.js";
 import * as C from "./flows-sfc-copy.js";
 
@@ -176,6 +176,7 @@ function sectorTable(columns, selected, tides, uni, tilt) {
     const taker = i >= 0 ? t.AC + t.AP - (t.BC + t.BP) : null;
     return {
       key: c, label: c, short: C.SECTOR_SHORT[c] || c, kind: kindOf(c), selected: selected === c, windows: i >= 0 ? t.n : 0, premium: i >= 0 ? safe(t.T) : null,
+      takerC: i >= 0 ? taker : null, uC: i >= 0 ? unsidedOf(t) : null, proof: i >= 0 ? netProof(taker, unsidedOf(t)) : null,
       taker: i >= 0 ? cell(taker, r1.rowTotals[i], unit) : nothing,
       calls: i >= 0 ? cell(g1[i][0], r1.cells[i][0], unit) : nothing,
       puts: i >= 0 ? cell(g1[i][1], r1.cells[i][1], unit) : nothing,
@@ -287,6 +288,43 @@ function flowView(totals, outside) {
     outside: outside
       ? { s: "ok", cents: outsideNet, text: money(Math.abs(outsideNet)), exact: exactDollars(outsideNet), line: outsideNet > 0 ? C.FLOW_LINES.outsidePaid(money(outsideNet)) : outsideNet < 0 ? C.FLOW_LINES.outsideReceived(money(-outsideNet)) : C.FLOW_LINES.outsideEven }
       : { s: "absent", cents: null, text: DASH, exact: null, line: C.FLOW_LINES.outsideAbsent },
+  };
+}
+
+function heroView(totals, lean, shed) {
+  const T = totals.T;
+  const A = totals.AC + totals.AP;
+  const B = totals.BC + totals.BP;
+  const U = unsidedOf(totals);
+  const part = (id, label, cents) => ({ id, label, cents, text: moneyShort(cents), exact: exactDollars(cents), frac: T > 0 ? cents / T : null });
+  const bounds = leanBounds(A, B, U);
+  const tick = lean.why ? null : lean.pct.share;
+  const verdictId = lean.side === "buyers" ? "paid" : lean.side === "sellers" ? "received" : lean.why && C.HERO.lean.verdict[lean.why] ? lean.why : "open";
+  const verdictCopy = C.HERO.lean.verdict[verdictId];
+  const heldNote = shed === 0 ? null : shed === null ? C.HERO.lean.held.unrecorded : C.HERO.lean.held.shed(shed);
+  const signed = (cents) => `${sign(cents)}${moneyShort(Math.abs(cents))}`;
+  const net = (id, label, ask, bid) => {
+    const n = ask - bid;
+    const proof = netProof(n, U);
+    return {
+      id, label, cents: n, text: signed(n), exact: `${sign(n)}${exactDollars(Math.abs(n))}`, proof, glyph: C.HERO.cells.glyph[proof],
+      line1: C.HERO.cells.range(moneyOut(n - U, "down", { plus: true }), moneyOut(n + U, "up", { plus: true })), line2: C.HERO.cells.proof[proof].short, why: C.HERO.cells.proof[proof].long,
+    };
+  };
+  return {
+    lean: {
+      T, A, B, U, frac: { lo: lean.lo, hi: lean.hi, share: lean.share },
+      parts: [part("ask", C.HERO.lean.ask, A), part("unknown", C.HERO.lean.unknown, U), part("bid", C.HERO.lean.bid, B)],
+      bounds: bounds === null ? null : bounds.text,
+      tick, tickLine: tick === null ? C.HERO.lean.noTick(lean.reason || "no premium") : C.HERO.lean.tick(tick),
+      bar: bounds === null ? null : C.HERO.lean.bar(bounds.say),
+      verdict: { state: verdictId === "paid" || verdictId === "received" ? verdictId : "open", id: verdictId, text: verdictCopy.short, long: [verdictCopy.long, ...(heldNote ? [heldNote] : []), C.HERO.lean.basis].join(" ") },
+    },
+    cells: [
+      { id: "held", label: C.HERO.cells.held.label, cents: T, text: moneyShort(T), exact: exactDollars(T), proof: null, why: null, glyph: "", line1: C.HERO.cells.held.line1(totals.n), line2: C.HERO.cells.held.line2(moneyShort(totals.sameDay)) },
+      net("calls", C.HERO.cells.calls.label, totals.AC, totals.BC),
+      net("puts", C.HERO.cells.puts.label, totals.AP, totals.BP),
+    ],
   };
 }
 
@@ -402,6 +440,7 @@ export function ledgerView(input) {
       return { ...head, status: "failed", why: reason, scope: { kind: scope.kind, key: scope.key }, withheld: { reason, all: true }, checks: { head: C.CHECKS_HEAD, items: checks.items, failed: checks.failed, notes: [] } };
     }
     const lean = leanRead({ T: totals.T, A: totals.AC + totals.AP, B: totals.BC + totals.BP });
+    const hero = heroView(totals, lean, shed);
     const notes = [
       { id: "held", text: C.NOTES.held.text(held, totalSeen), hover: C.NOTES.held.hover },
       { id: "tide", text: C.NOTES.tide.text(tides.sectors.size), hover: C.NOTES.tide.hover },
@@ -421,7 +460,9 @@ export function ledgerView(input) {
       withheld: null, checks: { head: C.CHECKS_HEAD, items: checks.items, failed: checks.failed, notes }, ledger, sectors: sectorsOut, lean: { ...lean, line: lineOfLean(lean) },
       tilt: checks.tiltFail ? { status: "absent", reason: tiltHold, rows: [], unweighted: [] } : { ...tilt, lines: [C.TILT_LINES.definition, C.TILT_LINES.total(tilt.weighted.length), C.TILT_LINES.reading, C.TILT_LINES.funds, ...(shed ? [C.TILT_LINES.shed(shed)] : [])] },
       flow: flowView(totals, outside),
-      stock: { status: "absent", reason: NO_OPEN_INTEREST, line: C.PANEL_LINES.stock, memo: { sameSession: safe(totals.sameDay), text: `Premium in held windows that expire this session: ${money(totals.sameDay)}.`, exact: exactDollars(totals.sameDay) }, notBuilt: C.NOT_BUILT_LINE },
+      hero,
+      tide: { at: tides.lastAt === null ? null : trtStamp(tides.lastAt, session), groups: tides.sectors.size },
+      stock: { status: "absent", reason: NO_OPEN_INTEREST, line: C.PANEL_LINES.stock, memo: { sameSession: safe(totals.sameDay), text: `Premium in held windows that expire at the session close: ${money(totals.sameDay)}.`, exact: exactDollars(totals.sameDay) }, notBuilt: C.NOT_BUILT_LINE },
       dq: { ...counts },
       notes: C.DELTA_NOTES,
     };
