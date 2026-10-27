@@ -228,10 +228,12 @@
   .pl-rc h3 { min-height: 18px; }
   .pl-rc .sub.c { -webkit-line-clamp: 4; }
   .pl-stage[data-view="detail"] > #plRail { display: grid; }
-  .pl-rc, .pl-rc.first { border-left: 0; padding: 0; }
+  .pl-rc, .pl-rc.first { border-left: 0; padding: 0; overflow: visible; }
+  .pl-rail { grid-auto-rows: max-content; }
   .pl-rc.chart { grid-column: 1 / -1; }
   .pl-rc.ctx, .pl-rc.ev { grid-column: 1 / -1; }
-  .pl-rc.chart .pl-svgwrap { flex: none; height: 68px; }
+  .pl-rc.chart .pl-svgwrap { flex: none; height: 52px; }
+  .pl-rc.chart .sub, .pl-rc.ctx .sub.c { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .pl-rhead { grid-column: 1 / -1; flex-wrap: wrap; row-gap: 4px; min-height: 0; }
   .pl-rhead .why { flex-basis: 100%; order: 3; }
   .pl-trow { height: var(--rh, 44px); }

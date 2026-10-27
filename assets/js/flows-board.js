@@ -750,7 +750,7 @@
       if (!allBtn.isConnected && sp) sp.append(allBtn);
     } finally { fitting = false; }
   }
-  if (typeof ResizeObserver === "function") new ResizeObserver(() => fitRows()).observe(table);
+  if (typeof ResizeObserver === "function") { const ro = new ResizeObserver(fitRows); ro.observe(table); ro.observe(body); }
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(fitRows);
 
   function paintRows(animate) {
