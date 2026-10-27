@@ -1,3 +1,4 @@
+import { fixedHalfUp } from "./flows-display-round.js";
 import { FRESH_CLASSES } from "./flows-freshness.js";
 
 export const SAMPLE_CAP = 64;
@@ -39,7 +40,7 @@ export function createSamples(cap = SAMPLE_CAP) {
 export function ageText(sec) {
   if (!Number.isFinite(sec)) return null;
   const s = Math.max(0, sec);
-  if (s < 10) return s.toFixed(1) + " s";
+  if (s < 10) return fixedHalfUp(s, 1) + " s";
   if (s < 60) return Math.floor(s) + " s";
   if (s < 3600) return Math.floor(s / 60) + " min";
   return Math.floor(s / 3600) + " h";
@@ -55,7 +56,7 @@ export function nextTickMs(sec) {
 export const lagText = (ms) => {
   if (!Number.isFinite(ms)) return null;
   const s = ms / 1000;
-  return s < 10 ? s.toFixed(1) + " s" : Math.round(s) + " s";
+  return s < 10 ? fixedHalfUp(s, 1) + " s" : Math.round(s) + " s";
 };
 
 export function hubAgeS(hub, nowPerf) {
