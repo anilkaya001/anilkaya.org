@@ -1,6 +1,7 @@
 import { LIMITS, METRICS, PAYLOADS, SWITCHES } from "../shared/ff-contract.js";
 import { ENGINE_VERSION, evaluateSafe } from "../shared/ff-engine.js";
-import { compileHouse, compileWire, HOUSE_WIRES, houseRows } from "../shared/ff-house.js";
+import { compileWire } from "../shared/ff-grammar.js";
+import { compileHouse, HOUSE_WIRES, houseRows } from "../shared/ff-house.js";
 import { unscaled } from "../shared/ff-stats.js";
 import { isSession, marketPhase, nightlyDeadline, nightlyFinal, prevSession, sessionOf } from "../shared/ff-session.js";
 
@@ -116,6 +117,15 @@ function decodeSectors(m) {
   return out;
 }
 
+export function stampOf(v) {
+  if (finite(v) && v > 0) return v;
+  if (typeof v === "string") {
+    const t = Date.parse(v);
+    return Number.isFinite(t) ? t : null;
+  }
+  return null;
+}
+
 export function otmPct(cp, k, px) {
   if (!finite(k) || !finite(px) || !(px > 0) || !(k > 0)) return null;
   if (cp === "C") return ((k - px) / px) * 100;
@@ -134,7 +144,7 @@ export function windowOf(row, day) {
   const otm = otmPct(row.cp, row.k, row.px);
   if (otm !== null) cols["contract.otm_pct"] = otm;
   if (finite(row.voi)) cols["contract.vol_oi"] = row.voi;
-  return { symbol: row.t, occ: row.oc, spanStart: finite(row.spanStart) ? row.spanStart : null, cols };
+  return { symbol: row.t, occ: row.oc, spanStart: stampOf(row.spanStart), cols };
 }
 
 export function nightlyWindows(flowalerts, carry, session) {
@@ -156,7 +166,7 @@ export function nightlyWindows(flowalerts, carry, session) {
     const cols = {};
     if (finite(at("prem"))) cols["contract.premium"] = at("prem");
     if (finite(at("voi"))) cols["contract.vol_oi"] = at("voi");
-    const w = { symbol: t, occ: oc, spanStart: finite(at("spanStart")) ? at("spanStart") : null, cols, why: {} };
+    const w = { symbol: t, occ: oc, spanStart: stampOf(at("spanStart")), cols, why: {} };
     if (Number.isInteger(oic)) cols["contract.oi_confirm"] = unscaled(oic, "ratio");
     else w.why["contract.oi_confirm"] = "unobservable";
     out.push(w);

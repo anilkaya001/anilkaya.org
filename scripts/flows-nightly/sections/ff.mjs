@@ -82,7 +82,7 @@ export async function runFf(ctx, deps = {}) {
       ", carry " + (out.carry === null ? "not written" : out.carry + " window(s)") +
       ", confirmed against " + out.carried.rows + " carried window(s)" + (out.carried.reason ? " (" + out.carried.reason + ")" : "") +
       (out.run ? ", run request HTTP " + out.run.status : ""));
-    if (out.run && !out.run.ok) console.warn("  ff: the run request was not accepted (" + out.run.status + " " + out.run.body + "), the half-hourly check retries it");
+    if (out.run && !out.run.ok) console.warn("  ff: the run request was not accepted (" + out.run.status + " " + out.run.body + "), the housekeeping check flags the night if it never runs");
     if (out.failures.length) throw new Error(out.failures.join("; "));
     return out;
   }, (error) => {

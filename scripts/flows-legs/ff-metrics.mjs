@@ -24,6 +24,8 @@ const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const finite = (x) => typeof x === "number" && Number.isFinite(x);
 
+export const times100 = (v) => Number((v * 100).toPrecision(12));
+
 const isDay = (d) => typeof d === "string" && DAY_RE.test(d);
 
 const DAY_MS = 86400000;
@@ -299,7 +301,7 @@ function earnColumns(session, universe, universeIndex, cardX, cols, i) {
     iv1.miss(i, d.reason);
     zvov.miss(i, d.reason);
   } else {
-    iv1.put(i, d.value * 100);
+    iv1.put(i, times100(d.value));
     const v = ivVolOfVol(cardX, session);
     if (v.reason) {
       zvov.miss(i, v.reason);
@@ -329,7 +331,7 @@ function skewColumns(session, card, cardX, cols, i) {
   const x0 = cols["vol.rr25.30d.x0"];
   const f = engineFact(card, "skew.rr25.30", session);
   if (f.reason) rr.miss(i, f.reason);
-  else rr.put(i, f.value * 100);
+  else rr.put(i, times100(f.value));
   if (!cardX) x0.miss(i, "missing");
   else if (cardX.sessionDate !== session) x0.miss(i, "stale");
   else {
