@@ -108,7 +108,7 @@ export async function openEvents(browser, viewport, opts = {}) {
   const payload = opts.payload || erPayload();
   const world = { errors, requests, payload, html };
   const { out: events } = opts.events ? { out: opts.events } : eventsPayload();
-  await page.routeWebSocket(/\/api\/rt\/ws/, (ws) => ws.close({ code: 4011, reason: "off" }));
+  await page.routeWebSocket(/\/api\/rt\/ws/, (ws) => (opts.rt ? opts.rt(ws) : ws.close({ code: 4011, reason: "off" })));
   await page.route("**/*", async (route) => {
     const u = new URL(route.request().url());
     requests.push(u.pathname + u.search);

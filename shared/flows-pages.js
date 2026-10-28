@@ -1060,11 +1060,13 @@ const feedModule = (id, title, body, { span = "", seg = "", tab = "", free = fal
 const feedTabs = (tabs) => `
   <div class="fd-tabs" role="tablist" aria-label="Views" id="fdTabs">${tabs.map(([k, t, id], i) => `<button type="button" role="tab" id="fdT-${k}" aria-controls="${id}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-tab="${k}">${t}</button>`).join("")}</div>`;
 
-const feedHead = (key, title) => `
+const feedHead = (key, title, meta = "") => `
   <header class="flows-head fd-head" data-fx-hero>
     <div class="fd-head-t"><h1 id="fxTitle">${title}</h1><span class="fd-about-slot" id="${key}AboutSlot"></span></div>
-    <p class="fd-meta" id="${key}Meta"></p>
+    <p class="fd-meta" id="${key}Meta">${meta}</p>
   </header>`;
+
+const ER_CHIP = `<span class="er-chip" title="The Risk, New issues, Policy and Halts views"><svg class="ui-g er-vg" aria-hidden="true" focusable="false"><use href="#g-live"/></svg>Event risk</span>`;
 
 const ER_TABS = Object.freeze([["week", "Week", "evWeekCard"], ["earn", "Earnings", "evEarnCard"], ["risk", "Risk", "erRiskCard"], ["macro", "Macro", "evMacroCard"], ["fda", "FDA", "evFdaCard"], ["issues", "New issues", "erIssuesCard"], ["policy", "Policy", "erPolicyCard"], ["halts", "Halts", "erHaltsCard"], ["react", "Reaction", "evReactCard"]]);
 
@@ -1072,7 +1074,7 @@ const erSkeleton = (n, what) => `<p class="er-load" data-er-load>${what}</p>${Ar
 
 export function eventsPage({ username = "", eventrisk = false, halts = false } = {}) {
   return `${head("Flows — Events", "What reports next, what is priced into it, and what else is on the calendar.", FEEDS_CSS)}
-${shell("Events", "events", username, `${feedHead("ev", "Events")}
+${shell("Events", "events", username, `${feedHead("ev", "Events", eventrisk ? ER_CHIP : "")}
   <p class="visually-hidden" id="evStatus" role="status">Loading the calendar…</p>
   <div class="fd-about" id="evAbout" hidden>
     <p>What the screened universe reports next, what the option market is charging for it,
@@ -1096,7 +1098,8 @@ ${feedModule("evReactCard", "Reaction", `<div class="fd-body" id="evReact"></div
   </div>
 `, { chrome: false })}${eventrisk ? `
 <dialog class="er-sheet" id="erDrill" aria-labelledby="erDrillT"><div class="er-sheet-in"><header><h2 id="erDrillT">Detail</h2><button type="button" class="er-x" data-er-close>Close</button></header><div class="er-sheet-b" id="erDrillB"></div></div></dialog>
-<i hidden data-defer="er" data-src="${v("/assets/js/flows-er.js")}" data-css="${v("/assets/css/flows-er.css")}" id="erDefer" data-halts="${halts ? "on" : "off"}"></i>` : ""}
+${halts ? `<i hidden data-defer="er" data-src="${v("/assets/js/flows-rt.js")}"></i>
+` : ""}<i hidden data-defer="er" data-src="${v("/assets/js/flows-er.js")}" data-css="${v("/assets/css/flows-er.css")}" id="erDefer" data-halts="${halts ? "on" : "off"}"></i>` : ""}
 ${UI_SCRIPT}
 <script src="${v("/assets/js/flows-feed-os.js")}" defer></script>
 <script src="${v("/assets/js/flows-events.js")}" defer></script>

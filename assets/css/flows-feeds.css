@@ -17,6 +17,10 @@
   font-variant-numeric: tabular-nums;
 }
 .fd-meta:empty { visibility: hidden; }
+.fd-meta .er-chip { margin-left: var(--sp-3); vertical-align: middle; }
+.er-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; border-radius: 14px; background: var(--fill-3); color: var(--label-2); font: var(--t-caption); }
+.er-chip .er-vg { font-size: 12px; color: var(--accent-ink); }
+.er-vg { width: 12px; height: 12px; flex: none; }
 .flows-body .fd-pill {
   position: relative;
   display: inline-flex;
@@ -40,6 +44,7 @@
 .fd-about-pop em { font-style: italic; }
 .fd-chips { margin: 0 0 var(--sp-5); }
 .fd-chips:empty { display: none; }
+.flows-main:has(#fdStage[data-view="risk"], #fdStage[data-view="issues"], #fdStage[data-view="policy"], #fdStage[data-view="halts"]) .fd-chips { display: none; }
 .fd-grid { align-items: stretch; }
 .fd-grid:has(.ui-disclose[aria-expanded="true"]) { align-items: start; }
 .fd-body { display: flex; flex: 1; flex-direction: column; gap: var(--sp-4); min-width: 0; }
