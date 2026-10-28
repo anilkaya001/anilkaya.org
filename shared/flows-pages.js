@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "414";
+export const ASSET_VERSION = "415";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -969,7 +969,7 @@ ${panel("network", `
 ${marketModule("mkNetCard", "Flow network", "mkNet", { sub: `<button type="button" class="mk-pop" id="mkNetPop" aria-label="Pop out the flow network into its own window" hidden>Pop out</button>`, seg: `<div class="mk-segc" id="mkNetSeg"></div>` })}`)}
 ${panel("extremes", `
 ${marketModule("mkMoversCard", "Extremes", "mktMovers", { seg: `<div class="mk-segc mk-seg-phone" id="mkMoversSeg"></div>`,
-    body: `<div class="mk-body" id="mktMovers" data-lens="${owner ? "ivdays" : "raw"}"></div>` })}
+    body: `<div class="mk-body" id="mktMovers" data-lens="ivdays"></div>` })}
 ${scenes ? marketModule("mkSkylineCard", "Move skyline", "mkSkyline") : ""}`)}${scenes ? panel("relations", `
 ${marketModule("mkRelationsCard", "Relations", "mkRelations")}`) : ""}
 ${panel("prints", `
