@@ -1,1 +1,1 @@
-{"name": "market-ticker", "class": "C", "group": "shard", "timing": false, "medianS": 1.3, "shard": 11, "files": ["market-ticker-render.mjs"], "covers": ["assets/js/market-ticker.js"]}
+{"name": "market-ticker", "class": "C", "group": "shard", "timing": false, "medianS": 1.3, "shard": 10, "files": ["market-ticker-render.mjs"], "covers": ["assets/js/market-ticker.js"]}

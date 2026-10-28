@@ -1,1 +1,1 @@
-{"name": "ff-a-stats", "class": "N", "group": "shard", "timing": false, "medianS": 60, "shard": 11, "command": "node --disable-warning=ExperimentalWarning ff-a-stats.mjs", "files": ["ff-a-stats.mjs"], "covers": ["tests/fixtures-ff-contract.json"]}
+{"name": "ff-a-stats", "class": "N", "group": "shard", "timing": false, "medianS": 60, "shard": 9, "command": "node --disable-warning=ExperimentalWarning ff-a-stats.mjs", "files": ["ff-a-stats.mjs"], "covers": ["tests/fixtures-ff-contract.json"]}

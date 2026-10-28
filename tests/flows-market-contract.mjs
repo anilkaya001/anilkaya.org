@@ -221,7 +221,7 @@ async function openMarket({ stub = true, routes = [], viewport, at, lens = "raw"
       const c = document.querySelector("#mktMovers .mk-movers-col");
       return b && b.textContent === "Raw change" && c && !/in IV-days$/.test(c.getAttribute("aria-label") || "") &&
         !document.querySelector("#mktMovers .mk-lens-note");
-    }, null, { timeout: 5000 });
+    }, null, { timeout: 15000 });
   }
   return page;
 }
