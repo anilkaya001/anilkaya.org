@@ -153,7 +153,7 @@ export const DRILL = Object.freeze({
   firstAggressive: "First aggressive minute",
   sizeOutlier: "Size outlier",
   sharesLine: "Shares of the profile",
-  venueNote: "The name's venue split today, beside this contract's prints.",
+  venueNote: "The name's venue split, beside this contract's prints.",
 });
 
 export const LABELS = Object.freeze({
@@ -194,6 +194,10 @@ export const STATE_MAP = Object.freeze({
 export const clientCopy = () => ({
   states: STATES, chips: STATE_CHIPS, stateMap: STATE_MAP, why: WHY_LINES, ranks: RANKS, presets: PRESET_LABELS, labels: LABELS, drill: DRILL,
   drillTabs: DRILL_TABS, glossary: GLOSSARY_LINES, convention: CONVENTION, session: SESSION_NOTE, empty: EMPTY_TITLES, columns: SCREEN_COLUMNS,
+});
+
+export const drillCopy = () => ({
+  states: STATES, chips: STATE_CHIPS, stateMap: STATE_MAP, labels: LABELS, drill: DRILL, drillTabs: DRILL_TABS, convention: CONVENTION,
 });
 
 export function fill(text, vars) {

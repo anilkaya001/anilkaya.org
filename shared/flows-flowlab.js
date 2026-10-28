@@ -259,8 +259,8 @@ export function reduceScreen(response, ctx = {}) {
     if (prem === null) { bad("premium"); continue; }
     const vol = row.volume;
     if (!nonNegInt(vol)) { bad("volume"); continue; }
-    const oi = row.open_interest === null || row.open_interest === undefined ? 0 : row.open_interest;
-    if (!nonNegInt(oi)) { bad("open_interest"); continue; }
+    const oi = row.open_interest === null || row.open_interest === undefined ? null : row.open_interest;
+    if (oi !== null && !nonNegInt(oi)) { bad("open_interest"); continue; }
     let failed = null;
     const side = {};
     for (const [name, key] of [["ask", "ask_side_volume"], ["bid", "bid_side_volume"], ["mid", "mid_volume"], ["none", "no_side_volume"], ["sweep", "sweep_volume"], ["floor", "floor_volume"], ["multi", "multileg_volume"], ["stockMulti", "stock_multi_leg_volume"], ["cross", "cross_volume"], ["tickerVol", "ticker_vol"], ["trades", "trades"]]) {
@@ -402,7 +402,7 @@ function reduceMinutes(response) {
     }
     if (!ok) { dropped++; continue; }
     const cents = (v) => (v === null || v === undefined ? null : (centsOf(v) || { cents: null }).cents);
-    const prem = (v) => (v === null || v === undefined ? 0 : (centsOf(v) || { cents: 0 }).cents);
+    const prem = cents;
     const num = (v) => (v === null || v === undefined || v === "" ? null : Number.isFinite(Number(v)) ? Number(v) : null);
     mins.push({
       m, o: cents(row.open), h: cents(row.high), l: cents(row.low), c: cents(row.close), ivL: num(row.iv_low), ivH: num(row.iv_high),

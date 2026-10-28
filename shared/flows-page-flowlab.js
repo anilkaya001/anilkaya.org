@@ -1,4 +1,4 @@
-import { TITLE, SUBTITLE, DESCRIPTION, TABS, STATES, SESSION_NOTE, RANKS, PRESET_LABELS, SCREEN_COLUMNS, INFO, NOT_BUILT, LABELS, RANK_NOTE, DRILL, CONVENTION, clientCopy } from "./flows-flowlab-copy.js";
+import { TITLE, SUBTITLE, DESCRIPTION, TABS, STATES, SESSION_NOTE, RANKS, PRESET_LABELS, SCREEN_COLUMNS, INFO, NOT_BUILT, LABELS, RANK_NOTE, DRILL, CONVENTION, clientCopy, drillCopy } from "./flows-flowlab-copy.js";
 import { PRESET_IDS } from "./flows-flowlab.js";
 
 export const FLOWLAB_DESCRIPTION = DESCRIPTION;
@@ -11,7 +11,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 
 const DASH = "—";
 
-export const copyScript = () => `<script type="application/json" id="flCopy">${JSON.stringify(clientCopy()).replace(/</g, "\\u003c")}</script>`;
+export const copyScript = (entry = false) => `<script type="application/json" id="flCopy">${JSON.stringify(entry ? drillCopy() : clientCopy()).replace(/</g, "\\u003c")}</script>`;
 
 const wait = () => `<p class="fl-wait" role="status">${esc(STATES.loading)}</p>`;
 

@@ -94,6 +94,8 @@ function battery(L) {
   safe("ratios", () => {
     const a = screen(L, [screenRow({ open_interest: 0 })]);
     need(a.ok && a.x.rows[0].ratios.voi === null && a.x.rows[0].ratios.voiWhy === "no-oi", "ratios: voi with no open interest is null with its reason");
+    const unsent = screen(L, [screenRow({ open_interest: null })]);
+    need(unsent.ok && unsent.x.rows[0].oi === null && unsent.x.rows[0].ratios.voiWhy === "no-oi", "ratios: open interest the feed did not send stays null, never zero");
     const b = screen(L, [screenRow({ premium: "300000.00", volume: 200, ask_side_volume: 80, bid_side_volume: 40, mid_volume: 20, no_side_volume: 60 })]);
     const rb = b.x.rows[0].ratios;
     need(rb.askLo === 0.4 && rb.askHi === 0.7, "ratios: ask range is ask over volume up to ask plus no-side over volume (" + rb.askLo + ", " + rb.askHi + ")");
@@ -181,6 +183,10 @@ function battery(L) {
     eq(m.x.cum, [0, 4, 22], "minutes: cumulative ask minus bid");
     const none = L.reduceContract({ intraday: { data: [minuteRow(0, 1, 1, 0, 0)] } }, { c: FX.contract }).x.minutes;
     need(none.x.firstAggressive === null, "minutes: none when the ratio never holds");
+    const unsentRow = { ...minuteRow(0, 1, 1, 0, 0), premium_ask_side: null };
+    delete unsentRow.premium_bid_side;
+    const unsent = L.reduceContract({ intraday: { data: [unsentRow] } }, { c: FX.contract }).x.minutes.x.list[0];
+    need(unsent.pa === null && unsent.pb === null && unsent.pm === 0, "minutes: a side premium the feed did not send stays null, a sent zero stays zero");
     const n = L.reduceContract({ intraday: N["contract-intraday"] }, { c: FX.contract }).x.minutes;
     need(n.ok && n.x.list.length === 380 && n.x.list.every((q, i, a) => i === 0 || a[i - 1].m < q.m), "minutes: 380 ascending bars");
   });

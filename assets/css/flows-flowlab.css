@@ -67,7 +67,7 @@
 .fl-rng { position: relative; display: inline-block; width: 56px; height: 6px; border-radius: 3px; background: var(--fill-3); flex: none; }
 .fl-rng i { position: absolute; top: 0; bottom: 0; left: var(--lo); right: calc(100% - var(--hi)); min-width: 2px; border-radius: 3px; background: var(--label-2); }
 .fl-rng-t { font-size: 12px; color: var(--label-1); }
-.ds-sg { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.fl .ds-sg, .dr .ds-sg { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
 .fl-rank, .fl-greek-tools { display: inline-flex; gap: 2px; background: var(--fill-3); border-radius: var(--r-sm); padding: 2px; }
 .fl-greek-tools { background: none; padding: 0; gap: 8px; }
 .fl-rank button { min-height: 30px; padding: 0 10px; border-radius: 8px; color: var(--label-2); font-size: 12.5px; white-space: nowrap; }
@@ -104,8 +104,9 @@
 .fl-dot:focus-visible .pt { stroke: var(--label-1); stroke-width: 2.5; }
 .fl-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); grid-auto-rows: minmax(44px, 1fr); gap: 8px; flex: 1; min-height: 0; overflow: hidden; padding-bottom: 8px; }
 .fl-tile { display: flex; flex-direction: column; justify-content: space-between; gap: 2px; min-width: 0; min-height: 44px; padding: 8px 10px; border-radius: var(--r-md); background: var(--fill-4); overflow: hidden; }
+.fl-tile[hidden] { display: none; }
 .fl-tile:hover { background: var(--fill-3); }
-.fl-tile-n { font-size: 13px; font-weight: 600; color: var(--label-1); white-space: nowrap; overflow: hidden; text-overflow: clip; }
+.fl-tile-n { flex: none; font-size: 13px; font-weight: 600; color: var(--label-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fl-spark { width: 100%; height: 22px; flex: none; }
 .fl-spark .axis { stroke: var(--sep-strong); stroke-width: 1; }
 .fl-spark .ln { stroke-width: 1.5; }
@@ -135,7 +136,7 @@
 .dr-b { flex: 1; min-height: 0; padding: 0 16px 12px; overflow: hidden; display: flex; flex-direction: column; }
 .dr-b .fl-plot { flex: 1; }
 .dr-n { margin: 0; padding: 4px 16px 12px; font: var(--t-caption); color: var(--label-3); flex: none; }
-.ds-st { display: inline-flex; align-items: center; gap: 6px; }
+.fl .ds-st, .dr .ds-st { display: inline-flex; align-items: center; gap: 6px; }
 @media (max-width: 1100px) {
   .fl-panel { grid-template-columns: minmax(0, 1fr) 300px; }
   .fl-title h1 { font-size: 24px; }
@@ -158,7 +159,7 @@
   .dr-sheet { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; }
 }
 @media (pointer: coarse) {
-  .fl-more, .fl-link { min-height: 44px; }
+  .fl-more, .fl-link, .fl-tab, .fl-rank button, .fl-pre, .fl-tog { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .fl *, .dr * { transition: none !important; animation: none !important; }
@@ -177,6 +178,7 @@
   .fl-t .c-sweep, .fl-t .c-name, .fl-t .c-flags, .fl-t .c-voi { display: none; }
 }
 @media (max-width: 599px) {
-  .fl-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fl-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: auto; align-content: start; }
+  .fl-tile { min-height: 44px; padding: 6px 10px; }
   .fl-tile .fl-spark { display: none; }
 }

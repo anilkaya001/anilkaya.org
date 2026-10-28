@@ -143,7 +143,8 @@
     };
     place();
     let guard = rows.length;
-    while (m.body.scrollHeight > m.body.clientHeight + 1 && n > 1 && guard-- > 0) { n--; place(); }
+    const over = () => m.body.scrollHeight > m.body.clientHeight + 1 || (!!tiles && tiles.scrollHeight > tiles.clientHeight + 1);
+    while (over() && n > 1 && guard-- > 0) { n--; place(); }
   }
 
   function fitAll() {
@@ -636,7 +637,7 @@
 
   function tile(g, entry) {
     const b = h("button", { type: "button", class: "fl-tile", "data-g": g, onclick: () => openGroup(g) });
-    b.append(h("span", { class: "fl-tile-n" }, titleCase(g)));
+    b.append(h("span", { class: "fl-tile-n", title: titleCase(g) }, titleCase(g)));
     if (!entry || entry.status !== "ok") {
       b.append(chipEl(entry && MAP[entry.status] ? entry.status : "failed"));
       b.setAttribute("aria-label", titleCase(g) + ", " + (entry ? entry.status : "not read"));

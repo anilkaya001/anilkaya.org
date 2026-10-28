@@ -42,23 +42,26 @@ export async function flowlabStage(ctx, deps = {}) {
 }
 
 export async function runFlowlab(ctx) {
-  await runFlowlabWith(ctx, {});
-}
-
-export async function runFlowlabWith(ctx, deps) {
   const { stages } = ctx;
+  const deps = ctx.flowlabDeps || {};
   const env = deps.env || process.env;
   if (!nightlyOn(env)) {
-    stages.skip(FLOWLAB_STAGE_ID, "FLOWS_FLOWLAB_NIGHTLY is off");
+    stages.skip("flowlab", "FLOWS_FLOWLAB_NIGHTLY is off");
     return;
   }
-  const result = await stages.run(FLOWLAB_STAGE_ID, async () => {
+  const result = await stages.run("flowlab", async () => {
     const out = await flowlabStage(ctx, deps);
-    stages.detail({ flCalls: out.calls, flSkipped: out.skipped.length, written: out.written.length, cap: out.cap });
+    stages.detail({ flCalls: out.calls, flSkipped: out.skipped.length });
     if (out.failures.length) console.warn("  flowlab: " + out.failures.join("; ") + " — the last good keys stand");
     return out;
   }, (error) => {
     console.warn("  flowlab: " + error.message + " — the last good keys stand");
   });
   Object.assign(ctx, { flowlab: result || null });
+}
+
+export async function runFlowlabWith(ctx, deps) {
+  const run = { ...ctx, flowlabDeps: deps || {} };
+  await runFlowlab(run);
+  Object.assign(ctx, { flowlab: run.flowlab });
 }

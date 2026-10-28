@@ -17,7 +17,7 @@ export function flowlabShell(html, slug, on) {
   }
   if (!ENTRY_PAGES.includes(slug)) return out;
   const root = `<div id="fxFlowlab" hidden data-page="${slug}"></div>
-${copyScript()}
+${copyScript(true)}
 <i hidden data-defer="drill" data-src="${v("/assets/js/flows-drill.js")}" data-css="${v("/assets/css/flows-flowlab.css")}"></i>`;
   return out.replace("</body>", () => root + "\n</body>");
 }
