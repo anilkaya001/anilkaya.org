@@ -345,7 +345,7 @@ function build(f, over = {}) {
     ok(m && mine && Number(m[1]) === mine.limit && Number(m[2]) === mine.periodS, r + " in the limits table equals wrangler.toml");
   }
   ok(/FLOWS_OPS = "on"/.test(toml), "wrangler.toml ships the switch on");
-  ok(Object.keys(LIVE_KEYS).length === 11, "eleven live keys, so the live read is at most eleven rows");
+  ok(Object.keys(LIVE_KEYS).length === 12, "twelve live keys, so the live read is at most twelve rows");
 }
 
 console.log(`server-ops: ${checks} checks`);

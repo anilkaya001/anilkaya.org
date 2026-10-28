@@ -299,6 +299,61 @@ export async function focusBudget({ windows = 16, perWindow = 5, coldOnly = fals
   };
 }
 
+export function fundsDb({ market = null } = {}) {
+  const statements = [];
+  const st = (sql) => {
+    const s = { sql, args: [], bind(...a) { s.args = a; return s; }, first: async () => null,
+      run: async () => { statements.push(s); return { meta: { changes: 1 } }; }, all: async () => ({ results: [] }) };
+    return s;
+  };
+  return {
+    statements,
+    prepare: st,
+    batch: async (list) => {
+      statements.push(...list);
+      return list.map((x) => ({ results: /id = 'live:market'/.test(x.sql) && market ? [market] : [] }));
+    },
+  };
+}
+
+export async function fundsBudget({ windows = 16, perWindow = 5, coldOnly = false } = {}) {
+  const W = await import("../shared/flows-live-worker.js");
+  const { readList } = await import("../shared/flows-floor-funds.js");
+  const session = "2026-09-22";
+  const at = easternInstant(session, 15 * 60 + 57);
+  const body = JSON.stringify(productionScreenerBody(readList(), { session, readAt: at - 20000 }));
+  const { clock, cpu } = cpuClock();
+  const fetchVendor = async () => JSON.parse(body);
+  const env = { DB: fundsDb(), UW_API_KEY: "k" };
+  const tick = () => W.fundsTick(env, at, { fetchVendor, log: { error() {} } });
+  const w0 = process.hrtime.bigint();
+  const c0 = cpu();
+  const first = await tick();
+  const cold = cpu() - c0;
+  const coldWall = Number(process.hrtime.bigint() - w0) / 1e6;
+  const shape = { written: first.written === true, calls: first.calls, read: first.report ? first.report.read : null,
+    payloadBytes: first.report ? first.report.bytes : null };
+  if (coldOnly) return { clock, cold, coldWall, ...shape };
+  for (let i = 0; i < 40; i++) await tick();
+  const means = [];
+  for (let w = 0; w < windows; w++) {
+    const t0 = cpu();
+    for (let i = 0; i < perWindow; i++) await tick();
+    means.push((cpu() - t0) / perWindow);
+  }
+  const sorted = means.slice().sort((a, b) => a - b);
+  const rows = JSON.parse(body).data;
+  return {
+    clock, window: perWindow, bytes: body.length, rows: rows.length, fields: Object.keys(rows[0]).length, ...shape,
+    cold, coldWall, median: (sorted[windows / 2 - 1] + sorted[windows / 2]) / 2, worst: sorted[sorted.length - 1],
+  };
+}
+
+if (process.argv[2] === "--funds-budget") {
+  fundsBudget({ coldOnly: process.argv[3] === "cold" }).then((r) => { console.log(JSON.stringify(r)); process.exit(0); },
+    (e) => { console.error(e && e.stack ? e.stack : String(e)); process.exit(1); });
+}
+
 if (process.argv[2] === "--focus-budget") {
   focusBudget({ coldOnly: process.argv[3] === "cold" }).then((r) => { console.log(JSON.stringify(r)); process.exit(0); },
     (e) => { console.error(e && e.stack ? e.stack : String(e)); process.exit(1); });

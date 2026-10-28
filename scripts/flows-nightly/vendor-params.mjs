@@ -45,6 +45,7 @@ export const CALL_COST = Object.freeze({
   activity: 1,
   sigmaLedger: 240,
   ivp: 1,
+  funds: 1 + 1 + 24 + 12 * 3 + 1,
   slow: 1500,
   misc: 67,
   eventrisk: 40,
@@ -70,6 +71,7 @@ export function callModel({ enriched = 0, deep = 0, cross = 0, dossiers = 0, ear
     activity: cost.activity,
     sigmaLedger: cost.sigmaLedger,
     ivp: cost.ivp * carded,
+    funds: cost.funds,
     slow: cost.slow,
     misc: cost.misc,
   };

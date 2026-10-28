@@ -111,7 +111,7 @@ export function richAnswer(dir, route, u) {
   }
 }
 
-export async function openMarket(browser, { rich = false, tweak = null, now = RICH_NOW, viewport = { width: 1440, height: 820 }, alerts = alertsFixture(), universe = universeFixture(), alertsStatus = 200, scenes = true, owner = true, reduced = false, coarse = false, patch = null, hash = "", hold = false } = {}) {
+export async function openMarket(browser, { rich = false, tweak = null, now = RICH_NOW, viewport = { width: 1440, height: 820 }, alerts = alertsFixture(), universe = universeFixture(), alertsStatus = 200, scenes = true, owner = true, reduced = false, coarse = false, patch = null, hash = "", hold = false, funds = null } = {}) {
   let release = () => {};
   const gate = hold ? new Promise((r) => { release = r; }) : null;
   const context = await browser.newContext({ viewport, reducedMotion: reduced ? "reduce" : "no-preference", hasTouch: coarse, isMobile: coarse });
@@ -119,9 +119,11 @@ export async function openMarket(browser, { rich = false, tweak = null, now = RI
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   page.errors = errors;
+  page.seen = [];
   const dir = rich ? nightlyEmit() : null;
   if (rich) await page.clock.install({ time: now });
-  const html = PAGES.marketPage({ username: "test", owner, scenes });
+  else if (funds && funds.now) await page.clock.install({ time: funds.now });
+  const html = PAGES.marketPage({ username: "test", owner, scenes, funds: Boolean(funds) });
   await page.routeWebSocket(/\/api\/rt\/ws/, (ws) => ws.close({ code: 4011, reason: "off" }));
   await page.route("**/*", async (route) => {
     const u = new URL(route.request().url());
@@ -136,10 +138,19 @@ export async function openMarket(browser, { rich = false, tweak = null, now = RI
       return route.fulfill({ path: f, contentType: MIME[path.extname(f)] || "application/octet-stream" });
     }
     if (u.pathname.startsWith("/api/rt/")) return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: { code: "rt_off", message: "off" } }) });
+    if (u.pathname.startsWith("/api/flows/")) page.seen.push(u.pathname + u.search);
     if (gate && u.pathname.startsWith("/api/flows/")) await gate;
     if (u.pathname === "/api/flows/flowalerts") {
       if (alertsStatus !== 200) return route.fulfill({ status: alertsStatus, contentType: "application/json", body: "{}" });
       return route.fulfill({ contentType: "application/json", body: JSON.stringify(alerts) });
+    }
+    if (funds && u.pathname === "/api/flows/market") {
+      const base = FIXTURES["flows/market"] || FIXTURES.market || { status: "ok" };
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(funds.market === undefined ? base : { ...base, funds: funds.market }) });
+    }
+    if (funds && u.pathname === "/api/flows/lk" && u.searchParams.get("k") === "funds") {
+      if (funds.live === undefined || funds.live === null) return route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(funds.live) });
     }
     if (u.pathname === "/api/flows/universe") return route.fulfill({ contentType: "application/json", body: JSON.stringify(universe) });
     if (u.pathname.startsWith("/api/flows/")) {

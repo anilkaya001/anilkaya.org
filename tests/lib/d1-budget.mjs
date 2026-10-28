@@ -56,7 +56,7 @@ export function dayFirings(crons, day) {
 
 export function firingCounts(crons = cronStrings()) {
   const count = (day) => {
-    const c = { rth: 0, focus: 0, housekeeping: 0, summary: 0 };
+    const c = { rth: 0, focus: 0, funds: 0, housekeeping: 0, summary: 0 };
     for (const f of dayFirings(crons, day)) {
       if (!Object.hasOwn(c, f.job)) throw new Error("d1-budget: a cron firing maps to the unpriced job " + f.job);
       c[f.job]++;
@@ -69,6 +69,7 @@ export function firingCounts(crons = cronStrings()) {
 export const ENGINE_CEILINGS = Object.freeze({
   rth: Object.freeze({ trips: 3, read: 13, written: 5 }),
   focus: Object.freeze({ trips: 2, read: 650, written: 2 }),
+  funds: Object.freeze({ trips: 2, read: 2, written: 1 }),
   summary: Object.freeze({ trips: 2, read: 5, written: 1 }),
   housekeeping: Object.freeze({ trips: 10, read: 4, written: 3 }),
 });
@@ -77,12 +78,12 @@ export const COLD_START = Object.freeze({
   trips: 6,
   written: 22,
   startsPerWeekday: 312,
-  source: "worst case: every one of the 312 cron firings on a fresh isolate runs the schema bootstrap batch (23 statements, 20 of them CREATE, three column probes); whether D1 bills a DDL statement as a row written is unmeasured (PLAN.final.md section 12), so each is counted as one",
+  source: "worst case: every one of the 312 Tier 1, focus, housekeeping and summary firings (the funds tick runs no bootstrap) on a fresh isolate runs the schema bootstrap batch (23 statements, 20 of them CREATE, three column probes); whether D1 bills a DDL statement as a row written is unmeasured (PLAN.final.md section 12), so each is counted as one",
 });
 
 export const TIER2 = Object.freeze({
   passesPerWeekday: 84,
-  pass: Object.freeze({ trips: 10, read: 0, written: 12 }),
+  pass: Object.freeze({ trips: 11, read: 0, written: 13 }),
   storedReadsPerPass: 5,
   watchReadsPerWeekday: 520,
   source: "W02 section 2.5: 84 passes a weekday; scripts/flows-legs/live.mjs reads board:long, board:short, board:watch, focus and live:heartbeat once a pass; watch.mjs at most 5 reads a 5-minute tick in session",
@@ -108,6 +109,8 @@ export const MEMBERS = Object.freeze({
 
 export const PLANNED = Object.freeze([
   Object.freeze({ id: "oracle.nightly", row: "oracle", written: 1730, read: 1730, source: "docs/oracle.md: one oracle row for each of the 856 carded names, oracle-top and oracle-norm, each post adding one manifest row through the door trigger (written 862 x 2) and, in warn mode, reading two rows for its tuple" }),
+  Object.freeze({ id: "flowlab.nightly", row: "WP2", written: 10, read: 10, source: "docs/packages/WP2-flow-intelligence.md 7.3: five nightly keys, each post adding one manifest row through the door trigger (written 5 x 2) and, in warn mode, reading two rows for its tuple" }),
+  Object.freeze({ id: "flowlab.nightly-read", row: "WP2", written: 0, read: 600, source: "docs/packages/WP2-flow-intelligence.md 7.3: one row a read of the nightly route; twelve members at fifty reads a day" }),
   Object.freeze({ id: "observer", row: "P1-25", written: 4, read: 672, source: "PLAN.final.md 5.3: transitions only; 48 firings of a 14-row batch" }),
   Object.freeze({ id: "ai.counters", row: "P1-08, P1-44", written: 660, read: 0, source: "PLAN.final.md 5.3: about 260 outcome and 400 class rows at about 200 calls" }),
   Object.freeze({ id: "ai.notes", row: "P1-45", written: 40, read: 0, source: "PLAN.final.md 5.3" }),
