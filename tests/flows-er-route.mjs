@@ -5,6 +5,12 @@ import { flowsEventRiskRows } from "../server/routes/flows-eventrisk.js";
 import { flowsReadRows } from "../server/routes/flows-read.js";
 import { stripEr, stripOwner } from "../shared/flows-er-strip.js";
 import { eventRiskOpen } from "../shared/flows-er-switch.js";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { eventsPage } from "../shared/flows-pages.js";
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -125,6 +131,31 @@ function world(rows = {}, { failing = new Set(), kept = null } = {}) {
   const r2 = rows2.find((r) => r.path === "/api/flows/card-x");
   const plainBody = await (await r2.handler({ request: new Request(url), env: {}, url, ctx: {}, session: { username: "member-2" } })).json();
   ok(!("er" in plainBody) && plainBody.t === "NVDA", "a card with no split engine is served stripped without a merge");
+}
+
+{
+  const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const base = (() => { try { return execFileSync("git", ["merge-base", "HEAD", "origin/main"], { cwd: root, encoding: "utf8" }).trim(); } catch { return null; } })();
+  if (base) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "er-off-"));
+    try {
+      const files = execFileSync("git", ["ls-tree", "-r", "--name-only", base, "shared/"], { cwd: root, encoding: "utf8" }).split("\n").filter((f) => f.endsWith(".js"));
+      for (const f of files) {
+        fs.mkdirSync(path.join(dir, path.dirname(f)), { recursive: true });
+        fs.writeFileSync(path.join(dir, f), execFileSync("git", ["show", base + ":" + f], { cwd: root, maxBuffer: 64 * 1024 * 1024 }));
+      }
+      const old = await import(pathToFileURL(path.join(dir, "shared/flows-pages.js")).href);
+      const norm = (html) => html.replace(/\?v=\d+/g, "?v=N");
+      const today = norm(old.eventsPage({ username: "member-2" }));
+      ok(norm(eventsPage({ username: "member-2" })) === today, "eventsPage with the switch closed is byte for byte the base's page (asset token aside)");
+      ok(norm(eventsPage({ username: "member-2", eventrisk: false, halts: true })) === today, "and so is it with the halts switch on");
+      ok(eventsPage({ username: "member-2", eventrisk: true }).includes('data-defer="er"'), "the open page declares the er group");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  } else {
+    console.log("flows-er-route: no origin/main to compare the closed page with; skipped");
+  }
 }
 
 console.log(`flows-er-route: ${checks} checks`);

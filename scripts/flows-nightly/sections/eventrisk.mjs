@@ -5,13 +5,15 @@ import { DEADLINE_MS } from "../vendor-params.mjs";
 import { poolWidth, runPooled, stats } from "../vendor.mjs";
 import { publish, readStored } from "../store.mjs";
 
+export const PULSE_REPORT_SESSIONS = 2;
+
 const byDateTicker = (a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : a.t < b.t ? -1 : a.t > b.t ? 1 : 0);
 
 export function windowNamesOf(events) {
   const rows = events && Array.isArray(events.rows) ? events.rows.filter((r) => r && typeof r.t === "string" && typeof r.d === "string").slice().sort(byDateTicker) : [];
   return {
     window: rows.slice(0, NATR_NAMES).map((r) => r.t),
-    near: rows.filter((r) => Number.isInteger(r.sdte) && r.sdte <= 2).slice(0, PULSE_NAMES).map((r) => r.t),
+    near: rows.filter((r) => Number.isInteger(r.sdte) && r.sdte <= PULSE_REPORT_SESSIONS).slice(0, PULSE_NAMES).map((r) => r.t),
   };
 }
 
