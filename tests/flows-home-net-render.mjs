@@ -49,12 +49,21 @@ ok(ON.includes("/assets/css/flows-net.css"), "and its stylesheet is linked");
   ok(/^FLOWS_HOME_NET\s*=\s*"on"/m.test(read("wrangler.toml")), "wrangler.toml ships the switch on: the owner opened the Home network to every member on 2026-10-12");
 }
 
-async function open(browser, { viewport = { width: 1440, height: 900 }, html = ON, alerts = FIX.overview.flowalerts, status = 200, netStatus = 200 } = {}) {
+async function open(browser, { viewport = { width: 1440, height: 900 }, html = ON, alerts = FIX.overview.flowalerts, status = 200, netStatus = 200, netMutate = null } = {}) {
   const context = await browser.newContext({ viewport });
   await context.addInitScript(BELOW_NOW);
   await context.addInitScript(() => {
     window.__ls = new Set();
+    window.__src = new Map();
+    window.__tgt = new Map();
     const add = EventTarget.prototype.addEventListener, rem = EventTarget.prototype.removeEventListener;
+    const srcOf = () => {
+      for (const line of String(new Error().stack).split("\n").slice(2)) {
+        const m = line.match(/\/assets\/js\/([\w.-]+\.js)/);
+        if (m) return m[1];
+      }
+      return null;
+    };
     const ids = new WeakMap();
     let n = 0;
     const key = (t, type, fn, cap) => {
@@ -63,7 +72,7 @@ async function open(browser, { viewport = { width: 1440, height: 900 }, html = O
       if (!ids.has(fn)) ids.set(fn, ++n);
       return ids.get(t) + ":" + type + ":" + ids.get(fn) + ":" + (typeof cap === "object" ? !!(cap && cap.capture) : !!cap);
     };
-    EventTarget.prototype.addEventListener = function (type, fn, cap) { const k = key(this, type, fn, cap); if (k) window.__ls.add(k); return add.call(this, type, fn, cap); };
+    EventTarget.prototype.addEventListener = function (type, fn, cap) { const k = key(this, type, fn, cap); if (k) { window.__ls.add(k); if (!window.__src.has(k)) { window.__src.set(k, srcOf()); window.__tgt.set(k, this); } } return add.call(this, type, fn, cap); };
     EventTarget.prototype.removeEventListener = function (type, fn, cap) { const k = key(this, type, fn, cap); if (k) window.__ls.delete(k); return rem.call(this, type, fn, cap); };
   });
   const page = await context.newPage();
@@ -74,6 +83,7 @@ async function open(browser, { viewport = { width: 1440, height: 900 }, html = O
     const u = new URL(route.request().url());
     log.push(u.pathname);
     if (u.pathname === NET_JS && netStatus !== 200) return route.fulfill({ status: netStatus, body: "" });
+    if (u.pathname === NET_JS && netMutate) return route.fulfill({ contentType: "text/javascript", body: netMutate(fs.readFileSync(path.join(ROOT, NET_JS), "utf8")) });
     if (u.pathname.startsWith("/assets/")) {
       const f = path.join(ROOT, u.pathname);
       if (!fs.existsSync(f)) return route.fulfill({ status: 404, body: "" });
@@ -91,6 +101,27 @@ async function open(browser, { viewport = { width: 1440, height: 900 }, html = O
   });
   return { context, page, errors, log };
 }
+
+const destroyProbe = async (page) => {
+  const own = () => page.evaluate(() => {
+    const mine = [...window.__ls].filter((k) => window.__src.get(k) === "flows-net.js");
+    const lasting = (t) => t === window || t === document || !(t instanceof Node) || t.isConnected;
+    return { n: mine.length, live: mine.filter((k) => lasting(window.__tgt.get(k))).map((k) => k.split(":")[1]) };
+  });
+  const a = await own();
+  const noise = await page.evaluate(() => {
+    let n = 0;
+    for (let i = 0; i < 12; i++) {
+      const el = document.createElement("div");
+      document.body.append(el);
+      for (const t of ["pointermove", "pointerdown", "pointerleave", "pointercancel", "blur", "keydown"]) { el.addEventListener(t, () => {}); n++; }
+    }
+    window.FlowsUI.net.of(document.getElementById("hmNetHost")).destroy();
+    return n;
+  });
+  const b = await own();
+  return { before: a.n, after: b.n, liveBefore: a.live, liveAfter: b.live, noise };
+};
 
 const mounted = (page) => page.waitForFunction(() => document.querySelector("#hmNetHost canvas") && window.FlowsUI.net.of(document.getElementById("hmNetHost")), null, { timeout: 20000 });
 
@@ -133,14 +164,21 @@ try {
     eq(idx.pending, { "Index options": 132e6, "Index funds": 50e6, "Sector pending": 8e6 }, "and the index classes stand before the universe is read, which only stocks wait for");
     ok(idx.names.includes("SPX:Index options") && idx.names.includes("SPY:Index funds"), `a name node says its class (${idx.names.join(", ")})`);
     eq(await page.evaluate(() => window.FlowsUI.net.of(document.getElementById("hmNetHost")).ambient()), false, "the owner's Home opens still, as the Unusual page does");
-    const before = await page.evaluate(() => window.__ls.size);
-    await page.evaluate(() => window.FlowsUI.net.of(document.getElementById("hmNetHost")).destroy());
-    const after = await page.evaluate(() => window.__ls.size);
+    const d = await destroyProbe(page);
     const own = await page.evaluate(() => document.querySelectorAll("#hmNetHost canvas").length);
     const mountedBefore = info.canvas;
-    ok(mountedBefore >= 1 && after < before, `DESTROY REMOVES THE LISTENERS THE MODULE ADDED (${before} to ${after})`);
+    ok(mountedBefore >= 1 && d.liveBefore.length > 0 && d.liveAfter.length === 0 && d.after < d.before, `DESTROY REMOVES THE LISTENERS THE MODULE ADDED: ${d.before} to ${d.after} of its own, none left on the page, the window or the document (${d.liveAfter.join(", ") || "none"}), with ${d.noise} listeners of another script added meanwhile`);
     eq(own, 0, "and its canvas");
     eq(errors, [], "no page error on the owner's Home");
+    await context.close();
+  }
+
+  {
+    const { context, page } = await open(browser, { netMutate: (t) => t.replace("for (const f of undo.splice(0)) f();", "undo.splice(0);") });
+    await page.goto("https://example.test/flows/");
+    await mounted(page);
+    const d = await destroyProbe(page);
+    ok(d.liveAfter.length > 0, `planted wrong build "destroy keeps its listeners" is caught: ${d.liveAfter.join(", ")} left on the page`);
     await context.close();
   }
 
