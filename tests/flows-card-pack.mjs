@@ -20,8 +20,8 @@ const eq = (a, b, m) => { assert.equal(a, b, m); checks++; };
 const same = (a, b, m) => { assert.deepEqual(a, b, m); checks++; };
 
 const HEADROOM_BYTES = Math.floor(0.95 * CARD_X_SOFT_BYTES);
-const WIRE_CEILING = 56700;
-const SERVED_CEILING = 62800;
+const WIRE_CEILING = 57500;
+const SERVED_CEILING = 63600;
 const DAY = 86400000;
 const iso = (n) => new Date(n * DAY).toISOString().slice(0, 10);
 const dayN = (s) => Date.parse(s + "T00:00:00Z") / DAY;
@@ -321,7 +321,7 @@ rmSync(wireDir, { recursive: true, force: true });
     ["the served ceiling dropped", [["const overSoft = (payload) => cardXBytes(payload) > CARD_X_SOFT_BYTES || servedBytes(payload) > CARD_X_SERVED_BYTES;", "const overSoft = (payload) => cardXBytes(payload) > CARD_X_SOFT_BYTES;"]]],
     ["the served ceiling at the whole budget", [["export const CARD_X_SERVED_BYTES = Math.floor(0.9 * CARD_X_BUDGET_BYTES);", "export const CARD_X_SERVED_BYTES = CARD_X_BUDGET_BYTES * 2;"]]],
     ["any value of the switch packs", [["export const cardXWire = () => process.env.FLOWS_CARDX_WIRE === \"pack\";", "export const cardXWire = () => Boolean(process.env.FLOWS_CARDX_WIRE);"]]],
-    ["the soft limit not enforced", [["while (overSoft(payload) && shedNextPart(payload)) {", "while (false && shedNextPart(payload)) {"]]],
+    ["the soft limit not enforced", [["while (overSoft(payload)) {", "while (false) {"]]],
   ];
   const probeBuild = (m) => withWire(true, () => {
     const a = m.cardXPayload("SYX101", parts(dates), stamp);

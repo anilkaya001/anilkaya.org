@@ -12,6 +12,7 @@ import { CALL_BUDGET, CALL_OVERRUN_MARGIN, RATE, callModel } from "../vendor-par
 import { delayFloorMs, delayMs, describeFloorVerdict, permits, stats, wire } from "../vendor.mjs";
 import { summarize } from "../../../shared/flows-call-meter.js";
 import { extrasStanding } from "../../../shared/flows-vendor-extras.js";
+import { volAuditState, volAuditStanding } from "../../flows-legs/health.mjs";
 import {
   ARCHIVE_DATE_RE, LEDGER_LIST_KINDS, bindStages, edgeSnapshot, landedKeys, listStored, probeStored, publish,
   publishedStore, readStored,
@@ -61,7 +62,7 @@ export async function runClose(ctx) {
     guaranteed, earlyRoster, deadline, gammaProfiles, prunePromise, scoresPayload, payloads, marketLegs, universe,
     neuronTiers, enriched, liquid, cardsBuilt, cardsFailed, cardsSkipped, extraBuilt, membership, ndxAge, ndx,
     focusCarded, byCard, coverageNotes, gate, intraday, screenerReadAt, screenerTruncated, dating, variationRun,
-    deepTickers, vendor, extraFailed, deadlineSkipped, extraSkipped, deepen, rotationCards,
+    deepTickers, vendor, extraFailed, deadlineSkipped, extraSkipped, deepen, rotationCards, volAudit,
   } = ctx;
   const rotation = deepen ? deepen.set : new Set();
   const carriedDeep = deepen ? deepen.carried : new Map();
@@ -167,6 +168,20 @@ export async function runClose(ctx) {
     priorFailed: extrasRun.priorFailed, health: extrasRun.health, ...extrasStanding(extrasRun.health, priorExtras),
   } : null;
 
+  const volAuditRun = volAudit || null;
+  let volauditSummary = null;
+  if (volAuditRun) {
+    let priorVol = null;
+    try {
+      const held = await readStored("meta");
+      priorVol = held && held.payload && typeof held.payload === "object" ? held.payload.volaudit || null : null;
+    } catch {
+      priorVol = null;
+    }
+    const state = volAuditState(volAuditRun.summary);
+    volauditSummary = { ...volAuditRun.summary, ...volAuditStanding(state, priorVol) };
+  }
+
   let metaBody = null;
   try {
     metaBody = {
@@ -177,6 +192,7 @@ export async function runClose(ctx) {
       cardsBuilt, cardsFailed, cardsSkipped,
       ...(neuronLedger ? { neuron: neuronLedger } : {}),
       ...(extrasSummary ? { extras: extrasSummary } : {}),
+      ...(volauditSummary ? { volaudit: volauditSummary } : {}),
       ...(deepen && deepen.plan ? { deepen: {
         mode: deepen.mode, chosen: deepen.plan.n, built: rotationCards ? rotationCards.built : 0,
         failed: rotationCards ? rotationCards.failed : 0, carried: carriedDeep.size, never: deepen.plan.never ?? 0,
@@ -344,6 +360,7 @@ export async function runClose(ctx) {
       rosterWritten: rosterSummary ? rosterSummary.written : (rosterThrew ? false : undefined), enriched: enriched.length,
       neuron: neuronLedger,
       extras: extrasSummary,
+      volaudit: volauditSummary,
     } });
   stages.finish();
   bindStages(null);

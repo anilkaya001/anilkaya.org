@@ -324,7 +324,7 @@
 .mk-stage { flex: 1; min-height: 0; position: relative; }
 .mk-panel { position: absolute; inset: 0; display: grid; gap: 12px; visibility: hidden; min-height: 0; min-width: 0; }
 .mk-stage[data-view="floor"] > #mkP-floor, .mk-stage[data-view="session"] > #mkP-session, .mk-stage[data-view="tide"] > #mkP-tide, .mk-stage[data-view="sectors"] > #mkP-sectors, .mk-stage[data-view="indices"] > #mkP-indices,
-.mk-stage[data-view="network"] > #mkP-network, .mk-stage[data-view="extremes"] > #mkP-extremes, .mk-stage[data-view="relations"] > #mkP-relations,
+.mk-stage[data-view="voldesk"] > #mkP-voldesk, .mk-stage[data-view="network"] > #mkP-network, .mk-stage[data-view="extremes"] > #mkP-extremes, .mk-stage[data-view="relations"] > #mkP-relations,
 .mk-stage[data-view="prints"] > #mkP-prints, .mk-stage[data-view="context"] > #mkP-context { visibility: visible; }
 .mk-panel > .mk-mod { min-height: 0; min-width: 0; overflow: hidden; padding: 12px 14px 10px; gap: 8px; }
 .mk-panel > .mk-mod > .mk-body { flex: 1; min-height: 0; overflow: hidden; }
@@ -370,9 +370,16 @@
 @media (max-width: 1199.98px) {
   .mk-tabs button { padding: 0 6px; font-size: 12.5px; }
 }
+@media (min-width: 900px) {
+  .mk-dn button { padding: 0 7px; font-size: 12.5px; }
+}
+@media (min-width: 900px) and (max-width: 1199.98px) {
+  .mk-dn button { padding: 0 5px; font-size: 12px; }
+}
 @media (max-width: 899px) {
   .flows-body[data-flows-page="market"] .flows-main { --mk-pad-b: var(--sp-3); }
   .mk-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-self: stretch; }
+  .mk-tabs:has(> :nth-child(11)) { grid-template-columns: repeat(6, minmax(0, 1fr)); }
   .mk-tabs button { padding: 0 4px; font-size: 12.5px; }
   .mk-sub { display: flex; flex: none; gap: 2px; background: var(--fill-3); border-radius: var(--r-sm); padding: 2px; margin: 0 0 var(--sp-3); overflow: hidden; }
   .mk-sub[hidden] { display: none; }
