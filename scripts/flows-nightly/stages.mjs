@@ -48,6 +48,7 @@ export const STAGES = Object.freeze([
   stage("compute", ISOLATION.isolated, ["card-x"]),
   stage("oracle-publish", ISOLATION.isolated, ["compute"], ["oracle:*", "oracle-top", "oracle-norm"]),
   stage("deepen-ledger", ISOLATION.isolated, ["compute"], ["deepen"]),
+  stage("flowlab", ISOLATION.isolated, ["compute"], ["flowlab-roots", "flowlab-venues", "flowlab-screen", "flowlab-groups", "flowlab-corr"]),
   stage("roster", ISOLATION.isolated, ["compute"], ["roster"]),
   stage("archive-check", ISOLATION.fatal, ["roster"]),
   stage("neuron-ledger", ISOLATION.isolated, ["roster"]),

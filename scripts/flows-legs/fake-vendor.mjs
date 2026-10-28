@@ -1,5 +1,6 @@
 import { addDays, weekdaysAhead, priorWeekdayIso, isWeekdayIso } from "../../shared/flows-cross.js";
 import { touch } from "./taint.mjs";
+import { flowlabHandlers } from "./flowlab-fake.mjs";
 
 function prng(seed) {
   let s = seed | 0;
@@ -569,6 +570,7 @@ export function makeFakeVendor({ sessionDate, screenerRows = [], carded = [] } =
         shares: Math.round(1e5 + rnd() * 5e7), weight: (rnd() * 8).toFixed(4),
       })) };
     }],
+    ...flowlabHandlers(S),
   ];
 
   const vendor = async (path, params = {}, { envelope = false } = {}) => {

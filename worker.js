@@ -38,6 +38,8 @@ import { logFailure } from "./server/log.js";
 import { createRouter } from "./server/router.js";
 import { flowsReadRows } from "./server/routes/flows-read.js";
 import { flowsDeskRows } from "./server/routes/flows-desk.js";
+import { flowsFlowlabRows } from "./server/routes/flows-flowlab.js";
+import { createFlowlab } from "./server/flowlab.js";
 import { flowsAiRows } from "./server/routes/flows-ai.js";
 import { flowsReadyRows } from "./server/routes/flows-ready.js";
 import { flowsOracleRows } from "./server/routes/flows-oracle.js";
@@ -3058,9 +3060,13 @@ async function renderCourse(request, env, url, meta, ctx) {
 
 const rtServe = (request, env, url) => serveRt(request, env, url, { json, HttpError, requireSameOrigin, getSession: () => currentFlowsUser(request, env) });
 
+const FLOWLAB_BUILDERS = createFlowlab({ isRefusal: (error) => error instanceof VendorRefused });
+
 const ROUTER = createRouter(flowsReadRows({ readServed, readFlowsPayload, readWithOverlay, passthrough, recallLastGood, storeGone,
   absentKey, cardWithEngine, briefWithLive, briefFeedsAhead, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK }),
 flowsDeskRows({ scRefreshAllowed, vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }),
+flowsFlowlabRows({ vendorGate, serveCachedVendorRead, readServed, passthrough, builders: FLOWLAB_BUILDERS, now: chainReadMs,
+  isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsAiRows({ askSpend, summaryResponse, readFlowsSummary, neuronProvenance, ensureFlowsTables, dossierResponse, askQuestion, askAnswer,
   readFlowsPayload, briefWithLive, askFloodPeriodS: ASK_FLOOD_PERIOD_S, aiCap: FLOWS_READING.aiCapOf }),
 flowsIngestRows({ store: FLOWS_STORE, ensureFlowsTables, storeGone, passthrough }),

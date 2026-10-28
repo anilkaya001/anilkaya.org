@@ -4,6 +4,8 @@ import { memberShell } from "../../shared/flows-member-shell.js";
 import { modeOf } from "../../shared/flows-member-state.js";
 import { EXPORT_PAGES, pageHold } from "../../shared/flows-export-build.js";
 import { ledgerLiveOn } from "../../shared/flows-ledger-live.js";
+import { flowlabMode } from "../../shared/flows-flowlab.js";
+import { flowlabShell } from "../../shared/flows-flowlab-shell.js";
 import { floorFundsMode } from "../../shared/flows-floor-funds.js";
 
 const floorFundsOn = (env, owner) => {
@@ -46,6 +48,7 @@ const PAGES = Object.freeze([
   { slug: "strategy", render: (username) => FLOWS_PAGES.strategyPage({ username }) },
   { slug: "ticker", render: (username, summary, owner, scenes) => FLOWS_PAGES.tickerPage({ username, scenes }) },
   { slug: "moves", gate: "FLOWS_MOVES", render: (username) => FLOWS_PAGES.movesPage({ username }) },
+  { slug: "flowlab", flowlab: true, render: (username) => FLOWS_PAGES.flowlabPage({ username }) },
   { slug: "unusual", render: (username, summary, owner) => FLOWS_PAGES.unusualPage({ username, owner }) },
   { slug: "ledger", gate: "FLOWS_LEDGER", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.ledgerPage({ username, live: ledgerLiveOn(env, owner) }) },
   { slug: "events", render: (username) => FLOWS_PAGES.eventsPage({ username }) },
@@ -117,7 +120,9 @@ export function flowsPageRows(deps) {
         const owner = isOwner(env, session.username);
         if (page.ownerOnly && !owner) throw HttpError.of("not_found");
         const slug = page.slug || "overview";
-        const rendered = memberShell(oracleShell(page.render(session.username, summary, owner, scenesOn(env, session.username), env), oracleMode(env, owner), slug), memberOptions(env, owner, slug));
+        const labOn = flowlabMode(env, owner) === "on";
+        if (page.flowlab && !labOn) throw HttpError.of("not_found");
+        const rendered = memberShell(oracleShell(flowlabShell(page.render(session.username, summary, owner, scenesOn(env, session.username), env), slug, labOn), oracleMode(env, owner), slug), memberOptions(env, owner, slug));
         return html(owner ? ownerNav(rendered) : rendered);
       },
     });
