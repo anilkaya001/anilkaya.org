@@ -31,8 +31,8 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/politician-portfolios/holders/{ticker}` | read | politician-holders | Enterprise | not observed | whole body | read by the code | nightly | read |
 | `/api/politics/fec/company/{ticker}/lobbying` | enterprise | - | Enterprise | not observed | lobbying spend by quarter and issue | stated | none | no: Enterprise only |
 | `/api/politics/fec/company/{ticker}/people` | enterprise | - | Enterprise | not observed | people linked to a company | third-party names | none | no: Enterprise only |
-| `/api/seasonality/{ticker}/monthly` | not added | - | any | not observed | average and median change, share of positive closes and years by calendar month | share stated; the change fields are described as per day for the month | price packet | no: each month has 10 to 20 years, so a 60 per cent share is under one standard error from a coin; the change wording is ambiguous |
-| `/api/seasonality/{ticker}/year-month` | not added | - | any | not observed | open, close and change for every past month | open and close stated as prices | price packet | no: derivable from the daily candles the nightly already holds |
+| `/api/seasonality/{ticker}/monthly` | added | seasonality-monthly | any | not observed | average and median change, share of positive closes and years by calendar month | years and positive closes read; the change fields are not read | Macro page (WP5) | added for SPY, QQQ, IWM and DIA only, as a cross-check of the year and positive-close counts the year-month table gives; no change figure is printed |
+| `/api/seasonality/{ticker}/year-month` | added | seasonality-year-month | any | not observed | open, close and change for every past month | open and close stated as prices; change recomputed from them and the feed's unit checked | Macro page (WP5) | added for the fifteen index and sector funds only: a share with its Wilson interval and a mean with its t interval, under 8 years printed as a count |
 | `/api/shorts/{ticker}/data` | read | shorts-data | any | observed | whole body | read by the code | nightly | read |
 | `/api/shorts/{ticker}/ftds` | not added | - | any | not observed | failures to deliver per settlement date: shares and price | quantity stated in shares; price withheld | positioning packet | no: published twice a month with a lag of weeks, a squeeze narrative and not a desk input; first to add if wanted |
 | `/api/shorts/{ticker}/interest-float` | deprecated | - | any | not observed | short interest and float (version 1) | - | - | deprecated: version 2 is read |
@@ -100,7 +100,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 
 ## Registered operations without a ticker in the path
 
-30 registry operations (market-wide, calendars, screeners, groups, sectors) all read before this branch.
+30 registry operations (market-wide, calendars, screeners, groups, sectors) read before WP5, and the 34 cross-asset, prediction-market and private-markets operations WP5 added (marked added).
 
 | Operation | Status | Registry id | Plan | Wire | Consumers |
 | --- | --- | --- | --- | --- | --- |
@@ -134,6 +134,40 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/volatility/anomaly/top` | read | vol-anomaly-top | Advanced | observed | nightly |
 | `/api/volatility/option-sentiment/top` | read | vol-sentiment-top | Advanced | observed | nightly |
 | `/api/screener/analysts` | read | analysts | Advanced | observed | dossier, engines |
+| `/api/futures/contracts` | added | futures-contracts | Advanced | not observed | nightly (Macro, WP5) |
+| `/api/futures/flow` | added | futures-flow | Advanced | not observed | nightly and the Macro page's 5-minute read (WP5) |
+| `/api/futures/{contract}/candles` | added | futures-candles | Advanced | not observed | nightly and the Macro page's 5-minute read (WP5) |
+| `/api/futures/{contract}/stats` | added | futures-stats | Advanced | not observed | nightly and the Macro page's 5-minute read (WP5) |
+| `/api/futures/{contract}/trades` | added | futures-trades | Advanced | not observed | nightly and the Macro page's 5-minute read (WP5) |
+| `/api/commodities/{name}` | added | commodity | Advanced | not observed | nightly (Macro, WP5) |
+| `/api/forex/rate` | added | fx-rate | Advanced | not observed | nightly and the Macro page's 5-minute read (WP5) |
+| `/api/forex/history` | added | fx-history | Advanced | not observed | nightly (Macro, WP5) |
+| `/api/forex/intraday` | added | fx-intraday | Advanced | not observed | nightly and the Macro page's 5-minute read (WP5) |
+| `/api/digital-currencies/history` | added | digital-history | Advanced | not observed | nightly (Macro, WP5) |
+| `/api/digital-currencies/intraday` | added | digital-intraday | Advanced | not observed | nightly and the Macro page's 5-minute read (WP5) |
+| `/api/crypto/{pair}/state` | added | crypto-state | Advanced | not observed | nightly and the Macro page's 5-minute read (WP5) |
+| `/api/crypto/{pair}/ohlc/{candle_size}` | added | crypto-ohlc | Advanced | not observed | nightly and the Macro page's 5-minute read (WP5) |
+| `/api/crypto/whales/recent` | added | crypto-whales | Advanced | not observed | nightly and the Macro page's 5-minute read (WP5) |
+| `/api/crypto/whale-transactions` | added | crypto-whale-tx | Advanced | not observed | nightly and the Macro page's 5-minute read (WP5) |
+| `/api/market/movers` | added | market-movers | Advanced | not observed | nightly (Macro, WP5) |
+| `/api/seasonality/{month}/performers` | added | seasonality-performers | Advanced | not observed | nightly (Macro, WP5) |
+| `/api/predictions/unusual` | added | pred-unusual | Advanced | not observed | nightly (Macro, WP5) |
+| `/api/predictions/smart-money` | added | pred-smart-money | Advanced | not observed | nightly (Macro, WP5) |
+| `/api/predictions/whales` | added | pred-whales | Advanced | not observed | nightly (Macro, WP5) |
+| `/api/predictions/insiders` | added | pred-insiders | Advanced | not observed | nightly (Macro, WP5) |
+| `/api/predictions/market/{asset_id}` | added | pred-market | Advanced | not observed | nightly (Macro, WP5) |
+| `/api/predictions/market/{asset_id}/liquidity` | added | pred-liquidity | Advanced | not observed | nightly (Macro, WP5) |
+| `/api/predictions/market/{asset_id}/positions` | added | pred-positions | Advanced | not observed | nightly (Macro, WP5) |
+| `/api/predictions/user/{user_id}` | added | pred-user | Advanced | not observed | nightly (Macro, WP5) |
+| `/api/private-markets/companies` | added | pm-companies | private-markets add-on | not observed | nightly (private markets, WP5) |
+| `/api/private-markets/companies/{npm_ticker}` | added | pm-company | private-markets add-on | not observed | nightly (private markets, WP5) |
+| `/api/private-markets/companies/{npm_ticker}/funding` | added | pm-funding | private-markets add-on | not observed | nightly (private markets, WP5) |
+| `/api/private-markets/companies/{npm_ticker}/pricing` | added | pm-pricing | private-markets add-on | not observed | nightly (private markets, WP5) |
+| `/api/private-markets/companies/{npm_ticker}/investors` | added | pm-investors-of | private-markets add-on | not observed | nightly (private markets, WP5) |
+| `/api/private-markets/companies/{npm_ticker}/management` | added | pm-management | private-markets add-on | not observed | nightly (private markets, WP5) |
+| `/api/private-markets/investors` | added | pm-investors | private-markets add-on | not observed | nightly (private markets, WP5) |
+| `/api/private-markets/investors/{name}` | added | pm-investor | private-markets add-on | not observed | nightly (private markets, WP5) |
+| `/api/private-markets/search` | added | pm-search | private-markets add-on | not observed | nightly (private markets, WP5) |
 
 ## The screener is the cheapest lever
 

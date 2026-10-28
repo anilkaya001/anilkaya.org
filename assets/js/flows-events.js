@@ -466,7 +466,8 @@
         oddsOn() ? oddsCell(m) : null);
     });
     host.macro.replaceChildren(
-      h("div", { class: "fe-mrow fu-head", ...HIDE }, h("span", null, "When"), h("span", null, "Print"), h("span", V, "Forecast"), h("span", V, "Prior"), oddsOn() ? h("span", V, "Market price", S.oddsFail ? h("button", { type: "button", class: "fe-modd-retry", onclick: () => { S.oddsAsked = false; S.odds = null; S.oddsFail = null; if (S.payload) paintMacro(S.payload); loadOdds(); } }, "Retry") : null) : null),
+      h("div", { class: "fe-mrow fu-head", ...HIDE }, h("span", null, "When"), h("span", null, "Print"), h("span", V, "Forecast"), h("span", V, "Prior"), oddsOn() ? h("span", V, "Market price") : null),
+      ...(oddsOn() && S.oddsFail ? [h("button", { type: "button", class: "fe-modd-retry", onclick: () => { S.oddsAsked = false; S.odds = null; S.oddsFail = null; if (S.payload) paintMacro(S.payload); loadOdds(); } }, "Retry market prices")] : []),
       withList(UI.list(items, { visible: 7, label: "Economic prints after the close" })));
   }
 

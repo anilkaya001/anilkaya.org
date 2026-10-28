@@ -77,7 +77,8 @@ const NEW_OPS = ["dividends", "splits", "interpolated-iv", "etf-exposure"];
   const claimed = table.filter((r) => r.status === "read" || r.status === "added");
   same(claimed.filter((r) => !OPS.some((o) => o.op === r.op && o.id === r.id)).map((r) => r.op), [], "a path marked read or added is a registry operation under the id the document gives");
   same(OPS.filter((o) => !claimed.some((r) => r.op === o.op)).map((o) => o.id), [], "and every registry operation is marked read or added");
-  same(claimed.filter((r) => r.status === "added").map((r) => r.id).sort(), [...NEW_OPS].sort(), "the added operations are the four this branch registered");
+  const WP5_OPS = ["futures-contracts", "futures-flow", "futures-candles", "futures-stats", "futures-trades", "commodity", "fx-rate", "fx-history", "fx-intraday", "digital-history", "digital-intraday", "crypto-state", "crypto-ohlc", "crypto-whales", "crypto-whale-tx", "market-movers", "seasonality-performers", "seasonality-monthly", "seasonality-year-month", "pred-unusual", "pred-smart-money", "pred-whales", "pred-insiders", "pred-market", "pred-liquidity", "pred-positions", "pred-user", "pm-companies", "pm-company", "pm-funding", "pm-pricing", "pm-investors-of", "pm-management", "pm-investors", "pm-investor", "pm-search"];
+  same(claimed.filter((r) => r.status === "added").map((r) => r.id).sort(), [...NEW_OPS, ...WP5_OPS].sort(), "the added operations are the four the extras registered and the thirty-six WP5 registered");
   same(table.filter((r) => r.status === "probe only").every((r) => list.probes.some((p) => p.op === r.op && p.tier !== "used")) && true, true, "a probe-only operation is probed and never read");
   same(table.filter((r) => ["not added", "deprecated", "enterprise"].includes(r.status)).filter((r) => OPS.some((o) => o.op === r.op)).map((r) => r.op), [], "and an operation the document says is not read is not in the registry");
   ok(!/\btape\b/i.test(docText.replace(/tape_time/g, "")), "the document uses no barred word");
@@ -435,7 +436,7 @@ const NOW = Date.parse("2026-10-20T21:45:00Z");
   ok(tight.cone && tight.gex && tight.contracts, "and the engine's own sections are intact");
   const tighter = cardXPayload("SYX101", { ...parts, dx, vx }, { generatedAt: F.GENERATED, sessionDate: F.SESSION, readAt: F.GENERATED, budgetBytes: own.bytes - 25000 });
   same(tighter.shed.slice(0, 2), ["dx.parts", "vx.parts"], "then vx, in that order");
-  same(CARD_X_SHED.slice(0, 2).map((e) => e[0]), ["dx.parts", "vx.parts"], "which is the order the table declares");
+  same(CARD_X_SHED.slice(0, 3).map((e) => e[0]), ["pm", "dx.parts", "vx.parts"], "which is the order the table declares, after the private-markets section WP5 sheds first");
   const next = composeCardXPayload(base("SYX101"), cardXPayload("SYX101", { dx, vx, short: { status: "ok" } }, { generatedAt: F.GENERATED, sessionDate: F.SESSION, readAt: F.GENERATED }));
   ok(next.dx && next.vx && next.engine && next.short, "composing the market legs' sections onto a same-session base keeps both");
 }

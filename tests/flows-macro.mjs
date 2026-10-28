@@ -541,10 +541,12 @@ const MUTANTS = [
   ok(/62%/.test(factOf(macro, "odds.next").v) && /not a forecast/.test(factOf(macro, "odds.next").note), "the odds fact is the market's number, not a forecast");
   const mixed = buildMacroPacket({ ticker: "AAPL", now: NOW, expectedSession: "2026-10-27", held: { macro: { ...mc, events: [{ at: "2026-10-28T18:00:00Z", event: "Done", price: 1, resolved: true }, { at: "2026-10-30T18:00:00Z", event: "Later", price: 0.4 }, { at: "2026-10-29T18:00:00Z", event: "Sooner", price: 0.3 }] } } });
   ok(/30% for Sooner/.test(factOf(mixed, "odds.next").v), "odds.next skips a resolved market and takes the nearest release");
+  const past = buildMacroPacket({ ticker: "AAPL", now: NOW, expectedSession: "2026-10-27", held: { macro: { ...mc, events: [{ at: "2026-10-27T12:30:00Z", event: "Printed", price: 0.9 }, { at: "2026-10-29T18:00:00Z", event: "Ahead", price: 0.3 }] } } });
+  ok(/30% for Ahead/.test(factOf(past, "odds.next").v), "odds.next skips a release that has already printed");
   eq(factOf(mixed, "fx.breadth").note, "a count of 7 pairs, not an index", "the breadth note uses the count read, not a fixed seven");
   const peers2 = buildPeersPacket({ ticker: "AAPL", now: NOW, expectedSession: "2026-10-27", held: { cardX: { sessionDate: "2026-10-27", pm: P.pmCardSection({ at: NOW - 1000, session: "2026-10-27", match: { name: "Sample Fund", companyCount: 2 }, companies: [["SYX001", "Alpha Co", "Tech"]] }) } } });
-  ok(peers2.text.some((t) => t.k === "pm.peers" && t.untrusted === true), "private company names travel as untrusted text");
-  ok(!peers2.facts.some((f) => f.k === "pm.peers"), "and not as a plain fact");
+  ok(peers2.text.some((t) => t.k === "pm.holdings" && t.untrusted === true), "private company names travel as untrusted text");
+  ok(!peers2.facts.some((f) => f.k === "pm.holdings"), "and not as a plain fact");
   const amb = buildPeersPacket({ ticker: "AAPL", now: NOW, expectedSession: "2026-10-27", held: { cardX: { sessionDate: "2026-10-27", pm: P.pmCardSection({ at: NOW - 1000, session: "2026-10-27", match: null, why: "ambiguous" }) } } });
   ok(amb.withheld.some((w) => w.k === "pm" && /more than one investor/.test(w.reason)), "an ambiguous match is held with its reason");
   {
