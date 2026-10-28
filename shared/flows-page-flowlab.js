@@ -63,7 +63,7 @@ export function flowlabBody(glyph) {
       <div class="fl-col fl-col-wide">${mod("flLadder", "Price ladders", { more: true })}</div>`)}${panel("routing", `
       <div class="fl-col fl-col-main">${mod("flRoute", "Exchanges", { more: true })}</div>
       <div class="fl-col fl-col-side">${mod("flCodes", "Trade codes", { more: true })}</div>`)}${panel("lit", `
-      <div class="fl-col fl-col-main">${mod("flLitMarket", "Largest lit prints", { more: true })}</div>
+      <div class="fl-col fl-col-main">${mod("flLitMarket", LABELS.litMarket, { more: true })}</div>
       <div class="fl-col fl-col-side">${mod("flLitTicker", "Newest prints for the name", { more: true })}</div>`)}${panel("groups", `
       <div class="fl-col fl-col-wide">${mod("flGroups", "Flow groups", { more: true })}</div>`)}${panel("relations", `
       <div class="fl-col fl-col-wide">${mod("flRel", "Names that moved together", { more: true })}</div>`)}

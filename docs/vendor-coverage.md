@@ -6,7 +6,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 
 ## Per-name operations (87 paths with a ticker in the path)
 
-84 spec paths carry a ticker, and 3 more are read from the live documentation: 47 read, 4 added, 7 probe only, 3 deprecated, 3 Enterprise only, 23 not added.
+84 spec paths carry a ticker, and 3 more are read from the live documentation: 61 read, 4 added, 1 probe only, 3 deprecated, 3 Enterprise only, 15 not added.
 
 | Operation | Status | Registry id | Plan | Wire | Returns | Unit status | Surface | Decision |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -16,7 +16,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/companies/{ticker}/splits` | added | splits | Advanced+ | not observed | effective date and split factor of each split | date stated; factor withheld (4 or 0.25 for a 4-for-1 is not stated) | events packet; break mask for the typical-day scale | added: `vx.splits`, refreshed every 14 days |
 | `/api/companies/{ticker}/transcripts/{quarter}` | not added | - | Advanced+ | not observed | the full earnings call text | text | none | no: size, the 8 KiB cache rows and the sanitiser's surface all argue against it |
 | `/api/darkpool/{ticker}` | read | darkpool | any | observed | whole body | read by the code | dossier, engines, nightly | read |
-| `/api/darkpool/{ticker}/price-levels` | read | darkpool-levels | any | observed | date, price, dark_pool_volume, regular_volume | read by the code | dossier, nightly | read |
+| `/api/darkpool/{ticker}/price-levels` | read | darkpool-levels | any | observed | date, price, dark_pool_volume, regular_volume | read by the code | dossier, nightly, Flow Lab ladders | read: the stock half of the price ladders, lit and off-exchange volume across the market in the feed's price buckets (1.2 to 1.7 KB a day measured) |
 | `/api/earnings/{ticker}` | read | earnings | any | observed | report_date, report_time, source, expected_move_perc, post_earnings_move_1d, ... | read by the code | dossier, engines, nightly | read |
 | `/api/etfs/{ticker}/exposure` | added | etf-exposure | any | not observed | every ETF that holds the name: ticker, shares, weight, fund name, prices | ticker and shares stated; weight, prices and fund name withheld | peers packet | added: `vx.etf`, refreshed every 7 days, top ten by weight |
 | `/api/etfs/{ticker}/holdings` | read | etf-holdings | any | observed | ticker, type, weight | read by the code | nightly | read |
@@ -26,7 +26,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/insider/{ticker}` | not added | - | any | not observed | the names of a company's insiders | third-party names | none | no: names of people; the insider batch and `insider-flow` already carry the flow |
 | `/api/insider/{ticker}/ticker-flow` | read | insider-flow | any | observed | date, buy_sell, transactions, uniq_insiders, volume, ... | read by the code | dossier | read |
 | `/api/institution/{ticker}/ownership` | read | ownership | any | observed | name, short_name, units, units_changed, historical_units, ... | read by the code | dossier | read |
-| `/api/lit-flow/{ticker}` | read | lit-ticker | any | not observed | lit-exchange stock prints | stated | none | no: print-level and heavy; asked weekly as an entitlement question (tier 2) |
+| `/api/lit-flow/{ticker}` | read | lit-ticker | any | not observed | lit-exchange stock prints | stated | Flow Lab lit prints | read: the newest 100 prints for the name on demand |
 | `/api/market/{ticker}/etf-tide` | read | etf-tide | any | observed | timestamp, net_call_premium, net_put_premium, net_volume, underlying_price | read by the code | Tier 2, nightly | read |
 | `/api/politician-portfolios/holders/{ticker}` | read | politician-holders | Enterprise | not observed | whole body | read by the code | nightly | read |
 | `/api/politics/fec/company/{ticker}/lobbying` | enterprise | - | Enterprise | not observed | lobbying spend by quarter and issue | stated | none | no: Enterprise only |
@@ -46,10 +46,10 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/stock/{ticker}/expiry-breakdown` | read | expiry-breakdown | any | observed | whole body | read by the code | Worker | read |
 | `/api/stock/{ticker}/financials` | read | financials | any | observed | income_statements, balance_sheets, cash_flows, earnings, fiscal_date_ending, ... | read by the code | dossier | read |
 | `/api/stock/{ticker}/flow-alerts` | deprecated | - | any | not observed | a name's flow alerts | - | - | deprecated: the market-wide alerts route is read |
-| `/api/stock/{ticker}/flow-per-expiry` | read | flow-per-expiry | any | observed | whole body | read by the code | nightly | read |
-| `/api/stock/{ticker}/flow-per-strike` | read | flow-per-strike | any | observed | whole body | read by the code | nightly | read |
-| `/api/stock/{ticker}/flow-per-strike-intraday` | read | strike-flow-intraday | any | not observed | flow by strike through the day | stated | flow | no: entitlement unanswered; asked weekly (tier 2) |
-| `/api/stock/{ticker}/flow-recent` | read | flow-recent | any | not observed | call and put premium and volume splits by expiry | stated | flow | no: duplicate of `flow-per-expiry` |
+| `/api/stock/{ticker}/flow-per-expiry` | read | flow-per-expiry | any | observed | call and put premium, side premiums, volume and trades by expiry for the last trading day | read by the code | nightly, Flow Lab premium by expiry | read: on demand for Premium by expiry and the Greek flow expiry (13 to 15 KB measured) |
+| `/api/stock/{ticker}/flow-per-strike` | read | flow-per-strike | any | observed | call and put volume and premium by side for each strike for a day | read by the code | nightly, Flow Lab strike totals | read: on demand for the session totals by strike (65 to 107 KB measured) |
+| `/api/stock/{ticker}/flow-per-strike-intraday` | read | strike-flow-intraday | any | not observed | each minute's strikes the feed ranks highest, by volume as asked | stated | Flow Lab strike map | read: answered 200 for AAPL and NVDA on 2026-10-18 and 10-25 at 0.67 to 1.51 MB, over the old 512 KiB cap; the cap is 4 MiB |
+| `/api/stock/{ticker}/flow-recent` | not added | - | any | not observed | the latest flows for the name; the spec names a per-expiry schema its rows do not match | - | none | no: production rows carried an expiry and none of the documented figures, so the Flow Lab reads its per-expiry totals from `flow-per-expiry`; retired from the registry and the probe list |
 | `/api/stock/{ticker}/fundamental-breakdown` | read | fundamental-breakdown | any | observed | rev_breakdown, report_date, rev_group, members, value, ... | read by the code | dossier | read |
 | `/api/stock/{ticker}/gex-levels` | read | gex-levels | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/greek-exposure` | read | greek-exposure | any | observed | whole body | read by the code | nightly | read |
@@ -57,7 +57,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/stock/{ticker}/greek-exposure/strike` | read | greek-exposure-strike | any | not observed | greek exposure by strike | stated | gamma modules | no: duplicate of `spot-exposures/strike` |
 | `/api/stock/{ticker}/greek-exposure/strike-expiry` | read | greek-exposure-strike-expiry | any | not observed | greek exposure by strike and expiry | stated | gamma modules | no: duplicate of `spot-exposures/expiry-strike` |
 | `/api/stock/{ticker}/greek-flow` | read | greek-flow | any | observed | whole body | read by the code | nightly | read |
-| `/api/stock/{ticker}/greek-flow/{expiry}` | read | greek-flow-expiry | any | not observed | delta and vega flow per minute for one expiry | stated | flow | no: large, and the engines use the all-expiry series |
+| `/api/stock/{ticker}/greek-flow/{expiry}` | read | greek-flow-expiry | any | not observed | delta and vega flow per minute for one expiry | stated | Flow Lab Greek flow | read: one expiry on demand; the cap is 512 KiB |
 | `/api/stock/{ticker}/greeks` | read | greeks | any | observed | the vendor's greeks per strike and expiry | strings | engine cross-check | no: observed on the wire but large; a follow-up as an independent check of the engine's greeks |
 | `/api/stock/{ticker}/historical-risk-reversal-skew` | read | rr-skew | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/income-statements` | not added | - | any | not observed | income statements | stated | fundamentals packet | no: duplicate of `financials` |
@@ -75,7 +75,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/stock/{ticker}/option-chains` | read | option-chains | any | observed | option chains with greeks | strings | options | no: observed on the wire (tier 1) but duplicates `option-contracts` |
 | `/api/stock/{ticker}/option-contracts` | read | option-contracts | any | observed | whole body | read by the code | Worker, nightly | read |
 | `/api/stock/{ticker}/option-stance` | read | option-stance | any | not observed | a vendor trade-stance ranking of contracts with a fit score, return on capital and pop | return on capital unit not stated | none | probe only: asked weekly (tier 2) for a later comparison with our own ratio and Win %, never displayed |
-| `/api/stock/{ticker}/option/stock-price-levels` | read | option-price-levels | any | not observed | option volume by price level | stated | flow | no: low value |
+| `/api/stock/{ticker}/option/stock-price-levels` | read | option-price-levels | any | not observed | option volume by price level | stated | Flow Lab ladders | read: the option half of the price ladders |
 | `/api/stock/{ticker}/option/volume-oi-expiry` | read | volume-oi-expiry | any | not observed | volume and open interest per expiry | stated | options | no: a sum of `option-contracts` |
 | `/api/stock/{ticker}/options-pulse` | not added | - | any | not observed | the Nasdaq options pulse for a name | the spec documents no response | flow | no: the response schema is empty in the committed spec |
 | `/api/stock/{ticker}/options-volume` | read | options-volume | any | observed | whole body | read by the code | nightly | read |
@@ -86,7 +86,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/stock/{ticker}/spot-exposures/strike` | read | spot-exposures-strike | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/spot-exposures/{expiry}/strike` | deprecated | - | any | not observed | spot gamma by strike for one expiry | - | - | deprecated: the expiry-strike route is read |
 | `/api/stock/{ticker}/stock-state` | read | stock-state | any | observed | close, prev_close, open, high, low, ... | read by the code | Worker, dossier, engines | read |
-| `/api/stock/{ticker}/stock-volume-price-levels` | read | stock-price-levels | any | not observed | lit and off-lit stock volume by price | shares stated | flow | no: entitlement unanswered; asked weekly (tier 2); if it answers it ranks above the ETF read |
+| `/api/stock/{ticker}/stock-volume-price-levels` | not added | - | any | not observed | lit and off-lit stock volume at each exact price, Nasdaq and FINRA only | shares stated | none | no: answered 200 at 1.07 to 1.80 MB (25,000 to 43,000 levels) and covers part of the market; the off-exchange price levels replace it in the Flow Lab ladders; retired from the registry and the probe list |
 | `/api/stock/{ticker}/technical-indicator/{function}` | not added | - | any | not observed | any technical indicator series | per function | price packet | no: computed from the candles the nightly holds |
 | `/api/stock/{ticker}/volatility/anomaly` | read | vol-anomaly | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/volatility/character` | read | vol-character | any | observed | whole body | read by the code | nightly | read |

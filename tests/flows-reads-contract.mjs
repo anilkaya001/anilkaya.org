@@ -810,10 +810,13 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   const getOwner = await client(f.D1, { FLOWS_RT_USERS: FIXTURE_ROSTER[0], FLOWS_OPS: "on", FLOWS_READY: "on", FLOWS_VOLDESK: "on", FLOWS_RT_MODE: "off" });
   const getBook = await client(f.D1, { FLOWS_RT_USERS: FIXTURE_ROSTER[0], FLOWS_LEDGER_LIVE: "owner" });
   const getLab = await client(f.D1, { FLOWS_FLOWLAB: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
+  const getLabOpen = await client(f.D1, { FLOWS_FLOWLAB: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test", UW_NOW: "2026-10-23T15:00:00Z" });
+  const getLabShut = await client(f.D1, { FLOWS_FLOWLAB: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test", UW_NOW: "2026-10-24T15:00:00Z" });
+  const getLabCorr = await client(f.D1, { FLOWS_FLOWLAB: "on", FLOWS_FLOWLAB_ANALYTICS: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
   const getFunds = await client(f.D1, { FLOWS_FLOOR_FUNDS: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
-  const cost = async (path, { init, vendor = false, owner = false, coverage = false, book = false, lab = false, funds = false } = {}) => {
+  const cost = async (path, { init, vendor = false, owner = false, coverage = false, book = false, lab = false, labOpen = false, labShut = false, labCorr = false, funds = false } = {}) => {
     const n = f.trips.length;
-    const r = await (funds ? getFunds : lab ? getLab : book ? getBook : coverage ? getCoverage : owner ? getOwner : vendor ? getVendor : get)(path, init);
+    const r = await (funds ? getFunds : labCorr ? getLabCorr : labOpen ? getLabOpen : labShut ? getLabShut : lab ? getLab : book ? getBook : coverage ? getCoverage : owner ? getOwner : vendor ? getVendor : get)(path, init);
     return { rows: f.rowsRead(n), trips: f.trips.length - n, status: r.res.status };
   };
   const CEILING = [
@@ -847,6 +850,14 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
     ["/api/flows/flowlab/lit", 0, { lab: true }],
     ["/api/flows/flowlab/venues?t=NVDA", 0, { lab: true }],
     ["/api/flows/flowlab/nightly?k=roots", 1, { lab: true }],
+    ["/api/flows/flowlab/nightly?k=corr", 0, { lab: true }],
+    ["/api/flows/flowlab/nightly?k=corr", 1, { labCorr: true }],
+    ["/api/flows/flowlab/nightly?k=groups", 0, { labOpen: true }],
+    ["/api/flows/flowlab/nightly?k=groups", 1, { labShut: true }],
+    ["/api/flows/flowlab/nightly?k=venues", 0, { labOpen: true }],
+    ["/api/flows/flowlab/nightly?k=venues", 1, { labShut: true }],
+    ["/api/flows/flowlab/name?t=NVDA&view=strikes", 0, { lab: true }],
+    ["/api/flows/flowlab/name?t=NVDA&view=recent", 0, { lab: true }],
   ];
   let home = 0;
   for (const [path, ceiling, opts = {}] of CEILING) {

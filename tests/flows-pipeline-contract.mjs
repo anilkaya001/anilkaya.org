@@ -4669,7 +4669,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 }
 
 {
-  const measured = callModel({ enriched: 149, deep: 50, cross: 99, dossiers: 3, earnings: 73 }, { ...CALL_COST, sigmaLedger: 0, ivp: 0, slow: 0, voldesk: 0, funds: 0 });
+  const measured = callModel({ enriched: 149, deep: 50, cross: 99, dossiers: 3, earnings: 73 }, { ...CALL_COST, sigmaLedger: 0, ivp: 0, slow: 0, voldesk: 0, funds: 0, flowlab: 0 });
   ok(Math.abs(measured.total - 3071) / 3071 < 0.01,
      `the call model reproduces the 2026-09-24 nightly (3,071 calls, before the sigma ledger's rotation existed) from its own shape: ${measured.total}`);
   eq(measured.legs.vol, 632, "leg by leg: the vol leg's 632 calls exactly (8 deep, 2 cross, 10 per dossier, 4 radar)");

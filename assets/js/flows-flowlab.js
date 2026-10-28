@@ -15,6 +15,11 @@
   const MAP = COPY.stateMap || {};
   const WHY = COPY.why || {};
   const LAB = COPY.labels || {};
+  const NOTES = COPY.notes || {};
+  const CLASSES = COPY.classes || {};
+  const WHYS = COPY.whys || {};
+  const ERRS = COPY.errors || {};
+  const NOT_SIDED = NOTES.groupSided || "";
   const DEF_TABS = ["screen", "strikes", "greeks", "ladders", "routing", "lit", "groups", "relations"];
   const TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
   const OSI_RE = /^[A-Z][A-Z0-9]{0,5}\d{6}[CP]\d{8}$/;
@@ -57,6 +62,32 @@
   };
   const stateBlock = (code, vars) => h("div", { class: "fl-state", "data-code": code, role: "status" }, chipEl(code), h("span", { class: "fl-state-t" }, fill(STATES[code] || "", vars)));
   const emptyBlock = (text) => h("div", { class: "fl-state", "data-code": "ask", role: "status" }, h("span", { class: "fl-state-t" }, text));
+  const stateOfPart = (p) => {
+    if (!p) return null;
+    if (p.read && CLASSES[p.read.class]) return CLASSES[p.read.class];
+    if (!p.why) return null;
+    return WHYS[p.why] || "unshaped";
+  };
+  const varsOf = (p) => ({ status: p && p.read && num(p.read.status) !== null ? p.read.status : DASH, date: p && typeof p.date === "string" ? p.date : DASH });
+  const partBlock = (p) => stateBlock(stateOfPart(p) || "failed", varsOf(p));
+  const stateText = (p) => fill(STATES[stateOfPart(p) || "failed"] || "", varsOf(p));
+  const topBlock = (code, text) => h("div", { class: "fl-state fl-state-top", "data-code": code }, chipEl(code), h("span", { class: "fl-state-t" }, text));
+  const sessionOf = (b) => (b && typeof b.sessionDate === "string" ? b.sessionDate : b && typeof b.session === "string" ? b.session : DASH);
+  const reasonText = (code) => {
+    const st = CLASSES[code] || ERRS[code] || WHYS[code];
+    return st && STATES[st] ? " " + STATES[st] : "";
+  };
+
+  function banners(m, rec) {
+    if (!m || !m.body || !rec || !rec.body) return;
+    const at = rec.body.asOf ? F.time(rec.body.asOf) : rec.body.generatedAt ? F.time(rec.body.generatedAt) : DASH;
+    const top = [];
+    if (rec.throttled) top.push(topBlock("throttled", fill(STATES.throttled, { TRT: at })));
+    else if (rec.stale) top.push(topBlock("kept", fill(STATES.kept, { TRT: at }) + reasonText(rec.stale)));
+    if (rec.held) top.push(topBlock("earlier", fill(STATES.earlier, { date: sessionOf(rec.body) }) + reasonText(rec.held)));
+    if (rec.body.closed && !rec.held) top.push(topBlock("closed", fill(STATES.closed, { date: sessionOf(rec.body) })));
+    if (top.length) m.body.prepend(...top);
+  }
 
   const modEl = (id) => ({ box: $(id), body: $(id + "B"), note: $(id + "N"), stamp: $(id + "S"), more: $(id + "M") });
 
@@ -82,15 +113,12 @@
   function why(res) {
     if (!res) return "failed";
     if (res.error) return res.error;
-    const w = res.body && res.body.why;
-    if (!w) return null;
-    if (w === "empty") return "quiet";
-    if (w === "plan") return "plan";
-    if (w === "limited") return "rate_limited";
-    if (w === "timeout") return "timeout";
-    if (w === "failed") return "failed";
-    return "unshaped";
+    const b = res.body;
+    if (!b || !b.why) return null;
+    return stateOfPart(b);
   }
+
+  const blockOf = (rec) => stateBlock(why(rec) || "failed", varsOf(rec && (rec.error ? rec : rec.body)));
 
   async function get(path, refresh) {
     const url = path + (refresh ? (path.includes("?") ? "&" : "?") + "refresh=1" : "");
@@ -98,19 +126,23 @@
     try {
       r = await fetch(url, { credentials: "same-origin", headers: { Accept: "application/json" } });
     } catch {
-      return { error: "failed", body: null };
+      return { error: "network", body: null };
     }
     let body = null;
     try { body = await r.json(); } catch { body = null; }
     if (r.ok && body) {
       const throttled = r.headers.get("X-Fresh-Throttled") === "1";
       const age = Number(r.headers.get("X-Chain-Age"));
-      return { body, throttled, ageS: Number.isFinite(age) ? age : null };
+      const stale = r.headers.get("X-Fresh-State") === "stale" ? r.headers.get("X-Fresh-Reason") : null;
+      return { body, throttled, stale, held: r.headers.get("X-Flowlab-Held"), ageS: Number.isFinite(age) ? age : null };
     }
     const code = body && body.error && body.error.code;
-    if (r.status === 429 || code === "rate_limited") return { error: "rate_limited", body: null };
-    if (r.status === 504 || code === "chain_timeout") return { error: "timeout", body: null };
-    return { error: "failed", body: null };
+    const read = body && body.read && typeof body.read === "object" ? body.read : null;
+    if (read && CLASSES[read.class]) return { error: CLASSES[read.class], read, body: null };
+    if (code && ERRS[code]) return { error: ERRS[code], read, body: null };
+    if (r.status === 429) return { error: "rate_limited", body: null };
+    if (r.status === 504) return { error: "timeout", body: null };
+    return { error: "failed", read, body: null };
   }
 
   const dash = (reason) => h("span", { class: "fl-dash", title: reason || null }, DASH);
@@ -173,13 +205,14 @@
     }
     const lo = Math.floor(x.askLo * 100 + 1e-9);
     const hi = Math.ceil(x.askHi * 100 - 1e-9);
-    const word = x.lean === 1 ? LAB.up : x.lean === -1 ? LAB.down : STATES["lean-undecided"];
-    const dir = x.lean === 1 ? "up" : x.lean === -1 ? "down" : "flat";
+    const word = x.lean === 1 ? LAB.up : x.lean === -1 ? LAB.down : CHIPS["lean-undecided"];
+    const dir = x.lean === 1 ? "up" : x.lean === -1 ? "down" : "und";
     const bar = h("span", { class: "fl-rng", "aria-hidden": "true" }, h("i"));
     bar.style.setProperty("--lo", lo + "%");
     bar.style.setProperty("--hi", hi + "%");
-    return h("td", { class: "c-ask", "data-lean": String(x.lean), title: word }, bar, h("span", { class: "fl-rng-t" }, lo === hi ? lo + "%" : lo + "–" + hi + "%"),
-      h("span", { class: "ds-sg", "data-dir": dir }, h("i", { "aria-hidden": "true" }), x.lean === 0 ? LAB.flat : word));
+    const said = x.stated === null || x.stated === undefined ? "" : " " + fill(NOTES.sided || "", { pct: pct0(x.stated) });
+    return h("td", { class: "c-ask", "data-lean": String(x.lean), title: (x.lean === 0 ? STATES["lean-undecided"] : word) + said }, bar, h("span", { class: "fl-rng-t" }, lo === hi ? lo + "%" : lo + "–" + hi + "%"),
+      h("span", { class: "ds-sg", "data-dir": dir }, h("i", { "aria-hidden": "true" }), word));
   }
 
   function screenRow(r) {
@@ -209,7 +242,7 @@
     stamp(id, rec.body);
     const st = why(rec);
     if (st) {
-      put(id, stateBlock(st), "");
+      put(id, blockOf(rec), "");
       paintPresetCounts();
       paintScatter();
       return;
@@ -222,8 +255,7 @@
     const notes = [h("span", null, fill(COPY.labels && LAB.unranked ? LAB.unranked : "{n} without this key sit last.", { n: ranked.unranked })), " "];
     const foot = [ranked.unranked ? notes[0] : null, ranked.unranked ? " " : null, h("span", null, STATES["min-volume"]), " ", h("span", null, COPY.convention || "")];
     const m = put(id, t, foot);
-    if (rec.throttled) m.body.prepend(h("div", { class: "fl-state fl-state-top" }, chipEl("throttled"), h("span", { class: "fl-state-t" }, fill(STATES.throttled, { TRT: rec.body.asOf ? F.time(rec.body.asOf) : DASH }))));
-    if (rec.body.closed) m.body.prepend(h("div", { class: "fl-state fl-state-top" }, chipEl("closed"), h("span", { class: "fl-state-t" }, fill(STATES.closed, { date: rec.body.session }))));
+    banners(m, rec);
     fit(id);
     paintPresetCounts();
     paintScatter();
@@ -242,7 +274,7 @@
     const rec = DATA["screen:" + S.preset + ":" + (S.t || "*")];
     const m = modEl(id);
     if (!m.body) return;
-    if (!rec || why(rec)) { put(id, rec ? stateBlock(why(rec)) : h("p", { class: "fl-wait" }, STATES.loading), ""); return; }
+    if (!rec || why(rec)) { put(id, rec ? blockOf(rec) : h("p", { class: "fl-wait" }, STATES.loading), ""); return; }
     const rows = rec.body.x.rows.filter((r) => r.ratios.voi !== null && r.ratios.voi > 0 && r.premC > 0);
     const left = rec.body.x.rows.length - rows.length;
     const host = h("div", { class: "fl-plot" });
@@ -301,71 +333,145 @@
     if (seq === S.seq || S.tab === "screen") paintScreen();
   }
 
-  const tickerNeeded = (id) => put(id, emptyBlock("Choose a ticker to read this view."), "");
+  const tickerNeeded = (id) => put(id, emptyBlock(STATES["choose-ticker"]), "");
 
-  function paintStrikes() {
-    const rec = DATA["strikes:" + S.t];
-    if (!rec) return;
-    stamp("flStrikes", rec.body);
-    const st = why(rec);
-    if (st) { put("flStrikes", stateBlock(st), ""); put("flStrikeRail", stateBlock(st), ""); return; }
-    const x = rec.body.x;
-    const m = modEl("flStrikes");
-    const host = h("div", { class: "fl-plot fl-heat" });
-    m.body.replaceChildren(host);
-    const cols = x.buckets.map((b) => b);
-    const grid = x.cells;
-    const cap = Math.max(1, ...grid.flat().filter((v) => v !== null).map((v) => Math.abs(v)));
-    const spotRow = x.spot === null ? undefined : x.strikes.reduce((a, k, i) => (Math.abs(k - x.spot) < Math.abs(x.strikes[a] - x.spot) ? i : a), 0);
-    const spec = {
-      rows: x.strikes, cols, grid, cap, left: 52, label: "Signed contracts by strike and quarter hour for " + S.t,
-      rowFormat: (k) => F.strike(k), colFormat: (ms) => F.time(ms, false), format: (v) => F.num(v, true) + " contracts", highlightRow: spotRow, cellH: 14,
-    };
-    const size = () => Math.max(8, Math.min(44, Math.floor((host.clientHeight - 32) / Math.max(1, x.strikes.length))));
-    spec.cellH = size();
-    if (UI.chart) {
-      DATA._heat = UI.chart.heatmap(host, spec);
-      host._draw = () => { const c = size(); if (c !== spec.cellH && DATA._heat) { spec.cellH = c; DATA._heat.update({ cellH: c }, { animate: false }); } };
-    }
-    const sourceText = x.spotSource === "card" ? "Spot from the card." : x.spotSource === "median" ? "Spot not sent; the busiest strike by volume stands in." : "";
-    if (m.note) m.note.replaceChildren(h("span", null, COPY.convention || ""), " ", h("span", null, STATES["no-expiry-in-rows"]), " ", h("span", null, sourceText));
-    ALL.flStrikes = () => h("div", { class: "fl-all-heat" }, table([{ label: "Strike" }, { label: "Signed contracts" }], x.strikes.map((k, i) => h("tr", null, h("th", { scope: "row" }, F.strike(k)), h("td", null, F.num(x.cum[i], true)))), "strikes"));
-    paintRail(x);
+  const signOf = (net, ok) => (net === null ? null : !ok ? "und" : net > 0 ? "up" : net < 0 ? "down" : "flat");
+  const sidedLine = (share, key) => (num(share) === null ? null : h("span", null, fill(NOTES[key || "sided"] || "", { pct: pct0(share) })));
+  const spaced = (...parts) => parts.filter((q) => q !== null && q !== undefined && q !== "").flatMap((q, i) => (i ? [" ", q] : [q]));
+
+  function mark(svg, x, y, dir) {
+    if (dir === "up") return s("path", { d: "M" + geo(x) + " " + geo(y - 4) + "l4 7h-8z", class: "pt up" }, svg);
+    if (dir === "down") return s("path", { d: "M" + geo(x) + " " + geo(y + 4) + "l4 -7h-8z", class: "pt dn" }, svg);
+    if (dir === "und") return s("path", { d: "M" + geo(x) + " " + geo(y - 4) + "l4 4l-4 4l-4 -4z", class: "pt hol" }, svg);
+    return s("path", { d: "M" + geo(x - 4) + " " + geo(y - 1) + "h8v2h-8z", class: "pt fl" }, svg);
   }
 
-  function paintRail(x) {
-    const m = modEl("flStrikeRail");
+  function strikeCellText(map, r, c) {
+    const v = map.cells[r] && map.cells[r][c];
+    if (num(v) === null) return DASH;
+    const u = num(map.unknown[r][c]) === null ? 0 : map.unknown[r][c];
+    const range = u ? ", " + F.num(v - u, true) + " to " + F.num(v + u, true) : "";
+    return F.num(v, true) + " contracts" + range + (map.decided[r][c] === true ? "" : ", " + STATES["net-undecided"]);
+  }
+
+  function paintStrikeMap(rec) {
+    const id = "flStrikes";
+    const m = modEl(id);
+    stamp(id, rec.body);
+    const half = rec.body.x.map;
+    if (!half || half.ok !== true) { put(id, partBlock(half), ""); return; }
+    const map = half.x;
+    const host = h("div", { class: "fl-plot fl-heat" });
+    m.body.replaceChildren(host);
+    const ends = [];
+    map.cells.forEach((line, i) => line.forEach((v, j) => { if (num(v) !== null) ends.push(Math.abs(v)); }));
+    const cap = Math.max(1, ...ends);
+    const centreRow = num(map.center) === null ? -1 : map.strikes.indexOf(map.center);
+    const spec = {
+      rows: map.strikes, cols: map.buckets, grid: map.cells, undecided: map.decided.map((line) => line.map((d) => d === false)), cap, left: 52, palette: "direction",
+      label: "Signed contracts by strike and quarter hour for " + S.t,
+      rowFormat: (k) => F.strike(k), colFormat: (ms) => F.time(ms, false),
+      format: (v, r, c) => (r === undefined ? F.num(v, true) + " contracts" : strikeCellText(map, r, c)),
+      highlightRow: centreRow >= 0 ? centreRow : undefined, cellH: 14,
+    };
+    const size = () => Math.max(8, Math.min(44, Math.floor((host.clientHeight - 32) / Math.max(1, map.strikes.length))));
+    const every = () => Math.max(1, Math.ceil(44 / Math.max(1, (host.clientWidth - 52) / Math.max(1, map.buckets.length))));
+    spec.cellH = size();
+    spec.colEvery = every();
+    if (UI.chart) {
+      DATA._heat = UI.chart.heatmap(host, spec);
+      host._draw = () => {
+        const c = size();
+        const e = every();
+        if ((c !== spec.cellH || e !== spec.colEvery) && DATA._heat) { spec.cellH = c; spec.colEvery = e; DATA._heat.update({ cellH: c, colEvery: e }, { animate: false }); }
+      };
+    }
+    banners(m, rec);
+    if (m.note) {
+      m.note.replaceChildren(...spaced(h("span", null, NOTES.strikeMap), h("span", null, NOTES.strikeCell), sidedLine(map.sidedShare)));
+    }
+    ALL.flStrikes = () => table([{ label: "Strike" }, { label: "Net contracts", cls: "num" }, { label: "Low", cls: "num" }, { label: "High", cls: "num" }],
+      map.strikes.map((k, i) => h("tr", null, h("th", { scope: "row" }, F.strike(k)), h("td", { class: "num" }, F.num(map.cum[i], true)),
+        h("td", { class: "num" }, F.num(map.cum[i] - map.cumUnknown[i], true)), h("td", { class: "num" }, F.num(map.cum[i] + map.cumUnknown[i], true)))), "strikes");
+    if (m.more) m.more.hidden = false;
+  }
+
+  function paintRail(rec) {
+    const id = "flStrikeRail";
+    const m = modEl(id);
+    stamp(id, rec.body);
+    const half = rec.body.x.rail;
+    if (!half || half.ok !== true) { put(id, partBlock(half), ""); return; }
+    const x = half.x;
     const host = h("div", { class: "fl-plot" });
     m.body.replaceChildren(host);
     const draw = () => {
       const W = host.clientWidth, H = host.clientHeight;
       if (!W || !H) return;
       host.replaceChildren();
-      const svg = s("svg", { width: W, height: H, viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": "Cumulative signed contracts by strike" }, host);
-      const T = 6, B = 6, Lw = 44;
+      const svg = s("svg", { width: W, height: H, viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": "Signed contracts by strike for the session, each with its range" }, host);
+      const T = 6, B = 6, Lw = 44, room = 58;
       const n = x.strikes.length;
-      const rh = (H - T - B) / n;
-      const max = Math.max(1, ...x.cum.map(Math.abs));
-      const mid = Lw + (W - Lw - 8) / 2;
-      s("line", { x1: mid, x2: mid, y1: T, y2: H - B, class: "axis" }, svg);
-      x.strikes.forEach((k, i) => {
-        const v = x.cum[i];
+      const rh = (H - T - B) / Math.max(1, n);
+      const ends = [];
+      for (const q of x.strikes) if (q.net !== null) ends.push(Math.abs(q.lo), Math.abs(q.hi));
+      const max = Math.max(1, ...ends);
+      const mid = Lw + (W - Lw) / 2;
+      const span = Math.max(8, (W - Lw) / 2 - room);
+      const at = (v) => mid + (v / max) * span;
+      s("line", { x1: geo(mid), x2: geo(mid), y1: T, y2: H - B, class: "axis" }, svg);
+      x.strikes.forEach((q, i) => {
         const y = T + i * rh;
-        const w = (Math.abs(v) / max) * ((W - Lw - 8) / 2 - 50);
-        s("rect", { x: v >= 0 ? mid : mid - w, y: y + 1, width: Math.max(0, w), height: Math.max(1, rh - 2), class: v > 0 ? "bar up" : v < 0 ? "bar dn" : "bar fl" }, svg);
-        s("text", { x: Lw - 6, y: y + rh / 2 + 3.5, text: F.strike(k), "text-anchor": "end" }, svg);
-        if (rh >= 12) s("text", { x: v >= 0 ? mid + w + 4 : mid - w - 4, y: y + rh / 2 + 3.5, text: (v > 0 ? "▲ " : v < 0 ? "▼ " : "") + F.num(v, true), "text-anchor": v >= 0 ? "start" : "end", class: "val" }, svg);
+        const cy = y + rh / 2;
+        s("text", { x: Lw - 6, y: geo(cy + 3.5), text: F.strike(q.k), "text-anchor": "end", class: q.k === x.center ? "val" : null }, svg);
+        const g = s("g", { class: "fl-rail", "data-k": String(q.k), "data-dir": q.net === null ? "none" : signOf(q.net, q.decided) }, svg);
+        if (q.net === null) {
+          s("text", { x: geo(mid + 4), y: geo(cy + 3.5), text: DASH, class: "val" }, g);
+          s("title", { text: WHY[q.why] || WHY.noSides }, g);
+          return;
+        }
+        const w = Math.abs(at(q.net) - mid);
+        s("line", { x1: geo(at(q.lo)), x2: geo(at(q.hi)), y1: geo(cy), y2: geo(cy), class: "rng" }, g);
+        s("rect", { x: geo(q.net >= 0 ? mid : mid - w), y: geo(y + 1), width: geo(w), height: geo(Math.max(1, rh - 2)), class: q.decided ? (q.net > 0 ? "bar up" : "bar dn") : "bar und" }, g);
+        if (rh >= 11) {
+          const right = q.net >= 0;
+          const edge = right ? at(q.hi) + 9 : at(q.lo) - 9;
+          mark(g, edge, cy, signOf(q.net, q.decided));
+          s("text", { x: geo(right ? edge + 7 : edge - 7), y: geo(cy + 3.5), text: F.num(q.net, true), "text-anchor": right ? "start" : "end", class: "val" }, g);
+        }
+        s("title", { text: F.strike(q.k) + ": " + F.num(q.net, true) + " contracts, " + F.num(q.lo, true) + " to " + F.num(q.hi, true) + (q.decided ? "" : ". " + STATES["net-undecided"]) }, g);
       });
     };
     host._draw = draw;
     draw();
-    stamp("flStrikeRail", { asOf: DATA["strikes:" + S.t].body.asOf });
+    banners(m, rec);
+    if (m.note) m.note.replaceChildren(...spaced(h("span", null, NOTES.strikeRail), sidedLine(x.sidedShare), h("span", null, NOTES.railMark)));
+    ALL.flStrikeRail = () => table([{ label: "Strike" }, { label: "Net contracts", cls: "num" }, { label: "Low", cls: "num" }, { label: "High", cls: "num" }, { label: "Sided", cls: "num" }],
+      x.strikes.map((q) => h("tr", { "data-k": String(q.k) }, h("th", { scope: "row" }, F.strike(q.k)),
+        ...(q.net === null ? [h("td", { class: "num", title: WHY[q.why] || null }, DASH), h("td", { class: "num" }, DASH), h("td", { class: "num" }, DASH), h("td", { class: "num" }, DASH)]
+          : [h("td", { class: "num" }, F.num(q.net, true)), h("td", { class: "num" }, F.num(q.lo, true)), h("td", { class: "num" }, F.num(q.hi, true)), h("td", { class: "num" }, pct0(q.vol > 0 ? q.sided / q.vol : null))]))), "strikes");
+    if (m.more) m.more.hidden = false;
+  }
+
+  function paintStrikes() {
+    const rec = DATA["strikes:" + S.t];
+    if (!rec) return;
+    const st = why(rec);
+    if (st) {
+      stamp("flStrikes", rec.body);
+      stamp("flStrikeRail", rec.body);
+      put("flStrikes", blockOf(rec), "");
+      put("flStrikeRail", blockOf(rec), "");
+      return;
+    }
+    paintStrikeMap(rec);
+    paintRail(rec);
   }
 
   async function loadStrikes(refresh) {
     if (!S.t) { tickerNeeded("flStrikes"); tickerNeeded("flStrikeRail"); return; }
     const key = "strikes:" + S.t;
-    if (!DATA[key]) { put("flStrikes", h("p", { class: "fl-wait", role: "status" }, STATES.loading), ""); }
+    if (!DATA[key]) { put("flStrikes", h("p", { class: "fl-wait", role: "status" }, STATES.loading), ""); put("flStrikeRail", h("p", { class: "fl-wait", role: "status" }, STATES.loading), ""); }
     DATA[key] = await get("/api/flows/flowlab/name?t=" + encodeURIComponent(S.t) + "&view=strikes", refresh);
     paintStrikes();
   }
@@ -374,14 +480,39 @@
     return x.rows.slice().sort((a, b) => (a.e < b.e ? -1 : 1));
   }
 
-  function chooseExpiry(x) {
-    if (S.expiry && x.rows.some((r) => r.e === S.expiry)) return S.expiry;
+  function chooseExpiry(x, day) {
+    if (S.expiry && x.rows.some((r) => r.e === S.expiry && (!day || r.e >= day))) return S.expiry;
+    const open = day ? x.rows.filter((r) => r.e >= day) : x.rows;
     let best = null;
-    for (const r of x.rows) {
-      const size = (r.callC || 0) + (r.putC || 0);
-      if (best === null || size > best.size) best = { size, e: r.e };
+    for (const r of open.length ? open : x.rows) {
+      const size = (num(r.callC) || 0) + (num(r.putC) || 0);
+      if (best === null || size > best.size || (size === best.size && r.e < best.e)) best = { size, e: r.e };
     }
     return best ? best.e : null;
+  }
+
+  function netCell(r) {
+    if (num(r.netC) === null) {
+      const text = WHY[r.why] || WHY.noSides;
+      return h("td", { class: "num c-net", "data-why": r.why || "noSides", title: text }, dash(text));
+    }
+    const exact = r.loC === r.hiC;
+    const dir = exact && r.netC === 0 ? "flat" : signOf(r.netC, r.decided === true);
+    const word = dir === "up" ? LAB.up : dir === "down" ? LAB.down : dir === "flat" ? LAB.flat : CHIPS["net-undecided"];
+    const text = exact ? money(r.netC, true) : money(r.netC, true) + " ± " + money(r.unknownC);
+    const said = word + ". " + (exact ? "" : money(r.loC, true) + " to " + money(r.hiC, true) + ". ") + (num(r.sidedShare) === null ? "" : fill(NOTES.sidedPremium || "", { pct: pct0(r.sidedShare) }));
+    return h("td", { class: "num c-net", "data-dir": dir, title: said.trim() }, h("span", { class: "ds-sg", "data-dir": dir }, h("i", { "aria-hidden": "true" }), text));
+  }
+
+  function pooledShare(rows) {
+    let sided = 0;
+    let total = 0;
+    for (const r of rows) {
+      if (num(r.sidedC) === null || num(r.callC) === null || num(r.putC) === null) continue;
+      sided += r.sidedC;
+      total += r.callC + r.putC;
+    }
+    return total > 0 ? sided / total : null;
   }
 
   function paintRecent() {
@@ -389,33 +520,46 @@
     if (!rec) return;
     stamp("flRecent", rec.body);
     const st = why(rec);
-    if (st) { put("flRecent", stateBlock(st), ""); return; }
+    if (st) { put("flRecent", blockOf(rec), ""); return; }
     const x = rec.body.x;
-    S.expiry = chooseExpiry(x);
-    const cols = [{ label: LAB.expiry || "Expiry" }, { label: LAB.calls || "Calls", cls: "num" }, { label: LAB.puts || "Puts", cls: "num" }, { label: "Net", cls: "num" }];
+    S.expiry = chooseExpiry(x, rec.body.session);
+    const cols = [{ label: LAB.expiry || "Expiry" }, { label: LAB.calls || "Calls", cls: "num" }, { label: LAB.puts || "Puts", cls: "num" }, { label: LAB.net || "Net", cls: "num" }];
     const mk = (r) => {
-      const dir = r.netC === null ? "flat" : r.netC > 0 ? "up" : r.netC < 0 ? "down" : "flat";
       const b = h("button", { type: "button", class: "fl-link", "aria-pressed": String(r.e === S.expiry), onclick: () => { S.expiry = r.e; writeHash(); paintRecent(); loadGreek(false); } }, F.day(r.e));
-      return h("tr", { "data-e": r.e, class: r.e === S.expiry ? "is-on" : null }, h("th", { scope: "row" }, b), h("td", { class: "num" }, money(r.callC)), h("td", { class: "num" }, money(r.putC)),
-        h("td", { class: "num" }, h("span", { class: "ds-sg", "data-dir": dir }, h("i", { "aria-hidden": "true" }), r.netC === null ? DASH : money(r.netC, true))));
+      return h("tr", { "data-e": r.e, class: r.e === S.expiry ? "is-on" : null }, h("th", { scope: "row" }, b), h("td", { class: "num" }, money(r.callC)), h("td", { class: "num" }, money(r.putC)), netCell(r));
     };
     const rows = expiryRows(x);
-    ALL.flRecent = () => table(cols, rows.map(mk), "expiries");
-    put("flRecent", table(cols, rows.map(mk), "expiries"), h("span", null, COPY.convention || ""));
+    const wide = [...cols, { label: "Low", cls: "num" }, { label: "High", cls: "num" }, { label: "Sided", cls: "num" }];
+    ALL.flRecent = () => table(wide, rows.map((r) => {
+      const tr = mk(r);
+      tr.append(h("td", { class: "num" }, money(r.loC, true)), h("td", { class: "num" }, money(r.hiC, true)), h("td", { class: "num" }, pct0(r.sidedShare)));
+      return tr;
+    }), "expiries");
+    const m = put("flRecent", table(cols, rows.map(mk), "expiries"),
+      spaced(x.prior ? h("span", null, fill(NOTES.priorSession, { date: x.date })) : null, h("span", null, NOTES.premiumNet), sidedLine(pooledShare(rows), "sidedPremium")));
+    banners(m, rec);
     fit("flRecent");
   }
 
   function linePath(values, x0, x1, y0, y1, ts) {
     let d = "";
     let open = false;
+    const span = Math.max(1, ts[ts.length - 1] - ts[0]);
     values.forEach((v, i) => {
       if (v === null) { open = false; return; }
-      const x = x0 + ((ts[i] - ts[0]) / Math.max(1, ts[ts.length - 1] - ts[0])) * (x1 - x0);
+      const x = x0 + ((ts[i] - ts[0]) / span) * (x1 - x0);
       const y = y1 - ((v + 1) / 2) * (y1 - y0);
       d += (open ? "L" : "M") + geo(x) + " " + geo(y);
       open = true;
     });
     return d;
+  }
+
+  const MINUTE = 60000;
+
+  function timeTicks(t0, t1) {
+    const mid = Math.round((t0 + t1) / 2 / MINUTE) * MINUTE;
+    return t1 - t0 >= 2 * 30 * MINUTE ? [t0, mid, t1] : [t0, t1];
   }
 
   function paintGreek() {
@@ -424,7 +568,7 @@
     if (!rec) return;
     stamp("flGreeks", rec.body, S.expiry ? F.day(S.expiry) : null);
     const st = why(rec);
-    if (st) { put("flGreeks", stateBlock(st), ""); return; }
+    if (st) { put("flGreeks", blockOf(rec), ""); return; }
     const x = rec.body.x;
     const dKey = S.basis === "tot" ? "totDelta" : S.otm ? "otmDirDelta" : "dirDelta";
     const vKey = S.basis === "tot" ? "totVega" : S.otm ? "otmDirVega" : "dirVega";
@@ -437,26 +581,32 @@
       const svg = s("svg", { width: W, height: H, viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": "Delta flow and vega flow through the session, relative shape only" }, host);
       const L = 8, R = 8, T = 10, B = 40;
       const y0 = T, y1 = H - B;
+      const t0 = x.t.length ? x.t[0] : 0;
+      const t1 = x.t.length ? x.t[x.t.length - 1] : 1;
+      const at = (t) => L + ((t - t0) / Math.max(1, t1 - t0)) * (W - L - R);
       s("line", { x1: L, x2: W - R, y1: (y0 + y1) / 2, y2: (y0 + y1) / 2, class: "axis" }, svg);
       const lines = [["Delta flow", x.rel[dKey], "ln a"], ["Vega flow", x.rel[vKey], "ln b"]];
       lines.forEach(([label, vals, cls], i) => {
         if (!vals) { s("text", { x: L + 4, y: y0 + 12 + i * 14, text: label + ": no shape, the series is flat or empty", class: "val" }, svg); return; }
         s("path", { d: linePath(vals, L, W - R, y0, y1, x.t), class: cls, fill: "none" }, svg);
       });
-      const ticks = x.t.length ? [x.t[0], x.t[Math.floor(x.t.length / 2)], x.t[x.t.length - 1]] : [];
-      ticks.forEach((t, i) => s("text", { x: L + (i / 2) * (W - L - R), y: H - 24, text: F.time(t), "text-anchor": i === 0 ? "start" : i === 2 ? "end" : "middle" }, svg));
-      const sg = x.signs;
-      const step = (W - L - R) / Math.max(1, sg.length);
-      sg.forEach((q, i) => {
-        const cx = L + step * (i + 0.5);
+      if (x.t.length) {
+        const ticks = timeTicks(t0, t1);
+        ticks.forEach((t, i) => s("text", { x: geo(at(t)), y: H - 24, text: F.time(t), "data-t": String(t), class: "tick", "text-anchor": i === 0 ? "start" : i === ticks.length - 1 ? "end" : "middle" }, svg));
+      }
+      for (const q of x.signs) {
+        const c = Math.min(t1, Math.max(t0, q.t + 15 * MINUTE));
+        const cx = at(c);
         const d = q.delta;
-        const path = d > 0 ? "M" + cx + " " + (H - 17) + "l4.5 8h-9z" : d < 0 ? "M" + cx + " " + (H - 9) + "l4.5 -8h-9z" : "M" + (cx - 4) + " " + (H - 13) + "h8v2h-8z";
-        s("path", { d: path, class: d > 0 ? "pt up" : d < 0 ? "pt dn" : "pt fl" }, svg);
-      });
+        const path = d > 0 ? "M" + geo(cx) + " " + (H - 17) + "l4.5 8h-9z" : d < 0 ? "M" + geo(cx) + " " + (H - 9) + "l4.5 -8h-9z" : "M" + geo(cx - 4) + " " + (H - 13) + "h8v2h-8z";
+        s("path", { d: path, class: d > 0 ? "pt up" : d < 0 ? "pt dn" : "pt fl", "data-t": String(q.t) }, svg);
+      }
     };
     host._draw = draw;
     draw();
-    if (m.note) m.note.replaceChildren(h("span", null, STATES["no-unit"]), " ", h("span", null, "Solid line: delta flow. Dashed line: vega flow. Triangles show the sign of directional delta flow in each half hour."));
+    banners(m, rec);
+    if (m.note) m.note.replaceChildren(...spaced(h("span", null, STATES["no-unit"]), h("span", null, "Solid line: delta flow. Dashed line: vega flow. Triangles show the sign of directional delta flow in each half hour."),
+      x.early > 0 ? h("span", null, NOTES.greekOpen) : null));
   }
 
   async function loadGreek(refresh) {
@@ -470,11 +620,19 @@
   async function loadGreeks(refresh) {
     if (!S.t) { tickerNeeded("flGreeks"); tickerNeeded("flRecent"); return; }
     const key = "recent:" + S.t;
-    if (!DATA[key]) put("flRecent", h("p", { class: "fl-wait", role: "status" }, STATES.loading), "");
+    if (!DATA[key]) { put("flRecent", h("p", { class: "fl-wait", role: "status" }, STATES.loading), ""); put("flGreeks", h("p", { class: "fl-wait", role: "status" }, STATES.loading), ""); }
     DATA[key] = await get("/api/flows/flowlab/name?t=" + encodeURIComponent(S.t) + "&view=recent", refresh);
     paintRecent();
-    if (!why(DATA[key])) await loadGreek(refresh);
-    else tickerNeeded("flGreeks");
+    if (!why(DATA[key]) && S.expiry) await loadGreek(refresh);
+    else {
+      stamp("flGreeks", DATA[key].body);
+      put("flGreeks", blockOf(DATA[key]), h("span", null, NOTES.greekNeeds));
+    }
+  }
+
+  function halfLine(label, read) {
+    if (!read) return null;
+    return h("span", { "data-half": label }, label + ": " + stateText(read));
   }
 
   function paintLadder() {
@@ -482,7 +640,7 @@
     if (!rec) return;
     stamp("flLadder", rec.body);
     const st = why(rec);
-    if (st) { put("flLadder", stateBlock(st), ""); return; }
+    if (st) { put("flLadder", blockOf(rec), ""); return; }
     const x = rec.body.x;
     const m = modEl("flLadder");
     const host = h("div", { class: "fl-plot fl-ladder" });
@@ -494,7 +652,7 @@
       const svg = s("svg", { width: W, height: H, viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": "Option volume and stock volume by price, side by side" }, host);
       const bins = x.bins.slice().reverse();
       const T = 18, B = 22;
-      const rh = Math.max(3, (H - T - B) / bins.length);
+      const rh = Math.max(3, (H - T - B) / Math.max(1, bins.length));
       const midL = W * 0.42, midR = W * 0.58;
       const maxO = Math.max(1, ...bins.map((b) => Math.max(b.call || 0, b.put || 0)));
       const maxS = Math.max(1, ...bins.map((b) => (b.lit || 0) + (b.off || 0)));
@@ -503,34 +661,38 @@
       bins.forEach((b, i) => {
         const y = T + i * rh;
         const wc = ((b.call || 0) / maxO) * (midL - 8), wp = ((b.put || 0) / maxO) * (midL - 8);
-        if (b.call === null && b.put === null) s("rect", { x: 4, y: y + 0.5, width: midL - 8, height: Math.max(1, rh - 1), class: "void" }, svg);
+        if (b.call === null && b.put === null) s("rect", { x: 4, y: geo(y + 0.5), width: geo(midL - 8), height: geo(Math.max(1, rh - 1)), class: "void" }, svg);
         else {
-          s("rect", { x: midL / 2 - wc / 2 + 0, y: y + 0.5, width: Math.max(0, wc) / 2, height: Math.max(1, rh - 1), class: "bar up" }, svg);
-          s("rect", { x: midL / 2, y: y + 0.5, width: Math.max(0, wp) / 2, height: Math.max(1, rh - 1), class: "bar dn" }, svg);
+          s("rect", { x: geo(midL / 2 - wc / 2), y: geo(y + 0.5), width: geo(Math.max(0, wc) / 2), height: geo(Math.max(1, rh - 1)), class: "bar up" }, svg);
+          s("rect", { x: geo(midL / 2), y: geo(y + 0.5), width: geo(Math.max(0, wp) / 2), height: geo(Math.max(1, rh - 1)), class: "bar dn" }, svg);
         }
-        if (b.lit === null && b.off === null) s("rect", { x: midR + 4, y: y + 0.5, width: W - midR - 8, height: Math.max(1, rh - 1), class: "void" }, svg);
+        if (b.lit === null && b.off === null) s("rect", { x: geo(midR + 4), y: geo(y + 0.5), width: geo(W - midR - 8), height: geo(Math.max(1, rh - 1)), class: "void" }, svg);
         else {
           const wl = ((b.lit || 0) / maxS) * (W - midR - 12), wo = ((b.off || 0) / maxS) * (W - midR - 12);
-          s("rect", { x: midR + 4, y: y + 0.5, width: Math.max(0, wl), height: Math.max(1, rh - 1), class: "bar lit" }, svg);
-          s("rect", { x: midR + 4 + wl, y: y + 0.5, width: Math.max(0, wo), height: Math.max(1, rh - 1), class: "bar off" }, svg);
+          s("rect", { x: geo(midR + 4), y: geo(y + 0.5), width: geo(Math.max(0, wl)), height: geo(Math.max(1, rh - 1)), class: "bar lit" }, svg);
+          s("rect", { x: geo(midR + 4 + wl), y: geo(y + 0.5), width: geo(Math.max(0, wo)), height: geo(Math.max(1, rh - 1)), class: "bar off" }, svg);
         }
-        if (i % Math.max(1, Math.ceil(12 / rh)) === 0) s("text", { x: (midL + midR) / 2, y: y + rh / 2 + 3.5, text: F.px(b.lo / 100, 2), "text-anchor": "middle" }, svg);
+        if (i % Math.max(1, Math.ceil(12 / rh)) === 0) s("text", { x: geo((midL + midR) / 2), y: geo(y + rh / 2 + 3.5), text: F.px(b.lo / 100, 2), "text-anchor": "middle" }, svg);
       });
       if (num(x.spot) !== null) {
         const hit = bins.findIndex((b) => b.lo / 100 <= x.spot);
-        if (hit >= 0) s("line", { x1: 0, x2: W, y1: T + hit * rh, y2: T + hit * rh, class: "ref" }, svg);
+        if (hit >= 0) s("line", { x1: 0, x2: W, y1: geo(T + hit * rh), y2: geo(T + hit * rh), class: "ref" }, svg);
       }
       s("text", { x: 4, y: H - 6, text: "Off-exchange share " + (x.offShare === null ? DASH : F.pct(x.offShare, 0)) }, svg);
     };
     host._draw = draw;
     draw();
-    const notes = [];
-    if (x.reads && x.reads.options) notes.push(h("span", null, "Option levels: " + (CHIPS[x.reads.options] || x.reads.options) + ". "));
-    if (x.reads && x.reads.stock) notes.push(h("span", null, "Stock levels: " + (CHIPS[x.reads.stock] || x.reads.stock) + ". "));
-    notes.push(h("span", null, "Bin width " + F.px(x.w / 100, 2) + ". " + (COPY.glossary ? COPY.glossary.offShare : "")));
-    if (m.note) m.note.replaceChildren(...notes);
+    banners(m, rec);
+    const reads = x.reads || {};
+    const notes = [halfLine("Option levels", reads.options), halfLine("Stock levels", reads.stock),
+      h("span", null, "Bin width " + F.px(x.w / 100, 2) + "."),
+      num(x.stockStep) !== null ? h("span", null, fill(NOTES.stockStep, { step: F.px(x.stockStep / 100, 2) })) : null,
+      x.widened ? h("span", null, fill(NOTES.widened, { w: F.px(x.w / 100, 2) })) : null,
+      h("span", null, COPY.glossary ? COPY.glossary.offShare : "")];
+    if (m.note) m.note.replaceChildren(...spaced(...notes));
     ALL.flLadder = () => table([{ label: "Price" }, { label: LAB.calls || "Calls", cls: "num" }, { label: LAB.puts || "Puts", cls: "num" }, { label: LAB.lit || "Lit", cls: "num" }, { label: LAB.offExchange || "Off exchange", cls: "num" }],
       x.bins.slice().reverse().map((b) => h("tr", null, h("th", { scope: "row" }, F.px(b.lo / 100, 2)), ...[b.call, b.put, b.lit, b.off].map((v) => h("td", { class: "num" }, v === null ? DASH : F.num(v))))), "levels");
+    if (m.more) m.more.hidden = false;
   }
 
   async function loadLadders(refresh) {
@@ -545,7 +707,7 @@
 
   async function nightly(k, refresh) {
     const key = nightlyKey(k);
-    if (!DATA[key] || refresh) DATA[key] = await get("/api/flows/flowlab/nightly?k=" + k, false);
+    if (!DATA[key] || refresh) DATA[key] = await get("/api/flows/flowlab/nightly?k=" + k, refresh === true);
     return DATA[key];
   }
 
@@ -564,44 +726,49 @@
     return list;
   }
 
+  function codeTable(pick) {
+    const cols = [{ label: "Code" }, { label: LAB.contracts || "Contracts", cls: "num" }, { label: "Share", cls: "num" }];
+    const rows = pick.top.map((q) => h("tr", { "data-code": q.code }, h("th", { scope: "row" }, q.code), h("td", { class: "num" }, F.num(q.contracts)), h("td", { class: "num" }, pct0(q.share))));
+    return { cols, rows };
+  }
+
   async function loadRouting(refresh) {
     if (S.t) {
       const key = "v:" + S.t;
-      if (!DATA[key]) put("flRoute", h("p", { class: "fl-wait", role: "status" }, STATES.loading), "");
+      if (!DATA[key]) { put("flRoute", h("p", { class: "fl-wait", role: "status" }, STATES.loading), ""); put("flCodes", h("p", { class: "fl-wait", role: "status" }, STATES.loading), ""); }
       DATA[key] = await get("/api/flows/flowlab/venues?t=" + encodeURIComponent(S.t), refresh);
       const rec = DATA[key];
       stamp("flRoute", rec.body);
+      stamp("flCodes", rec.body);
       const st = why(rec);
-      if (st) put("flRoute", stateBlock(st), "");
-      else {
-        const t = rec.body.x.tickers[0];
-        put("flRoute", h("div", { class: "fl-route" }, h("p", { class: "fl-fig" }, h("b", null, F.px(Number(t.hhi), 2)), " ", COPY.glossary ? COPY.glossary.routing : ""), exchangeBars(t)), "");
-        ALL.flRoute = () => exchangeBars(t);
+      const t = st ? null : rec.body.x.tickers[0];
+      if (!t) {
+        put("flRoute", blockOf(rec), "");
+        put("flCodes", blockOf(rec), "");
+        return;
       }
-    } else {
-      const rec = await nightly("venues", refresh);
-      stamp("flRoute", rec.body);
-      const st = why(rec);
-      if (st || pending(rec)) put("flRoute", st ? stateBlock(st) : emptyBlock("The nightly routing read has not landed."), "");
-      else {
-        const cols = [{ label: "Ticker" }, { label: LAB.contracts || "Contracts", cls: "num" }, { label: "Concentration", cls: "num" }];
-        const rows = rec.body.tickers.slice().sort((a, b) => b.total - a.total).map((t) => h("tr", { "data-t": t.t }, h("th", { scope: "row" }, h("button", { type: "button", class: "fl-link", onclick: () => setTicker(t.t, true) }, t.t)), h("td", { class: "num" }, F.num(t.total)), h("td", { class: "num" }, t.hhi === null ? DASH : F.px(t.hhi, 2))));
-        ALL.flRoute = () => table(cols, rows.map((r) => r.cloneNode(true)), "tickers");
-        put("flRoute", table(cols, rows, "tickers"), "");
-        fit("flRoute");
-      }
+      const m = put("flRoute", h("div", { class: "fl-route" }, h("p", { class: "fl-fig" }, h("b", null, F.px(Number(t.hhi), 2)), " ", COPY.glossary ? COPY.glossary.routing : ""), exchangeBars(t)), "");
+      banners(m, rec);
+      ALL.flRoute = () => exchangeBars(t);
+      if (!Array.isArray(t.top) || !t.top.length) { put("flCodes", stateBlock("quiet"), fill(NOTES.codes, { T: t.t })); return; }
+      const { cols, rows } = codeTable(t);
+      ALL.flCodes = () => table(cols, codeTable(t).rows, "codes");
+      put("flCodes", table(cols, rows, "codes"), fill(NOTES.codes, { T: t.t }));
+      fit("flCodes");
+      return;
     }
-    const codes = await nightly("venues", false);
-    stamp("flCodes", codes.body);
-    const cst = why(codes);
-    if (cst || pending(codes)) { put("flCodes", cst ? stateBlock(cst) : emptyBlock("The nightly trade codes have not landed."), ""); return; }
-    const pick = S.t ? codes.body.codes.find((q) => q.t === S.t) : codes.body.codes[0];
-    if (!pick) { put("flCodes", emptyBlock("No trade codes for this name in last night's read."), ""); return; }
-    const cols = [{ label: "Code" }, { label: LAB.contracts || "Contracts", cls: "num" }, { label: "Share", cls: "num" }];
-    const rows = pick.top.map((q) => h("tr", null, h("th", { scope: "row" }, q.code), h("td", { class: "num" }, F.num(q.contracts)), h("td", { class: "num" }, pct0(q.share))));
-    ALL.flCodes = () => table(cols, rows.map((r) => r.cloneNode(true)), "codes");
-    put("flCodes", table(cols, rows, "codes"), pick.t);
-    fit("flCodes");
+    put("flCodes", emptyBlock(STATES["choose-ticker-codes"]), "");
+    const rec = await nightly("venues", refresh);
+    stamp("flRoute", rec.body);
+    const st = why(rec);
+    const list = rec.body && Array.isArray(rec.body.tickers) ? rec.body.tickers : null;
+    if (st || !list) { put("flRoute", st ? blockOf(rec) : stateBlock(pending(rec) ? "loading" : "unshaped"), ""); return; }
+    const cols = [{ label: "Ticker" }, { label: LAB.contracts || "Contracts", cls: "num" }, { label: "Concentration", cls: "num" }];
+    const rows = list.slice().sort((a, b) => b.total - a.total).map((t) => h("tr", { "data-t": t.t }, h("th", { scope: "row" }, h("button", { type: "button", class: "fl-link", onclick: () => setTicker(t.t, true) }, t.t)), h("td", { class: "num" }, F.num(t.total)), h("td", { class: "num" }, t.hhi === null ? DASH : F.px(t.hhi, 2))));
+    ALL.flRoute = () => table(cols, rows.map((r) => r.cloneNode(true)), "tickers");
+    const m = put("flRoute", table(cols, rows, "tickers"), "");
+    banners(m, rec);
+    fit("flRoute");
   }
 
   function litTable(list) {
@@ -615,11 +782,13 @@
     const mk = DATA.litMarket = await get("/api/flows/flowlab/lit", refresh);
     stamp("flLitMarket", mk.body);
     const st = why(mk);
-    if (st) put("flLitMarket", stateBlock(st), "");
+    if (st) put("flLitMarket", blockOf(mk), "");
     else {
       const { cols, rows } = litTable(mk.body.x.list);
-      ALL.flLitMarket = () => litTable(mk.body.x.list).rows && table(cols, litTable(mk.body.x.list).rows, "prints");
-      put("flLitMarket", table(cols, rows, "prints"), "");
+      ALL.flLitMarket = () => table(cols, litTable(mk.body.x.list).rows, "prints");
+      const below = num(mk.body.x.below) || 0;
+      const m = put("flLitMarket", table(cols, rows, "prints"), spaced(h("span", null, fill(NOTES.litMarket, { n: F.num(mk.body.x.n) })), below ? h("span", null, fill(NOTES.litBelow, { n: F.num(below) })) : null));
+      banners(m, mk);
       fit("flLitMarket");
     }
     if (!S.t) { tickerNeeded("flLitTicker"); return; }
@@ -627,21 +796,25 @@
     DATA[key] = await get("/api/flows/flowlab/name?t=" + encodeURIComponent(S.t) + "&view=lit", refresh);
     stamp("flLitTicker", DATA[key].body);
     const st2 = why(DATA[key]);
-    if (st2) put("flLitTicker", stateBlock(st2), "");
+    if (st2) put("flLitTicker", blockOf(DATA[key]), "");
     else {
       const { cols, rows } = litTable(DATA[key].body.x.list);
       ALL.flLitTicker = () => table(cols, litTable(DATA[key].body.x.list).rows, "prints");
-      put("flLitTicker", table(cols, rows, "prints"), "");
+      const m = put("flLitTicker", table(cols, rows, "prints"), "");
+      banners(m, DATA[key]);
       fit("flLitTicker");
     }
   }
 
+  const groupState = (status) => (status === "ok" ? null : WHYS[status] || (STATES[status] ? status : "unshaped"));
+
   function tile(g, entry) {
     const b = h("button", { type: "button", class: "fl-tile", "data-g": g, onclick: () => openGroup(g) });
     b.append(h("span", { class: "fl-tile-n", title: titleCase(g) }, titleCase(g)));
-    if (!entry || entry.status !== "ok") {
-      b.append(chipEl(entry && MAP[entry.status] ? entry.status : "failed"));
-      b.setAttribute("aria-label", titleCase(g) + ", " + (entry ? entry.status : "not read"));
+    const st = entry ? groupState(entry.status) : "failed";
+    if (st) {
+      b.append(chipEl(st));
+      b.setAttribute("aria-label", titleCase(g) + ", " + (CHIPS[st] || st));
       return b;
     }
     const vals = entry.bars.map((q) => q.d);
@@ -654,23 +827,34 @@
       s("path", { d, class: "ln a", fill: "none" }, svg);
     }
     const net = entry.callC - entry.putC;
-    b.append(svg, h("span", { class: "ds-sg", "data-dir": net > 0 ? "up" : net < 0 ? "down" : "flat" }, h("i", { "aria-hidden": "true" }), money(net, true)));
-    b.setAttribute("aria-label", titleCase(g) + ", net call minus put premium " + money(net, true));
+    b.append(svg, h("span", { class: "fl-tile-v" }, money(net, true)));
+    b.setAttribute("aria-label", titleCase(g) + ", " + (LAB.netCallPut || "Net call minus put premium") + " " + money(net, true));
     return b;
   }
 
+  function groupLine(rec) {
+    const b = rec.body;
+    const text = b.source === "read" ? fill(NOTES.groupRead, { TRT: b.asOf ? F.time(b.asOf) : DASH }) : fill(NOTES.groupSession, { date: sessionOf(b) });
+    return h("p", { class: "fl-read" }, text + (b.expiry ? " " + (LAB.expiry || "Expiry") + " " + F.day(b.expiry) + "." : ""));
+  }
+
   async function loadGroups(refresh) {
+    if (!DATA[nightlyKey("groups")]) put("flGroups", h("p", { class: "fl-wait", role: "status" }, STATES["reading-groups"]), "");
     const rec = await nightly("groups", refresh);
     stamp("flGroups", rec.body);
     const st = why(rec);
-    if (st || pending(rec)) { put("flGroups", st ? stateBlock(st) : emptyBlock("The nightly group read has not landed."), ""); return; }
+    const groups = rec.body && rec.body.groups && typeof rec.body.groups === "object" ? rec.body.groups : null;
+    if (st || !groups) { put("flGroups", st ? blockOf(rec) : stateBlock(pending(rec) ? "loading" : "unshaped"), ""); return; }
     const grid = h("div", { class: "fl-tiles" });
-    for (const g of GROUP_NAMES) grid.append(tile(g, rec.body.groups[g]));
-    put("flGroups", grid, h("span", null, (LAB.netCallPut || "Net call minus put premium") + ". " + STATES["no-unit"]));
+    for (const g of GROUP_NAMES) grid.append(tile(g, groups[g]));
+    const wrap = h("div", { class: "fl-groups" }, groupLine(rec), grid);
+    const m = put("flGroups", wrap, spaced(h("span", null, NOTES.groupNet), h("span", null, NOT_SIDED), h("span", null, STATES["no-unit"])));
+    banners(m, rec);
     fit("flGroups");
     ALL.flGroups = () => table([{ label: "Group" }, { label: "Net", cls: "num" }, { label: "Status" }], GROUP_NAMES.map((g) => {
-      const e = rec.body.groups[g];
-      return h("tr", null, h("th", { scope: "row" }, titleCase(g)), h("td", { class: "num" }, e && e.status === "ok" ? money(e.callC - e.putC, true) : DASH), h("td", null, e ? e.status : DASH));
+      const e = groups[g];
+      const gst = e ? groupState(e.status) : "failed";
+      return h("tr", null, h("th", { scope: "row" }, titleCase(g)), h("td", { class: "num" }, !gst ? money(e.callC - e.putC, true) : DASH), h("td", null, gst ? CHIPS[gst] || gst : LAB.readOk || DASH));
     }), "groups");
   }
 
@@ -681,13 +865,13 @@
     $("flAllT").textContent = titleCase(g);
     $("flAllB").replaceChildren(h("p", { class: "fl-wait", role: "status" }, STATES.loading));
     if (dlg.showModal && !dlg.open) dlg.showModal();
-    if (!exp) { $("flAllB").replaceChildren(stateBlock("failed")); return; }
+    if (!exp) { $("flAllB").replaceChildren(why(rec) ? blockOf(rec) : stateBlock("unshaped")); return; }
     const live = await get("/api/flows/flowlab/group?g=" + encodeURIComponent(g) + "&exp=" + encodeURIComponent(exp), false);
     const st = why(live);
-    if (st) { $("flAllB").replaceChildren(stateBlock(st)); return; }
+    if (st) { $("flAllB").replaceChildren(blockOf(live)); return; }
     const x = live.body.x;
     const host = h("div", { class: "fl-plot fl-greek" });
-    $("flAllB").replaceChildren(host, h("p", { class: "fl-note" }, STATES["no-unit"], " ", fill(LAB.netCallPut || "", {}), ": ", money(x.net.callC - x.net.putC, true)));
+    $("flAllB").replaceChildren(host, h("p", { class: "fl-note" }, NOTES.groupNet + ": " + money(x.net.callC - x.net.putC, true) + ". " + NOT_SIDED + " " + STATES["no-unit"]));
     const draw = () => {
       const W = host.clientWidth || 520, H = 200;
       host.replaceChildren();
@@ -709,10 +893,10 @@
     const rec = await nightly("corr", refresh);
     stamp("flRel", rec.body);
     const st = why(rec);
-    if (st) { put("flRel", stateBlock(st), ""); return; }
+    if (st) { put("flRel", blockOf(rec), ""); return; }
     const b = rec.body;
-    if (pending(rec)) { put("flRel", emptyBlock("The nightly relations read has not landed."), ""); return; }
     if (b.status === "off") { put("flRel", stateBlock("off"), ""); return; }
+    if (pending(rec)) { put("flRel", emptyBlock("The nightly relations read has not landed."), ""); return; }
     if (b.status !== "ok") { put("flRel", stateBlock(({ empty: "quiet", plan: "plan", unshaped: "unshaped", off: "off", timeout: "timeout" })[b.status] || "failed"), ""); return; }
     const m = modEl("flRel");
     const host = h("div", { class: "fl-plot fl-heat" });

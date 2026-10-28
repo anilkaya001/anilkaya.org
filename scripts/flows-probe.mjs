@@ -947,6 +947,12 @@ export function exitCode(results) {
   return called.some((r) => r.cls === "ok" || r.cls === "empty") ? 0 : 1;
 }
 
+export function registryCap(op) {
+  let cap = 0;
+  for (const e of OPS) if (e.op === op && Number.isInteger(e.maxBytes) && e.maxBytes > cap) cap = e.maxBytes;
+  return cap || null;
+}
+
 export function strictVerdict(results, list) {
   const gated = (list && list.gated) || {};
   const proveRows = (list && list.proveRows) || [];
@@ -964,6 +970,8 @@ export function strictVerdict(results, list) {
       continue;
     }
     if (expected !== null) notes.push(`${r.id} answers ${r.status} where ${expected} was expected: the plan changed`);
+    const cap = registryCap(r.op);
+    if (cap !== null && Number.isFinite(r.bytes) && r.bytes > cap) notes.push(`OVERSIZE ${r.id}: ${r.bytes} bytes, over the ${cap} byte cap the registry reads it with`);
     if (r.cls === "empty" && proveRows.includes(r.op)) failures.push(`UNPROVEN ${r.id}: answered with no rows, so none of the fields the code reads was checked`);
     if (r.reads && r.reads.unseen.length) failures.push(`DRIFT ${r.id}: ${r.reads.unseen.join(" ")} did not arrive`);
   }
