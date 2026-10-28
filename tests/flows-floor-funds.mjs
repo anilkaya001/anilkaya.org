@@ -216,7 +216,7 @@ const asked = (cases) => {
   const nightly = nightlyFunds();
   const live = liveFunds();
   eq(live.key, "live:funds", "LIVE: the builder names its key");
-  ok(LIVE_KEYS["live:funds"] && LIVE_KEYS["live:funds"].writer === "actions" && LIVE_KEYS["live:funds"].maxBytes === 16 * 1024, "the key is registered for the Actions writer under 16 KiB");
+  ok(LIVE_KEYS["live:funds"] && LIVE_KEYS["live:funds"].writer === "worker" && LIVE_KEYS["live:funds"].klass === "market" && LIVE_KEYS["live:funds"].maxBytes === 16 * 1024, "the key is registered for the Worker's funds tick, on the market clock, under 16 KiB");
   let compared = 0;
   for (const [t, r] of Object.entries(nightly.rows)) if (r.src === "screener") { same(live.rows[t], r, `LIVE: ${t} has the nightly's figures`); compared++; }
   ok(compared >= 60, `LIVE: ${compared} funds compared`);
@@ -268,11 +268,11 @@ const asked = (cases) => {
     same(emitRead(off, "market").funds, { v: 1, status: "off" }, "SWITCH OFF: market.funds is the off block");
     const hash = (d, file) => createHash("sha256").update(fs.readFileSync(path.join(d, file))).digest("hex");
     const files = emitFiles(dir);
-    ok(files.includes("-live-funds.json") && !emitFiles(off).includes("-live-funds.json"), "and live:funds is not written");
-    same(emitFiles(off), files.filter((x) => x !== "-live-funds.json"), "every other file is written");
+    ok(!files.includes("-live-funds.json") && !emitFiles(off).includes("-live-funds.json"), "live:funds is the Worker's funds tick's key, so the dry live pass writes it under neither setting");
+    same(emitFiles(off), files, "every other file is written");
     const moved = emitFiles(off).filter((x) => hash(dir, x) !== hash(off, x));
     same(moved.filter((x) => !x.startsWith("-live-") && x !== "-market.json" && x !== "-meta.json"), [], "no nightly payload but the market moved by a single byte");
-    same(moved.filter((x) => x.startsWith("-live-")), ["-live-alerts.json", "-live-alerts:head.json", "-live-heartbeat.json", "-live-news.json"], "and only the live keys read after the extra screener call moved, each by the virtual clock's 250 ms step");
+    same(moved.filter((x) => x.startsWith("-live-")), [], "and no live key moved: the pass makes no fund read under either setting");
     const a = { ...emitRead(dir, "market") }, b = { ...emitRead(off, "market") };
     delete a.funds; delete b.funds;
     same(a, b, "and the market payload is otherwise the same");
@@ -320,7 +320,7 @@ const asked = (cases) => {
 }
 
 {
-  const tree = ["shared/flows-floor-funds.js", "scripts/flows-legs/funds.mjs", "shared/flows-live.js", "scripts/flows-legs/live.mjs"];
+  const tree = ["shared/flows-floor-funds.js", "shared/flows-floor-funds-live.js", "scripts/flows-legs/funds.mjs", "shared/flows-live.js", "scripts/flows-legs/live.mjs"];
   const reads = tree.filter((f) => /\/api\/(etfs|stock-directory|screener|stock\/)/.test(fs.readFileSync(path.join(ROOT, f), "utf8")));
   same(reads, [], "NO CALL SITE SPELLS A FUND PATH: the registry is the only place");
   const worker = fs.readFileSync(path.join(ROOT, "server/routes/flows-pages.js"), "utf8");

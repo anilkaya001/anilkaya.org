@@ -64,6 +64,8 @@ import { nightlyFreshMeta, STRIP_FIELDS, stripValues, LIVE_BUDGET } from "./shar
 import { readExpiryBreakdown } from "./shared/flows-positioning.js";
 import { serveRt, railReadiness } from "./shared/flows-rt-routes.js";
 import { RT_LIMITS, rtSwitches, rtIsOwner } from "./shared/flows-rt.js";
+import { floorFundsMode } from "./shared/flows-floor-funds.js";
+import { FUNDS_FILL } from "./shared/flows-floor-funds-live.js";
 import { memberAllowed, memberId } from "./shared/flows-access.js";
 import { partState } from "./shared/flows-vendor-extras.js";
 import { vendorBase, vendorRedirected, vendorUrl, vendorMeter, newerMeter } from "./shared/flows-vendor-core.js";
@@ -88,6 +90,7 @@ function createState() {
     scChains: new Map(),
     scFlights: new Map(),
     scRefreshes: new Map(),
+    fundsFill: null,
   };
 }
 const state = createState();
@@ -1254,6 +1257,42 @@ function chargedFetch(env, gate) {
     if (!(await gate.call())) throw new VendorRefused();
     return uwFetch(env, path, params, opts);
   };
+}
+
+const FUNDS_FILL_MARK = internalKey("funds", "fill");
+
+function fundsFiller(env, ctx, session) {
+  const mode = floorFundsMode(env);
+  if (mode === "off" || (mode === "owner" && !rtIsOwner(rtSwitches(env), session && session.username))) return null;
+  return (clock, marketRow) => fundsFill(env, ctx, session, clock, marketRow);
+}
+
+async function fundsFill(env, ctx, session, clock, marketRow) {
+  const held = await edgeCache.get(FUNDS_FILL_MARK);
+  if (held) {
+    const kept = await held.json().catch(() => null);
+    if (kept && kept.row && typeof kept.row.payload === "string") return { written: false, why: "kept", calls: 0, row: kept.row };
+    if (kept && typeof kept.why === "string") return { written: false, why: "recent:" + kept.why, calls: 0 };
+  }
+  if (!state.fundsFill) {
+    const gate = vendorGate(env, session);
+    state.fundsFill = (async () => {
+      if (!(await gate.member())) return { written: false, why: "throttled", calls: 0 };
+      const charged = chargedFetch(env, gate);
+      const out = await FLOWS_LIVE.fillFunds(env, Date.now(), {
+        clock, marketRow, isRefusal: (error) => error instanceof VendorRefused,
+        fetchVendor: (p, params) => charged(p, params, { deadlineMs: LIVE_BUDGET.tier1TimeoutMs }),
+      });
+      if (!out.written && out.why !== "throttled" && out.why !== "no-key") {
+        const body = JSON.stringify(out.row && !out.written ? { why: out.why, row: out.row } : { why: out.why });
+        const mark = edgeCache.put(FUNDS_FILL_MARK, new Response(body, { headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": `max-age=${FUNDS_FILL.markerS}` } }));
+        if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(mark);
+        else await mark;
+      }
+      return out;
+    })().finally(() => { state.fundsFill = null; });
+  }
+  return state.fundsFill;
 }
 
 const FALLBACK_FAILED = Object.freeze({
@@ -3729,7 +3768,7 @@ async function route(request, env, url, ctx) {
 
     if (path === "/api/flows/lk") {
       await ensureFlowsTables(env);
-      return FLOWS_LIVE.serveLiveKey(env, url, Date.now(), { json, HttpError });
+      return FLOWS_LIVE.serveLiveKey(env, url, Date.now(), { json, HttpError, fill: fundsFiller(env, ctx, session) });
     }
 
     if (path === "/api/flows/now") {
@@ -3838,6 +3877,10 @@ export default {
     }
     if (job === "summary") {
       guard("flows summary refresh failed", summaryFiring(env, at));
+      return;
+    }
+    if (job === "funds") {
+      guard("flows funds tick failed", FLOWS_LIVE.fundsTick(env, at, tickVendor(env)));
       return;
     }
 

@@ -413,7 +413,7 @@
       try {
         const keep = /view=([a-z]+)/.exec(location.hash);
         if (keep && keep[1] !== "floor") return;
-        history.replaceState(null, "", "#view=floor" + (basis === "session" ? "&basis=session" : ""));
+        history.replaceState(null, "", "#view=floor&basis=" + basis);
       } catch (error) { void error; }
     };
     const paintBasis = () => {
@@ -442,7 +442,8 @@
       if (!M.fundsOn) return "";
       if (M.basis === "flagged") return "Flagged windows";
       if (!M.funds) return "";
-      return M.funds.previous ? "Previous session" + MID + M.funds.session : "Whole session" + (M.funds.readAt && F.when(M.funds.readAt, Date.now()) ? MID + "read " + F.when(M.funds.readAt, Date.now()) : "");
+      const read = M.funds.readAt && F.when(M.funds.readAt, Date.now()) ? MID + "read " + F.when(M.funds.readAt, Date.now()) : "";
+      return M.funds.previous ? "Previous session" + MID + M.funds.session + read : "Whole session" + read;
     };
     const srcText = (x) => x.src.map((k) => SRC_WORD[k] || k).join(" and ");
     const metaText = (t) => {
@@ -976,7 +977,7 @@
       if (auto && !picked) basis = "flagged";
       auto = false;
       M = build();
-      if (M.fundsOn && !picked && M.basis === "flagged" && M.count === 0 && M.funds) { basis = "session"; auto = true; M = build(); }
+      if (M.fundsOn && !picked && M.basis === "flagged" && M.funds) { basis = "session"; auto = true; M = build(); }
       sel = null;
       hover = null;
       paintBasis();

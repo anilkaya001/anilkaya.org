@@ -15,6 +15,8 @@ import { readLabActiveAt } from "./lab-sign-in.js";
 import { emitFailure } from "./flows-log.js";
 import { newsFields } from "./flows-news.js";
 import { FIXTURE_REFUSALS, fixtureHost, fixtureRefusal } from "./flows-fixture-names.js";
+import { nightlyFundsOn } from "./flows-floor-funds.js";
+import { FUNDS_KEY, FUNDS_READ, FUNDS_WRITERS, fundsReadParams, marketSectors, needsSectorRead, sectorEtfsOf, shapeFunds } from "./flows-floor-funds-live.js";
 import {
   LEDGER_SCHEMA_SQL, LEDGER_ROWS_SQL, tickWindow, ledgerTickStatement, ledgerOutcomeStatement, ledgerFocusStatement,
   ledgerPassStatement, ledgerNightlyStatement, ledgerView, ledgerPruneCutoff, worstStale,
@@ -58,12 +60,14 @@ export const RTH_CRON = "1-59/5 13-21 * * MON-FRI";
 export const FOCUS_CRON = "3-58/5 13-21 * * MON-FRI";
 export const HOUSEKEEPING_CRON = "*/30 * * * *";
 export const SUMMARY_CRON = "15,45 * * * *";
+export const FUNDS_CRON = "2-57/5 13-21 * * MON-FRI";
 
 export function cronJob(cron, at) {
   if (cron === RTH_CRON) return "rth";
   if (cron === FOCUS_CRON) return "focus";
   if (cron === HOUSEKEEPING_CRON) return "housekeeping";
   if (cron === SUMMARY_CRON) return "summary";
+  if (cron === FUNDS_CRON) return "funds";
   const d = new Date(Number.isFinite(at) ? at : Date.now());
   const weekday = d.getUTCDay() >= 1 && d.getUTCDay() <= 5;
   const hour = d.getUTCHours();
@@ -71,7 +75,7 @@ export function cronJob(cron, at) {
   if (minute % 30 === 0) return "housekeeping";
   if (minute % 30 === 15) return "summary";
   if (!(weekday && hour >= 13 && hour <= 21)) return "housekeeping";
-  return minute % 5 === 3 ? "focus" : "rth";
+  return minute % 5 === 3 ? "focus" : minute % 5 === 2 ? "funds" : "rth";
 }
 
 export const NIGHTLY_READ_KEYS = Object.freeze(["board:long", "board:short", "board:watch", "meta", "focus"]);
@@ -275,6 +279,25 @@ export async function tier1Reads(fetchVendor, { timeoutMs = LIVE_BUDGET.tier1Tim
   const raws = {};
   TIER1_CALLS.forEach((c, i) => { raws[c.feed] = results[i]; });
   return raws;
+}
+
+export function fundsStatement(db, raws, { at, session, writer, log = console }) {
+  const payload = shapeFunds(raws.funds, { at, session, writer, sectorEtfs: raws.sectorEtfs });
+  const text = JSON.stringify(payload);
+  const spec = LIVE_KEYS[FUNDS_KEY];
+  const report = { status: payload.status, read: payload.counts.read, listed: payload.counts.listed, bytes: text.length };
+  if (payload.status === "unavailable") {
+    return { statement: null, report: { ...report, written: false, why: "no-fund-read",
+      failed: raws.funds && raws.funds.__failed ? String(raws.funds.__failed).slice(0, 120) : null } };
+  }
+  if (text.length > spec.maxBytes) {
+    emitFailure(log, "error", "live:funds over its byte cap", { bytes: text.length, cap: spec.maxBytes });
+    return { statement: null, report: { ...report, written: false, why: "over-cap" } };
+  }
+  return {
+    statement: writeLiveStatement(db, FUNDS_KEY, text, { readAt: at, session, cadenceS: spec.cadenceS, source: "worker", writer }, at),
+    report: { ...report, written: true }, text,
+  };
 }
 
 const LIVE_KEY_IDS = new Set(Object.keys(LIVE_KEYS));
@@ -932,15 +955,98 @@ export function liveEnvelope(params, rows, now, clock) {
     "X-Payload-Updated": String(updated) } };
 }
 
-export async function serveLiveKey(env, url, now, { json, HttpError }) {
+export const NIGHTLY_FUNDS_SQL = "SELECT CASE WHEN json_valid(payload) THEN json_extract(payload, '$.funds.status') END AS status, " +
+  "CASE WHEN json_valid(payload) THEN json_extract(payload, '$.funds.session') END AS session FROM flows_payload WHERE id = 'market'";
+
+export function nightlyFundsUsable(row) {
+  return !!row && (row.status === "ok" || row.status === "partial") && typeof row.session === "string" && /^\d{4}-\d{2}-\d{2}$/.test(row.session);
+}
+
+export function fillSession(at, clock = null) {
+  const p = phaseAt(at, clock);
+  if (!p) return null;
+  const live = p.trading && (p.phase === "rth" || p.phase === "post");
+  const session = live ? p.session : p.lastClosed;
+  return typeof session === "string" && session ? { session, date: live ? null : session } : null;
+}
+
+export const FUNDS_MARKET_SQL = "SELECT session, CASE WHEN json_valid(payload) THEN json_extract(payload, '$.sectors') END AS sectors " +
+  "FROM flows_live WHERE id = 'live:market'";
+
+async function fundsRead(env, at, { fetchVendor, session, date, marketRow, writer, sectorCall, isRefusal = () => false, log = console }) {
+  let calls = 0;
+  const call = (path, params) => {
+    calls++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => resolve({ __failed: "timeout after " + LIVE_BUDGET.tier1TimeoutMs + " ms" }), LIVE_BUDGET.tier1TimeoutMs);
+      Promise.resolve().then(() => fetchVendor(path, params)).then((v) => { clearTimeout(timer); resolve(v); }, (e) => {
+        clearTimeout(timer);
+        if (isRefusal(e)) reject(e);
+        else resolve({ __failed: e && e.message ? String(e.message) : String(e) });
+      });
+    });
+  };
+  const raws = { funds: null, sectorEtfs: marketSectors(marketRow, session) };
+  try {
+    raws.funds = await call(FUNDS_READ.path, fundsReadParams(date));
+    if (sectorCall && needsSectorRead(raws.funds, session, raws.sectorEtfs)) raws.sectorEtfs = sectorEtfsOf(await call(FUNDS_READ.sectorPath, {})) || raws.sectorEtfs;
+  } catch (error) {
+    if (isRefusal(error)) return { written: false, why: "throttled", calls };
+    throw error;
+  }
+  const f = fundsStatement(env.DB, raws, { at, session, writer, log });
+  if (!f.statement) return { written: false, why: f.report.why, calls, report: f.report };
+  const row = { payload: f.text, readAt: at, session, cadenceS: LIVE_KEYS[FUNDS_KEY].cadenceS, source: "worker", writer, updatedAt: at };
+  try {
+    await f.statement.run();
+  } catch (error) {
+    emitFailure(log, "error", "live:funds not stored", { calls, writer }, error);
+    return { written: false, why: "store", calls, row, report: f.report };
+  }
+  return { written: true, why: "written", calls, row, report: f.report };
+}
+
+export async function fundsTick(env, at, { fetchVendor, log = console } = {}) {
+  if (!env || !env.DB) return { skipped: "no-db" };
+  if (liveMode(env) === "off") return { skipped: "off" };
+  if (!nightlyFundsOn(env)) return { skipped: "funds-off" };
+  const read = await env.DB.batch([env.DB.prepare(CLOCK_ROW_SQL), env.DB.prepare(FUNDS_MARKET_SQL)]).catch(() => null);
+  const firstRow = (r) => (r && r.results && r.results[0] ? r.results[0] : null);
+  const clock = read ? normalizeClock(firstRow(read[0])) : memoizedClock(at);
+  if (!focusDue(at, clock)) return { due: false, why: "not-due" };
+  if (!env.UW_API_KEY || typeof fetchVendor !== "function") return { due: true, written: false, why: "no-key" };
+  const out = await fundsRead(env, at, { fetchVendor, session: easternDay(at), date: null, marketRow: read ? firstRow(read[1]) : null,
+    writer: FUNDS_WRITERS.tick, sectorCall: false, log });
+  if (!out.written) emitFailure(log, "error", "live:funds not written", { why: out.why, calls: out.calls, ...(out.report || {}) });
+  return { due: true, written: out.written, why: out.why, calls: out.calls, report: out.report || null };
+}
+
+export async function fillFunds(env, at, { fetchVendor, clock = null, marketRow = null, isRefusal = () => false, log = console } = {}) {
+  if (!env || !env.DB) return { written: false, why: "no-db", calls: 0 };
+  if (!env.UW_API_KEY || typeof fetchVendor !== "function") return { written: false, why: "no-key", calls: 0 };
+  const plan = fillSession(at, clock);
+  if (!plan) return { written: false, why: "no-session", calls: 0 };
+  return fundsRead(env, at, { fetchVendor, session: plan.session, date: plan.date, marketRow, writer: FUNDS_WRITERS.fill, sectorCall: true, isRefusal, log });
+}
+
+export async function serveLiveKey(env, url, now, { json, HttpError, fill = null }) {
   const params = liveParams(url.searchParams.get("k"));
   if (!params.length) throw new HttpError(400, "invalid_key", "Unknown live key");
   if (params.length === 1) {
     const key = liveKeyFromParam(params[0]);
-    const { results, clock } = await batchWithClock(env.DB, [env.DB.prepare(LIVE_ROW_SQL).bind(key)], now);
+    const fillable = key === FUNDS_KEY && typeof fill === "function";
+    const reads = [env.DB.prepare(LIVE_ROW_SQL).bind(key)];
+    if (fillable) reads.push(env.DB.prepare(NIGHTLY_FUNDS_SQL), env.DB.prepare(FUNDS_MARKET_SQL));
+    const { results, clock } = await batchWithClock(env.DB, reads, now);
     const raw = results ? firstOf(results[0]) : null;
     const row = raw && raw.payload ? liveRow(raw) : null;
     if (!row) {
+      if (fillable && results && !nightlyFundsUsable(firstOf(results[1]))) {
+        const got = await Promise.resolve().then(() => fill(clock, firstOf(results[2]))).catch(() => null);
+        const why = got && typeof got.why === "string" ? got.why : "failed";
+        if (got && got.row) return liveResponse(got.row, now, clock, { "X-Funds-Fill": why });
+        return json({ key, status: "pending", why }, 200, { ...pendingHeaders(LIVE_KEYS[key].klass, now, clock), "X-Funds-Fill": why });
+      }
       return json({ key, status: "pending" }, 200, pendingHeaders(LIVE_KEYS[key].klass, now, clock));
     }
     return liveResponse(row, now, clock);
