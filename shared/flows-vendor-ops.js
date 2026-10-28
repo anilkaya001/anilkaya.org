@@ -156,6 +156,7 @@ export function opsFor(limiter) {
 export const BUDGETS = Object.freeze({
   nightly: Object.freeze({ window: "17:30-17:50 ET", minDelayMs: 60, perMinute: null }),
   tier1: Object.freeze({ window: "13:00-21:00 UTC, Monday to Friday", callsPerTick: 2, focusCallsPerTick: 1, tickMinutes: 5 }),
+  funds: Object.freeze({ window: "13:00-21:00 UTC, Monday to Friday", callsPerTick: 1, tickMinutes: 5, fillMaxCalls: 2, fillMarkerS: 60 }),
   tier2: Object.freeze({ window: "09:30-16:25 ET", paceMs: 333, perMinute: 180, maxCallsPerPass: 48 }),
   rail: Object.freeze({ window: "04:00-20:00 ET, trading days, while demanded", perMinute: 240 }),
   voldesk: Object.freeze({ window: "17:30-17:50 ET", marketCalls: 17, perName: 8, names: 40, maxCalls: 337 }),

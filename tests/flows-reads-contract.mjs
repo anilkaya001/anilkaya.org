@@ -810,16 +810,17 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   const getOwner = await client(f.D1, { FLOWS_RT_USERS: FIXTURE_ROSTER[0], FLOWS_OPS: "on", FLOWS_READY: "on", FLOWS_VOLDESK: "on", FLOWS_RT_MODE: "off" });
   const getBook = await client(f.D1, { FLOWS_RT_USERS: FIXTURE_ROSTER[0], FLOWS_LEDGER_LIVE: "owner" });
   const getLab = await client(f.D1, { FLOWS_FLOWLAB: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
-  const cost = async (path, { init, vendor = false, owner = false, coverage = false, book = false, lab = false } = {}) => {
+  const getFunds = await client(f.D1, { FLOWS_FLOOR_FUNDS: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
+  const cost = async (path, { init, vendor = false, owner = false, coverage = false, book = false, lab = false, funds = false } = {}) => {
     const n = f.trips.length;
-    const r = await (lab ? getLab : book ? getBook : coverage ? getCoverage : owner ? getOwner : vendor ? getVendor : get)(path, init);
+    const r = await (funds ? getFunds : lab ? getLab : book ? getBook : coverage ? getCoverage : owner ? getOwner : vendor ? getVendor : get)(path, init);
     return { rows: f.rowsRead(n), trips: f.trips.length - n, status: r.res.status };
   };
   const CEILING = [
     ["/api/flows/board?side=long", 1], ["/api/flows/board?side=watch", 1], ["/api/flows/market", 1], ["/api/flows/flowalerts", 3],
     ["/api/flows/events", 1], ["/api/flows/scoretrack", 1], ["/api/flows/sector-premium", 1], ["/api/flows/news", 2],
     ["/api/flows/pulse", 3], ["/api/flows/regime", 1], ["/api/flows/focus", 1], [HOME_LIVE, 6],
-    ["/api/flows/now?n=board:long,board:short,meta,focus", 4], ["/api/flows/lk?k=market", 1],
+    ["/api/flows/now?n=board:long,board:short,meta,focus", 4], ["/api/flows/lk?k=market", 1], ["/api/flows/lk?k=funds", 3, { funds: true }],
     ["/api/flows/card?t=NVDA", 2], ["/api/flows/hist?t=IDX", 3], ["/api/flows/summary?t=NVDA", 20], ["/api/flows/summary?t=LITE", names.length + 70], ["/api/flows/summary?t=ZZZZ", names.length + 70],
     ["/api/flows/meta", 1], ["/api/flows/universe", 1], ["/api/flows/universe?cols=t,sec,chg,iv30p,ed", 1], ["/api/flows/roster", 1], ["/api/flows/ideas", 3], ["/api/flows/movers", 1],
     ["/api/flows/sectors", 1], ["/api/flows/political", 1], ["/api/flows/unusual", 1], ["/api/flows/record", 1], ["/api/flows/calib", 1], ["/api/flows/dispersion", 1],

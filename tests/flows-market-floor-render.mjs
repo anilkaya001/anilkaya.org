@@ -683,8 +683,17 @@ try {
     {
       const { context, page } = await open({ funds: { market: full, live: null, now: NOW } });
       let f = await page.evaluate(INSPECT_F);
-      eq(f.basis, "flagged", "BASIS: the default is the flagged windows");
-      eq(f.hash, "", "with no basis in the address");
+      eq(f.basis, "session", "BASIS: WITH A USABLE FUNDS BLOCK AND NO CHOICE MADE, THE FLOOR OPENS ON THE WHOLE SESSION");
+      eq(f.hash, "", "with nothing written to the address, since the reader chose nothing");
+      eq(f.sub, "Whole session · read 23:41 TRT", "and the subtitle names the basis and its TRT read time");
+      eq(verifyF(f, full, "premium"), [], "every fund pillar stands on the session scale");
+      const heldRow = [...L.FLOOR_FUNDS.funds, ...L.FLOOR_FUNDS.etf].filter((t) => full.rows[t] && Number.isInteger(full.rows[t].cp));
+      ok(heldRow.length === 15 && heldRow.every((t) => { const tile = f.tiles.find((x) => x.label === t); return tile && tile.v !== null && tile.v > 0; }),
+        "NO FUND TILE IS EMPTY WHILE THE BLOCK HOLDS ITS ROW: every index fund and sector ETF draws a pillar");
+      ok(!f.tiles.some((t) => t.group === "stocks"), "the stock row is not drawn in the session basis");
+      await pickBasis(page, "Flagged");
+      f = await page.evaluate(INSPECT_F);
+      eq(f.hash, "#view=floor&basis=flagged", "THE FLAGGED BASIS IS ONE CLICK AWAY, and the choice is written to the address");
       eq(f.sub.replace(/\d{4}-\d{2}-\d{2}/, "D"), "Flagged windows · D", "and the subtitle names the basis and the session");
       ok(f.tiles.some((t) => t.group === "stocks") && f.tiles.length > 21, "the flagged basis keeps the stock row and draws every class");
       const unflagged = f.tiles.filter((t) => t.group !== "stocks" && t.n === 0);
@@ -693,27 +702,30 @@ try {
       const x = unflagged[0], xe = sessExpected(full).byId.get(x.id);
       ok(f.hits.find((h2) => h2.id === x.id).label.includes("Session " + (await page.evaluate((v) => window.FlowsUI.F.money(v), xe.prem))), "and the pillar's sentence carries that figure beside its flagged state");
       ok(f.scene.tiles.filter((s) => !unflagged.some((t) => t.id === s.id) && s.v !== null).length > 0, "tiles with windows keep their flagged heights");
-      await page.locator("#mkFloorCard .ui-seg-i", { hasText: "Session" }).focus();
-      await page.keyboard.press("Enter");
+      await page.locator("#mkFloorCard .ui-seg-i", { hasText: "Flagged" }).focus();
+      await page.keyboard.press("ArrowRight");
       await page.waitForFunction(() => window.FlowsUI.floor.of(document.getElementById("mkFloor")).basis() === "session", null, { timeout: 8000 });
       await page.waitForTimeout(350);
       f = await page.evaluate(INSPECT_F);
-      eq(f.hash, "#view=floor&basis=session", "BASIS BY KEYBOARD: Enter on Session writes the address");
+      eq(f.hash, "#view=floor&basis=session", "BASIS BY ARROW KEY: ArrowRight on Flagged picks Session and writes the address");
       eq(verifyF(f, full, "premium"), [], "and draws the session scale");
       await page.locator("#mkFloorCard .ui-seg-i", { hasText: "Session" }).focus();
       await page.keyboard.press("ArrowLeft");
       await page.waitForFunction(() => window.FlowsUI.floor.of(document.getElementById("mkFloor")).basis() === "flagged", null, { timeout: 8000 });
       await page.waitForTimeout(350);
       f = await page.evaluate(INSPECT_F);
-      eq(f.hash, "#view=floor", "BASIS BY ARROW KEY: ArrowLeft returns to the flagged windows and clears the address");
-      await pickBasis(page, "Session");
-      f = await page.evaluate(INSPECT_F);
-      eq(f.hash, "#view=floor&basis=session", "BASIS BY CLICK: Session writes the address");
+      eq(f.hash, "#view=floor&basis=flagged", "BASIS BY ARROW KEY: ArrowLeft returns to the flagged windows and says so in the address");
       await page.reload();
       await page.waitForFunction(() => { const h2 = document.getElementById("mkFloor"); return h2 && window.FlowsUI.floor && window.FlowsUI.floor.of(h2) && window.FlowsUI.floor.of(h2).scene() !== null; }, null, { timeout: 15000 });
       await page.waitForTimeout(400);
       f = await page.evaluate(INSPECT_F);
-      eq([f.basis, f.hash], ["session", "#view=floor&basis=session"], "THE ADDRESS ROUND TRIP: a reload opens on the session basis");
+      eq([f.basis, f.hash], ["flagged", "#view=floor&basis=flagged"], "THE ADDRESS ROUND TRIP: a reload keeps the reader's flagged choice over the session default");
+      await pickBasis(page, "Session");
+      await page.reload();
+      await page.waitForFunction(() => { const h2 = document.getElementById("mkFloor"); return h2 && window.FlowsUI.floor && window.FlowsUI.floor.of(h2) && window.FlowsUI.floor.of(h2).scene() !== null; }, null, { timeout: 15000 });
+      await page.waitForTimeout(400);
+      f = await page.evaluate(INSPECT_F);
+      eq([f.basis, f.hash], ["session", "#view=floor&basis=session"], "and a reload opens on a session the reader picked");
       await context.close();
     }
 
@@ -749,9 +761,13 @@ try {
       const prevBlock = nightlyFunds({ session: "2026-09-28", readAt: "2026-09-28T20:41:00.000Z" });
       const { context, page } = await open({ funds: { market: prevBlock, live: null, now: NOW }, hash: "#view=floor&basis=session" });
       const f = await page.evaluate(INSPECT_F);
-      eq(f.sub, "Previous session · 2026-09-28", "PREVIOUS SESSION: the subtitle says so and gives the date");
+      eq(f.sub, "Previous session · 2026-09-28 · read 2026-09-28 23:41 TRT", "PREVIOUS SESSION: the subtitle says so and gives the session date and its TRT read time");
       ok(f.funds && f.funds.previous === true && /not today's/.test(f.note), "the caption says the figures are not today's");
-      ok(f.hits.every((x) => x.label.includes("Previous session · 2026-09-28")), "and every pillar carries the label");
+      ok(f.hits.every((x) => x.label.includes("Previous session · 2026-09-28 · read 2026-09-28 23:41 TRT")), "and every pillar carries the label with its date and read time");
+      const noHash = await open({ funds: { market: prevBlock, live: null, now: NOW } });
+      const g0 = await noHash.page.evaluate(INSPECT_F);
+      ok(g0.basis === "session" && /^Previous session · 2026-09-28 · read /.test(g0.sub), "and with no choice made the floor opens on that previous session, labelled, rather than on empty tiles");
+      await noHash.context.close();
       await context.close();
       const live = liveFunds({ session: "2026-09-29", at: Date.parse("2026-09-29T20:30:00.000Z") });
       const r = await open({ funds: { market: prevBlock, live, now: NOW }, hash: "#view=floor&basis=session" });
@@ -794,7 +810,8 @@ try {
       ["fund-dropped-page: one fund missing from the page's table", 'Bonds: ["TLT", "IEF",', 'Bonds: ["TLT",', {}, "premium"],
       ["stale-as-today: an earlier session printed without its label", "previous: Boolean(session) }", "previous: false }", { block: nightlyFunds({ session: "2026-09-28", readAt: "2026-09-28T20:41:00.000Z" }) }, "premium"],
       ["stocks-in-session: the stock row drawn in the session basis", 'const groups = GROUPS.filter((g) => basis !== "session" || g.id !== "stocks")', "const groups = GROUPS.filter(() => true)", {}, "premium"],
-      ["eastern-stamp: the subtitle in Eastern time", '"Whole session" + (M.funds.readAt && F.when(M.funds.readAt, Date.now()) ? MID + "read " + F.when(M.funds.readAt, Date.now()) : "")', '"Whole session" + MID + "read " + new Date(M.funds.readAt).toLocaleTimeString("en-GB", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit" }) + " ET"', {}, "premium"],
+      ["eastern-stamp: the subtitle in Eastern time", 'const read = M.funds.readAt && F.when(M.funds.readAt, Date.now()) ? MID + "read " + F.when(M.funds.readAt, Date.now()) : "";', 'const read = MID + "read " + new Date(M.funds.readAt).toLocaleTimeString("en-GB", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit" }) + " ET";', {}, "premium"],
+      ["previous-undated: a previous session drawn without its date and read time", 'return M.funds.previous ? "Previous session" + MID + M.funds.session + read : "Whole session" + read;', 'return M.funds.previous ? "Previous session" : "Whole session" + read;', { block: nightlyFunds({ session: "2026-09-28", readAt: "2026-09-28T20:41:00.000Z" }) }, "premium"],
     ];
     for (const [name, from, to, extra, measureKey] of FUNDS_MUTANTS) {
       ok(SRC.includes(from), `mutant "${name}" anchors on the served module`);
@@ -805,7 +822,7 @@ try {
         context = r.context;
         const f = await r.page.evaluate(INSPECT_F);
         why = verifyF(f, block, measureKey)[0] || null;
-        if (!why && block.session !== SESSION) why = /^Previous session · /.test(f.sub || "") ? null : "the previous session is printed as today's";
+        if (!why && block.session !== SESSION) why = /^Previous session · \d{4}-\d{2}-\d{2} · read \d{4}-\d{2}-\d{2} \d{2}:\d{2} TRT$/.test(f.sub || "") ? null : "the previous session is not printed with its date and TRT read time: " + f.sub;
         if (!why && block.session === SESSION && !/^Whole session · read 23:41 TRT$/.test(f.sub || "")) why = "the subtitle is not in TRT: " + f.sub;
         if (!why) {
           const grabbed = await r.page.evaluate(() => ({ bonds: window.FlowsUI.floor.of(document.getElementById("mkFloor")).model().tiles.find((t) => t.id === "other:Bonds").sess.of }));
@@ -817,6 +834,21 @@ try {
       if (context) await context.close();
     }
     ok(true, "funds block planted builds done");
+    {
+      const from = 'if (M.fundsOn && !picked && M.basis === "flagged" && M.funds) { basis = "session"; auto = true; M = build(); }';
+      ok(SRC.includes(from), 'mutant "flagged-default" anchors on the served module');
+      let why = null, context = null;
+      try {
+        const r = await open({ patch: { [JS]: [[from, 'if (M.fundsOn && !picked && M.basis === "flagged" && M.count === 0 && M.funds) { basis = "session"; auto = true; M = build(); }']] }, funds: { market: full, live: null, now: NOW } });
+        context = r.context;
+        const f = await r.page.evaluate(INSPECT_F);
+        const empty = [...L.FLOOR_FUNDS.funds, ...L.FLOOR_FUNDS.etf].filter((t) => { const tile = f.tiles.find((x) => x.label === t); return !tile || tile.v === null || !(tile.v > 0); });
+        why = f.basis !== "session" ? "the floor opened on the flagged windows" + (empty.length ? ", leaving " + empty.join(", ") + " empty while the block holds their rows" : "") : null;
+      } catch (e) { why = "threw: " + String(e.message).split("\n")[0]; }
+      console.log("  planted flagged-default: " + (why || "NOT CAUGHT").slice(0, 160));
+      ok(why !== null, 'THE PLANTED WRONG BUILD "flagged-default: a fund tile empty while the block holds its row" FAILS');
+      if (context) await context.close();
+    }
   }
 } finally {
   await browser.close();

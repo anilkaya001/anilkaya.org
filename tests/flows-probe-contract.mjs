@@ -14,6 +14,7 @@ import { SOURCES } from "../shared/flows-dossier-worker.js";
 import { VENDOR_BASE_DEFAULT } from "../shared/flows-vendor-core.js";
 import { LIVE_BUDGET } from "../shared/flows-live.js";
 import { PREMARKET_NEWS } from "../shared/flows-live-worker.js";
+import { FUNDS_FILL } from "../shared/flows-floor-funds-live.js";
 import { RT_LIMITS } from "../shared/flows-rt.js";
 import { RATE as NIGHTLY_RATE, CALL_COST } from "../scripts/flows-nightly/vendor-params.mjs";
 import * as VD from "../shared/flows-voldesk.js";
@@ -244,6 +245,9 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
   eq(BUDGETS.ondemand.periodS, Number(limiterBlock[2]), "and its period");
   eq(BUDGETS.nightly.minDelayMs, NIGHTLY_RATE.minDelayMs, "BUDGETS: the nightly's floor delay is the pipeline's");
   eq(BUDGETS.tier1.callsPerTick, LIVE_BUDGET.tier1Calls, "BUDGETS: Tier 1's calls a tick are the live registry's");
+  eq(BUDGETS.funds.callsPerTick, LIVE_BUDGET.fundsCalls, "BUDGETS: the funds tick's calls are the live registry's");
+  eq(BUDGETS.funds.fillMaxCalls, FUNDS_FILL.maxCalls, "BUDGETS: a reader's cold fill makes at most the funds module's two calls");
+  eq(BUDGETS.funds.fillMarkerS, FUNDS_FILL.markerS, "and holds its outcome for the funds module's minute");
   eq(BUDGETS.tier2.paceMs, LIVE_BUDGET.tier2PaceMs, "BUDGETS: Tier 2's pace is the live registry's");
   eq(BUDGETS.tier2.perMinute, Math.floor(60000 / LIVE_BUDGET.tier2PaceMs), "and its calls a minute follow from the pace");
   eq(BUDGETS.tier2.maxCallsPerPass, LIVE_BUDGET.tier2MaxCalls, "BUDGETS: Tier 2's calls a pass are the live registry's");

@@ -56,7 +56,7 @@ export function dayFirings(crons, day) {
 
 export function firingCounts(crons = cronStrings()) {
   const count = (day) => {
-    const c = { rth: 0, focus: 0, housekeeping: 0, summary: 0 };
+    const c = { rth: 0, focus: 0, funds: 0, housekeeping: 0, summary: 0 };
     for (const f of dayFirings(crons, day)) {
       if (!Object.hasOwn(c, f.job)) throw new Error("d1-budget: a cron firing maps to the unpriced job " + f.job);
       c[f.job]++;
@@ -69,6 +69,7 @@ export function firingCounts(crons = cronStrings()) {
 export const ENGINE_CEILINGS = Object.freeze({
   rth: Object.freeze({ trips: 3, read: 13, written: 5 }),
   focus: Object.freeze({ trips: 2, read: 650, written: 2 }),
+  funds: Object.freeze({ trips: 2, read: 2, written: 1 }),
   summary: Object.freeze({ trips: 2, read: 5, written: 1 }),
   housekeeping: Object.freeze({ trips: 10, read: 4, written: 3 }),
 });
@@ -77,7 +78,7 @@ export const COLD_START = Object.freeze({
   trips: 6,
   written: 22,
   startsPerWeekday: 312,
-  source: "worst case: every one of the 312 cron firings on a fresh isolate runs the schema bootstrap batch (23 statements, 20 of them CREATE, three column probes); whether D1 bills a DDL statement as a row written is unmeasured (PLAN.final.md section 12), so each is counted as one",
+  source: "worst case: every one of the 312 Tier 1, focus, housekeeping and summary firings (the funds tick runs no bootstrap) on a fresh isolate runs the schema bootstrap batch (23 statements, 20 of them CREATE, three column probes); whether D1 bills a DDL statement as a row written is unmeasured (PLAN.final.md section 12), so each is counted as one",
 });
 
 export const TIER2 = Object.freeze({
