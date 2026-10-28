@@ -8,7 +8,7 @@
   --font-ui: var(--font-figure);
 
   --ground-base: #07090e;
-  --ground-sky: url("/assets/img/atmosphere.svg?v=415") center / cover no-repeat;
+  --ground-sky: url("/assets/img/atmosphere.svg?v=416") center / cover no-repeat;
   --aur-1: rgba(64, 120, 255, 0.16);
   --aur-2: rgba(150, 100, 255, 0.11);
   --aur-3: rgba(60, 200, 240, 0.07);
