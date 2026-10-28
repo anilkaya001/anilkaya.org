@@ -164,7 +164,7 @@ const BASE = {
     "the card section's per-name reads swallow nothing: every one records its failure");
   ok((src.match(/\.catch\(soft\("/g) || []).length >= 14, "the card, dossier and enrichment reads all record theirs");
   ok(/readFailures: lost,/.test(src) && /readFailures: reads\.readFailures/.test(src), "and hand them to buildCard");
-  ok(/\.\.\.\(stats\.calls > 0 \? \{ feed: summarize\(wire\.snapshot\(\)\) \} : \{\}\)/.test(src), "meta carries the wire summary only when the run called the feed");
+  ok(/\.\.\.\(stats\.calls > 0 \? \{ vendor: summarize\(wire\.snapshot\(\)\) \} : \{\}\)/.test(src), "meta carries the wire summary only when the run called the feed");
 }
 
 const write = (body) => {

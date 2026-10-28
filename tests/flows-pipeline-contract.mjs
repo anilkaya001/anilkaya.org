@@ -3880,7 +3880,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     const limit = Number(/^ {4}open-pull-requests-limit: (\d+)$/m.exec(u.body)?.[1]);
     ok(limit >= 1 && limit <= 3, `${u.ecosystem} holds at most ${limit} open pull requests at a time`);
     ok(/^ {4}groups:\n {6}[a-z-]+:\n {8}patterns:\n/m.test(u.body), `${u.ecosystem} updates arrive GROUPED, so one month is one pull request per group`);
-    ok(!/^ {4}(ignore|allow|target-branch|reviewers|assignees|registries|feed|rebase-strategy|insecure-external-code-execution):/m.test(u.body),
+    ok(!/^ {4}(ignore|allow|target-branch|reviewers|assignees|registries|vendor|rebase-strategy|insecure-external-code-execution):/m.test(u.body),
       `${u.ecosystem} narrows nothing and redirects nothing: every update is proposed, to the default branch`);
   }
   const npmGroups = [...updates[0].body.matchAll(/^ {6}([a-z-]+):\n {8}patterns:\n((?: {10}- "[^"]+"\n)+)(?: {8}exclude-patterns:\n((?: {10}- "[^"]+"\n)+))?/gm)]
@@ -5321,7 +5321,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
   const src = nightlySource();
   const mod = slice(src, "@@ source scripts/flows-nightly/sections/compute.mjs @@", "@@ source scripts/flows-nightly/sections/context.mjs @@");
-  ok(!/from "\.\.\/(feed|store|archive)\.mjs"/.test(mod), "compute: the module imports no feed client, store or archive, so it can neither call the feed nor publish");
+  ok(!/from "\.\.\/(vendor|store|archive)\.mjs"/.test(mod), "compute: the module imports no feed client, store or archive, so it can neither call the feed nor publish");
   eq(count(mod, /\buw\(|\bpublish\(|fetch\(/g), 0, "compute: and makes no request");
   const exec = nightlyExecution();
   ok(exec.indexOf('stages.step("card-x")') < exec.indexOf('stages.run("compute"') && exec.indexOf('stages.run("compute"') < exec.indexOf('stages.run("roster"'),

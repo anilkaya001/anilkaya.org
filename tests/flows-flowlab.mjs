@@ -368,7 +368,7 @@ for (const [id, transforms, expect] of PLANTS) {
     const text = COPY.fill(s, { date: "2026-10-23", TRT: "21:30", T: "SYX101", n: 3, what: "rows" });
     eq(lintText(text), [], "copy lint: " + text);
     eq(tooLong(text, 14), null, "copy within 14 words: " + text);
-    ok(!/feed|unusual whales|tape/i.test(text), "copy names no provider and no tape: " + text);
+    ok(!/vendor|unusual whales|tape/i.test(text), "copy names no provider and no tape: " + text);
   }
   for (const f of ["shared/flows-flowlab.js", "shared/flows-flowlab-copy.js", "tests/gen-flowlab-fixtures.py"]) {
     ok(!/\btape\b/i.test(fs.readFileSync(path.join(ROOT, f), "utf8").replace(/shared\/flows-tape-stats\.js|flows-tape-stats|tape-stats/g, "")), f + " holds the word tape nowhere");

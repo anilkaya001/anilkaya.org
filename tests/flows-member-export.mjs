@@ -43,7 +43,7 @@ const COLUMN_MUTANTS = [
   ["an undeclared hold accepted", [['if (col.hold !== null && !Object.hasOwn(HOLDS, col.hold)) throw new Error("export: unknown hold " + key);', ""]]],
   ["two windows enough", [["export const MIN_WINDOWS = 3;", "export const MIN_WINDOWS = 2;"]]],
   ["a reason grammar that allows anything", [["export const REASON_GRAMMAR = /^[A-Za-z0-9 ]{1,48}$/;", "export const REASON_GRAMMAR = /^.*$/;"]]],
-  ["the feed premium registered as own", [['C("*", k, k, "label", "feed", "a field of the feed\'s row")', 'C("*", k, k, "label", k === "prem" ? "own" : "feed", "a field of the feed\'s row")']]],
+  ["the feed premium registered as own", [['C("*", k, k, "label", "vendor", "a field of the feed\'s row")', 'C("*", k, k, "label", k === "prem" ? "own" : "vendor", "a field of the feed\'s row")']]],
 ];
 
 for (const [label, transforms] of COLUMN_MUTANTS) {
