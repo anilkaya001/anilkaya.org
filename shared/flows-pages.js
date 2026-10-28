@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "411";
+export const ASSET_VERSION = "414";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -7,6 +7,7 @@ import { etDayOf, isSession, shiftDay } from "./flows-quant-time.js";
 import { ledgerBody, LEDGER_DESCRIPTION, LEDGER_STYLES, LEDGER_SCRIPTS } from "./flows-page-ledger.js";
 import { HORIZON_SESSIONS } from "./flows-horizon.js";
 import { macroBody, MACRO_DESCRIPTION, MACRO_STYLES, MACRO_SCRIPTS, MACRO_DEFER } from "./flows-page-macro.js";
+import { flowlabBody, FLOWLAB_DESCRIPTION, FLOWLAB_STYLES, FLOWLAB_SCRIPTS } from "./flows-page-flowlab.js";
 
 export const CALENDAR_BACK_DAYS = 14;
 export const CALENDAR_SESSIONS = 60;
@@ -139,6 +140,7 @@ export const FLOWS_NAV = [
     { key: "market", href: "/flows/market/", label: "Market", glyph: "market" },
     { key: "moves", href: "/flows/moves/", label: "Moves", glyph: "wave" },
     { key: "unusual", href: "/flows/unusual/", label: "Unusual", glyph: "unusual" },
+    { key: "flowlab", href: "/flows/flowlab/", label: "Flow Lab", glyph: "flask", ownerOnly: true },
     { key: "ledger", href: "/flows/ledger/", label: "Ledger", glyph: "levels" },
     { key: "macro", href: "/flows/macro/", label: "Macro", glyph: "globe", gate: "macro" },
     { key: "events", href: "/flows/events/", label: "Events", glyph: "cal", count: true },
@@ -162,7 +164,7 @@ const TABS = [
   { href: "/flows/", label: "Home", glyph: "home", keys: ["overview"] },
   { href: "/flows/long/", label: "Boards", glyph: "boards", keys: ["long", "short"] },
   { href: "/flows/ticker/", label: "Search", glyph: "search", keys: ["ticker"], search: true },
-  { href: "/flows/market/", label: "Market", glyph: "market", keys: ["market", "moves", "unusual", "ledger", "macro", "events", "political"] },
+  { href: "/flows/market/", label: "Market", glyph: "market", keys: ["market", "moves", "unusual", "flowlab", "ledger", "macro", "events", "political"] },
 ];
 
 const railItem = (active) => (it) => {
@@ -465,6 +467,7 @@ export function aboutPage() {
       <li><strong>Market.</strong> The session tide, breadth, sectors, index ETFs, expiries and volatility, with the market-wide feeds.</li>
       <li><strong>Moves.</strong> Every name's move today against its own typical day and against the day its options implied, with how often a move that size has happened in the last year, and each sector&#39;s median move beside the list of names.</li>
       <li><strong>Unusual.</strong> The option windows the vendor flagged, drawn as a flow network from sector through the side of the quote and name to lean, and the contracts trading far above their open interest.</li>
+      <li><strong>Flow Lab.</strong> The contracts behind a name's flow: a screener ranked by the site's own ratios, strike and Greek flow, price ladders, routing, lit prints and group flow, each with its unit or a dash and the reason.</li>
       <li><strong>Ledger.</strong> The flagged option premium booked as a closed ledger: takers on one side, liquidity providers on the other, so every row and column sums to zero. It sets each sector's share against its market-cap share, with the bounds it can prove.</li>
       <li><strong>Macro.</strong> Rates, currencies, commodities, crypto and futures on one screen, with prediction-market odds beside each scheduled release and seasonality shown with its intervals. A figure the feed does not carry is a dash with its reason.</li>
       <li><strong>Events.</strong> Earnings, economic prints and FDA dates for the coming sessions, with the move each report is priced for.</li>
@@ -942,14 +945,14 @@ const MARKET_TABS = (scenes) => [
   ["extremes", "Extremes"], ...(scenes ? [["relations", "Relations"]] : []), ["prints", "Prints"], ["context", "Context"],
 ];
 
-export function marketPage({ username = "", owner = false, scenes = false } = {}) {
+export function marketPage({ username = "", owner = false, scenes = false, funds = false } = {}) {
   const tabs = MARKET_TABS(scenes);
   const panel = (key, body) => `
     <div class="mk-panel" role="tabpanel" id="mkP-${key}" aria-labelledby="mkT-${key}" data-panel="${key}"${key === "floor" ? "" : " inert"}>${body}
     </div>`;
   return `${head("Flows \u2014 Market", "The market in one screen: the session tide, breadth, sectors, index ETFs, the flow network, extremes, relations and the market-wide feeds, each a tab.", ["/assets/css/flows-market.css", "/assets/css/flows-net-map.css", "/assets/css/flows-popout.css"])}
 ${shell("Market", "market", username, `
-  <div class="mk" id="mk">
+  <div class="mk" id="mk"${funds ? ' data-funds="on"' : ""}>
   <div class="mk-top">
   <header class="flows-head mk-head" data-fx-hero>
     <h1 id="fxTitle">Market</h1>
@@ -1167,6 +1170,19 @@ export function movesPage({ username = "" } = {}) {
   <dialog class="mv-dlg" id="mvSecDlg" aria-labelledby="mvSecT"><div class="dg"><h2 id="mvSecT"></h2><p id="mvSecP"></p><div class="mv-secg" id="mvSecG"></div><div class="x"><button type="button" class="link" id="mvSecX">Close</button></div></div></dialog>
   <dialog class="mv-dlg" id="mvInfoDlg" aria-labelledby="mvInfoT"><div class="dg"><h2 id="mvInfoT">How to read this page</h2><div class="body" id="mvInfoB"></div><div class="x"><button type="button" class="link" id="mvInfoX">Close</button></div></div></dialog>
 `,
+  });
+}
+
+export function flowlabPage({ username = "" } = {}) {
+  return flowsDocument({
+    title: "Flow Lab",
+    description: FLOWLAB_DESCRIPTION,
+    active: "flowlab",
+    username,
+    chrome: false,
+    styles: FLOWLAB_STYLES,
+    scripts: FLOWLAB_SCRIPTS,
+    body: flowlabBody(glyph),
   });
 }
 
@@ -1604,6 +1620,6 @@ export function oracleShell(html, mode, slug) {
 export const FLOWS_PAGES = {
   loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, networkPage, nowPage, deskPage,
   politicalPage,
-  tickerPage, unusualPage, movesPage, ledgerPage, macroPage, statusPage, eventsPage, strategyPage, ASSET_VERSION,
+  tickerPage, unusualPage, movesPage, flowlabPage, ledgerPage, macroPage, statusPage, eventsPage, strategyPage, ASSET_VERSION,
 };
 

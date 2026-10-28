@@ -35,6 +35,7 @@ import { pathFor } from "../shared/flows-vendor-ops.js";
 import { processCpuMs, runCompute } from "./flows-nightly/sections/compute.mjs";
 import { runOraclePrep, runOraclePublish } from "./flows-nightly/sections/oracle.mjs";
 import { runMacroStage, runPmNames, runPmSectors } from "./flows-nightly/sections/macro.mjs";
+import { runFlowlab } from "./flows-nightly/sections/flowlab.mjs";
 
 export {
   CALL_BUDGET, CALL_COST, CALL_OVERRUN_MARGIN, CHAIN_RESERVE_MS, DEADLINE_MS, DEEP_NAMES, DEEP_RULE,
@@ -293,6 +294,7 @@ async function main() {
   await stages.run("deepen-ledger", () => runDeepenLedger(ctx), (error) => {
     console.warn(`  deepen ledger: ${error.message} — the next run re-reads what the store holds`);
   });
+  await runFlowlab(ctx);
   await runClose(ctx);
 }
 

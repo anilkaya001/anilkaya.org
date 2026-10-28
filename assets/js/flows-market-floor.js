@@ -9,12 +9,16 @@
   const FONT = "Inter, system-ui, sans-serif";
   const PITCH_X = 1, PITCH_Z = 1.9, PITCH_Z_PHONE = 1.45, PHONE_COLS = 6, PED = 0.88, PIL = 0.58, STRIPE = 0.06;
   const HMAX = 2.1, HMAX_PHONE = 1.5;
-  const LEAN_EDGE = 0.1, LEAN_FULL = 0.6;
+  const LEAN_EDGE_PCT = 10, LEAN_EDGE = 0.1, LEAN_FULL = 0.6;
   const SIDE_HITS = 12;
   const MEASURES = [
-    { id: "premium", label: "Premium", noun: "flagged premium" },
-    { id: "volume", label: "Volume", noun: "flagged contracts" },
-    { id: "lean", label: "Net lean", noun: "net lean in premium" },
+    { id: "premium", label: "Premium", noun: "flagged premium", nounS: "whole-session premium" },
+    { id: "volume", label: "Volume", noun: "flagged contracts", nounS: "whole-session contracts" },
+    { id: "lean", label: "Net lean", noun: "net lean in premium", nounS: "net lean in whole-session premium" },
+  ];
+  const BASES = [
+    { id: "flagged", label: "Flagged", word: "Flagged windows" },
+    { id: "session", label: "Session", word: "Whole session" },
   ];
   const GROUPS = [
     { id: "funds", label: "Index funds" },
@@ -32,6 +36,17 @@
     Crypto: ["IBIT", "BITO", "ETHA", "FBTC", "GBTC", "ETHE", "ARKB", "BITX"],
     International: ["EEM", "EFA", "FXI", "EWZ", "KWEB", "EWJ", "INDA", "EWY", "EWT", "VWO", "MCHI", "EWG"],
   };
+  const ROOT_ALIAS = { SPXW: "SPX", NDXP: "NDX", RUTW: "RUT", VIXW: "VIX", MRUT: "RUT" };
+  const FUND_WHY = {
+    no_row: "The feed returned no row for this fund this session.",
+    stale: "The feed's row is for an earlier session.",
+    not_listed: "This ticker is not in the feed's directory.",
+    over_cap: "Not read tonight: the fallback read cap was reached.",
+    refused: "The feed refused this read.",
+    failed: "The read failed; it will be tried again.",
+    off: "Whole-session activity is switched off.",
+  };
+  const SRC_WORD = { screener: "the feed's screener row", "sector-etfs": "the feed's sector fund row", "options-volume": "the feed's per-fund volume" };
   const FUND_OF = new Map(FUNDS.map((t) => [t, t]));
   const ETF_OF = new Map(SECTOR_ETFS.map(([t, s]) => [t, s]));
   const OTHER_OF = new Map();
@@ -73,12 +88,69 @@
   };
 
   function valueOf(t, measure) {
+    if (t.basis === "session") return t.vals[measure];
     if (measure === "volume") return t.volN ? t.vol : null;
     return t.n ? (measure === "lean" ? t.net : t.prem) : null;
   }
   function whyNull(t, measure) {
+    if (t.basis === "session") {
+      if (t.sess && t.sess.whys.length && !t.sess.read) return FUND_WHY[t.sess.whys[0][1]];
+      if (t.sess && !t.sess.read && t.sess.alias.length) return "Counted under " + t.sess.alias[0][1] + ".";
+      return "The feed returned no " + (measure === "volume" ? "contract count" : measure === "lean" ? "side split" : "premium") + " for this class.";
+    }
     if (!t.n) return "No window of this class was flagged this session.";
     return measure === "volume" ? "The flagged windows of this class carried no contract count." : "No value.";
+  }
+
+  const readAtOf = (f) => (f && f.fresh && typeof f.fresh.readAt === "string" ? f.fresh.readAt : f && typeof f.readAt === "string" ? f.readAt : null);
+
+  function chooseFunds(f, session) {
+    if (!f) return { block: null, why: "off" };
+    const usable = (b) => Boolean(b) && typeof b === "object" && !b.__unreadable && Boolean(b.rows) && typeof b.rows === "object" && typeof b.session === "string";
+    const n = f.nightly && typeof f.nightly === "object" && !f.nightly.__unreadable ? f.nightly : null;
+    const nOk = usable(n) && (n.status === "ok" || n.status === "partial");
+    const lOk = usable(f.live);
+    const cands = [];
+    if (lOk) cands.push({ src: "live", session: f.live.session, readAt: readAtOf(f.live), rows: f.live.rows, meta: nOk && n.meta ? n.meta : {}, dir: nOk ? n.dir || null : null });
+    if (nOk) cands.push({ src: "nightly", session: n.session, readAt: n.readAt || null, rows: n.rows, meta: n.meta || {}, dir: n.dir || null });
+    if (!cands.length) return { block: null, why: n && n.status === "off" ? "off" : n && n.status === "unavailable" ? "unavailable" : "absent" };
+    const newest = (a, b) => (a.session !== b.session ? (a.session > b.session ? -1 : 1) : String(b.readAt || "") < String(a.readAt || "") ? -1 : 1);
+    const same = session ? cands.filter((c) => c.session === session).sort(newest) : [];
+    if (same.length) return { block: { ...same[0], previous: false }, why: null };
+    return { block: { ...cands.slice().sort(newest)[0], previous: Boolean(session) }, why: null };
+  }
+
+  function rowState(block, t) {
+    if (Object.prototype.hasOwnProperty.call(ROOT_ALIAS, t)) return { t, alias: ROOT_ALIAS[t] };
+    const r = block.rows[t];
+    if (!r || typeof r !== "object") return { t, why: "no_row" };
+    if (typeof r.alias === "string") return { t, alias: r.alias };
+    if (r.why) return { t, why: FUND_WHY[r.why] ? r.why : "no_row" };
+    return { t, r };
+  }
+
+  function sessOf(tickers, block) {
+    const out = { tickers: [], read: 0, of: 0, prem: 0, premN: 0, vol: 0, volN: 0, net: 0, gross: 0, netN: 0, src: [], alias: [], whys: [], partial: [] };
+    for (const t of tickers) {
+      const st = rowState(block, t);
+      out.tickers.push(st);
+      if (st.alias) { out.alias.push([t, st.alias]); continue; }
+      out.of++;
+      if (st.why) { out.whys.push([t, st.why]); continue; }
+      const r = st.r;
+      out.read++;
+      if (r.src && !out.src.includes(r.src)) out.src.push(r.src);
+      const hasP = isNum(r.cp) && isNum(r.pp), hasV = isNum(r.cv) && isNum(r.pv), hasL = isNum(r.bu) && isNum(r.be);
+      st.prem = hasP ? r.cp + r.pp : null;
+      st.vol = hasV ? r.cv + r.pv : null;
+      st.net = hasL ? r.bu - r.be : null;
+      st.gross = hasL ? r.bu + r.be : null;
+      if (hasP) { out.prem += st.prem; out.premN++; }
+      if (hasV) { out.vol += st.vol; out.volN++; }
+      if (hasL) { out.net += st.net; out.gross += st.gross; out.netN++; }
+      if (!hasP || !hasV || !hasL) out.partial.push(t);
+    }
+    return out;
   }
 
   function model(alerts, o = {}) {
@@ -87,14 +159,21 @@
     const uniOk = Boolean(u && u.status === "ok" && Array.isArray(u.t) && Array.isArray(u.sec) && Array.isArray(u.sectors));
     const secOf = new Map();
     if (uniOk) u.t.forEach((t, i) => secOf.set(String(t).toUpperCase(), Number.isInteger(u.sec[i]) ? u.sectors[u.sec[i]] || null : null));
+    const session = alerts && typeof alerts.sessionDate === "string" ? alerts.sessionDate.slice(0, 10) : null;
+    const fundsOn = Boolean(o.funds);
+    const chosen = fundsOn ? chooseFunds(o.funds, session) : null;
+    const block = chosen ? chosen.block : null;
+    const basis = fundsOn && o.basis === "session" && block ? "session" : "flagged";
     const tiles = new Map();
-    const ensure = (id, group, label, sub, order) => {
+    const ensure = (id, group, label, sub, order, tickers) => {
       let t = tiles.get(id);
-      if (!t) { t = { id, group, label, sub, order, n: 0, prem: 0, up: 0, down: 0, nx: 0, vol: 0, volN: 0, names: new Map() }; tiles.set(id, t); }
+      if (!t) { t = { id, group, label, sub, order, tickers: tickers || [], n: 0, prem: 0, up: 0, down: 0, nx: 0, vol: 0, volN: 0, names: new Map() }; tiles.set(id, t); }
       return t;
     };
-    FUNDS.forEach((f, i) => ensure("funds:" + f, "funds", f, "Index fund", i));
-    SECTOR_ETFS.forEach(([f, s], i) => ensure("etf:" + f, "etf", f, s, i));
+    const otherSub = (cls) => (cls === "Index options" ? "Cash-settled index roots" : "Other fund class");
+    FUNDS.forEach((f, i) => ensure("funds:" + f, "funds", f, "Index fund", i, [f]));
+    SECTOR_ETFS.forEach(([f, s], i) => ensure("etf:" + f, "etf", f, s, i, [f]));
+    if (fundsOn) for (const cls of Object.keys(OTHER)) ensure("other:" + cls, "other", cls, otherSub(cls), 0, OTHER[cls]);
     let dropped = 0;
     const windows = [];
     rows.forEach((r, i) => {
@@ -103,7 +182,7 @@
       let tile;
       if (FUND_OF.has(T)) tile = tiles.get("funds:" + T);
       else if (ETF_OF.has(T)) tile = tiles.get("etf:" + T);
-      else if (OTHER_OF.has(T)) tile = ensure("other:" + OTHER_OF.get(T), "other", OTHER_OF.get(T), OTHER_OF.get(T) === "Index options" ? "Cash-settled index roots" : "Other fund class", 0);
+      else if (OTHER_OF.has(T)) tile = ensure("other:" + OTHER_OF.get(T), "other", OTHER_OF.get(T), otherSub(OTHER_OF.get(T)), 0, OTHER[OTHER_OF.get(T)]);
       else {
         const sec = !uniOk ? STOCK_UNREAD : secOf.get(T) || STOCK_NONE;
         tile = ensure("stocks:" + sec, "stocks", SHORT[sec] || sec, sec, 0);
@@ -122,23 +201,44 @@
     const list = [...tiles.values()];
     for (const t of list) {
       t.net = t.up - t.down;
+      t.basis = "flagged";
       t.lean = leanOf(t.net, t.prem);
       t.share = total > 0 && t.n ? t.prem / total : null;
       t.nameList = [...t.names.values()].map((x) => ({ ...x, net: x.up - x.down, lean: leanOf(x.up - x.down, x.prem) })).sort((a, b) => b.prem - a.prem || (a.t < b.t ? -1 : 1));
       t.top = t.nameList.slice(0, 3);
+      t.sess = block && t.group !== "stocks" ? sessOf(t.tickers, block) : null;
     }
-    const groups = GROUPS.map((g) => {
+    let sessTotal = 0;
+    if (basis === "session") {
+      for (const t of list) if (t.sess) sessTotal += t.sess.premN ? t.sess.prem : 0;
+      for (const t of list) {
+        if (!t.sess) continue;
+        const s = t.sess;
+        t.basis = "session";
+        t.vals = { premium: s.premN ? s.prem : null, volume: s.volN ? s.vol : null, lean: s.netN ? s.net : null };
+        t.lean = s.netN && s.gross > 0 ? leanOf(s.net, s.gross) : null;
+        t.share = sessTotal > 0 && s.premN ? s.prem / sessTotal : null;
+        t.top = s.tickers.filter((x) => x.r && isNum(x.prem)).sort((a, b) => b.prem - a.prem || (a.t < b.t ? -1 : 1)).slice(0, 3).map((x) => ({ t: x.t, prem: x.prem }));
+      }
+    }
+    const groups = GROUPS.filter((g) => basis !== "session" || g.id !== "stocks").map((g) => {
       const ts = list.filter((t) => t.group === g.id);
       if (g.id === "other" || g.id === "stocks") ts.sort((a, b) => lastOf(a) - lastOf(b) || b.prem - a.prem || (a.label < b.label ? -1 : 1));
-
       else ts.sort((a, b) => a.order - b.order);
+      if (basis === "session" && g.id === "other") ts.sort((a, b) => (b.vals.premium === null ? -1 : b.vals.premium) - (a.vals.premium === null ? -1 : a.vals.premium) || (a.label < b.label ? -1 : 1));
+      if (basis === "session") {
+        const prem = ts.reduce((a, t) => a + (t.sess && t.sess.premN ? t.sess.prem : 0), 0);
+        const n = ts.reduce((a, t) => a + (t.sess ? t.sess.read : 0), 0);
+        const volN = ts.reduce((a, t) => a + (t.sess ? t.sess.volN : 0), 0);
+        return { ...g, tiles: ts, n, prem, vol: volN ? ts.reduce((a, t) => a + (t.sess ? t.sess.vol : 0), 0) : null, share: sessTotal > 0 && n ? prem / sessTotal : null };
+      }
       const prem = ts.reduce((a, t) => a + t.prem, 0), n = ts.reduce((a, t) => a + t.n, 0);
       const volN = ts.reduce((a, t) => a + t.volN, 0);
       return { ...g, tiles: ts, n, prem, vol: volN ? ts.reduce((a, t) => a + t.vol, 0) : null, share: total > 0 && n ? prem / total : null };
     }).filter((g) => g.tiles.length);
     const ordered = groups.flatMap((g) => g.tiles);
-    const session = alerts && typeof alerts.sessionDate === "string" ? alerts.sessionDate.slice(0, 10) : null;
-    return { session, windows, tiles: ordered, groups, total, dropped, uniOk, count: windows.length };
+    const count = basis === "session" ? ordered.filter((t) => t.sess && t.sess.read).length : windows.length;
+    return { session, windows, tiles: ordered, groups, total: basis === "session" ? sessTotal : total, flaggedTotal: total, dropped, uniOk, count, basis, fundsOn, funds: block, fundsWhy: chosen ? chosen.why : null };
   }
 
   function camera({ cx, cy, scale, yaw, pitch, dist }) {
@@ -193,7 +293,8 @@
         const v = valueOf(t, measure);
         const hgt = isNum(v) && vMax > 0 ? (Math.abs(v) / vMax) * hmax : 0;
         const lean = t.lean ? t.lean.cat : null;
-        const s = { id: t.id, group: ln.g.id, row: ln.ri, col: c, label: t.label, x, z, v, h: hgt, lean, share: t.share, stripe: isNum(t.share) && sMax > 0 ? t.share / sMax : null };
+        const cap = t.basis === "flagged" && t.sess && !t.n ? "Session " + (t.sess.premN ? money(t.sess.prem) : DASH) : null;
+        const s = { id: t.id, group: ln.g.id, row: ln.ri, col: c, label: t.label, x, z, v, h: hgt, lean, share: t.share, stripe: isNum(t.share) && sMax > 0 ? t.share / sMax : null, cap };
         const ped = [[x - PED / 2, 0, z - PED / 2], [x + PED / 2, 0, z - PED / 2], [x + PED / 2, 0, z + PED / 2], [x - PED / 2, 0, z + PED / 2]];
         const c0 = cam(x, 0, z), top = cam(x, hgt, z);
         const proj = ped.map((p) => cam(p[0], p[1], p[2]));
@@ -258,8 +359,10 @@
     const prev = FLOORS.get(host);
     if (prev) prev.destroy();
     const RM = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const S = { alerts: null, st: { state: "pending", reason: "Reading the flagged windows." }, universe: opts.universe };
+    const S = { alerts: null, st: { state: "pending", reason: "Reading the flagged windows." }, universe: opts.universe, funds: opts.funds || null };
+    const fromHash = () => { const m = /basis=(flagged|session)/.exec(location.hash); return m ? m[1] : null; };
     let M = null, SC = null, W = 0, H = 0, dpr = 1, sel = null, hover = null, paints = 0, dead = false, measure = "premium", yaw = null, pitch = null, wide = false, LAB = { labels: [], dropped: [] };
+    let basis = fromHash() || "flagged", picked = Boolean(fromHash());
     let TOK = null, SHADOW = null;
     const glows = new Map();
     const tokens = () => {
@@ -299,8 +402,27 @@
     const wrap = h("div", { class: "mk-fl", "data-state": "pending" }, read, main, empty, legend, note, details, tables, dlg);
     host.replaceChildren(wrap);
     const segHost = (host.closest(".mk-mod") && host.closest(".mk-mod").querySelector(".mk-segc")) || null;
+    const subEl = host.closest(".mk-mod") ? host.closest(".mk-mod").querySelector("#mkFloorSub") : null;
     const seg = UI.segmented("Height", MEASURES.map((m) => ({ label: m.label })), (i) => { measure = MEASURES[i].id; relayout(); }, 0);
-    if (segHost) segHost.replaceChildren(seg); else wrap.insertBefore(seg, wrap.firstChild);
+    let basisSeg = null;
+    const segBox = segHost || h("div", { class: "mk-segc" });
+    if (!segHost) wrap.insertBefore(segBox, wrap.firstChild);
+    const mountSegs = () => { segBox.replaceChildren(...(basisSeg ? [basisSeg, seg] : [seg])); };
+    mountSegs();
+    const setHash = () => {
+      try {
+        const keep = /view=([a-z]+)/.exec(location.hash);
+        if (keep && keep[1] !== "floor") return;
+        history.replaceState(null, "", "#view=floor&basis=" + basis);
+      } catch (error) { void error; }
+    };
+    const paintBasis = () => {
+      if (!M || !M.fundsOn) { basisSeg = null; mountSegs(); return; }
+      const off = !M.funds;
+      const items = BASES.map((b) => ({ label: b.label, disabled: b.id === "session" && off, title: b.id === "session" && off ? (M.fundsWhy === "off" ? FUND_WHY.off : "Whole-session activity was not read tonight.") : null }));
+      basisSeg = UI.segmented("Basis", items, (i) => { basis = BASES[i].id; picked = true; setHash(); rebuild(); }, BASES.findIndex((b) => b.id === M.basis));
+      mountSegs();
+    };
     tableBtn.addEventListener("click", () => {
       const close = h("button", { type: "button", class: "nm-link", onclick: () => dlg.close() }, "Close");
       tables.hidden = false;
@@ -316,13 +438,58 @@
     const volText = (t) => (t.volN ? "volume " + F.num(t.vol) + " contracts" + (t.volN < t.n ? " from " + t.volN + " of " + t.n + " windows" : "") : "volume " + DASH + " (no contract count carried)");
     const leanText = (t) => (t.n ? "net lean " + moneyS(t.net) + ", " + (t.lean ? LEAN_WORD[t.lean.cat] : DASH) : "");
     const topText = (t) => (t.top.length ? "top names " + t.top.map((x) => x.t + " " + money(x.prem)).join(", ") : "no names");
-    const tileSentence = (t) => {
-      const g = groupOf(t);
-      if (!t.n) return t.label + MID + g.label + MID + DASH + " no flagged window this session";
-      return t.label + (t.sub && t.sub !== t.label ? " (" + t.sub + ")" : "") + MID + g.label + MID + money(t.prem) + " flagged" + (isNum(t.share) ? " (" + F.pct(t.share, 1) + " of all)" : "") + MID + volText(t) + MID + leanText(t) + MID + topText(t);
+    const stampText = () => {
+      if (!M.fundsOn) return "";
+      if (M.basis === "flagged") return "Flagged windows";
+      if (!M.funds) return "";
+      const read = M.funds.readAt && F.when(M.funds.readAt, Date.now()) ? MID + "read " + F.when(M.funds.readAt, Date.now()) : "";
+      return M.funds.previous ? "Previous session" + MID + M.funds.session + read : "Whole session" + read;
     };
-    const shortSentence = (t) => (t.n ? t.label + MID + money(t.prem) + (isNum(t.share) ? " (" + F.pct(t.share, 0) + ")" : "") + MID + (t.volN ? F.num(t.vol) + " contracts" : "volume " + DASH) + MID + (t.lean ? LEAN_WORD[t.lean.cat] : DASH) : t.label + MID + DASH + " no flagged window");
-    const groupSentence = (g) => g.label + MID + (g.n ? money(g.prem) + " flagged" + (isNum(g.share) ? " (" + F.pct(g.share, 1) + " of all)" : "") + MID + (g.vol === null ? "volume " + DASH : "volume " + F.num(g.vol) + " contracts") : DASH + " no flagged window");
+    const srcText = (x) => x.src.map((k) => SRC_WORD[k] || k).join(" and ");
+    const metaText = (t) => {
+      const m = M.funds && t.tickers.length === 1 && M.funds.meta ? M.funds.meta[t.tickers[0]] : null;
+      if (!m) return "";
+      const bits = [];
+      if (m.issuer) bits.push(m.issuer);
+      if (isNum(m.n)) bits.push(F.num(m.n) + " holdings");
+      if (Array.isArray(m.sec) && m.sec.length) bits.push("top sectors " + m.sec.map((x) => x[0] + " " + F.pct(x[1], 0)).join(", "));
+      if (Array.isArray(m.ctry) && m.ctry.length) bits.push("top countries " + m.ctry.map((x) => x[0] + " " + F.pct(x[1], 0)).join(", "));
+      if (m.flow && isNum(m.flow.sh)) bits.push((m.flow.sh >= 0 ? "net creations " + F.num(m.flow.sh) : "net redemptions " + F.num(-m.flow.sh)) + " shares on " + m.flow.d);
+      return bits.join(MID);
+    };
+    const missBit = (x) => (x.of > 1 ? x.read + " of " + x.of + " funds read" + (x.whys.length ? ", missing " + x.whys.map((w) => w[0]).join(", ") : "") : "");
+    const aliasBit = (x) => x.alias.map((a) => a[0] + " counted under " + a[1]).join(", ");
+    const sessionSentence = (t) => {
+      const x = t.sess, g = groupOf(t);
+      const head = t.label + (t.sub && t.sub !== t.label ? " (" + t.sub + ")" : "") + MID + g.label + MID + stampText();
+      if (!x || !x.read) return [head, DASH + " " + whyNull(t, "premium"), aliasBit(x || { alias: [] })].filter(Boolean).join(MID);
+      return [head,
+        x.premN ? money(x.prem) + " premium" + (isNum(t.share) ? " (" + F.pct(t.share, 1) + " of fund premium)" : "") : "premium " + DASH,
+        x.volN ? F.num(x.vol) + " contracts" : "volume " + DASH,
+        x.netN ? "net lean " + moneyS(x.net) + ", " + (t.lean ? LEAN_WORD[t.lean.cat] : DASH) : "net lean " + DASH,
+        srcText(x), missBit(x), aliasBit(x),
+        x.partial.length ? x.partial.join(", ") + (x.partial.length > 1 ? " lack" : " lacks") + " a figure" : "",
+        t.tickers.length > 1 && t.top.length ? "top funds " + t.top.map((y) => y.t + " " + money(y.prem)).join(", ") : "",
+        metaText(t)].filter(Boolean).join(MID);
+    };
+    const flaggedSentence = (t) => {
+      const g = groupOf(t);
+      const cap = M.fundsOn && t.sess && !t.n ? MID + "Session " + (t.sess.premN ? money(t.sess.prem) : DASH + " " + whyNull({ ...t, basis: "session" }, "premium")) : "";
+      if (!t.n) return t.label + MID + g.label + MID + DASH + " no flagged window this session" + cap + (M.fundsOn ? MID + stampText() : "");
+      return t.label + (t.sub && t.sub !== t.label ? " (" + t.sub + ")" : "") + MID + g.label + MID + money(t.prem) + " flagged" + (isNum(t.share) ? " (" + F.pct(t.share, 1) + " of all)" : "") + MID + volText(t) + MID + leanText(t) + MID + topText(t) + (M.fundsOn ? MID + stampText() : "");
+    };
+    const tileSentence = (t) => (t.basis === "session" ? sessionSentence(t) : flaggedSentence(t));
+    const shortSentence = (t) => {
+      if (t.basis === "session") {
+        const x = t.sess;
+        return x && x.read ? t.label + MID + (x.premN ? money(x.prem) : DASH) + MID + (x.volN ? F.num(x.vol) + " contracts" : "volume " + DASH) + MID + (t.lean ? LEAN_WORD[t.lean.cat] : DASH) : t.label + MID + DASH + " " + whyNull(t, "premium");
+      }
+      return t.n ? t.label + MID + money(t.prem) + (isNum(t.share) ? " (" + F.pct(t.share, 0) + ")" : "") + MID + (t.volN ? F.num(t.vol) + " contracts" : "volume " + DASH) + MID + (t.lean ? LEAN_WORD[t.lean.cat] : DASH) : t.label + MID + DASH + " no flagged window" + (M.fundsOn && t.sess ? MID + "Session " + (t.sess.premN ? money(t.sess.prem) : DASH) : "");
+    };
+    const groupSentence = (g) => {
+      if (M.basis === "session") return g.label + MID + (g.n ? money(g.prem) + " in the session" + (isNum(g.share) ? " (" + F.pct(g.share, 1) + " of fund premium)" : "") + MID + (g.vol === null ? "volume " + DASH : "volume " + F.num(g.vol) + " contracts") : DASH + " no fund read");
+      return g.label + MID + (g.n ? money(g.prem) + " flagged" + (isNum(g.share) ? " (" + F.pct(g.share, 1) + " of all)" : "") + MID + (g.vol === null ? "volume " + DASH : "volume " + F.num(g.vol) + " contracts") : DASH + " no flagged window");
+    };
     const leader = () => M.tiles.filter((t) => isNum(valueOf(t, measure))).sort((a, b) => Math.abs(valueOf(b, measure)) - Math.abs(valueOf(a, measure)) || (a.id < b.id ? -1 : 1))[0] || null;
     const sentence = () => {
       if (!M || !M.count) return "";
@@ -335,14 +502,43 @@
     const paintRead = () => { read.textContent = sentence(); };
 
     function describe() {
+      if (M && M.basis === "session") {
+        const bestS = M.groups.filter((g) => g.n).sort((a, b) => b.prem - a.prem)[0];
+        const lS = leader();
+        return M.tiles.length + " classes on " + M.groups.length + " rows, " + M.count + " with a whole-session figure, " + money(M.total) + " of fund premium. " + (bestS ? bestS.label + " draws the most, " + money(bestS.prem) + ". " : "") + "Pillar height is " + meas().nounS + ", one scale" + (lS ? ", the tallest " + lS.label : "") + ". " + stampText() + ". The tables list every class and its funds.";
+      }
       if (!M || !M.count) return "The floor has no flagged windows to draw.";
       const best = M.groups.filter((g) => g.n).sort((a, b) => b.prem - a.prem)[0];
       const l = leader();
       return M.tiles.length + " classes on " + M.groups.length + " rows, " + M.count + " flagged windows, " + money(M.total) + ". " + (best ? best.label + " draws the most premium, " + money(best.prem) + ". " : "") + "Pillar height is " + meas().noun + ", one scale" + (l ? ", the tallest " + l.label : "") + ". The tables list every class and its names.";
     }
 
+    function paintSessionTables() {
+      const th = (t, c) => h("th", { scope: "col", class: c || null }, t);
+      const cell = (txt, why) => h("td", { class: "c-num", title: why || null }, txt);
+      const premOf = (t) => (t.vals.premium === null ? -1 : t.vals.premium);
+      const ranked = M.tiles.slice().sort((a, b) => premOf(b) - premOf(a) || (a.id < b.id ? -1 : 1));
+      const classes = h("table", { class: "mk-tbl mk-fl-t" }, h("caption", null, "Classes ranked by whole-session premium, with volume in contracts and lean by convention"),
+        h("thead", null, h("tr", null, th("Class"), th("Group"), th("Premium", "c-num"), th("Share", "c-num"), th("Volume", "c-num"), th("Net lean", "c-num"), th("Funds read", "c-num"))),
+        h("tbody", null, ranked.map((t) => h("tr", { "data-id": t.id }, h("th", { scope: "row" }, t.label), h("td", null, groupOf(t).label),
+          cell(t.vals.premium === null ? DASH : money(t.vals.premium), t.vals.premium === null ? whyNull(t, "premium") : null), cell(isNum(t.share) ? F.pct(t.share, 1) : DASH),
+          cell(t.vals.volume === null ? DASH : F.num(t.vals.volume), t.vals.volume === null ? whyNull(t, "volume") : null),
+          cell(t.vals.lean === null ? DASH : moneyS(t.vals.lean), t.vals.lean === null ? whyNull(t, "lean") : null), cell(t.sess ? t.sess.read + " of " + t.sess.of : DASH)))));
+      const funds = M.tiles.flatMap((t) => (t.sess ? t.sess.tickers.filter((x) => !x.alias).map((x) => ({ ...x, cls: t })) : []));
+      const readF = funds.filter((x) => x.r).sort((a, b) => (isNum(b.prem) ? b.prem : -1) - (isNum(a.prem) ? a.prem : -1) || (a.t < b.t ? -1 : 1)).slice(0, 40);
+      const gone = funds.filter((x) => !x.r);
+      const flagOf = (x) => { const nm = x.cls.names.get(x.t); return nm ? money(nm.prem) : DASH; };
+      const fundT = h("table", { class: "mk-tbl mk-fl-t" }, h("caption", null, "The funds with the most whole-session premium, beside their flagged premium"),
+        h("thead", null, h("tr", null, th("Fund"), th("Class"), th("Premium", "c-num"), th("Volume", "c-num"), th("Net lean", "c-num"), th("Flagged", "c-num"))),
+        h("tbody", null, readF.concat(gone).map((x) => h("tr", { "data-t": x.t }, h("th", { scope: "row" }, h("a", { href: "/flows/ticker/?t=" + encodeURIComponent(x.t) }, x.t)), h("td", null, x.cls.label),
+          x.r ? cell(isNum(x.prem) ? money(x.prem) : DASH) : cell(DASH, FUND_WHY[x.why]), x.r ? cell(isNum(x.vol) ? F.num(x.vol) : DASH) : cell(DASH, FUND_WHY[x.why]),
+          x.r ? cell(isNum(x.net) ? moneyS(x.net) : DASH) : cell(DASH, FUND_WHY[x.why]), cell(flagOf(x))))));
+      tables.replaceChildren(classes, fundT);
+    }
+
     function paintTables() {
       if (!M) { tables.replaceChildren(); return; }
+      if (M.basis === "session") { paintSessionTables(); return; }
       const th = (t, c) => h("th", { scope: "col", class: c || null }, t);
       const cell = (txt, why) => h("td", { class: "c-num", title: why || null }, txt);
       const ranked = M.tiles.slice().sort((a, b) => b.prem - a.prem || (a.id < b.id ? -1 : 1));
@@ -359,10 +555,50 @@
       tables.replaceChildren(classes, nameT);
     }
 
+    function paintSessionSide(rowsFit) {
+      const rowsN = Math.max(3, rowsFit);
+      if (sel) {
+        const g = groupOf(sel);
+        side.append(h("div", { class: "mk-fl-sh" }, h("h3", null, sel.label), h("button", { type: "button", class: "mk-fl-x", onclick: () => select(null) }, "Back to classes")), h("p", { class: "mk-fl-ss" }, g.label + MID + (sel.vals.premium === null ? DASH : money(sel.vals.premium)) + MID + stampText()));
+        const rowsAll = sel.sess ? sel.sess.tickers : [];
+        if (!rowsAll.length) { side.append(h("p", { class: "mk-fl-sn" }, whyNull(sel, "premium"))); return; }
+        side.append(h("div", { class: "mk-fl-lh", role: "none" }, h("span", null, "Fund"), h("span", null, "Session"), h("span", null, "Flagged")));
+        const list = h("ol", { class: "mk-fl-list" });
+        const flagOf = (t) => { const nm = sel.names.get(t); return nm ? money(nm.prem) : DASH; };
+        rowsAll.slice(0, rowsN).forEach((x) => {
+          if (x.alias) { list.append(h("li", { "data-lean": "none" }, h("a", { href: "/flows/ticker/?t=" + encodeURIComponent(x.t) }, x.t), h("span", { class: "mk-fl-v" }, "Counted under " + x.alias), h("span", { class: "mk-fl-p" }, flagOf(x.t)))); return; }
+          if (!x.r) { list.append(h("li", { "data-lean": "none" }, h("a", { href: "/flows/ticker/?t=" + encodeURIComponent(x.t) }, x.t), h("span", { class: "mk-fl-v", title: FUND_WHY[x.why] }, DASH), h("span", { class: "mk-fl-p" }, flagOf(x.t)))); return; }
+          const v = measure === "volume" ? x.vol : measure === "lean" ? x.net : x.prem;
+          const ln = x.gross > 0 && isNum(x.net) ? leanOf(x.net, x.gross) : null;
+          list.append(h("li", { "data-lean": ln ? ln.cat : "none" }, h("a", { href: "/flows/ticker/?t=" + encodeURIComponent(x.t) }, x.t), h("span", { class: "mk-fl-v" }, !isNum(v) ? DASH : measure === "volume" ? F.num(v) : measure === "lean" ? moneyS(v) : money(v)), h("span", { class: "mk-fl-p" }, flagOf(x.t))));
+        });
+        side.append(list);
+        if (rowsAll.length > rowsN) side.append(h("p", { class: "mk-fl-sn" }, "+" + (rowsAll.length - rowsN) + " more in the tables"));
+        const miss = sel.sess ? missBit(sel.sess) : "";
+        if (miss) side.append(h("p", { class: "mk-fl-sn" }, miss + "."));
+        const meta = metaText(sel);
+        if (meta) side.append(h("p", { class: "mk-fl-sn" }, meta + "."));
+        return;
+      }
+      side.append(h("div", { class: "mk-fl-sh" }, h("h3", null, "Classes by session " + (measure === "volume" ? "volume" : measure === "lean" ? "net lean" : "premium"))));
+      const rank = M.tiles.filter((t) => isNum(valueOf(t, measure))).sort((a, b) => Math.abs(valueOf(b, measure)) - Math.abs(valueOf(a, measure)) || (a.id < b.id ? -1 : 1));
+      const rowsR = Math.max(3, rowsFit - 1);
+      side.append(h("div", { class: "mk-fl-lh", role: "none" }, h("span", null, "Class"), h("span", null, meas().label), h("span", null, "Share")));
+      const list = h("ol", { class: "mk-fl-list" });
+      rank.slice(0, rowsR).forEach((t) => {
+        const v = valueOf(t, measure);
+        list.append(h("li", { "data-lean": t.lean ? t.lean.cat : "none" }, h("button", { type: "button", class: "mk-fl-pick", "data-id": t.id, onclick: () => select(t) }, t.label), h("span", { class: "mk-fl-v" }, measure === "volume" ? F.num(v) : measure === "lean" ? moneyS(v) : money(v)), h("span", { class: "mk-fl-p" }, isNum(t.share) ? F.pct(t.share, 0) : DASH)));
+      });
+      side.append(list);
+      const left = M.tiles.length - Math.min(rowsR, rank.length);
+      if (left > 0) side.append(h("p", { class: "mk-fl-sn" }, "+" + left + " more in the tables"));
+    }
+
     function paintSide(rowsFit) {
       side.replaceChildren();
       if (!M || !wide) { side.hidden = true; return; }
       side.hidden = false;
+      if (M.basis === "session") { paintSessionSide(rowsFit); return; }
       const rowsN = Math.max(3, rowsFit);
       if (sel) {
         const g = groupOf(sel);
@@ -578,6 +814,7 @@
         const front = cam(s.x, 0, s.z - PED / 2 - 0.06);
         const hot = hotOf(s);
         lab.add(s.label, front.x + level.get(s.id)[0], front.y + (phone ? 10 : 14) + level.get(s.id)[1], "center", hot ? 30 : 25, s.v === null ? TOK.faint : TOK.body, tf, { id: s.id, z: s.pz });
+        if (s.cap) lab.add(s.cap.slice(8), front.x + level.get(s.id)[0], front.y + (phone ? 10 : 14) + level.get(s.id)[1] + (phone ? 14 : 16), "center", 7, TOK.faint, tf, { id: s.id, z: s.pz });
         if (s.v !== null && (topSet.has(s.id) || hot)) {
           const t = tileOf(s.id), val = measure === "volume" ? F.num(s.v) : measure === "lean" ? moneyS(s.v) : money(s.v);
           lab.add(val, s.px, s.py - 6, "center", hot ? 29 : 8 + s.h / (SC.hmax || 1), TOK.strong, vf, { id: s.id, z: s.pz });
@@ -620,7 +857,7 @@
       wide = wrap.clientWidth >= 860;
       SC = layout(M, measure, W, H, { phone: W < 640, yaw, pitch });
       canvas.setAttribute("aria-label", describe());
-      legend.querySelector(".mk-fl-heights").textContent = "Height: " + meas().noun + ", one scale" + (SC && SC.vMax ? ", the tallest " + (measure === "volume" ? F.num(SC.vMax) + " contracts" : money(SC.vMax)) : "") + ". White base stripe: share of all flagged premium.";
+      legend.querySelector(".mk-fl-heights").textContent = "Height: " + (M.basis === "session" ? meas().nounS : meas().noun) + ", one scale" + (SC && SC.vMax ? ", the tallest " + (measure === "volume" ? F.num(SC.vMax) + " contracts" : money(SC.vMax)) : "") + (M.basis === "session" ? ". White base stripe: share of all fund premium in the session." : ". White base stripe: share of all flagged premium." + (M.fundsOn ? " The figure under a dashed tile is its whole-session premium, not flagged." : ""));
       paint();
       placeHits();
       paintRead();
@@ -629,13 +866,16 @@
 
     function render() {
       if (!M) return;
-      wrap.dataset.state = !S.st || S.st.state !== "ok" ? S.st.state : M.count ? "ok" : "quiet";
+      const sessionOk = M.basis === "session" && M.count > 0;
+      wrap.dataset.state = sessionOk ? "ok" : !S.st || S.st.state !== "ok" ? S.st.state : M.count ? "ok" : "quiet";
       const live = wrap.dataset.state === "ok";
+      if (subEl && M.fundsOn) subEl.textContent = M.basis === "session" ? stampText() : "Flagged windows" + (M.session ? MID + M.session : "");
       empty.hidden = live;
       main.hidden = !live;
       details.hidden = !live;
       legend.hidden = !live;
       seg.hidden = !live;
+      if (basisSeg) basisSeg.hidden = !live;
       if (!live) {
         empty.textContent = S.st.state === "pending" ? "Pending: flagged windows not published." : S.st.state === "unavailable" ? "Unavailable: " + (S.st.reason || "the flagged windows could not be read.") : "No flagged window this session. A quiet reading, not a forecast.";
         read.textContent = "";
@@ -644,8 +884,11 @@
         SC = null;
         return;
       }
-      note.textContent = M.uniOk ? "" : "The universe has not published, so stocks are not split by sector.";
-      fullNote.textContent = "One pillar for each class: the four index funds, the eleven sector ETFs, any other fund class that was flagged, and single stocks grouped by sector. Height is the measure chosen above on one scale across every class. Colour is lean by convention: calls on the ask side and puts on the bid side read bullish, the reverse bearish, slate when the two are within " + Math.round(LEAN_EDGE * 100) + "% of premium. The white stripe at each base is the class's share of all flagged premium, the longest being the largest. A dashed tile had no flagged window." + (M.dropped ? " " + M.dropped + " rows without a premium are not drawn." : "");
+      const fundsNote = !M.fundsOn ? "" : M.funds ? (M.funds.previous ? "These figures are from the previous session (" + M.funds.session + "), not today's." : "")
+        : M.fundsWhy === "off" ? FUND_WHY.off : M.fundsWhy === "unavailable" ? "Whole-session activity was not read tonight." : "Whole-session activity has not been published yet.";
+      note.textContent = [M.basis === "session" ? "Stocks show flagged windows only." : M.uniOk ? "" : "The universe has not published, so stocks are not split by sector.", fundsNote].filter(Boolean).join(" ");
+      if (M.basis === "session") fullNote.textContent = "One pillar for each class of fund: the four index funds, the eleven sector ETFs and the other fund classes. Height is the measure chosen above on one scale, from each fund's whole-session options activity as the feed reports it. Colour is lean by convention: calls on the ask side and puts on the bid side read bullish, the reverse bearish, slate when the two are within " + LEAN_EDGE_PCT + "% of premium. The white stripe at each base is the class's share of all fund premium in the session. A dashed tile had no row; its reason is in the readout. Stocks show flagged windows only. Session figures are never added to flagged premium or drawn on its scale.";
+      else fullNote.textContent = "One pillar for each class: the four index funds, the eleven sector ETFs, any other fund class that was flagged, and single stocks grouped by sector. Height is the measure chosen above on one scale across every class. Colour is lean by convention: calls on the ask side and puts on the bid side read bullish, the reverse bearish, slate when the two are within " + LEAN_EDGE_PCT + "% of premium. The white stripe at each base is the class's share of all flagged premium, the longest being the largest. A dashed tile had no flagged window." + (M.dropped ? " " + M.dropped + " rows without a premium are not drawn." : "") + (M.fundsOn ? " A fund with no flagged window also prints its whole-session premium under its name. Flagged and session figures are never added together or drawn on one scale." : "");
       relayout();
       paintTables();
     }
@@ -728,14 +971,31 @@
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     if (mq.addEventListener) mq.addEventListener("change", onTheme);
 
-    const rebuild = () => { M = model(S.alerts, { universe: S.universe }); sel = null; hover = null; render(); };
+    let auto = false;
+    const build = () => model(S.alerts, { universe: S.universe, funds: S.funds, basis });
+    const rebuild = () => {
+      if (auto && !picked) basis = "flagged";
+      auto = false;
+      M = build();
+      if (M.fundsOn && !picked && M.basis === "flagged" && M.funds) { basis = "session"; auto = true; M = build(); }
+      sel = null;
+      hover = null;
+      paintBasis();
+      render();
+    };
     const api = {
       take(alerts, st) {
         S.alerts = alerts && Array.isArray(alerts.rows) ? alerts : null;
         S.st = st || (S.alerts ? { state: "ok" } : { state: "pending", reason: "Reading the flagged windows." });
         rebuild();
       },
-      update(o) { if (o.universe !== undefined) S.universe = o.universe; if (S.alerts || S.st.state !== "pending") rebuild(); },
+      update(o) {
+        if (o.universe !== undefined) S.universe = o.universe;
+        if (o.funds !== undefined) S.funds = o.funds;
+        if (S.alerts || S.st.state !== "pending" || S.funds) rebuild();
+      },
+      basis: () => (M ? M.basis : basis),
+      setBasis(id) { if (!BASES.some((b) => b.id === id)) return; basis = id; picked = true; setHash(); rebuild(); },
       model: () => M,
       scene: () => SC,
       labels: () => LAB,
@@ -748,8 +1008,9 @@
     };
     FLOORS.set(host, api);
     if (opts.alerts) api.take(opts.alerts, opts.st);
+    else if (S.funds) rebuild();
     return api;
   }
 
-  window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { floor: Object.freeze({ model, layout, mount, of: (host) => FLOORS.get(host) || null, valueOf, classify: (t) => (FUND_OF.has(t) ? "funds" : ETF_OF.has(t) ? "etf" : OTHER_OF.has(t) ? "other" : "stocks") }) }));
+  window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { floor: Object.freeze({ model, layout, mount, of: (host) => FLOORS.get(host) || null, valueOf, chooseFunds, whyNull, classify: (t) => (FUND_OF.has(t) ? "funds" : ETF_OF.has(t) ? "etf" : OTHER_OF.has(t) ? "other" : "stocks") }) }));
 })();

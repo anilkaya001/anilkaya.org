@@ -24,12 +24,14 @@ export const LIVE_KEYS = Object.freeze({
   "live:movers": spec("breadth", "actions", 8 * 1024, 0),
   "live:news": spec("breadth", "actions", 32 * 1024, 1),
   "live:heartbeat": spec("breadth", "actions", 8 * 1024, 0),
+  "live:funds": spec("market", "worker", 16 * 1024, 1),
 });
 
 export const TAPE_SPEC = spec("tape", "ondemand", 32 * 1024, 2);
 
 export const LIVE_BUDGET = Object.freeze({
   tier1Calls: 2,
+  fundsCalls: 1,
   tier1TimeoutMs: 6000,
   tier2PaceMs: 333,
   tier2MaxCalls: 48,

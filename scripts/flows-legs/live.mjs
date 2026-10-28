@@ -8,6 +8,7 @@ import { FOCUS_STRIP_FALLBACK, focusStripNames as focusNamesOf } from "../../sha
 import { phaseAt, closeMinutes, inferredEarlyClose, PHASE_MINUTES, LIVE_CLOCK, easternInstant, prevTradingDay } from "../../shared/flows-freshness.js";
 import { fakeLiveVendor, fakeBoards } from "./live-fake.mjs";
 import { pathFor } from "../../shared/flows-vendor-ops.js";
+import { fundsNote } from "../../shared/flows-floor-funds-live.js";
 
 export const LIVE_READ_PACE_MS = LIVE_BUDGET.tier2PaceMs;
 
@@ -269,6 +270,8 @@ export async function runLive({
     const head = typeof bytes["live:alerts"] === "number" ? shapeAlertsHead(merged.write, { writer }) : null;
     if (head) await put("live:alerts:head", head);
   } else log(`  live:alerts: NOT WRITTEN — ${merged.why}; ${merged.read} row(s) read, the held record stands`);
+
+  note(fundsNote(await readStored("live:funds")));
 
   if (typeof shapeNews === "function") {
     const news = failed(newsRaw)

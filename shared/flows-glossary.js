@@ -8,6 +8,7 @@ const TICKER = { file: "assets/js/flows-ticker.js", page: "each name's Ticker pa
 const POLITICAL = { file: "assets/js/flows-political.js", page: "Political", href: "/flows/political/" };
 const MOVES = { file: "assets/js/flows-moves.js", page: "Moves", href: "/flows/moves/" };
 const UNUSUAL = { file: "assets/js/flows-unusual.js", page: "Unusual", href: "/flows/unusual/" };
+const FLOWLAB = { file: "shared/flows-flowlab-copy.js", page: "Flow Lab", href: "/flows/flowlab/" };
 const MACRO = { file: "shared/flows-macro-copy.js", page: "Macro", href: "/flows/macro/" };
 const BOARDS = { file: "assets/js/flows-board.js", page: "the Bullish and Bearish boards", href: "/flows/long/" };
 
@@ -160,6 +161,27 @@ export const GLOSSARY = Object.freeze([
   { key: "insiders", term: "Insiders", ...MARKET_BELOW, lines: [
     "Form 4 buys against sells, in dollars, per filing day.",
   ] },
+  { key: "flowlab-ask-range", term: "Ask share range", ...FLOWLAB, lines: [
+    "Ask share range: the ask-side share of volume, widened by volume of unknown side.",
+  ] },
+  { key: "flowlab-off-share", term: "Off-exchange share", ...FLOWLAB, lines: [
+    "Off-exchange share is off-exchange stock volume over lit plus off-exchange, per price bin.",
+  ] },
+  { key: "flowlab-poc", term: "Point of control", ...FLOWLAB, lines: [
+    "Point of control is the busiest price level; a tie goes lower.",
+  ] },
+  { key: "flowlab-routing", term: "Routing concentration", ...FLOWLAB, lines: [
+    "Routing concentration sums squared exchange shares of contracts; one venue alone is 1.",
+  ] },
+  { key: "flowlab-strike-map", term: "Strike map", ...FLOWLAB, lines: [
+    "Strike map shows signed contracts per strike; ask-side calls and bid-side puts count positive.",
+  ] },
+  { key: "flowlab-value-area", term: "Value area", ...FLOWLAB, lines: [
+    "Value area is the band around the busiest level holding 70% of volume.",
+  ] },
+  { key: "flowlab-voi", term: "Volume to open interest", ...FLOWLAB, lines: [
+    "Volume to open interest is today's contracts over contracts open at the start.",
+  ] },
   { key: "net-impact", term: "Net impact", ...MARKET_BELOW, lines: [
     "The names the vendor ranks by net premium impact, split by sign.",
   ] },
@@ -188,4 +210,4 @@ export const GLOSSARY = Object.freeze([
   ] },
 ]);
 
-export const GLOSSARY_PAGES = Object.freeze([HOME.page, MARKET.page, MOVES.page, UNUSUAL.page, POLITICAL.page, EVENTS.page, BOARDS.page, TICKER.page, MACRO.page]);
+export const GLOSSARY_PAGES = Object.freeze([HOME.page, MARKET.page, MOVES.page, UNUSUAL.page, FLOWLAB.page, POLITICAL.page, EVENTS.page, BOARDS.page, TICKER.page, MACRO.page]);

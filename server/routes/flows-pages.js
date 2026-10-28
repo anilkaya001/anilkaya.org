@@ -4,6 +4,14 @@ import { memberShell } from "../../shared/flows-member-shell.js";
 import { modeOf } from "../../shared/flows-member-state.js";
 import { EXPORT_PAGES, pageHold } from "../../shared/flows-export-build.js";
 import { ledgerLiveOn } from "../../shared/flows-ledger-live.js";
+import { flowlabMode } from "../../shared/flows-flowlab.js";
+import { flowlabShell } from "../../shared/flows-flowlab-shell.js";
+import { floorFundsMode } from "../../shared/flows-floor-funds.js";
+
+const floorFundsOn = (env, owner) => {
+  const mode = floorFundsMode(env);
+  return mode === "on" || (mode === "owner" && owner === true);
+};
 
 const homeNet = (env, owner) => {
   const mode = String(env && env.FLOWS_HOME_NET || "").trim().toLowerCase();
@@ -33,13 +41,14 @@ const PAGES = Object.freeze([
   { slug: "long", from: "long", render: (username) => FLOWS_PAGES.sidePage({ username, side: "long" }) },
   { slug: "short", from: "short", render: (username) => FLOWS_PAGES.sidePage({ username, side: "short" }) },
   { slug: "watch", from: "watch", render: (username) => FLOWS_PAGES.watchPage({ username }) },
-  { slug: "market", render: (username, summary, owner, scenes) => FLOWS_PAGES.marketPage({ username, owner, scenes }) },
+  { slug: "market", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.marketPage({ username, owner, scenes, funds: floorFundsOn(env, owner) }) },
   { slug: "network", render: (username) => FLOWS_PAGES.networkPage({ username }) },
   { slug: "now", render: (username) => FLOWS_PAGES.nowPage({ username }) },
   { slug: "desk", render: (username) => FLOWS_PAGES.deskPage({ username }) },
   { slug: "strategy", render: (username) => FLOWS_PAGES.strategyPage({ username }) },
   { slug: "ticker", render: (username, summary, owner, scenes, env, gates) => FLOWS_PAGES.tickerPage({ username, scenes, privateLens: gates.macroOn(env, owner) }) },
   { slug: "moves", gate: "FLOWS_MOVES", render: (username) => FLOWS_PAGES.movesPage({ username }) },
+  { slug: "flowlab", flowlab: true, render: (username) => FLOWS_PAGES.flowlabPage({ username }) },
   { slug: "unusual", render: (username, summary, owner) => FLOWS_PAGES.unusualPage({ username, owner }) },
   { slug: "ledger", gate: "FLOWS_LEDGER", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.ledgerPage({ username, live: ledgerLiveOn(env, owner) }) },
   { slug: "macro", open: "macro", render: (username, summary, owner, scenes, env, gates) => FLOWS_PAGES.macroPage({ username, live: gates.macroLiveOn(env, owner) }) },
@@ -113,7 +122,9 @@ export function flowsPageRows(deps) {
         const owner = isOwner(env, session.username);
         if (page.ownerOnly && !owner) throw HttpError.of("not_found");
         const slug = page.slug || "overview";
-        const shown = memberShell(oracleShell(page.render(session.username, summary, owner, scenesOn(env, session.username), env, { macroOn, macroLiveOn }), oracleMode(env, owner), slug), memberOptions(env, owner, slug));
+        const labOn = flowlabMode(env, owner) === "on";
+        if (page.flowlab && !labOn) throw HttpError.of("not_found");
+        const shown = memberShell(oracleShell(flowlabShell(page.render(session.username, summary, owner, scenesOn(env, session.username), env, { macroOn, macroLiveOn }), slug, labOn), oracleMode(env, owner), slug), memberOptions(env, owner, slug));
         const rendered = macroOn(env, owner) ? macroNav(shown) : shown;
         return html(owner ? ownerNav(rendered) : rendered);
       },
