@@ -39,7 +39,7 @@ export function vendorMinuteCeilings(env = {}, { locations = 1 } = {}) {
     onDemand: perMinute(onDemand) * locations,
     member: perMinute(member) * locations,
     tier2: Math.floor(60000 / LIVE_BUDGET.tier2PaceMs),
-    tier1: LIVE_BUDGET.tier1Calls + 1,
+    tier1: LIVE_BUDGET.tier1Calls + LIVE_BUDGET.fundsCalls + 1,
   };
 }
 
@@ -78,9 +78,9 @@ export function downgradeBreaches(env = {}) {
   const c = vendorMinuteCeilings();
   eq(c.rail, RT_LIMITS.callsPerMinute, "the rail's default ceiling is the hub's own default, read through hubConfig");
   eq(c.tier2, 180, "the Tier 2 pass is paced at LIVE_BUDGET.tier2PaceMs (333 ms), 180 calls a minute");
-  eq(c.tier1, 3, "and Tier 1 with the focus tick is its two calls plus one");
-  eq(budgetPlanSum(), 240 + 120 + 180 + 3, "THE AS-BUILT REGULAR-SESSION CEILINGS OF THE PLAN'S LEDGER (rail, on-demand, Tier 2, Tier 1 and focus) SUM TO 543");
-  eq(vendorMinuteSum(), 240 + 120 + 60 + 180 + 3, "and with the member limiter every enforced ceiling sums to 603, counting each limiter once");
+  eq(c.tier1, 4, "and the cron engines are Tier 1's two market calls, the focus tick's one and the funds tick's one, summed as if they shared a minute although their firings never do");
+  eq(budgetPlanSum(), 240 + 120 + 180 + 4, "THE AS-BUILT REGULAR-SESSION CEILINGS OF THE PLAN'S LEDGER (rail, on-demand, Tier 2, Tier 1 and focus) SUM TO 544");
+  eq(vendorMinuteSum(), 240 + 120 + 60 + 180 + 4, "and with the member limiter every enforced ceiling sums to 604, counting each limiter once");
 }
 
 {
@@ -96,10 +96,10 @@ export function downgradeBreaches(env = {}) {
   const strictest = lines({});
   eq(strictest["uw.min"].plan, "unknown", "with no plan recorded the line is the unread plan's");
   eq(strictest["uw.min"].cap, 500, "which is Startup's 500 a minute");
-  ok(budgetPlanSum() > strictest["uw.min"].cap, `EXPECTED BREACH: the plan ledger's 543 is over the strictest vendor minute line (${strictest["uw.min"].cap}) and P1-31 is the row that clears it`);
+  ok(budgetPlanSum() > strictest["uw.min"].cap, `EXPECTED BREACH: the plan ledger's 544 is over the strictest vendor minute line (${strictest["uw.min"].cap}) and P1-31 is the row that clears it`);
   ok(vendorMinuteSum() > strictest["uw.min"].cap, `and the full sum (${vendorMinuteSum()}) is over it too`);
   same(budgetBreaches(), ["uw.min"], "so the as-built tree reports one breach today, the vendor minute line");
-  eq(vendorMinuteSum() - strictest["uw.min"].cap, 103, "103 calls a minute over the line, none of it headroom");
+  eq(vendorMinuteSum() - strictest["uw.min"].cap, 104, "104 calls a minute over the line, none of it headroom: the Tier 1 fund read added one to the 103 before it");
 }
 
 {
@@ -120,7 +120,7 @@ export function downgradeBreaches(env = {}) {
   same(plans.filter((p) => p.line.cap !== null && vendorMinuteSum() <= p.line.cap).map((p) => p.plan), ["startup-annual"], "only the annual plan's 1,000 a minute covers the as-built ceilings");
   const caps = plans.filter((p) => p.line.planCap !== null).map((p) => p.line.planCap);
   eq(lines({})["uw.min"].cap, Math.min(...caps), "an unread plan is the smallest documented line");
-  same(budgetBreaches({ FLOWS_UW_PLAN: "advanced" }), ["uw.min"], "EXPECTED BREACH ON THE RECORDED PLAN: Advanced states no minute line, so the 603 is held to the 500 working line and P1-31 still clears it");
+  same(budgetBreaches({ FLOWS_UW_PLAN: "advanced" }), ["uw.min"], "EXPECTED BREACH ON THE RECORDED PLAN: Advanced states no minute line, so the 604 is held to the 500 working line and P1-31 still clears it");
 }
 
 {
@@ -138,7 +138,7 @@ export function downgradeBreaches(env = {}) {
   const four = { locations: 4 };
   eq(vendorMinuteCeilings({}, four).onDemand, 480, "four locations make the on-demand limiter 480 a minute in the worst case");
   eq(vendorMinuteCeilings({}, four).member, 240, "and the member limiter 240");
-  eq(vendorMinuteSum({}, four), 240 + 480 + 240 + 180 + 3, "so the worst-case sum is 1,143");
+  eq(vendorMinuteSum({}, four), 240 + 480 + 240 + 180 + 4, "so the worst-case sum is 1,144");
   same(budgetBreaches({ FLOWS_UW_PLAN: "startup-annual" }, four), ["uw.min"], "which not even the annual plan's 1,000 covers");
   same(budgetBreaches({ FLOWS_UW_PLAN: "startup-annual" }, { locations: 1 }), [], "while one location fits it");
 }
@@ -148,10 +148,10 @@ export function downgradeBreaches(env = {}) {
   eq(vendorMinuteCeilings(raised).rail, 1200, "FLOWS_RT_CALLS_PER_MIN is honoured up to 1,200 by the hub");
   same(budgetBreaches(raised), ["uw.min"], "a rail raised to 1,200 is a breach: 1,563 with the other ceilings");
   same(budgetBreaches({ ...raised, FLOWS_UW_PLAN: "startup-annual" }), ["uw.min"], "and the annual plan's 1,000 does not cover it either");
-  same(budgetBreaches({ FLOWS_RT_CALLS_PER_MIN: "137" }), [], "a rail at 137 is the largest that fits 500 beside the other ceilings (363)");
-  same(budgetBreaches({ FLOWS_RT_CALLS_PER_MIN: "138" }), ["uw.min"], "and 138 does not: 501, one past the line");
-  same(budgetBreaches({ FLOWS_RT_CALLS_PER_MIN: "637", FLOWS_UW_PLAN: "startup-annual" }), [], "the annual plan covers a rail at 637");
-  same(budgetBreaches({ FLOWS_RT_CALLS_PER_MIN: "638", FLOWS_UW_PLAN: "startup-annual" }), ["uw.min"], "and not 638");
+  same(budgetBreaches({ FLOWS_RT_CALLS_PER_MIN: "136" }), [], "a rail at 136 is the largest that fits 500 beside the other ceilings (364)");
+  same(budgetBreaches({ FLOWS_RT_CALLS_PER_MIN: "137" }), ["uw.min"], "and 137 does not: 501, one past the line");
+  same(budgetBreaches({ FLOWS_RT_CALLS_PER_MIN: "636", FLOWS_UW_PLAN: "startup-annual" }), [], "the annual plan covers a rail at 636");
+  same(budgetBreaches({ FLOWS_RT_CALLS_PER_MIN: "637", FLOWS_UW_PLAN: "startup-annual" }), ["uw.min"], "and not 637");
   eq(vendorMinuteCeilings({ FLOWS_RT_CALLS_PER_MIN: "9" }).rail, 10, "the hub clamps a rail below 10 a minute up to 10");
   eq(vendorMinuteCeilings({ FLOWS_RT_CALLS_PER_MIN: "lots" }).rail, 240, "and a value that is not a number falls back to the default");
 }
@@ -183,7 +183,7 @@ export function downgradeBreaches(env = {}) {
   ok(/rt\.connect\(\{ topics: \["fl"\] \}\)/.test(read("assets/js/flows-unusual.js")), "which is the same demand, so a second viewer of it adds no poll: the hub polls a topic once for every socket that names it");
   same(vendorMinuteCeilings({ FLOWS_LEDGER_LIVE: "on" }), vendorMinuteCeilings({}), "FLOWS_LEDGER_LIVE moves no per-minute ceiling: the rail, the limiters, Tier 2 and Tier 1 are what they were");
   same(vendorMinuteCeilings({ FLOWS_LEDGER_LIVE: "owner" }), vendorMinuteCeilings({}), "owner mode too");
-  eq(vendorMinuteSum({ FLOWS_LEDGER_LIVE: "on" }), 603, "so the sum stays at 603 and the as-built breach of the 500 working line is not one call wider");
+  eq(vendorMinuteSum({ FLOWS_LEDGER_LIVE: "on" }), 604, "so the sum stays at 604 and the as-built breach of the 500 working line is not one call wider");
   ok(/^FLOWS_LEDGER_LIVE = "owner"$/m.test(toml), "wrangler.toml ships the live ledger to owners only");
 }
 
@@ -204,4 +204,4 @@ export function downgradeBreaches(env = {}) {
   eq(lines({})["uw.day"].source, "uw.tier", "the strictest day line cites the spec's tier text");
 }
 
-console.log(`✓ flows-vendor-budget: ${checks} assertions — the enforced per-minute vendor ceilings (rail, on-demand and member limiters, the Tier 2 pace, Tier 1 and focus) summed to 543 and 603 and held against the same plan-facts table the governor reads, with the as-built breach of the unread plan's 500 asserted as expected and the per-location limiters counted at four locations, for every vendor plan with Advanced's unstated minute line held to the 500 working line, the recorded plan moving no ceiling, a rail ceiling moved across the line, the vendor lines unmoved by a Workers plan change while 14 serving lines move, and the downgrade checklist of enforced settings above the Free column`);
+console.log(`✓ flows-vendor-budget: ${checks} assertions — the enforced per-minute vendor ceilings (rail, on-demand and member limiters, the Tier 2 pace, Tier 1 and focus) summed to 544 and 604 and held against the same plan-facts table the governor reads, with the as-built breach of the unread plan's 500 asserted as expected and the per-location limiters counted at four locations, for every vendor plan with Advanced's unstated minute line held to the 500 working line, the recorded plan moving no ceiling, a rail ceiling moved across the line, the vendor lines unmoved by a Workers plan change while 14 serving lines move, and the downgrade checklist of enforced settings above the Free column`);

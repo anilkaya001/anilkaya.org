@@ -169,7 +169,7 @@ const bump = (job, trips, read, written) => {
     };
     let nextPass = at("09:07");
     const firings = dayFirings(cronStrings(), day);
-    ok(firings.length === 312, "a weekday is 312 cron firings: " + firings.length);
+    ok(firings.length === 420, "a weekday is 420 cron firings: " + firings.length);
     for (const firing of firings) {
       while (nextPass <= firing.at && nextPass <= at("16:30")) {
         now = nextPass;
