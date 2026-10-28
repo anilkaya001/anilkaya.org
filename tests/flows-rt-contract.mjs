@@ -37,14 +37,16 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 const read = (p) => readFileSync(new URL("../" + p, import.meta.url), "utf8");
 const DAY = "2026-09-30";
 const at = (h, m, day = DAY) => easternInstant(day, h * 60 + m);
-const TOPICS = RT.RT_TOPIC_KEYS;
+const TOPICS = RT.RT_DEFAULT_TOPICS;
 const cpuMs = () => { const u = process.threadCpuUsage(); return (u.user + u.system) / 1000; };
 
 const rtFlat = (o) => JSON.stringify(Object.keys(o).sort());
 
 {
-  deep(RT.RT_TOPIC_KEYS, ["px", "fl", "gx", "mk", "nw"], "five data topics");
-  deep(RT.RT_KINDS, ["px", "fl", "gx", "mk", "nw", "ctl"], "five data topics and the control channel");
+  deep(RT.RT_TOPIC_KEYS, ["px", "fl", "gx", "mk", "nw", "ht"], "five polled data topics and the halts channel");
+  deep(RT.RT_DEFAULT_TOPICS, ["px", "fl", "gx", "mk", "nw"], "the five polled topics are what a caller that names none is given: the halts channel is asked for by name only");
+  deep(RT.RT_SOCKET_ONLY, ["ht"], "the halts channel is the one topic the socket alone carries");
+  deep(RT.RT_KINDS, ["px", "fl", "gx", "mk", "nw", "ht", "ctl"], "six data topics and the control channel");
   deep(RT.RT_CTL, ["hello", "hb", "resync", "degraded", "closed", "bye"], "six control frames");
   deep(RT.RT_ENVELOPE_KEYS, ["v", "k", "ep", "sq", "at", "snap", "fresh", "meta", "rows"], "the envelope keys, in order");
   for (const [name, v] of Object.entries({ RT_TOPICS: RT.RT_TOPICS, RT_LIMITS: RT.RT_LIMITS, RT_CLOSE: RT.RT_CLOSE, RT_ROW_FIELDS: RT.RT_ROW_FIELDS })) {
@@ -1023,11 +1025,11 @@ const seqOk = (ws) => {
   deep(Array.from(new Set(r.vendor.calls.map((c) => c.path))), ["/api/screener/stocks"], "demand: the only vendor route read is the screener");
   ok(r.vendor.paramsOf(/screener/).every((p) => p.ticker.split(",").includes("NVDA")), "demand: and the focus ticker still joins the px read");
   const st = r.hub.status();
-  deep(Object.keys(st.topics), TOPICS.slice(), "status: still lists all five topics");
+  deep(Object.keys(st.topics), RT.RT_TOPIC_KEYS.slice(), "status: lists the five polled topics and the halts channel");
   deep(TOPICS.map((k) => [st.topics[k].window.klass, st.topics[k].window.liveMs, st.topics[k].window.staleMs]),
     TOPICS.map((k) => [RT.RT_TOPICS[k].klass, (FRESH_CLASSES[RT.RT_TOPICS[k].klass].liveS + RT.RT_TOPICS[k].barS) * 1000, (FRESH_CLASSES[RT.RT_TOPICS[k].klass].staleS + RT.RT_TOPICS[k].barS) * 1000]),
     "status: each topic carries its own live and stale windows, the class's line plus the vendor's bar (prices and alerts 15 s and 60 s, gamma 90 s and 180 s, market tide 330 s and 420 s, news 75 s and 300 s)");
-  deep(TOPICS.map((k) => st.topics[k].demanded), [true, false, false, false, false], "status: and says which are demanded");
+  deep(RT.RT_TOPIC_KEYS.map((k) => st.topics[k].demanded), [true, false, false, false, false, false], "status: and says which are demanded");
   deep(Array.from(r.hub.plan.topics), ["px"], "demand: the plan's topics are the union of what sockets ask");
   r.hub.lastBroadcastAt = 0;
   r.hub.beat(r.state.t, false);
@@ -2322,7 +2324,7 @@ const seqOk = (ws) => {
     }
     const toml = read("wrangler.toml");
     const socketTopics = Object.entries(RT.RT_UPSTREAM).filter(([, v]) => v.channels.length > 0).map(([k]) => k);
-    ok(socketTopics.length === 5, "redaction: every topic names vendor socket channels, so the credential rules apply to the object that will open them");
+    ok(socketTopics.length === RT.RT_TOPIC_KEYS.length && RT.RT_TOPIC_KEYS.length === 6, "redaction: every topic, the halts channel included, names feed socket channels, so the credential rules apply to the object that will open them");
     ok(/\[observability\.traces\]\nenabled = false\n/.test(toml), "redaction: and traces are switched off in wrangler.toml, where a span would record the socket URL's query");
   }
 }
@@ -2570,9 +2572,10 @@ const SKEY = "sock-key-9f8e7d6c5b4a3921";
   deep(SOCK.wantChannels({ topics: new Set(["px"]), focus: ["NVDA", "bad ticker", "x"], gex: ["NVDA"] }).map((w) => w.channel), ["price:NVDA"], "socket: only the topics demanded, only valid tickers");
   deep(SOCK.wantChannels({ topics: new Set(), focus: names, gex: names }), [], "socket: nothing demanded, nothing joined");
   for (const k of ["px", "gx", "fl", "nw"]) ok(RT.RT_UPSTREAM[k].channels.includes(SOCK.SOCKET_CHANNELS[k].template), `socket: ${k} joins a channel the topic table already lists (${SOCK.SOCKET_CHANNELS[k].template})`);
-  deep(SOCK.SOCKET_TOPICS, ["px", "fl", "gx", "nw"], "socket: four topics ride the socket; mk stays on REST");
+  for (const k of ["ht"]) ok(RT.RT_UPSTREAM[k].channels.includes(SOCK.SOCKET_CHANNELS[k].template), `socket: ${k} joins a channel the topic table already lists (${SOCK.SOCKET_CHANNELS[k].template})`);
+  deep(SOCK.SOCKET_TOPICS, ["px", "fl", "gx", "nw", "ht"], "socket: five topics ride the socket; mk stays on REST and the halts channel rides nothing else");
   deep(SOCK.channelTopic("price:NVDA"), { k: "px", name: "NVDA" }, "socket: a price channel is px");
-  deep([SOCK.channelTopic("gex:BRK.B"), SOCK.channelTopic("flow-alerts"), SOCK.channelTopic("news")], [{ k: "gx", name: "BRK.B" }, { k: "fl", name: null }, { k: "nw", name: null }], "socket: gex, flow-alerts and news");
+  deep([SOCK.channelTopic("gex:BRK.B"), SOCK.channelTopic("flow-alerts"), SOCK.channelTopic("news"), SOCK.channelTopic("trading_halts")], [{ k: "gx", name: "BRK.B" }, { k: "fl", name: null }, { k: "nw", name: null }, { k: "ht", name: null }], "socket: gex, flow-alerts, news and trading_halts");
   deep(["price", "gex", "market_tide", "net_flow:SPY", "price:bad ticker", null, 4].map(SOCK.channelTopic), [null, null, null, null, null, null, null], "socket: every other channel is nobody's");
 
   deep(SOCK.parseMessage('["flow-alerts",{"response":{},"status":"ok"}]'), { kind: "ack", channel: "flow-alerts", status: "ok", detail: null }, "parse: an ok ack");

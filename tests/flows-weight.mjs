@@ -184,6 +184,11 @@ for (const name of ["deskPage", "sidePage", "watchPage"]) {
   CEILING_KIB[name] += MEMBER_EXPORT_JS.bytes / 1024;
   GZIP_KIB[name] += MEMBER_EXPORT_JS.gzip / 1024;
 }
+const RT_HALTS = { od: "WP6-HALTS", bytes: 884, gzip: 206, routes: ["marketPage", "movesPage", "networkPage", "nowPage", "overviewPage", "sidePage", "tickerPage", "unusualPage", "watchPage"], why: "WP6 halts channel: the rail client carries the sixth topic (its ring, grace and default list), a heartbeat that tells a page when the channel's state turns, and the halts() adapter the Events page reads; flows-rt.js is eager on these nine routes, so each carries the same bytes" };
+for (const name of RT_HALTS.routes) {
+  CEILING_KIB[name] += RT_HALTS.bytes / 1024;
+  GZIP_KIB[name] += RT_HALTS.gzip / 1024;
+}
 
 const RATCHET_KIB = { raw: 12, gzip: 3, css: 3, cssGzip: 3 };
 const HELD_RAW_KIB = { eventsPage: 50 };
@@ -253,6 +258,8 @@ const HORIZON_DEFERRED = { od: "LANE-4", tickerBytes: 2947, marketBytes: 1261, w
 DEFERRED_KIB.tickerPage += HORIZON_DEFERRED.tickerBytes / 1024;
 DEFERRED_KIB.marketPage += HORIZON_DEFERRED.marketBytes / 1024;
 DEFERRED_KIB.tickerPage += FLOWLAB_LINK.networkBytes / 1024;
+const ER_HALTS_LIVE = { od: "WP6-HALTS", bytes: 301, why: "the Events page connects the rail for the halts channel when the halts switch is on, and its halts pane follows the channel's state as it turns instead of the state at first paint (flows-er.js, a deferred group file)" };
+DEFERRED_KIB.eventsPage += ER_HALTS_LIVE.bytes / 1024;
 DEFERRED_KIB.unusualPage += FLOWLAB_LINK.belowBytes / 1024;
 DEFERRED_KIB.flowlabPage = 80 + NN_ASK.bytes / 1024;
 

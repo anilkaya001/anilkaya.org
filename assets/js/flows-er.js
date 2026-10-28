@@ -6,7 +6,7 @@
     tabs: { risk: "Risk", issues: "New issues", policy: "Policy", halts: "Halts" },
     loading: "Loading the event-risk read.",
     chip: "Event risk",
-    chipTitle: "Behind a switch; owners only",
+    chipTitle: "The Risk, New issues, Policy and Halts views",
     verdict: {
       rich: { word: "Priced above past moves", glyph: "down", short: "Above" },
       cheap: { word: "Priced below past moves", glyph: "up", short: "Below" },
@@ -136,7 +136,8 @@
     document.head.append(Object.assign(document.createElement("link"), { rel: "stylesheet", href, onload: ok, onerror: ok }));
   });
 
-  const S = { data: null, cards: new Map(), quotes: new Map(), mounted: null, said: 0, sayQueue: [], haltsSeen: new Set(), timer: null };
+  const S = { data: null, cards: new Map(), quotes: new Map(), mounted: null, said: 0, sayQueue: [], haltsSeen: new Set(), timer: null, rt: null };
+  if (haltsOn && UI.rt && typeof UI.rt.connect === "function") { try { S.rt = UI.rt.connect({ topics: ["ht"], primary: [] }); } catch { S.rt = null; } }
 
   const isNum = (v) => typeof v === "number" && Number.isFinite(v);
   const dayMs = (d) => Date.parse(d + "T00:00:00Z");
@@ -572,7 +573,7 @@
   function haltRow(r, opts) {
     const reasonText = haltReason(r.reason);
     const state = COPY.halt.states[r.state] || (r.state ? r.state.charAt(0).toUpperCase() + r.state.slice(1).replace(/_/g, " ") : DASH);
-    return h("li", { class: "er-li er-halt", "data-t": r.t },
+    return h("li", { class: "er-li er-halt" + (opts.date ? " is-dated" : ""), "data-t": r.t },
       h("span", { class: "er-time" }, (opts.date ? (F.when(r.at) || DASH) : (F.time(r.at).replace(" TRT", "") + " TRT"))),
       tickerButton(r.t),
       h("span", { class: "er-hs is-" + (r.state || "none") }, state),
@@ -595,12 +596,15 @@
   function paintHalts(d) {
     const host = hosts.halts;
     if (!host) return;
-    const liveState = !haltsOn ? "off" : liveHalts() === null ? "socket-only" : "ok";
+    const liveStateNow = () => (!haltsOn ? "off" : liveHalts() === null ? "socket-only" : "ok");
+    let liveState = liveStateNow();
     const h14 = d && d.halts14;
     const livePane = h("div", { class: "er-livebox" });
     const liveHead = h("p", { class: "er-livehead", role: "status" });
     const ul = h("ul", { class: "er-list", role: "log", "aria-live": "off", "aria-label": "Halts streamed now" });
     const paintLive = () => {
+      liveState = liveStateNow();
+      stateNow();
       if (liveState === "off") { liveHead.textContent = ""; ul.replaceChildren(h("li", { class: "er-li is-empty" }, DASH + " " + COPY.halt.off)); return; }
       if (liveState === "socket-only") { liveHead.textContent = ""; ul.replaceChildren(h("li", { class: "er-li is-empty is-warn" }, DASH + " " + COPY.halt.socketOnly)); return; }
       const rows = liveHalts() || [];
@@ -613,11 +617,11 @@
       ul.replaceChildren(...rows.slice().sort((a, b) => b.ts - a.ts).map((r) => haltRow(r, { open: lastBy.get(r.t) === r && (r.state === "halted" || r.state === "paused") })));
       announceNew(rows);
     };
-    paintLive();
-    livePane.append(liveHead, ul);
-    S.paintLive = paintLive;
-
     const h14st = !h14 || h14.status === "pending" ? { state: "pending" } : h14.status === "unavailable" ? { state: "unavailable" } : { state: "ok" };
+    const stateNow = () => {
+      const hasState = liveState !== "ok" || h14st.state !== "ok" || (h14 && h14.configured === false);
+      setState(host, hasState ? { state: "quiet", reason: liveState === "socket-only" ? COPY.halt.socketOnly : liveState === "off" ? COPY.honesty.pending : h14 && h14.configured === false ? COPY.halt.notConfigured : COPY.honesty.pending } : { state: "ok" }, COPY.titles.halts);
+    };
     const archive = h("ul", { class: "er-list", "aria-label": "Halts in the last 14 days" });
     if (h14st.state !== "ok") archive.append(h("li", { class: "er-li is-empty" }, DASH + " " + (h14st.state === "pending" ? COPY.honesty.pending : COPY.honesty.failed)));
     else if (h14.configured === false) archive.append(h("li", { class: "er-li is-empty is-warn" }, DASH + " " + COPY.halt.notConfigured));
@@ -627,8 +631,9 @@
     const panes = liveState === "off" ? h("div", { class: "er-panes er-p1" }, archivePane) : h("div", { class: "er-panes er-p2" }, pane("Live", "streamed now", livePane, "live"), archivePane);
     const seg = liveState === "off" ? null : paneSwitch("Halts", [["live", "Live"], ["days", "14 days"]], panes);
     host.replaceChildren(...(seg ? [seg] : []), panes, h("p", { class: "er-foot" }, "Times in TRT. A halt shows as open until a later row for the same name resumes it."));
-    const hasState = liveState !== "ok" || h14st.state !== "ok" || (h14 && h14.configured === false);
-    setState(host, hasState ? { state: "quiet", reason: liveState === "socket-only" ? COPY.halt.socketOnly : liveState === "off" ? COPY.honesty.pending : h14 && h14.configured === false ? COPY.halt.notConfigured : COPY.honesty.pending } : { state: "ok" }, COPY.titles.halts);
+    paintLive();
+    livePane.append(liveHead, ul);
+    S.paintLive = paintLive;
     setStamp(host, d, staleData(d));
     if (S.timer === null) S.timer = setInterval(() => { if (!document.hidden) refreshOpenCounts(); }, 60000);
     if (UI.rt && typeof UI.rt.on === "function" && !S.rtBound) { S.rtBound = true; try { UI.rt.on("ht", () => S.paintLive && S.paintLive()); } catch { S.rtBound = false; } }
