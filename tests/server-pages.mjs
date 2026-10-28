@@ -251,7 +251,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
   eq(await ledgerAs({ username: "member<x>" }, { FLOWS_LEDGER: "members" }), [404, "not_found"], "a value that is not on, off or owner fails closed for a member");
   eq(await ledgerAs(null, {}), [200, "login"], "and an anonymous visitor is answered with the sign-in page whatever the switch says");
   const wrangler = (await import("node:fs")).readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
-  ok(/^FLOWS_LEDGER = "owner"$/m.test(wrangler), "wrangler.toml ships the switch at owner: the page is the owner's until the production checks pass and the value is changed to on");
+  ok(/^FLOWS_LEDGER = "on"$/m.test(wrangler), "wrangler.toml ships the switch on: the ledger is every member's page");
   const bare = await router.find("/flows/political").handler(rc("/flows/political"));
   eq([bare.status, bare.headers.get("Location")], [308, "https://anilkaya.org/flows/political/"], "a bare page path is a 308 to its slash form");
 }

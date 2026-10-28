@@ -213,7 +213,7 @@ for (const file of MODULES) {
   }
   const all = [...toml.matchAll(/namespace_id = "(\d+)"/g)].map((m) => m[1]).concat([...staging.matchAll(/namespace_id = "(\d+)"/g)].map((m) => m[1]));
   eq(new Set(all).size, all.length, "every rate-limit namespace in either file is distinct");
-  ok(/FLOWS_MEMBER_STATE = "on"/.test(toml) && /FLOWS_EXPORTS = "owner"/.test(toml), "production ships member state on and exports for the owner only");
+  ok(/FLOWS_MEMBER_STATE = "on"/.test(toml) && /FLOWS_EXPORTS = "on"/.test(toml), "production ships member state and exports on for every member, the column rules still holding each file");
   ok(!/MEMBER_STATE_KEY/.test(toml) && !/MEMBER_STATE_KEY/.test(staging), "and no key value is in either file");
 }
 

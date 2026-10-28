@@ -467,17 +467,15 @@ await showTab(page, "#mktMovers");
     const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
     await mount(page, { html: PAGES.marketPage({ username: "member", owner: false }), url: "/flows/market/", answer: marketAnswer(state) });
     const got = await readLists(page);
-    deep(got.seg, [["Raw change", "true"], ["In IV-days", "false"]], "MEMBERS OPEN ON RAW CHANGE");
-    ok(!page._asked.some((k) => /^lk\?k=.*strips/.test(k)), "and the live rows are not fetched for a lens nobody asked for");
-    ok(page._asked.some((k) => /^now\?/.test(k)) && !page._asked.some((k) => /^now\?.*strips/.test(k)), "THE HEARTBEAT OF A MEMBER WITH THE LENS OFF does not read live:strips, so that key cannot move the pill of a page that does not use it");
+    deep(got.seg, [["Raw change", "false"], ["In IV-days", "true"]], "EVERY MEMBER OPENS ON IV-DAYS, not the owner alone");
+    deep(got.cols[1].clean.map((r) => r[0]), ["AAA", "CCC", "DDD"], "and the member's lists are the same IV-days ranking");
+    ok(page._asked.some((k) => /^now\?.*strips/.test(k)), "THE MEMBER'S HEARTBEAT reads the live rows from the first beat, as the owner's does");
 await showTab(page, "#mktMovers");
-    await page.click("#mktMovers .mk-lens .ui-seg-i:nth-child(3)");
-    await page.waitForSelector("#mktMovers li[data-t]", { timeout: 15000 });
+    await page.click("#mktMovers .mk-lens .ui-seg-i:nth-child(2)");
+    await page.waitForFunction(() => !document.querySelector("#mktMovers li[data-t]"), null, { timeout: 15000 });
     await settle(page);
-    ok(page._asked.some((k) => /^now\?.*strips/.test(k)), "and choosing IV-days adds it to the heartbeat");
-    const on = await readLists(page);
-    ok(page._asked.some((k) => k === "lk?k=strips"), "choosing IV-days reads the live rows once");
-    deep(on.cols[1].clean.map((r) => r[0]), ["AAA", "CCC", "DDD"], "and ranks them");
+    const raw = await readLists(page);
+    deep(raw.seg, [["Raw change", "true"], ["In IV-days", "false"]], "and a member can go back to raw change");
     await page.close();
   }
 
@@ -713,4 +711,4 @@ await showTab(page, "#mktMovers");
   }
 }
 
-console.log(`✓ flows-moves0: ${checks} assertions — the IV-days definition worked by hand, the timing fixture ranked on the previous close's IV in the leaf and on the page, a current-IV build and an implied-move build caught, earnings names ranked apart, absent IV never zero, the median line on the prior-close IV, the copy lint, the owner and member defaults, raw lists kept when the lens is off, the order held under the pointer, and Home's Leaders column`);
+console.log(`✓ flows-moves0: ${checks} assertions — the IV-days definition worked by hand, the timing fixture ranked on the previous close's IV in the leaf and on the page, a current-IV build and an implied-move build caught, earnings names ranked apart, absent IV never zero, the median line on the prior-close IV, the copy lint, the IV-days default for every member, raw lists kept when the lens is off, the order held under the pointer, and Home's Leaders column`);

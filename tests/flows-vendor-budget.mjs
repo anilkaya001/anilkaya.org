@@ -184,7 +184,7 @@ export function downgradeBreaches(env = {}) {
   same(vendorMinuteCeilings({ FLOWS_LEDGER_LIVE: "on" }), vendorMinuteCeilings({}), "FLOWS_LEDGER_LIVE moves no per-minute ceiling: the rail, the limiters, Tier 2 and Tier 1 are what they were");
   same(vendorMinuteCeilings({ FLOWS_LEDGER_LIVE: "owner" }), vendorMinuteCeilings({}), "owner mode too");
   eq(vendorMinuteSum({ FLOWS_LEDGER_LIVE: "on" }), 603, "so the sum stays at 603 and the as-built breach of the 500 working line is not one call wider");
-  ok(/^FLOWS_LEDGER_LIVE = "owner"$/m.test(toml), "wrangler.toml ships the live ledger to owners only");
+  ok(/^FLOWS_LEDGER_LIVE = "on"$/m.test(toml), "wrangler.toml ships the live ledger to every member, and it still moves no per-minute ceiling");
 }
 
 {
