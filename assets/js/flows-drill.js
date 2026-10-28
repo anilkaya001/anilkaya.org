@@ -1,5 +1,6 @@
 (() => {
   "use strict";
+  const geo = (v) => Math.trunc(v * 10) / 10;
 
   const UI = window.FlowsUI;
   if (!UI || (UI.drill && UI.drill.open)) return;
@@ -134,7 +135,7 @@
       s("text", { x: 4, y: T + 8, text: F.num(max, true) }, svg);
       s("text", { x: 4, y: H - B, text: F.num(-max, true) }, svg);
       let d = "";
-      x.list.forEach((q, i) => { d += (i ? "L" : "M") + px(q.m).toFixed(1) + " " + py(x.cum[i]).toFixed(1); });
+      x.list.forEach((q, i) => { d += (i ? "L" : "M") + geo(px(q.m)) + " " + geo(py(x.cum[i])); });
       s("path", { d, class: "ln a", fill: "none" }, svg);
       [t0, t1].forEach((t, i) => s("text", { x: i ? W - R : L, y: H - 6, text: F.time(t), "text-anchor": i ? "end" : "start" }, svg));
       if (x.firstAggressive !== null) {

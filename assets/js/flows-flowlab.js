@@ -1,5 +1,6 @@
 (() => {
   "use strict";
+  const geo = (v) => Math.trunc(v * 10) / 10;
 
   const UI = window.FlowsUI;
   const root = document.getElementById("flMain");
@@ -411,7 +412,7 @@
       if (v === null) { open = false; return; }
       const x = x0 + ((ts[i] - ts[0]) / Math.max(1, ts[ts.length - 1] - ts[0])) * (x1 - x0);
       const y = y1 - ((v + 1) / 2) * (y1 - y0);
-      d += (open ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
+      d += (open ? "L" : "M") + geo(x) + " " + geo(y);
       open = true;
     });
     return d;
@@ -555,7 +556,7 @@
     const list = h("div", { class: "fl-bars" });
     for (const e of t.exchanges) {
       const bar = h("span", { class: "fl-bar" }, h("i"));
-      bar.style.setProperty("--w", ((e.contracts / maxC) * 100).toFixed(1) + "%");
+      bar.style.setProperty("--w", geo((e.contracts / maxC) * 100) + "%");
       const calls = e.callTrades + e.putTrades > 0 ? e.callTrades / (e.callTrades + e.putTrades) : null;
       list.append(h("div", { class: "fl-brow", "data-x": e.x }, h("span", { class: "fl-bk" }, e.x), bar, h("span", { class: "fl-bv" }, F.num(e.contracts)),
         h("span", { class: "fl-bs" }, money(e.premC) + " · " + (calls === null ? DASH : F.pct(calls, 0) + " calls"))));
@@ -649,7 +650,7 @@
     s("line", { x1: 0, x2: 130, y1: 12, y2: 12, class: "axis" }, svg);
     if (max > 0) {
       let d = "";
-      vals.forEach((v, i) => { if (v === null) return; d += (d ? "L" : "M") + (i * 130 / 12).toFixed(1) + " " + (12 - (v / max) * 10).toFixed(1); });
+      vals.forEach((v, i) => { if (v === null) return; d += (d ? "L" : "M") + geo(i * 130 / 12) + " " + geo(12 - (v / max) * 10); });
       s("path", { d, class: "ln a", fill: "none" }, svg);
     }
     const net = entry.callC - entry.putC;
