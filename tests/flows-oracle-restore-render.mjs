@@ -80,15 +80,22 @@ async function restoreProbe(mutate, only) {
     const w = await open(browser, { mutate, records: RECORDS, topBody: FX.top() });
     await waitOracle(w.page);
     await settle(w.page, 300);
-    await hide(w.page);
-    await w.page.clock.runFor(9500);
-    await settle(w.page, 200);
+    await w.page.click(".orc-orb");
+    await sleep(400);
+    const now = () => w.page.evaluate(() => Date.now());
+    const before = await now();
+    await w.page.click('.orc-pref-b[data-pref="off"]');
+    const after = await now();
+    await w.page.clock.pauseAt(new Date(after + 2000));
+    const early = before + 9500 - (after + 2000);
+    need(early > 0, `hiding took ${after - before} ms of page time, too long to look at Undo at 9.5 s`);
+    if (early > 0) await w.page.clock.runFor(early);
     const a = await read(w.page);
     need(a.undo && a.name === "Neuron hidden. Undo" && a.focus, `Undo is still offered nine and a half seconds after hiding: ${a.name}`);
-    await w.page.clock.runFor(1100);
-    await settle(w.page, 200);
+    await w.page.clock.runFor(after + 10100 - Math.max(before + 9500, after + 2000));
     const b = await read(w.page);
     need(b.restore && !b.undo && b.name === "Show the Neuron", `and gives way to the small button once the ten seconds are over: ${b.name}`);
+    await w.page.clock.resume();
     await w.close();
   }
   if (want("count")) {
