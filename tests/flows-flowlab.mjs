@@ -519,6 +519,18 @@ for (const [id, transforms, expect] of PLANTS) {
 }
 
 {
+  const { UA_BANNED_CLAIMS } = await import("../shared/flows-unusual.js");
+  const claims = (copy) => [...JSON.stringify(copy.drillCopy()).matchAll(new RegExp(UA_BANNED_CLAIMS.source, "ig"))].map((m) => m[0]);
+  eq(claims(COPY), [], "the drill copy, which the Unusual, ticker and Moves pages carry, names no word the Unusual page refuses to claim");
+  const planted = await loadMutated("shared/flows-flowlab-copy.js", [["\"Choose a ticker to read its codes.\"", "\"Choose a ticker to read its trade codes.\""]]);
+  ok(claims(planted).length > 0, "planted build: a drill sentence that names a trade is caught");
+  const dated = (copy) => [...JSON.stringify(copy.drillCopy()).matchAll(/\b(today|this session|the day's|the day\u2019s)\b/ig)].map((m) => m[0]);
+  eq(dated(COPY), [], "and it dates nothing those pages count: no today, this session or the day's");
+  const plantedDated = await loadMutated("shared/flows-flowlab-copy.js", [["the newer read is not in", "today's read is not in"]]);
+  ok(dated(plantedDated).length > 0, "planted build: a drill sentence that says today is caught");
+}
+
+{
   const title = COPY.LABELS.litMarket;
   const usd = (v) => "$" + (v >= 1e6 ? v / 1e6 + "M" : v / 1e3 + "K");
   ok(title.includes(usd(BUILD.LIT_MIN_PREMIUM)) && COPY.NOTES.litMarket.includes(usd(BUILD.LIT_MIN_PREMIUM)), "the lit title and note name the premium floor the read asks for (" + title + ")");

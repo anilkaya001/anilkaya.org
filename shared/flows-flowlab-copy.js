@@ -53,9 +53,9 @@ export const STATES = Object.freeze({
   unconfigured: "Live reads are not configured on this server.",
   "net-undecided": "Undecided: the range includes zero.",
   "choose-ticker": "Choose a ticker to read this view.",
-  "choose-ticker-codes": "Choose a ticker to read its trade codes.",
+  "choose-ticker-codes": "Choose a ticker to read its codes.",
   "reading-groups": "Reading the 25 flow groups from the feed.",
-  earlier: "From the {date} session; today's read is not in.",
+  earlier: "From the {date} session; the newer read is not in.",
   kept: "The latest read failed; showing the copy from {TRT}.",
 });
 

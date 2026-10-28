@@ -811,10 +811,11 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   const getLab = await client(f.D1, { FLOWS_FLOWLAB: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
   const getLabOpen = await client(f.D1, { FLOWS_FLOWLAB: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test", UW_NOW: "2026-10-23T15:00:00Z" });
   const getLabShut = await client(f.D1, { FLOWS_FLOWLAB: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test", UW_NOW: "2026-10-24T15:00:00Z" });
+  const getLabCorr = await client(f.D1, { FLOWS_FLOWLAB: "on", FLOWS_FLOWLAB_ANALYTICS: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
   const getFunds = await client(f.D1, { FLOWS_FLOOR_FUNDS: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
-  const cost = async (path, { init, vendor = false, owner = false, coverage = false, book = false, lab = false, labOpen = false, labShut = false, funds = false } = {}) => {
+  const cost = async (path, { init, vendor = false, owner = false, coverage = false, book = false, lab = false, labOpen = false, labShut = false, labCorr = false, funds = false } = {}) => {
     const n = f.trips.length;
-    const r = await (funds ? getFunds : labOpen ? getLabOpen : labShut ? getLabShut : lab ? getLab : book ? getBook : coverage ? getCoverage : owner ? getOwner : vendor ? getVendor : get)(path, init);
+    const r = await (funds ? getFunds : labCorr ? getLabCorr : labOpen ? getLabOpen : labShut ? getLabShut : lab ? getLab : book ? getBook : coverage ? getCoverage : owner ? getOwner : vendor ? getVendor : get)(path, init);
     return { rows: f.rowsRead(n), trips: f.trips.length - n, status: r.res.status };
   };
   const CEILING = [
@@ -848,6 +849,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
     ["/api/flows/flowlab/venues?t=NVDA", 0, { lab: true }],
     ["/api/flows/flowlab/nightly?k=roots", 1, { lab: true }],
     ["/api/flows/flowlab/nightly?k=corr", 0, { lab: true }],
+    ["/api/flows/flowlab/nightly?k=corr", 1, { labCorr: true }],
     ["/api/flows/flowlab/nightly?k=groups", 0, { labOpen: true }],
     ["/api/flows/flowlab/nightly?k=groups", 1, { labShut: true }],
     ["/api/flows/flowlab/nightly?k=venues", 0, { labOpen: true }],
