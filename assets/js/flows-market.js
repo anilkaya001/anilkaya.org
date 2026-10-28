@@ -935,7 +935,7 @@
     buildSub(key);
     if (key === "network") syncPop();
     if (focus) t.focus();
-    if (!quiet) { try { history.replaceState(null, "", "#view=" + key + (key === "floor" && /basis=session/.test(location.hash) ? "&basis=session" : "")); } catch (error) { void error; } }
+    if (!quiet) { try { history.replaceState(null, "", "#view=" + key + (key === "floor" ? (/&basis=[a-z]+/.exec(location.hash) || [""])[0] : "")); } catch (error) { void error; } }
   }
   for (const [i, t] of TABS.entries()) {
     t.addEventListener("click", () => showTab(t.dataset.tab, false));

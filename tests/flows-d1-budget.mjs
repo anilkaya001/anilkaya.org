@@ -10,12 +10,12 @@ const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 const crons = cronStrings();
-eq(crons.length, 4, "wrangler.toml declares four cron strings");
+eq(crons.length, 5, "wrangler.toml declares five cron strings");
 const counts = firingCounts(crons);
-eq(counts.weekday, { rth: 108, focus: 108, housekeeping: 48, summary: 48 }, "a weekday is 108 Tier 1 firings, 108 focus, 48 housekeeping and 48 summary: 312 in all");
-eq(counts.weekend, { rth: 0, focus: 0, housekeeping: 48, summary: 48 }, "a weekend day is the housekeeping and the summary only");
-eq(dayFirings(crons, WEEKDAY).length, 312, "and the expansion of the cron strings is 312 distinct instants");
-eq(new Set(dayFirings(crons, WEEKDAY).map((f) => f.at)).size, 312, "no two of them fall on the same minute");
+eq(counts.weekday, { rth: 108, focus: 108, funds: 108, housekeeping: 48, summary: 48 }, "a weekday is 108 Tier 1 firings, 108 focus, 108 funds, 48 housekeeping and 48 summary: 420 in all");
+eq(counts.weekend, { rth: 0, focus: 0, funds: 0, housekeeping: 48, summary: 48 }, "a weekend day is the housekeeping and the summary only");
+eq(dayFirings(crons, WEEKDAY).length, 420, "and the expansion of the cron strings is 420 distinct instants");
+eq(new Set(dayFirings(crons, WEEKDAY).map((f) => f.at)).size, 420, "no two of them fall on the same minute");
 eq(Object.keys(ENGINE_CEILINGS).sort(), Object.keys(counts.weekday).sort(), "every job a cron string starts has a per-firing ceiling");
 
 const rows = ledger(counts);
