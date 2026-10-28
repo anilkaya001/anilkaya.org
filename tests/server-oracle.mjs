@@ -153,7 +153,7 @@ function world(rows = {}, behaviour = {}) {
   const worker = fs.readFileSync(path.join(ROOT, "worker.js"), "utf8");
   ok(/flowsOracleRows\(\{ store: FLOWS_STORE/.test(worker), "the Worker mounts the family");
   const toml = fs.readFileSync(path.join(ROOT, "wrangler.toml"), "utf8");
-  ok(/^FLOWS_ORACLE = "owner"$/m.test(toml), "and ships it staged for the owner");
+  ok(/^FLOWS_ORACLE = "on"$/m.test(toml), "and ships it on for every member");
 }
 
 console.log(`server-oracle: ${checks} checks passed`);

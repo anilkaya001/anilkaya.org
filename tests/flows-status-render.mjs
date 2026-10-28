@@ -9,6 +9,13 @@ import { COVERAGE_KEYS } from "../server/ops.js";
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
+const drained = async (list) => {
+  let n = -1;
+  for (let quiet = 0, waited = 0; quiet < 500 && waited < 8000; waited += 50) {
+    if (list.length === n) quiet += 50; else { n = list.length; quiet = 0; }
+    await new Promise((r) => setTimeout(r, 50));
+  }
+};
 const require = createRequire(import.meta.url);
 let AXE = null;
 try { AXE = fs.readFileSync(require.resolve("axe-core/axe.min.js"), "utf8"); } catch { AXE = null; }
@@ -485,19 +492,24 @@ try {
     const start = { rail: count("/api/rt/status"), ops: count("/api/flows/ops"), series: count("/api/flows/lk?k=strips:series"), ai: count("/api/flows/ops?part=ai") };
     eq([start.rail, start.ops, start.series, start.ai], [1, 1, 1, 1], "each Latency read is made once at load");
     await page.clock.runFor(11000);
+    await drained(asked);
     eq(count("/api/rt/status") - start.rail, 1, "THE RAIL IS READ EVERY 10 s on the Latency tab");
     eq(count("/api/flows/ops") - start.ops, 0, "and the ops view not yet");
     await page.clock.runFor(50000);
+    await drained(asked);
     eq(count("/api/flows/ops") - start.ops, 1, "the ops view every 60 s");
     await page.clock.runFor(250000);
+    await drained(asked);
     eq(count("/api/flows/lk?k=strips:series") - start.series, 1, "the Tier 2 series every 5 minutes");
     eq(count("/api/flows/ops?part=ai"), 1, "the outcome block is read once, not on a timer");
     await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); document.dispatchEvent(new Event("visibilitychange")); });
     const before = asked.length;
     await page.clock.runFor(180000);
+    await drained(asked);
     eq(asked.length - before, 0, "NO READ AND NO TIMER WHILE THE TAB IS HIDDEN");
     await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => false }); document.dispatchEvent(new Event("visibilitychange")); });
     await page.clock.runFor(100);
+    await drained(asked);
     ok(asked.length - before >= 5, "it resumes with one immediate read of what the tab shows");
     await page.close();
   }
@@ -507,8 +519,10 @@ try {
     const count = (p) => asked.filter((a) => a === p).length;
     eq(count("/api/flows/ops?part=coverage"), 1, "coverage is read once at load");
     await page.clock.runFor(200000);
+    await drained(asked);
     eq(count("/api/flows/ops?part=coverage"), 1, "and not inside five minutes");
     await page.clock.runFor(110000);
+    await drained(asked);
     eq(count("/api/flows/ops?part=coverage"), 2, "and again at five minutes: a read of about forty-eight rows");
     await page.close();
   }
@@ -517,8 +531,10 @@ try {
     const { page, asked } = await open(browser, { view: "health", pause: true });
     const n0 = asked.length;
     await page.clock.runFor(20000);
+    await drained(asked);
     eq(asked.length - n0, 0, "THE HEALTH TAB READS NOTHING INSIDE 30 s");
     await page.clock.runFor(11000);
+    await drained(asked);
     eq(asked.filter((a) => a === "/api/rt/status").length, 2, "and the rail at 30 s");
     ok(!asked.includes("/api/flows/ops?part=coverage") && !asked.includes("/api/flows/ops?part=ai"), "the heavier ops parts are not read on Health");
     await page.close();

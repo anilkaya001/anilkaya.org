@@ -1,1 +1,1 @@
-{"name": "flows-time", "class": "N", "group": "shard", "timing": false, "medianS": 0.6, "shard": 12, "command": "node flows-time.mjs", "files": ["flows-time.mjs"], "covers": ["scripts/flows-pipeline.mjs","shared/flows-freshness.js","worker.js"]}
+{"name": "flows-time", "class": "N", "group": "shard", "timing": false, "medianS": 0.6, "shard": 1, "command": "node flows-time.mjs", "files": ["flows-time.mjs"], "covers": ["scripts/flows-pipeline.mjs","shared/flows-freshness.js","worker.js"]}
