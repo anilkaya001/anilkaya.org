@@ -383,7 +383,44 @@
   .orc-band-c:nth-of-type(n + 3) { display: none; }
 }
 
+.orc-orb[hidden] { display: none; }
+.orc-restore {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0 var(--sp-3);
+  box-sizing: border-box;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: var(--mat-thick);
+  box-shadow: var(--mat-edge), var(--lift-2);
+  color: var(--label-2);
+  font: var(--t-callout);
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0.72;
+  -webkit-tap-highlight-color: transparent;
+}
+.orc-restore[hidden] { display: none; }
+.orc-restore:hover, .orc-restore:focus-visible, .orc-restore.is-undo { opacity: 1; }
+.orc-restore:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 3px; }
+.orc-restore .orc-spark { width: 16px; height: 16px; flex: none; }
+.orc-restore.is-undo { min-height: 44px; padding: 0 var(--sp-4); color: var(--label-1); }
+.orc-restore-t[hidden], .orc-restore-u[hidden] { display: none; }
+.orc-restore-u { color: var(--accent-ink); font-weight: 600; }
+@media (pointer: coarse) { .orc-restore { min-width: 44px; min-height: 44px; } }
+@media (prefers-reduced-motion: no-preference) {
+  .orc-restore { transition: opacity var(--dur-fade) linear; }
+}
+
 @media (forced-colors: active) {
+  .orc-restore { background: Canvas; color: CanvasText; border: 1px solid ButtonBorder; box-shadow: none; opacity: 1; }
   .orc-disc, .orc-pill, .orc-sheet, .orc-toast { background: Canvas; color: CanvasText; border: 1px solid ButtonBorder; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
   .orc-badge { background: Highlight; color: HighlightText; box-shadow: none; }
 }

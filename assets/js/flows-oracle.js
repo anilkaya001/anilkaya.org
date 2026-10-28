@@ -37,11 +37,12 @@
   var CLEAR_TEXT = "Nothing stands out. Options are priced about where the model would price them.";
   var INFO_TEXT = "Cheap means the market charges less than the model's fair price; rich, more. The model's price comes from the engine's fitted smile and its own model of returns, not from a quote.";
   var SHEET_ID = "orcSheet";
+  var UNDO_MS = 10000;
 
   var S = {
     pref: "on", mode: host.getAttribute("data-oracle") === "quiet" ? "quiet" : "on", route: "idle",
     top: null, rec: new Map(), recFail: new Map(), msgs: [], open: false, opener: null, behind: [], expanded: new Set(),
-    lastFlowAt: null, announceAt: 0, announceQ: null, announceTimer: null, gesture: false, toastTimer: null,
+    lastFlowAt: null, announceAt: 0, announceQ: null, announceTimer: null, gesture: false, toastTimer: null, undoUntil: 0, undoTimer: null,
     liveState: L.createState(), unsub: null, hidden: false, asked: new Set(), batchAt: 0, nnState: ""
   };
 
@@ -172,7 +173,7 @@
     return null;
   }
 
-  var orb, pill, pillGlyph, pillText, badge, liveEl, toast, sheet, scrim, list, titleEl, subEl, closeBtn, infoBtn, infoNote, prefSeg, prefBtns = {};
+  var orb, pill, pillGlyph, pillText, badge, restore, restoreTxt, restoreUndo, liveEl, toast, sheet, scrim, list, titleEl, subEl, closeBtn, infoBtn, infoNote, prefSeg, prefBtns = {};
 
   function spark() {
     var svg = s("svg", { class: "ui-g orc-spark", "aria-hidden": "true", focusable: "false" });
@@ -188,6 +189,9 @@
     badge = h("span", { class: "orc-badge", "aria-hidden": "true", hidden: "" });
     orb = h("button", { type: "button", class: "orc-orb", "aria-haspopup": "dialog", "aria-expanded": "false", "aria-controls": SHEET_ID },
       pill, h("span", { class: "orc-disc nn-orb nn-mirror is-52" }, h("i"), h("i"), h("i"), h("span", { class: "orc-rim", "aria-hidden": "true" }), spark()), badge);
+    restoreTxt = h("span", { class: "orc-restore-t" }, "Neuron hidden");
+    restoreUndo = h("span", { class: "orc-restore-u" }, "Undo");
+    restore = h("button", { type: "button", class: "orc-restore", hidden: "", title: "Show the Neuron (Alt+Shift+N)" }, spark(), restoreTxt, restoreUndo);
     liveEl = h("p", { class: "visually-hidden", role: "status", "aria-live": "polite" });
     toast = h("p", { class: "orc-toast", "aria-hidden": "true", hidden: "" });
     scrim = h("div", { class: "orc-scrim", hidden: "" });
@@ -209,8 +213,9 @@
       h("div", { class: "orc-head" }, h("div", { class: "orc-head-t" }, titleEl, subEl), closeBtn),
       list,
       h("div", { class: "orc-foot" }, h("p", { class: "orc-model" }, W.MODEL_IMPLIED), h("div", { class: "orc-foot-r" }, infoBtn, h("div", { class: "orc-pref-w" }, h("span", { class: "orc-pref-l", id: "orcPrefL" }, "Show the Neuron as"), prefSeg)), infoNote));
-    host.append(orb, toast, liveEl, scrim, sheet);
+    host.append(orb, restore, toast, liveEl, scrim, sheet);
     orb.addEventListener("click", function () { setOpen(!S.open); });
+    restore.addEventListener("click", function () { restorePref(); });
     closeBtn.addEventListener("click", function () { setOpen(false); });
     scrim.addEventListener("click", function () { setOpen(false); });
     infoBtn.addEventListener("click", function () {
@@ -280,11 +285,34 @@
   }
 
   function setPref(p) {
+    var was = S.pref;
+    if (p === "off" && was !== "off") {
+      setCookie("fn_oracle_prev", was);
+      S.undoUntil = Date.now() + UNDO_MS;
+      clearTimeout(S.undoTimer);
+      S.undoTimer = setTimeout(paintOrb, UNDO_MS + 50);
+    } else if (p !== "off") {
+      S.undoUntil = 0;
+      clearTimeout(S.undoTimer);
+    }
     setCookie("fn_oracle", p);
     S.pref = readPref();
     if (S.pref === "off") setOpen(false);
     else if (S.route === "idle") { loadTop(); loadRec(ticker()); }
     paint();
+    if (S.pref === "off" && was !== "off") {
+      say("Neuron hidden. Undo brings it back.");
+      try { restore.focus(); } catch (e) {   }
+    }
+  }
+
+  function restorePref() {
+    var p = cookie("fn_oracle_prev");
+    setPref(PREF[p] > 0 ? p : "on");
+    if (S.pref === "off") return;
+    U.defer("nn-orb", { when: "idle" }).then(function () { if (window.FlowsUI.nnOrb) window.FlowsUI.nnOrb.scan(); });
+    say("Neuron shown.");
+    try { orb.focus(); } catch (e) {   }
   }
 
   function say(text) {
@@ -320,7 +348,14 @@
     var n = liveCount() + (focusRec() && focusRec().state === "signal" ? 1 : 0);
     var hl = headline();
     var showPill = S.pref === "on" && hl && !S.open;
-    host.hidden = S.pref === "off";
+    var off = S.pref === "off", undo = off && S.undoUntil > Date.now();
+    host.hidden = false;
+    orb.hidden = off;
+    restore.hidden = !off;
+    restore.classList.toggle("is-undo", undo);
+    restoreTxt.hidden = !undo;
+    restoreUndo.hidden = !undo;
+    restore.setAttribute("aria-label", undo ? "Neuron hidden. Undo" : "Show the Neuron");
     host.setAttribute("data-state", state);
     nnApply(state);
     host.setAttribute("data-pref", S.pref);
@@ -697,7 +732,7 @@
     if (e.code === "KeyN" && e.shiftKey && e.altKey && !e.ctrlKey && !e.metaKey) {
       var a = document.activeElement, tag = a && a.tagName ? a.tagName.toLowerCase() : "";
       if (tag === "input" || tag === "textarea" || tag === "select" || (a && a.isContentEditable)) return;
-      if (S.pref === "off" && PREF[S.mode] > 0) { e.preventDefault(); setPref("quiet"); }
+      if (S.pref === "off" && PREF[S.mode] > 0) { e.preventDefault(); restorePref(); }
     }
   }
 
@@ -711,7 +746,7 @@
     S.timer = tick;
     paint();
     if (S.pref !== "off") U.defer("nn-orb", { when: "idle" }).then(function () { if (window.FlowsUI.nnOrb) window.FlowsUI.nnOrb.scan(); });
-    host.hidden = S.pref === "off";
+    host.hidden = false;
     return S.pref === "off" ? Promise.resolve() : Promise.all([loadTop(), loadRec(ticker())]).then(paint);
   }
 
