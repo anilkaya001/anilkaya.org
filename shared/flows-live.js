@@ -24,6 +24,7 @@ export const LIVE_KEYS = Object.freeze({
   "live:movers": spec("breadth", "actions", 8 * 1024, 0),
   "live:news": spec("breadth", "actions", 32 * 1024, 1),
   "live:heartbeat": spec("breadth", "actions", 8 * 1024, 0),
+  "live:funds": spec("breadth", "actions", 16 * 1024, 1),
 });
 
 export const TAPE_SPEC = spec("tape", "ondemand", 32 * 1024, 2);

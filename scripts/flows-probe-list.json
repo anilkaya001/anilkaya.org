@@ -102,6 +102,9 @@
     {"id": "splits", "tier": "used", "op": "/api/companies/{ticker}/splits", "path": "/api/companies/{t}/splits"},
     {"id": "interpolated-iv", "tier": "used", "op": "/api/stock/{ticker}/interpolated-iv", "path": "/api/stock/{t}/interpolated-iv", "query": {"date": "{date}"}},
     {"id": "etf-exposure", "tier": "used", "op": "/api/etfs/{ticker}/exposure", "path": "/api/etfs/{t}/exposure"},
+    {"id": "etf-info", "tier": "used", "op": "/api/etfs/{ticker}/info", "path": "/api/etfs/{t}/info"},
+    {"id": "etf-weights", "tier": "used", "op": "/api/etfs/{ticker}/weights", "path": "/api/etfs/{t}/weights"},
+    {"id": "ticker-exchanges", "tier": "used", "op": "/api/stock-directory/ticker-exchanges", "path": "/api/stock-directory/ticker-exchanges"},
     {"id": "option-trades", "tier": "2", "op": "/api/option-trades", "path": "/api/option-trades", "query": {"ticker_symbol": "{t}", "limit": "50"}},
     {"id": "lit-flow", "tier": "used", "op": "/api/lit-flow/{ticker}", "path": "/api/lit-flow/{t}", "query": {"limit": "50"}},
     {"id": "quote", "tier": "2", "op": "/api/stock/{ticker}/quote", "path": "/api/stock/{t}/quote"},
@@ -149,6 +152,9 @@
     "/api/companies/{ticker}/splits": ["data", "effective_date", "split_factor", "splits", "ticker"],
     "/api/stock/{ticker}/interpolated-iv": ["date", "days", "implied_move_perc", "percentile", "volatility"],
     "/api/etfs/{ticker}/exposure": ["etf", "full_name", "last_price", "prev_price", "shares", "weight"],
+    "/api/etfs/{ticker}/info": ["aum", "avg30_volume", "call_vol", "data", "description", "domicile", "etf_company", "expense_ratio", "has_options", "holdings_count", "inception_date", "name", "opt_vol", "put_vol", "stock_vol", "website"],
+    "/api/etfs/{ticker}/weights": ["country", "sector", "weight"],
+    "/api/stock-directory/ticker-exchanges": ["data", "exchange", "ticker"],
     "/api/stock/{ticker}/option-stance": ["as_of_date", "avg_price", "components", "context", "data", "delta", "disclaimer", "dte", "dte_fit", "earnings_before_expiry", "earnings_timing", "expires", "explanation", "fit_score", "gamma", "greeks_fit", "iv", "iv_30d", "iv_percentile", "iv_rank", "iv_regime", "liquidity", "name", "next_earnings_date", "open_interest", "option_symbol", "option_type", "pop", "premium", "rank_metric", "roc", "stance", "stock_price", "strike", "theta", "ticker", "value", "vega", "volume"],
     "/api/insider/{ticker}/ticker-flow": ["avg_price", "buy_sell", "date", "has_more", "premium", "transactions", "uniq_insiders", "volume"],
     "/api/stock/{ticker}/ohlc/{candle_size}": ["close", "end_time", "high", "low", "market_time", "open", "start_time", "total_volume", "volume"],
@@ -237,7 +243,10 @@
     "/api/companies/{ticker}/dividends",
     "/api/companies/{ticker}/splits",
     "/api/stock/{ticker}/interpolated-iv",
-    "/api/etfs/{ticker}/exposure"
+    "/api/etfs/{ticker}/exposure",
+    "/api/etfs/{ticker}/info",
+    "/api/etfs/{ticker}/weights",
+    "/api/stock-directory/ticker-exchanges"
   ],
   "entitlement": [
     "/api/option-trades",

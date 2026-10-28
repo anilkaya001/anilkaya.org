@@ -6,6 +6,12 @@ import { EXPORT_PAGES, pageHold } from "../../shared/flows-export-build.js";
 import { ledgerLiveOn } from "../../shared/flows-ledger-live.js";
 import { flowlabMode } from "../../shared/flows-flowlab.js";
 import { flowlabShell } from "../../shared/flows-flowlab-shell.js";
+import { floorFundsMode } from "../../shared/flows-floor-funds.js";
+
+const floorFundsOn = (env, owner) => {
+  const mode = floorFundsMode(env);
+  return mode === "on" || (mode === "owner" && owner === true);
+};
 
 const homeNet = (env, owner) => {
   const mode = String(env && env.FLOWS_HOME_NET || "").trim().toLowerCase();
@@ -35,7 +41,7 @@ const PAGES = Object.freeze([
   { slug: "long", from: "long", render: (username) => FLOWS_PAGES.sidePage({ username, side: "long" }) },
   { slug: "short", from: "short", render: (username) => FLOWS_PAGES.sidePage({ username, side: "short" }) },
   { slug: "watch", from: "watch", render: (username) => FLOWS_PAGES.watchPage({ username }) },
-  { slug: "market", render: (username, summary, owner, scenes) => FLOWS_PAGES.marketPage({ username, owner, scenes }) },
+  { slug: "market", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.marketPage({ username, owner, scenes, funds: floorFundsOn(env, owner) }) },
   { slug: "network", render: (username) => FLOWS_PAGES.networkPage({ username }) },
   { slug: "now", render: (username) => FLOWS_PAGES.nowPage({ username }) },
   { slug: "desk", render: (username) => FLOWS_PAGES.deskPage({ username }) },

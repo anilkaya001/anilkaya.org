@@ -32,7 +32,7 @@ const RAW = [
   { id: "oi-change", path: "/api/stock/{ticker}/oi-change", licence: "aggregate", klass: "nightly" },
   { id: "flow-per-expiry", path: "/api/stock/{ticker}/flow-per-expiry", licence: "aggregate", klass: "nightly" },
   { id: "flow-per-strike", path: "/api/stock/{ticker}/flow-per-strike", licence: "aggregate", klass: "nightly" },
-  { id: "options-volume", path: "/api/stock/{ticker}/options-volume", licence: "aggregate", klass: "nightly" },
+  { id: "options-volume", path: "/api/stock/{ticker}/options-volume", licence: "aggregate", klass: "nightly", reads: ["date", "call_premium", "put_premium", "call_volume", "put_volume", "bullish_premium", "bearish_premium"] },
   { id: "nope", path: "/api/stock/{ticker}/nope", licence: "derived", klass: "nightly" },
   { id: "vol-anomaly", path: "/api/stock/{ticker}/volatility/anomaly", licence: "derived", klass: "nightly" },
   { id: "vol-sentiment", path: "/api/stock/{ticker}/volatility/option-sentiment", licence: "derived", klass: "nightly", liveOnly: true },
@@ -65,7 +65,7 @@ const RAW = [
   { id: "earnings-premarket", path: "/api/earnings/premarket", licence: "aggregate", klass: "nightly" },
   { id: "treasury-yield", path: "/api/economy/treasury-yield", op: "/api/economy/{indicator}", licence: "aggregate", klass: "nightly" },
   { id: "etf-holdings", path: "/api/etfs/{ticker}/holdings", licence: "aggregate", klass: "nightly", reads: ["ticker", "type", "weight"] },
-  { id: "etf-in-outflow", path: "/api/etfs/{ticker}/in-outflow", licence: "aggregate", klass: "nightly" },
+  { id: "etf-in-outflow", path: "/api/etfs/{ticker}/in-outflow", licence: "aggregate", klass: "nightly", reads: ["date", "change"] },
   { id: "etf-tide", path: "/api/market/{ticker}/etf-tide", licence: "aggregate", klass: "breadth", reads: ["timestamp", "net_call_premium", "net_put_premium", "net_volume", "underlying_price"] },
   { id: "group-flow-greek", path: "/api/group-flow/{flow_group}/greek-flow", licence: "aggregate", klass: "nightly" },
   { id: "sector-tide", path: "/api/market/{sector}/sector-tide", licence: "aggregate", klass: "breadth", reads: ["timestamp", "net_call_premium", "net_put_premium", "net_volume"] },
@@ -104,6 +104,9 @@ const RAW = [
   { id: "lit-ticker", path: "/api/lit-flow/{ticker}", licence: "print", klass: "quote", limiter: "ondemand", maxBytes: 262144, reads: ["ticker", "executed_at", "price", "size", "premium", "nbbo_bid", "nbbo_ask", "market_center", "canceled", "trade_code", "sale_cond_codes"] },
   { id: "analytics-window", path: "/api/analytics/window", licence: "derived", klass: "nightly", maxBytes: 262144 },
   { id: "analytics-sliding", path: "/api/analytics/sliding", licence: "derived", klass: "nightly", maxBytes: 262144 },
+  { id: "etf-info", path: "/api/etfs/{ticker}/info", licence: "text", klass: "slow", maxBytes: 32768, reads: ["name", "etf_company", "holdings_count", "has_options"] },
+  { id: "etf-weights", path: "/api/etfs/{ticker}/weights", licence: "aggregate", klass: "slow", maxBytes: 32768, reads: ["sector", "country", "weight"] },
+  { id: "ticker-exchanges", path: "/api/stock-directory/ticker-exchanges", licence: "aggregate", klass: "slow", maxBytes: 1048576, reads: ["ticker", "exchange"] },
 ];
 
 export const OPS = Object.freeze(RAW.map((e) => Object.freeze({

@@ -832,6 +832,7 @@
   };
   if ($("mkNet") || $("mkRelations") || $("mkRiver") || $("mkFloor")) ALERTS.kick();
   let RIVER = null;
+  let FUNDS_PULL = null;
 
   const FIT_MIN = 3;
   const fitDlg = h("dialog", { class: "nm-dlg", "aria-labelledby": "mkFitT" });
@@ -934,7 +935,7 @@
     buildSub(key);
     if (key === "network") syncPop();
     if (focus) t.focus();
-    if (!quiet) { try { history.replaceState(null, "", "#view=" + key); } catch (error) { void error; } }
+    if (!quiet) { try { history.replaceState(null, "", "#view=" + key + (key === "floor" && /basis=session/.test(location.hash) ? "&basis=session" : "")); } catch (error) { void error; } }
   }
   for (const [i, t] of TABS.entries()) {
     t.addEventListener("click", () => showTab(t.dataset.tab, false));
@@ -1050,8 +1051,15 @@
     const floorHost = $("mkFloor");
     if (floorHost && UI.defer) {
       UI.defer("floor", { when: "visible", el: floorHost, label: "The trading floor" }).then(() => {
-        const api = window.FlowsUI.floor.mount(floorHost, { universe });
+        const fundsOn = Boolean($("mk") && $("mk").dataset.funds === "on");
+        const nightlyFunds = fundsOn && m && typeof m === "object" && !m.__unreadable ? m.funds || { status: "unavailable" } : null;
+        const api = window.FlowsUI.floor.mount(floorHost, { universe, funds: fundsOn ? { nightly: nightlyFunds, live: null } : null });
         if (api) ALERTS.sub((a, st) => api.take(a, st));
+        if (api && fundsOn) {
+          const pullFunds = () => getLive(["funds"]).then((lk2) => api.update({ funds: { nightly: nightlyFunds, live: okFeed(lk2.funds) } })).catch(() => {});
+          pullFunds();
+          FUNDS_PULL = pullFunds;
+        }
       });
     }
     const riverHost = $("mkRiver");
@@ -1073,7 +1081,8 @@
     }
     if (UI.defer) UI.defer("market-below", { when: "visible", el: $("mkSectorsCard"), label: "The lower modules" });
     if (typeof UI.heartbeat === "function") {
-      const beat = (withStrips) => UI.heartbeat({ keys: withStrips ? ["market", "breadth", "strips"] : ["market", "breadth"], nightly: ["pulse"], page: "market",
+      const fundsBeat = Boolean($("mk") && $("mk").dataset.funds === "on");
+      const beat = (withStrips) => UI.heartbeat({ keys: [...(withStrips ? ["market", "breadth", "strips"] : ["market", "breadth"]), ...(fundsBeat ? ["funds"] : [])], nightly: ["pulse"], page: "market",
         onChange(changed) {
           const keys = Array.isArray(changed) ? changed.map(String) : [];
           if (LENS.on && !(UI.rt && UI.rt.feeds("px")) && keys.some((c) => /live:strips(?!:)/.test(c))) {
@@ -1084,6 +1093,7 @@
               later("lens", (b) => b.lensRepaint(false));
             }).catch(() => {});
           }
+          if (FUNDS_PULL && keys.some((c) => c.includes("live:funds"))) FUNDS_PULL();
           const ask = ["market", "breadth"].filter((k) => keys.some((c) => c.includes("live:" + k)));
           if (!ask.length) return;
           getLive(ask).then((lk) => {

@@ -928,14 +928,14 @@ const MARKET_TABS = (scenes) => [
   ["extremes", "Extremes"], ...(scenes ? [["relations", "Relations"]] : []), ["prints", "Prints"], ["context", "Context"],
 ];
 
-export function marketPage({ username = "", owner = false, scenes = false } = {}) {
+export function marketPage({ username = "", owner = false, scenes = false, funds = false } = {}) {
   const tabs = MARKET_TABS(scenes);
   const panel = (key, body) => `
     <div class="mk-panel" role="tabpanel" id="mkP-${key}" aria-labelledby="mkT-${key}" data-panel="${key}"${key === "floor" ? "" : " inert"}>${body}
     </div>`;
   return `${head("Flows \u2014 Market", "The market in one screen: the session tide, breadth, sectors, index ETFs, the flow network, extremes, relations and the market-wide feeds, each a tab.", ["/assets/css/flows-market.css", "/assets/css/flows-net-map.css", "/assets/css/flows-popout.css"])}
 ${shell("Market", "market", username, `
-  <div class="mk" id="mk">
+  <div class="mk" id="mk"${funds ? ' data-funds="on"' : ""}>
   <div class="mk-top">
   <header class="flows-head mk-head" data-fx-hero>
     <h1 id="fxTitle">Market</h1>
