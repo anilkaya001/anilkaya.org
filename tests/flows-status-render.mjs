@@ -218,6 +218,7 @@ try {
     const timing = await text(page, "#lTime");
     ok(/Tier 2 pass\s+Took 1 min, 44 calls, 1 failed/.test(timing) && /Vendor socket\s+connected, 412,000 messages/.test(timing), "timing summary: " + timing.slice(0, 300));
     ok(/Worker clock vs browser\s+[+\u2212]\d+ ms/.test(timing), "the clock offset is an estimate in ms");
+    await page.waitForFunction(() => !!document.querySelector("#stSession svg"), null, { timeout: 15000 }).catch(() => null);
     ok(await page.evaluate(() => !!document.querySelector("#stSession svg")), "the Tier 2 chart is drawn");
     ok(/passes had p90 past it/.test(await text(page, "#stSession")) && /not recorded/.test(await text(page, "#stSession")), "the chart says what it shows and what is not recorded: " + (await text(page, "#stSession")).slice(0, 300));
     const sess = await page.evaluate(() => {
