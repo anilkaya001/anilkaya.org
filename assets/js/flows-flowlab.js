@@ -897,7 +897,7 @@
     const b = rec.body;
     if (b.status === "off") { put("flRel", stateBlock("off"), ""); return; }
     if (pending(rec)) { put("flRel", emptyBlock("The nightly relations read has not landed."), ""); return; }
-    if (b.status !== "ok") { put("flRel", stateBlock(b.status === "empty" ? "quiet" : b.status === "plan" ? "plan" : "unshaped"), ""); return; }
+    if (b.status !== "ok") { put("flRel", stateBlock(({ empty: "quiet", plan: "plan", unshaped: "unshaped", off: "off", timeout: "timeout" })[b.status] || "failed"), ""); return; }
     const m = modEl("flRel");
     const host = h("div", { class: "fl-plot fl-heat" });
     m.body.replaceChildren(host);

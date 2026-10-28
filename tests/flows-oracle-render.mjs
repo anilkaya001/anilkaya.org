@@ -110,12 +110,14 @@ for (const [w, h] of VIEWS) {
   eq([s.pill, s.badge], [false, false], "the count-only preference shows the count and no pill");
   await quiet.close();
   const off = await boot(browser, { cookies: [{ name: "fn_oracle", value: "off", path: "/flows" }], wait: false });
-  eq(await off.page.evaluate(() => document.getElementById("fxOracle").hidden), true, "the hidden preference removes the orb");
+  const hid = await off.page.evaluate(() => ({ orb: document.querySelector(".orc-orb").hidden, restore: !document.querySelector(".orc-restore").hidden, name: document.querySelector(".orc-restore").getAttribute("aria-label") }));
+  eq(hid, { orb: true, restore: true, name: "Show the Neuron" }, "the hidden preference removes the orb and leaves a small button that brings it back");
   await off.page.keyboard.press("Alt+Shift+KeyN");
   await settle(off.page, 300);
-  eq(await off.page.evaluate(() => document.getElementById("fxOracle").hidden), false, "Alt+Shift+N brings it back");
+  eq(await off.page.evaluate(() => [document.querySelector(".orc-orb").hidden, document.getElementById("fxOracle").getAttribute("data-pref")]), [false, "on"], "Alt+Shift+N brings it back to the pill when no earlier choice is stored");
   await off.close();
 }
+
 
 {
   const w = await boot(browser, { url: TICKER_URL("SYO001"), slug: "ticker" });

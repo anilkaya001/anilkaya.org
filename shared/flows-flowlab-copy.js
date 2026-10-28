@@ -42,7 +42,7 @@ export const STATES = Object.freeze({
   "no-expiry-in-rows": "Strike rows carry no expiry, so no share hedge is computed.",
   "min-volume": "The feed returns contracts with 200 or more contracts only.",
   "not-optionable": "{T} has no listed options in last night's list.",
-  off: "Relations are off until the feed's answer shape is recorded.",
+  off: "Relations are switched off on this site.",
   "not-session": "The feed sent the {date} session, not this one.",
   too_large: "The feed's answer was larger than this page reads.",
   status_5xx: "The feed answered with an error, status {status}.",
@@ -186,7 +186,7 @@ export const EMPTY_TITLES = Object.freeze({
   routing: "No routing rows",
   lit: "No lit prints",
   groups: "No group reads",
-  relations: "Relations are off",
+  relations: "No relations read",
 });
 
 export const DRILL = Object.freeze({
