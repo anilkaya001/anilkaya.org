@@ -56,6 +56,7 @@ export const ERRORS = Object.freeze({
   not_found: entry(404, "Not found"),
   oracle_off: entry(404, "The Neuron's view is off"),
   ops_off: entry(404, "The owner operations view is off"),
+  voldesk_off: entry(404, "Not found"),
   payload_too_large: entry(413, "Payload is too large"),
   positioning_off: entry(404, "Positioning is off"),
   ready_off: entry(404, "The readiness check is off"),

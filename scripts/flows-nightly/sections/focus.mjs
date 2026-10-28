@@ -176,6 +176,10 @@ export async function runFocus(ctx) {
     console.log(`  dossiers: ${say("index")}; ${say("fund")}` +
       Object.entries(dossiers.shed).map(([t, keys]) => `; ${t} shed ${keys.join(", ")}`).join(""));
   }
+  if (ctx.auditHooks) {
+    if (ctx.auditHooks.on) await stages.run("vol-audit", () => ctx.auditHooks.run(), (error) => ctx.auditHooks.failed(error));
+    else stages.skip("vol-audit", "FLOWS_VOLDESK_BUILD is off");
+  }
   {
     const featuresFor = new Map(enriched.map((e) => [e.features.ticker, e.features]));
     for (const [t, f] of dossierFeatures) featuresFor.set(t, f);

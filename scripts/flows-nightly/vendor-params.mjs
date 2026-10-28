@@ -47,6 +47,7 @@ export const CALL_COST = Object.freeze({
   ivp: 1,
   funds: 1 + 1 + 24 + 12 * 3 + 1,
   slow: 1500,
+  voldesk: 337,
   positioning: 720,
   misc: 67,
 });
@@ -72,6 +73,7 @@ export function callModel({ enriched = 0, deep = 0, cross = 0, dossiers = 0, ear
     ivp: cost.ivp * carded,
     funds: cost.funds,
     slow: cost.slow,
+    voldesk: cost.voldesk,
     positioning: cost.positioning,
     misc: cost.misc,
   };

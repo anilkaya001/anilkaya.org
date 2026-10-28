@@ -1,1 +1,1 @@
-{"name": "flows-basis", "class": "N", "group": "shard", "timing": false, "medianS": 0.4, "shard": 5, "files": ["flows-basis-contract.mjs"], "covers": ["tests/fixtures-live-probe.json","tests/fixtures-vol-probe.json"]}
+{"name": "flows-basis", "class": "N", "group": "shard", "timing": false, "medianS": 0.4, "shard": 3, "files": ["flows-basis-contract.mjs"], "covers": ["tests/fixtures-live-probe.json","tests/fixtures-vol-probe.json"]}

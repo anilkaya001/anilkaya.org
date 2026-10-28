@@ -1,1 +1,1 @@
-{"name": "flows-stock", "class": "N", "group": "shard", "timing": false, "medianS": 0.1, "shard": 2, "files": ["flows-stock-contract.mjs"], "covers": []}
+{"name": "flows-stock", "class": "N", "group": "shard", "timing": false, "medianS": 0.1, "shard": 7, "files": ["flows-stock-contract.mjs"], "covers": []}

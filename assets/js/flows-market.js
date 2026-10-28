@@ -906,6 +906,14 @@
   }
   syncPop();
 
+  let vdOpened = false;
+  function openVoldesk() {
+    if (vdOpened || !$("mkVdTerm")) return;
+    vdOpened = true;
+    Promise.all([optional("/api/flows/voldesk"), UI.defer("voldesk", { when: "visible", el: $("mkVdTermCard"), label: "The Vol desk" })])
+      .then(([payload]) => window.FlowsUI.volDesk.ready.then(() => window.FlowsUI.volDesk.mount(null, payload)));
+  }
+
   const TABS = [...document.querySelectorAll("#mkTabs [role=tab]")];
   const stage = $("mkStage"), subBar = $("mkSub");
   const subPick = {};
@@ -923,7 +931,7 @@
       m.inert = NARROW.matches && i !== pick;
       if (mods.length < 2) return;
       const title = m.querySelector(".ui-mod-t");
-      subBar.append(h("button", { type: "button", role: "tab", "aria-selected": String(i === pick), "aria-controls": m.id, onclick: () => { subPick[key] = i; buildSub(key); } }, title ? title.textContent : "View " + (i + 1)));
+      subBar.append(h("button", { type: "button", role: "tab", "aria-selected": String(i === pick), "aria-controls": m.id, "aria-label": m.dataset.short && title ? title.textContent : null, onclick: () => { subPick[key] = i; buildSub(key); } }, m.dataset.short || (title ? title.textContent : "View " + (i + 1))));
     });
   }
   function showTab(key, focus, quiet) {
@@ -934,6 +942,7 @@
     for (const p of document.querySelectorAll(".mk-panel")) p.inert = p.dataset.panel !== key;
     buildSub(key);
     if (key === "network") syncPop();
+    if (key === "voldesk") openVoldesk();
     if (focus) t.focus();
     if (!quiet) { try { history.replaceState(null, "", "#view=" + key + (key === "floor" ? (/&basis=[a-z]+/.exec(location.hash) || [""])[0] : "")); } catch (error) { void error; } }
   }

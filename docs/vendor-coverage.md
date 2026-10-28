@@ -39,7 +39,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/shorts/{ticker}/interest-float/v2` | read | short-interest | any | observed | market_date, short_interest, total_float, days_to_cover | read by the code | dossier | read |
 | `/api/shorts/{ticker}/volume-and-ratio` | read | shorts-volume | any | observed | whole body | read by the code | nightly | read |
 | `/api/shorts/{ticker}/volumes-by-exchange` | read | short-venues | any | not observed | short volume by exchange | shares stated | positioning packet | no: `shorts-volume` already carries the ratio |
-| `/api/stock/{ticker}/atm-chains` | not added | - | any | not observed | at-the-money chains for expirations the caller names | stated | options | no: needs `expirations[]` and duplicates `option-contracts` |
+| `/api/stock/{ticker}/atm-chains` | read | atm-chains | any | not observed | at-the-money chains for expirations the caller names | stated | options | no: needs `expirations[]` and duplicates `option-contracts` |
 | `/api/stock/{ticker}/balance-sheets` | not added | - | any | not observed | balance sheet statements | stated | fundamentals packet | no: duplicate of `financials` |
 | `/api/stock/{ticker}/cash-flows` | not added | - | any | not observed | cash flow statements | stated | fundamentals packet | no: duplicate of `financials` |
 | `/api/stock/{ticker}/earnings` | not added | - | any | not observed | reported and estimated EPS with the surprise | strings | earnings packet | no: the EPS history is inside `financials.earnings`, which the dossier stores |
@@ -54,11 +54,11 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/stock/{ticker}/gex-levels` | read | gex-levels | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/greek-exposure` | read | greek-exposure | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/greek-exposure/expiry` | read | greek-exposure-expiry | any | observed | whole body | read by the code | Worker, engines, nightly | read |
-| `/api/stock/{ticker}/greek-exposure/strike` | not added | - | any | not observed | greek exposure by strike | stated | gamma modules | no: duplicate of `spot-exposures/strike` |
-| `/api/stock/{ticker}/greek-exposure/strike-expiry` | not added | - | any | not observed | greek exposure by strike and expiry | stated | gamma modules | no: duplicate of `spot-exposures/expiry-strike` |
+| `/api/stock/{ticker}/greek-exposure/strike` | read | greek-exposure-strike | any | not observed | greek exposure by strike | stated | gamma modules | no: duplicate of `spot-exposures/strike` |
+| `/api/stock/{ticker}/greek-exposure/strike-expiry` | read | greek-exposure-strike-expiry | any | not observed | greek exposure by strike and expiry | stated | gamma modules | no: duplicate of `spot-exposures/expiry-strike` |
 | `/api/stock/{ticker}/greek-flow` | read | greek-flow | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/greek-flow/{expiry}` | read | greek-flow-expiry | any | not observed | delta and vega flow per minute for one expiry | stated | flow | no: large, and the engines use the all-expiry series |
-| `/api/stock/{ticker}/greeks` | probe only | - | any | observed | the vendor's greeks per strike and expiry | strings | engine cross-check | no: observed on the wire but large; a follow-up as an independent check of the engine's greeks |
+| `/api/stock/{ticker}/greeks` | read | greeks | any | observed | the vendor's greeks per strike and expiry | strings | engine cross-check | no: observed on the wire but large; a follow-up as an independent check of the engine's greeks |
 | `/api/stock/{ticker}/historical-risk-reversal-skew` | read | rr-skew | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/income-statements` | not added | - | any | not observed | income statements | stated | fundamentals packet | no: duplicate of `financials` |
 | `/api/stock/{ticker}/info` | read | info | any | observed | full_name, sector, issue_type, marketcap, avg30_volume, ... | read by the code | Worker, dossier, engines | read |
@@ -70,13 +70,13 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/stock/{ticker}/nope` | read | nope | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/ohlc/{candle_size}` | read | ohlc-1d | any | observed | open, high, low, close, volume | read by the code | Worker, nightly | read |
 | `/api/stock/{ticker}/oi-change` | read | oi-change | any | observed | whole body | read by the code | engines, nightly | read |
-| `/api/stock/{ticker}/oi-per-expiry` | not added | - | any | not observed | call and put open interest per expiry | stated | options | no: a sum of `option-contracts`, which can disagree with a second source |
+| `/api/stock/{ticker}/oi-per-expiry` | read | oi-per-expiry | any | not observed | call and put open interest per expiry | stated | options | no: a sum of `option-contracts`, which can disagree with a second source |
 | `/api/stock/{ticker}/oi-per-strike` | read | oi-per-strike | any | observed | whole body | read by the code | nightly | read |
-| `/api/stock/{ticker}/option-chains` | probe only | - | any | observed | option chains with greeks | strings | options | no: observed on the wire (tier 1) but duplicates `option-contracts` |
+| `/api/stock/{ticker}/option-chains` | read | option-chains | any | observed | option chains with greeks | strings | options | no: observed on the wire (tier 1) but duplicates `option-contracts` |
 | `/api/stock/{ticker}/option-contracts` | read | option-contracts | any | observed | whole body | read by the code | Worker, nightly | read |
-| `/api/stock/{ticker}/option-stance` | probe only | - | any | not observed | a vendor trade-stance ranking of contracts with a fit score, return on capital and pop | return on capital unit not stated | none | probe only: asked weekly (tier 2) for a later comparison with our own ratio and Win %, never displayed |
+| `/api/stock/{ticker}/option-stance` | read | option-stance | any | not observed | a vendor trade-stance ranking of contracts with a fit score, return on capital and pop | return on capital unit not stated | none | probe only: asked weekly (tier 2) for a later comparison with our own ratio and Win %, never displayed |
 | `/api/stock/{ticker}/option/stock-price-levels` | read | option-price-levels | any | not observed | option volume by price level | stated | flow | no: low value |
-| `/api/stock/{ticker}/option/volume-oi-expiry` | not added | - | any | not observed | volume and open interest per expiry | stated | options | no: a sum of `option-contracts` |
+| `/api/stock/{ticker}/option/volume-oi-expiry` | read | volume-oi-expiry | any | not observed | volume and open interest per expiry | stated | options | no: a sum of `option-contracts` |
 | `/api/stock/{ticker}/options-pulse` | not added | - | any | not observed | the Nasdaq options pulse for a name | the spec documents no response | flow | no: the response schema is empty in the committed spec |
 | `/api/stock/{ticker}/options-volume` | read | options-volume | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/ownership` | enterprise | - | Enterprise | not observed | institutions, insiders and politicians with the most shares | stated | positioning packet | no: Enterprise only; `institution/{ticker}/ownership` is read |
@@ -90,8 +90,8 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/stock/{ticker}/technical-indicator/{function}` | not added | - | any | not observed | any technical indicator series | per function | price packet | no: computed from the candles the nightly holds |
 | `/api/stock/{ticker}/volatility/anomaly` | read | vol-anomaly | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/volatility/character` | read | vol-character | any | observed | whole body | read by the code | nightly | read |
-| `/api/stock/{ticker}/volatility/realized` | not added | - | any | not observed | 30-day implied against 21-session realised volatility | strings, units not stated | options | no: duplicate of `vrp` and the realised-volatility section |
-| `/api/stock/{ticker}/volatility/stats` | not added | - | any | not observed | implied and realised volatility with 1-year highs and lows | every field is described only as the implied volatility value | options | no: the schema is copied between fields, so even the meaning is unknown; duplicates `iv-rank`, `vrp` and the realised section |
+| `/api/stock/{ticker}/volatility/realized` | read | vol-realized | any | not observed | 30-day implied against 21-session realised volatility | strings, units not stated | options | no: duplicate of `vrp` and the realised-volatility section |
+| `/api/stock/{ticker}/volatility/stats` | read | vol-stats | any | not observed | implied and realised volatility with 1-year highs and lows | every field is described only as the implied volatility value | options | no: the schema is copied between fields, so even the meaning is unknown; duplicates `iv-rank`, `vrp` and the realised section |
 | `/api/stock/{ticker}/volatility/term-structure` | read | term-structure | any | observed | whole body | read by the code | engines, nightly | read |
 | `/api/stock/{ticker}/volatility/variance-risk-premium` | read | vrp | any | observed | whole body | read by the code | dossier, engines, nightly | read |
 | `/api/stock/{ticker}/volatility/term-structure/distribution` | read | term-structure-dist | Advanced+ | observed | whole body | read by the code | nightly | read; in the live documentation and not in the committed copy |
@@ -146,6 +146,9 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/options-pulse/total` | read | options-pulse-total | Advanced | observed | nightly |
 | `/api/volatility/anomaly/top` | read | vol-anomaly-top | Advanced | observed | nightly |
 | `/api/volatility/option-sentiment/top` | read | vol-sentiment-top | Advanced | observed | nightly |
+| `/api/volatility/vix-term-structure` | read | vix-term | Advanced | not observed | nightly |
+| `/api/volatility/character/top` | read | vol-character-top | Advanced | not observed | nightly |
+| `/api/market/correlations` | read | market-correlations | Advanced | not observed | nightly |
 | `/api/screener/analysts` | read | analysts | Advanced | observed | dossier, engines |
 
 ## The screener is the cheapest lever

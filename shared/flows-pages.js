@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "416";
+export const ASSET_VERSION = "418";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -7,6 +7,7 @@ import { etDayOf, isSession, shiftDay } from "./flows-quant-time.js";
 import { ledgerBody, LEDGER_DESCRIPTION, LEDGER_STYLES, LEDGER_SCRIPTS } from "./flows-page-ledger.js";
 import { positioningBody, POSITIONING_DESCRIPTION, POSITIONING_STYLES, POSITIONING_SCRIPTS } from "./flows-page-positioning.js";
 import { HORIZON_SESSIONS } from "./flows-horizon.js";
+import { COPY as VD_COPY } from "./flows-voldesk-copy.js";
 import { flowlabBody, FLOWLAB_DESCRIPTION, FLOWLAB_STYLES, FLOWLAB_SCRIPTS } from "./flows-page-flowlab.js";
 
 export const CALENDAR_BACK_DAYS = 14;
@@ -914,8 +915,8 @@ ${UI_CHART_SCRIPTS}
 </html>`;
 }
 
-const marketModule = (id, title, bodyId, { sub = "", seg = "", body = "" } = {}) => `
-    <section class="ui-card ui-mod mk-mod" id="${id}" aria-labelledby="${id}T">
+const marketModule = (id, title, bodyId, { sub = "", seg = "", body = "", short = "" } = {}) => `
+    <section class="ui-card ui-mod mk-mod" id="${id}" aria-labelledby="${id}T"${short ? ` data-short="${short}"` : ""}>
       <header class="ui-mod-h"><h2 class="ui-mod-t" id="${id}T">${title}</h2><span class="ui-mod-sp"></span>${sub}${seg}</header>
       ${body || `<div class="mk-body" id="${bodyId}"></div>`}
     </section>`;
@@ -924,13 +925,13 @@ const dossier = (t) => `<a class="mk-dossier" href="/flows/ticker/?t=${t}">Dossi
 
 const INDEX_NAV = `<nav class="fx-index" id="fxIndex" aria-label="On this page" hidden></nav>`;
 
-const MARKET_TABS = (scenes) => [
-  ["floor", "Floor"], ["session", "Session"], ["tide", "Tide"], ["sectors", "Sectors"], ["indices", "Indices"], ["network", "Network"],
+const MARKET_TABS = (scenes, voldesk = false) => [
+  ["floor", "Floor"], ["session", "Session"], ["tide", "Tide"], ["sectors", "Sectors"], ["indices", "Indices"], ...(voldesk ? [["voldesk", VD_COPY["title.tab"]]] : []), ["network", "Network"],
   ["extremes", "Extremes"], ...(scenes ? [["relations", "Relations"]] : []), ["prints", "Prints"], ["context", "Context"],
 ];
 
-export function marketPage({ username = "", owner = false, scenes = false, funds = false } = {}) {
-  const tabs = MARKET_TABS(scenes);
+export function marketPage({ username = "", owner = false, scenes = false, voldesk = false, funds = false } = {}) {
+  const tabs = MARKET_TABS(scenes, voldesk);
   const panel = (key, body) => `
     <div class="mk-panel" role="tabpanel" id="mkP-${key}" aria-labelledby="mkT-${key}" data-panel="${key}"${key === "floor" ? "" : " inert"}>${body}
     </div>`;
@@ -945,7 +946,7 @@ ${shell("Market", "market", username, `
   <p class="visually-hidden" id="mktStatus" role="status">Loading the session\u2026</p>
   <p class="visually-hidden" id="mktStale" role="status" hidden></p>
   <p class="visually-hidden" id="mkPulseStamp"></p>
-  <div class="mk-tabs" role="tablist" aria-label="Market views" id="mkTabs">${tabs.map(([k, t], i) => `<button type="button" role="tab" id="mkT-${k}" aria-controls="mkP-${k}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-tab="${k}">${t}</button>`).join("")}</div>
+  <div class="mk-tabs${voldesk ? " mk-dn" : ""}" role="tablist" aria-label="Market views" id="mkTabs">${tabs.map(([k, t], i) => `<button type="button" role="tab" id="mkT-${k}" aria-controls="mkP-${k}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-tab="${k}">${t}</button>`).join("")}</div>
   </div>
   <section class="mk-hero" id="mkHero" aria-label="The market at a glance"></section>
   <div class="mk-sub" id="mkSub" role="tablist" aria-label="Modules in this view" hidden></div>
@@ -965,7 +966,11 @@ ${marketModule("mkGroupsCard", "Groups", "mkGroups")}`)}
 ${panel("indices", `
 ${["SPY", "QQQ", "IWM"].map((t) => marketModule("mkEtf" + t + "Card", t, "mkEtf" + t, { sub: dossier(t) })).join("")}
 ${marketModule("mkExpiryCard", "Expiry", "mkExpiry")}
-${marketModule("mkVolCard", "Volatility", "mkVol")}`)}
+${marketModule("mkVolCard", "Volatility", "mkVol")}`)}${voldesk ? panel("voldesk", `
+${marketModule("mkVdTermCard", VD_COPY["title.term"], "mkVdTerm", { short: "Term", seg: `<div class="mk-segc" id="mkVdTermSeg"></div>` })}
+${marketModule("mkVdIvrvCard", VD_COPY["title.ivrv"], "mkVdIvrv", { short: "Implied" })}
+${marketModule("mkVdCorrCard", VD_COPY["title.matrix"], "mkVdCorr", { short: "Correlation", seg: `<div class="mk-segc" id="mkVdCorrSeg"></div>` })}
+${marketModule("mkVdCharCard", VD_COPY["title.character"], "mkVdChar", { short: "Character" })}`) : ""}
 ${panel("network", `
 ${marketModule("mkNetCard", "Flow network", "mkNet", { sub: `<button type="button" class="mk-pop" id="mkNetPop" aria-label="Pop out the flow network into its own window" hidden>Pop out</button>`, seg: `<div class="mk-segc" id="mkNetSeg"></div>` })}`)}
 ${panel("extremes", `
@@ -990,7 +995,8 @@ ${marketModule("mkSeasonCard", "Seasonality", "mkSeason", { seg: `<div class="mk
   <i hidden data-defer="river" data-src="${v("/assets/js/flows-market-river.js")}"></i>
   <i hidden data-defer="market-below" data-src="${v("/assets/js/flows-market-below.js")}"></i>
   <i hidden data-defer="net" data-src="${v("/assets/js/flows-net.js")}"></i>
-  <i hidden data-defer="netmap" data-src="${v("/assets/js/flows-net-map.js")}"></i>${scenes ? `
+  <i hidden data-defer="netmap" data-src="${v("/assets/js/flows-net-map.js")}"></i>${voldesk ? `
+  <i hidden data-defer="voldesk" data-src="${v("/assets/js/flows-voldesk.js")}" data-css="${v("/assets/css/flows-voldesk.css")}"></i>` : ""}${scenes ? `
   <i hidden data-defer="skyline" data-src="${v("/assets/js/flows-skyline.js")}"></i>
   <i hidden data-defer="relations" data-src="${v("/assets/js/flows-relations.js")}"></i>` : ""}
   <p class="visually-hidden" id="mkPulseFoot"></p>
@@ -1243,7 +1249,7 @@ ${UI_CHART_SCRIPTS}
 </html>`;
 }
 
-export function tickerPage({ username = "", scenes = false, now = Date.now() } = {}) {
+export function tickerPage({ username = "", scenes = false, xcheck = false, now = Date.now() } = {}) {
   return flowsDocument({
     title: "Ticker",
     description: "One name's options dossier: price against the priced move, the Neuron verdict with priced structures, and the dealer book, volatility, flow and positioning behind it.",
@@ -1315,7 +1321,8 @@ export function tickerPage({ username = "", scenes = false, now = Date.now() } =
   <i hidden data-defer="movelab" data-src="${v("/assets/js/flows-ticker-movelab.js")}" id="ftMoveLab"></i>
   <i hidden data-defer="network" data-src="${v("/assets/js/flows-ticker-network.js")}" data-css="${v("/assets/css/flows-ticker-network.css")}" id="ftNetwork"></i>
   <i hidden data-defer="live" data-src="${v("/assets/js/flows-ticker-live.js")}" id="ftLive"></i>${scenes ? `
-  <i hidden data-defer="surface" data-src="${v("/assets/js/flows-ticker-surface.js")}" id="ftSurface"></i>` : ""}
+  <i hidden data-defer="surface" data-src="${v("/assets/js/flows-ticker-surface.js")}" id="ftSurface"${xcheck ? ' data-xcheck="1"' : ""}></i>${xcheck ? `
+  <i hidden data-defer="xcheck" data-src="${v("/assets/js/flows-ticker-xcheck.js")}" data-css="${v("/assets/css/flows-voldesk.css")}" id="ftXcheckLoad"></i>` : ""}` : ""}
 `,
   });
 }

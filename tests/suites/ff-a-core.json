@@ -1,1 +1,1 @@
-{"name": "ff-a-core", "class": "N", "group": "shard", "timing": false, "medianS": 8, "shard": 2, "command": "node --disable-warning=ExperimentalWarning ff-a-core.mjs", "files": ["ff-a-core.mjs"], "covers": ["tests/fixtures-ff-contract.json"]}
+{"name": "ff-a-core", "class": "N", "group": "shard", "timing": false, "medianS": 8, "shard": 11, "command": "node --disable-warning=ExperimentalWarning ff-a-core.mjs", "files": ["ff-a-core.mjs"], "covers": ["tests/fixtures-ff-contract.json"]}

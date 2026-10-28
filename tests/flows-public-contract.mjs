@@ -133,6 +133,7 @@ for (const [route, name] of [["/flows/about/", "about"], ["/flows/glossary/", "g
   ok(!/each page/.test(lede), "the lede does not claim every page");
   const covered = new Set(GLOSSARY.map((g) => g.href).filter(Boolean));
   for (const href of ["/flows/market/", "/flows/political/", "/flows/moves/", "/flows/unusual/", "/flows/long/", "/flows/", "/flows/events/"]) ok(covered.has(href), `the glossary holds the information-button lines of ${href}`);
+  for (const key of ["contango", "backwardation", "roll-per-30-days", "implied-against-realised", "correlation-window", "volatility-half-life", "engine-cross-check"]) ok(GLOSSARY.some((g) => g.key === key) && html.includes(`id="${key}"`), `the glossary holds the Vol desk term ${key}`);
   ok(!/<(?:img|iframe|style)|<script(?![^>]*src=)/i.test(html), "no markup of that kind reaches the page");
   ok(html.includes("expected P&amp;L") && !html.includes("expected P&L"), "ampersands in the strings are escaped");
   ok(html.includes("members&#39; own variances"), "and so are apostrophes");
