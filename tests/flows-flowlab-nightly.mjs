@@ -52,11 +52,11 @@ async function battery(leg, section) {
   await safe("plan", async () => {
     const calls = [];
     const out = await leg.readFlowlab({ vendor: vendorOf(N, { calls }), sessionDate: SESSION, generatedAt: AT, cap: 40, env: {}, alertRows: ALERTS });
-    need(out.calls === 31 && calls.length === 31, "plan: roots 1, venues 2, screen 3 and 25 groups make 31 calls (" + out.calls + ")");
+    need(out.calls === 30 && calls.length === 30, "plan: roots 1, venues 1, screen 3 and 25 groups make 30 calls (" + out.calls + ")");
     need(Object.keys(out.payloads).sort().join() === [...KEYS].sort().join(), "plan: five keys built");
     need(out.payloads["flowlab-corr"].status === "off", "plan: the correlation key says off while the switch is off");
     need(calls.every((c) => !c.path.startsWith("/api/analytics")), "plan: analytics read with the switch off");
-    need(out.detail.flCalls === 31 && out.detail.flSkipped === 0, "plan: detail names calls and skips");
+    need(out.detail.flCalls === 30 && out.detail.flSkipped === 0, "plan: detail names calls and skips");
     for (const key of KEYS) {
       const v = validate(key, { ...out.payloads[key], fixture: true }, { allowSynthetic: true });
       need(v.ok, "plan: " + key + " validates (" + JSON.stringify(v.structural) + ")");
@@ -67,20 +67,21 @@ async function battery(leg, section) {
     need(roots.list === "SYX101|SYX202|SYX303|SYX404|SYX505" && roots.n === 5, "plan: roots are the sorted unique list");
     const first = calls[0];
     need(first.path === "/api/option-trades/optionable-tickers", "plan: roots are read first");
-    need(calls.slice(1, 3).every((c) => c.path === `/api/option-trades/exchange-breakdown/${SESSION}`) && calls[2].params.by_trade_code === "true", "plan: venues read the session and then the trade codes");
-    need(calls.slice(3, 6).map((c) => c.params.order).join() === "premium,volume_oi_ratio,premium" && calls.slice(3, 6).every((c) => c.params.limit === "250"), "plan: three presets");
+    need(calls[1].path === `/api/option-trades/exchange-breakdown/${SESSION}` && !("by_trade_code" in calls[1].params) && calls.filter((c) => c.path.startsWith("/api/option-trades/exchange-breakdown/")).length === 1, "plan: venues read the session once, without trade codes");
+    need(calls.slice(2, 5).map((c) => c.params.order).join() === "premium,volume_oi_ratio,premium" && calls.slice(2, 5).every((c) => c.params.limit === "250"), "plan: three presets");
     const groups = out.payloads["flowlab-groups"];
     need(Object.keys(groups.groups).length === 25 && Object.values(groups.groups).every((g) => g.status === "ok" && g.bars.length === 13), "plan: 25 groups of 13 bars");
     need(groups.expiry === "2026-11-20", "plan: the group expiry is the third Friday (" + groups.expiry + ")");
     need(groups.groups.mag7.bars.every((b) => b.d === null || Number.isFinite(b.d)), "plan: bars are numbers or null");
-    need(out.payloads["flowlab-venues"].tickers.length === 3 && out.payloads["flowlab-venues"].codes[0].top.length === 4, "plan: venues and codes");
+    need(out.payloads["flowlab-venues"].tickers.length === 3 && !("codes" in out.payloads["flowlab-venues"]), "plan: venues without the whole universe's codes");
   });
 
   await safe("cap", async () => {
-    need(leg.callCeiling({}, 1990, 2000) === 10, "cap: the extras remainder (10) bounds the stage");
-    need(leg.callCeiling({}, 0, 2000) === 40 && leg.callCeiling({}, 1999.9, 2000) === 0, "cap: forty at most, zero at the extras cap");
-    const out = await leg.readFlowlab({ vendor: vendorOf(), sessionDate: SESSION, generatedAt: AT, cap: leg.callCeiling({}, 1990, 2000), env: {} });
-    need(out.calls === 6 && out.skipped.length === 1 && out.skipped[0].section === "groups" && out.skipped[0].why === "cap", "cap: groups are skipped for the cap when ten calls remain (" + out.calls + ")");
+    const t0 = Date.parse("2026-10-23T22:00:00Z");
+    need(leg.callCeiling(t0 + 1, () => t0) === 40 && leg.callCeiling(null, () => t0) === 40, "cap: Flow Lab's own allowance is forty calls a night");
+    need(leg.callCeiling(t0, () => t0) === 0 && leg.callCeiling(t0 - 1, () => t0) === 0, "cap: past the run's deadline nothing is read");
+    const out = await leg.readFlowlab({ vendor: vendorOf(), sessionDate: SESSION, generatedAt: AT, cap: 10, env: {} });
+    need(out.calls === 5 && out.skipped.length === 1 && out.skipped[0].section === "groups" && out.skipped[0].why === "cap", "cap: groups are skipped for the cap when ten calls remain (" + out.calls + ")");
     need(!out.payloads["flowlab-groups"] && out.detail.flSkipped === 1, "cap: nothing is published for the skipped section");
     const none = await leg.readFlowlab({ vendor: vendorOf(), sessionDate: SESSION, generatedAt: AT, cap: 0, env: {} });
     need(none.calls === 0 && none.skipped.length === 4, "cap: a zero remainder reads nothing");
@@ -105,7 +106,9 @@ async function battery(leg, section) {
   await safe("analytics", async () => {
     const calls = [];
     const on = await leg.readFlowlab({ vendor: vendorOf(N, { calls }), sessionDate: SESSION, generatedAt: AT, cap: 40, env: { FLOWS_FLOWLAB_ANALYTICS: "on" }, alertRows: ALERTS });
-    need(calls.filter((c) => c.path.startsWith("/api/analytics")).length === 2 && on.calls === 33, "analytics: two more calls under the switch (" + on.calls + ")");
+    need(calls.filter((c) => c.path.startsWith("/api/analytics")).length === 2 && on.calls === 32, "analytics: two more calls under the switch (" + on.calls + ")");
+    const asked = calls.filter((c) => c.path.startsWith("/api/analytics"));
+    need(asked.every((c) => /^(\d+month|full|\d{4}-\d{2}-\d{2})$/.test(c.params.range) && c.params.calculations === c.params.calculations.toUpperCase() && c.params.calculations === "CORRELATION"), "analytics: the range and the calculation take the documented forms (" + asked.map((c) => c.params.range + "/" + c.params.calculations).join() + ")");
     const corr = on.payloads["flowlab-corr"];
     need(corr.status === "ok" && corr.symbols.join() === "SPY,SYX101,SYX202" && corr.window.symbols.length === 3 && corr.sliding.symbols.length === 3, "analytics: the matrix of the three flow names");
     need(calls.find((c) => c.path === "/api/analytics/window").params.symbols === "SPY,SYX101,SYX202", "analytics: symbols by flagged premium");
@@ -128,10 +131,14 @@ async function battery(leg, section) {
     const puts = [];
     const notes = [];
     const stages = { run: async (id, fn, onError) => { try { return await fn(); } catch (e) { onError(e); return null; } }, detail: (d) => notes.push(d), skip: (id, why) => notes.push({ skipped: why }) };
-    const ctx = { stages, vendor: vendorOf(), sessionDate: SESSION, generatedAt: AT, marketLegs: { extras: { calls: 1990 } } };
-    await section.runFlowlabWith(ctx, { env: { FLOWS_EXTRAS_CAP: "2000" }, put: async (k, v) => { puts.push(k); }, store: { flowalerts: { rows: ALERTS } }, pool: null });
-    need(notes[0] && notes[0].flCalls === 6 && notes[0].flSkipped === 1, "section: the extras remainder bounds the stage (" + JSON.stringify(notes[0]) + ")");
-    need(puts.join() === "flowlab-roots,flowlab-venues,flowlab-screen,flowlab-corr", "section: published keys in order");
+    const ctx = { stages, vendor: vendorOf(), sessionDate: SESSION, generatedAt: AT, marketLegs: { extras: { calls: 2000 } } };
+    const t0 = Date.now();
+    await section.runFlowlabWith(ctx, { env: { FLOWS_EXTRAS_CAP: "2000" }, put: async (k, v) => { puts.push(k); }, store: { flowalerts: { rows: ALERTS } }, pool: null, startedAt: t0, now: () => t0 + 60000 });
+    need(notes[0] && notes[0].flCalls === 30 && notes[0].flSkipped === 0, "section: Flow Lab keeps its own allowance whatever the extras spent (" + JSON.stringify(notes[0]) + ")");
+    need(puts.join() === "flowlab-roots,flowlab-venues,flowlab-screen,flowlab-groups,flowlab-corr", "section: published keys in order");
+    const late = [];
+    await section.runFlowlabWith({ ...ctx, stages: { ...stages, detail: (d) => late.push(d) } }, { env: {}, put: async () => {}, store: { flowalerts: null }, pool: null, startedAt: t0, now: () => t0 + 91 * 60000 });
+    need(late[0] && late[0].flCalls === 0 && late[0].flSkipped === 4, "section: past the run's deadline the stage reads nothing (" + JSON.stringify(late[0]) + ")");
     const off = [];
     await section.runFlowlabWith({ ...ctx, stages: { ...stages, skip: (id, why) => off.push([id, why]), run: async () => { throw new Error("must not run"); } } }, { env: { FLOWS_FLOWLAB_NIGHTLY: "off" } });
     need(off.length === 1 && off[0][0] === "flowlab", "section: FLOWS_FLOWLAB_NIGHTLY=off skips the stage");
@@ -149,14 +156,28 @@ assert.deepEqual(base, [], "the shipped leg and stage pass their battery:\n" + b
 checks++;
 
 const legPlants = [
-  [29, "stage ignores the extras remainder", [["const room = Number.isFinite(extrasCap) ? extrasCap - used : NIGHTLY_MAX;", "const room = NIGHTLY_MAX;"]], "extras remainder"],
-  [30, "groups published with a failed group as zeros", [["groups[g] = x.ok ? { status: \"ok\", n: x.x.t.length, bars: groupBars(x.x, openMs), callC: x.x.net.callC, putC: x.x.net.putC } : { status: x.why };", "groups[g] = x.ok ? { status: \"ok\", n: x.x.t.length, bars: groupBars(x.x, openMs), callC: x.x.net.callC, putC: x.x.net.putC } : { status: x.why, bars: [], callC: 0, putC: 0 };"]], "keeps its reason and no figures"],
+  [30, "groups published with a failed group as zeros", [["groups[g] = groupEntry(res.ok ? reduceGreek(res.body, { group: true, expiry }) : res, openMs);", "groups[g] = res.ok ? groupEntry(reduceGreek(res.body, { group: true, expiry }), openMs) : { status: \"plan\", bars: [], callC: 0, putC: 0 };"]], "keeps its reason and no figures"],
   [32, "analytics read with the switch off", [["if (section === \"analytics\" && !analytics) continue;", ""]], "analytics read with the switch off"],
+  [71, "analytics asks an undocumented range", [["export const CORR_RANGE = \"3month\";", "export const CORR_RANGE = \"3M\";"]], "documented forms"],
+  [72, "analytics asks a lower-case calculation", [["export const CORR_CALC = \"CORRELATION\";", "export const CORR_CALC = \"correlation\";"]], "documented forms"],
+  [73, "venues read the whole universe's codes again", [["const ex = await get(pathFor(\"exchange-breakdown\", { date: sessionDate }), { limit: FLOWLAB_LIMITS.venuesUniverse });", "const ex = await get(pathFor(\"exchange-breakdown\", { date: sessionDate }), { limit: FLOWLAB_LIMITS.venuesUniverse });\n      await get(pathFor(\"exchange-breakdown\", { date: sessionDate }), { limit: 500, by_trade_code: \"true\" });"]], "make 30 calls"],
+  [74, "no allowance past the deadline", [["return Number.isFinite(deadline) && now() >= deadline ? 0 : NIGHTLY_MAX;", "return NIGHTLY_MAX;"]], "past the run's deadline nothing is read"],
+];
+
+const sectionPlants = [
+  [29, "the extras remainder bounds the stage", [["const cap = callCeiling(deadline, now);", "const cap = Math.max(0, Math.min(40, 2000 - ((ctx.marketLegs && ctx.marketLegs.extras && ctx.marketLegs.extras.calls) || 0)));"]], "own allowance whatever the extras spent"],
 ];
 
 for (const [n, title, transforms, expect] of legPlants) {
   const mod = await loadMutated("scripts/flows-legs/flowlab.mjs", transforms);
   const problems = await battery(mod, SECTION);
+  ok(problems.length > 0, `PLANTED BUILD ${n} (${title}) must fail the battery`);
+  ok(problems.some((p) => p.includes(expect)), `PLANTED BUILD ${n} fails its named check (${expect}): ${problems.slice(0, 3).join(" | ")}`);
+}
+
+for (const [n, title, transforms, expect] of sectionPlants) {
+  const mod = await loadMutated("scripts/flows-nightly/sections/flowlab.mjs", transforms);
+  const problems = await battery(LEG, mod);
   ok(problems.length > 0, `PLANTED BUILD ${n} (${title}) must fail the battery`);
   ok(problems.some((p) => p.includes(expect)), `PLANTED BUILD ${n} fails its named check (${expect}): ${problems.slice(0, 3).join(" | ")}`);
 }
@@ -188,7 +209,7 @@ const emitted = (dir) => {
   ok(e["flowlab-corr"].status === "off", "the dry run's correlation key is off");
   const meta = JSON.parse(fs.readFileSync(path.join(emitDir, "-meta.json"), "utf8"));
   const stage = meta.stages.find((s) => s.id === "flowlab");
-  ok(stage && stage.status === "ok" && stage.flCalls === 31 && stage.flSkipped === 0, "meta records the stage with its call count: " + JSON.stringify(stage));
+  ok(stage && stage.status === "ok" && stage.flCalls === 30 && stage.flSkipped === 0, "meta records the stage with its call count: " + JSON.stringify(stage));
   const refused = e["flowlab-groups"].groups.uranium;
   ok(refused.status === "plan" && !("bars" in refused), "the dry run's refused group is a reason and no figures");
   const names = JSON.stringify(e);

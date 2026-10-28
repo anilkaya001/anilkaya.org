@@ -4,21 +4,26 @@ import { productById } from "../../shared/flows-products.js";
 import { sessionOpen } from "../../shared/flows-freshness.js";
 import {
   FLOWLAB_LIMITS, GROUPS, NIGHTLY_PRESETS, presetParams, reduceScreen, reduceVenues, reduceRoots, reduceGreek, reduceAnalytics, thirdFridayExpiry, analyticsOn,
+  groupBars, groupEntry, orderGroups, GROUP_BAR_COUNT, GROUP_BAR_MS,
 } from "../../shared/flows-flowlab.js";
 
 export const FLOWLAB_KEYS = Object.freeze(["flowlab-roots", "flowlab-venues", "flowlab-screen", "flowlab-groups", "flowlab-corr"]);
 
 export const SECTION_ORDER = Object.freeze(["roots", "venues", "screen", "groups", "analytics"]);
 
-export const SECTION_COST = Object.freeze({ roots: 1, venues: 2, screen: 3, groups: GROUPS.length, analytics: 2 });
+export const SECTION_COST = Object.freeze({ roots: 1, venues: 1, screen: 3, groups: GROUPS.length, analytics: 2 });
 
 export const SECTION_KEY = Object.freeze({ roots: "flowlab-roots", venues: "flowlab-venues", screen: "flowlab-screen", groups: "flowlab-groups", analytics: "flowlab-corr" });
 
 export const NIGHTLY_MAX = 40;
 
-export const BAR_COUNT = 13;
+export const BAR_COUNT = GROUP_BAR_COUNT;
 
-export const BAR_MS = 30 * 60000;
+export const BAR_MS = GROUP_BAR_MS;
+
+export const CORR_RANGE = "3month";
+
+export const CORR_CALC = "CORRELATION";
 
 export const CORR_SYMBOLS = 20;
 
@@ -48,10 +53,8 @@ export function planSections({ cap, analytics }) {
   return { run, skipped, left };
 }
 
-export function callCeiling(env, extrasCalls, extrasCap) {
-  const used = Number.isFinite(extrasCalls) ? extrasCalls : 0;
-  const room = Number.isFinite(extrasCap) ? extrasCap - used : NIGHTLY_MAX;
-  return Math.max(0, Math.min(NIGHTLY_MAX, Math.floor(room)));
+export function callCeiling(deadline = null, now = Date.now) {
+  return Number.isFinite(deadline) && now() >= deadline ? 0 : NIGHTLY_MAX;
 }
 
 export function fitTail(payload, capBytes, lists) {
@@ -80,19 +83,7 @@ export function slimRow(row) {
   };
 }
 
-export function groupBars(x, openMs) {
-  const bars = [];
-  for (let i = 0; i < BAR_COUNT; i++) bars.push({ t: openMs + i * BAR_MS, d: null, v: null });
-  x.t.forEach((t, i) => {
-    const b = Math.floor((t - openMs) / BAR_MS);
-    if (b < 0 || b >= BAR_COUNT) return;
-    const d = x.series.dirDelta[i];
-    const v = x.series.dirVega[i];
-    if (d !== null) bars[b].d = (bars[b].d === null ? 0 : bars[b].d) + d;
-    if (v !== null) bars[b].v = (bars[b].v === null ? 0 : bars[b].v) + v;
-  });
-  return bars;
-}
+export { groupBars };
 
 export function topNames(rows, limit = CORR_SYMBOLS) {
   const totals = new Map();
@@ -138,22 +129,12 @@ export async function readFlowlab({
       if (x.ok) payloads["flowlab-roots"] = { ...head, ...x.x };
       else note("roots", x.why);
     } else if (section === "venues") {
-      const [ex, codes] = [await get(pathFor("exchange-breakdown", { date: sessionDate }), { limit: 500 }), await get(pathFor("exchange-breakdown", { date: sessionDate }), { limit: 500, by_trade_code: "true" })];
+      const ex = await get(pathFor("exchange-breakdown", { date: sessionDate }), { limit: FLOWLAB_LIMITS.venuesUniverse });
       const a = ex.ok ? reduceVenues(ex.body, {}) : ex;
-      const b = codes.ok ? reduceVenues(codes.body, { mode: "codes" }) : codes;
-      if (!a.ok && !b.ok) note("venues", a.why);
+      if (!a.ok) note("venues", a.why);
       else {
-        const payload = {
-          ...head,
-          tickers: a.ok ? a.x.tickers : [],
-          codes: b.ok ? b.x.tickers.map((q) => ({ t: q.t, top: q.top })) : [],
-          ...(a.ok ? {} : { tickersWhy: a.why }),
-          ...(b.ok ? {} : { codesWhy: b.why }),
-        };
-        const fit = fitTail(payload, productById("flowlab-venues").capBytes, [["tickers", (o) => o.tickers, (o, v) => { o.tickers = v; }], ["codes", (o) => o.codes, (o, v) => { o.codes = v; }]]);
+        const fit = fitTail({ ...head, tickers: a.x.tickers }, productById("flowlab-venues").capBytes, [["tickers", (o) => o.tickers, (o, v) => { o.tickers = v; }]]);
         payloads["flowlab-venues"] = Object.keys(fit.cut).length ? { ...fit.payload, cut: fit.cut } : fit.payload;
-        if (!a.ok) reasons.venues = a.why;
-        if (!b.ok) reasons.venues = b.why;
       }
     } else if (section === "screen") {
       const presets = {};
@@ -187,12 +168,9 @@ export async function readFlowlab({
       const groups = {};
       await each(GROUPS, async (g) => {
         const res = await get(pathFor("group-greek-flow-expiry", { flow_group: g, expiry }), { date: sessionDate });
-        const x = res.ok ? reduceGreek(res.body, { group: true, expiry }) : res;
-        groups[g] = x.ok ? { status: "ok", n: x.x.t.length, bars: groupBars(x.x, openMs), callC: x.x.net.callC, putC: x.x.net.putC } : { status: x.why };
+        groups[g] = groupEntry(res.ok ? reduceGreek(res.body, { group: true, expiry }) : res, openMs);
       });
-      const ordered = {};
-      for (const g of GROUPS) if (groups[g]) ordered[g] = groups[g];
-      for (const g of GROUPS) if (!ordered[g]) ordered[g] = { status: "cap" };
+      const ordered = orderGroups(groups);
       const bad = Object.values(ordered).filter((q) => q.status !== "ok").length;
       if (bad === GROUPS.length) note("groups", Object.values(ordered)[0].status);
       else {
@@ -205,7 +183,7 @@ export async function readFlowlab({
         payloads["flowlab-corr"] = { ...head, status: "empty", symbols };
         continue;
       }
-      const params = (extra) => ({ symbols: symbols.join(","), range: "3M", calculations: "correlation", ...extra });
+      const params = (extra) => ({ symbols: symbols.join(","), range: CORR_RANGE, calculations: CORR_CALC, ...extra });
       const win = await get(pathFor("analytics-window"), params({}));
       const sld = await get(pathFor("analytics-sliding"), params({ window_size: 20 }));
       const a = win.ok ? reduceAnalytics(win.body, { symbols, calc: "correlation" }) : win;

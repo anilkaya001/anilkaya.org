@@ -4,10 +4,10 @@ import { CONTRACT, open, launch, until, settle } from "./lib/flowlab-world.mjs";
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
 
-const SIZES = [[1440, 820], [1024, 768], [390, 844]];
+const SIZES = [[1920, 1080], [1440, 820], [1024, 768], [390, 844]];
 const TABS = ["screen", "strikes", "greeks", "ladders", "routing", "lit", "groups", "relations"];
 
-async function sweep(browser, plant) {
+async function sweep(browser, plant, { first = false } = {}) {
   const bad = [];
   for (const [w, h] of SIZES) {
     for (const tab of TABS) {
@@ -30,7 +30,8 @@ async function sweep(browser, plant) {
         return {
           page: de.scrollHeight - innerHeight, side: de.scrollWidth - innerWidth,
           inertOk: inactive.every((p) => p.hasAttribute("inert") && getComputedStyle(p).visibility === "hidden"),
-          clipped, inner: [...panel.querySelectorAll(".fl-body")].filter((b) => b.scrollHeight > b.clientHeight + 1 && b.offsetParent !== null && !b.querySelector("table[data-what]")).map((b) => b.id),
+          clipped, cutNotes: [...panel.querySelectorAll(".fl-note")].filter((n) => n.offsetParent !== null && n.scrollHeight > n.clientHeight + 1).map((n) => n.id),
+          inner: [...panel.querySelectorAll(".fl-body")].filter((b) => b.scrollHeight > b.clientHeight + 1 && b.offsetParent !== null && !b.querySelector("table[data-what]")).map((b) => b.id),
           errors: 0,
         };
       });
@@ -39,9 +40,11 @@ async function sweep(browser, plant) {
       if (r.side > 1) bad.push(tag + " scrolls sideways by " + r.side);
       if (!r.inertOk) bad.push(tag + " leaves an inactive panel live");
       if (r.clipped.length) bad.push(tag + " clips " + r.clipped.join());
+      if (r.cutNotes.length) bad.push(tag + " cuts the note of " + r.cutNotes.join());
       if (r.inner.length) bad.push(tag + " hides content in " + r.inner.join());
       if (s.log.errors.length) bad.push(tag + " page error " + s.log.errors[0]);
       await s.close();
+      if (first && bad.length) return bad;
     }
   }
   return bad;
@@ -99,14 +102,17 @@ try {
   const t = await showAll(browser);
   ok(t.length === 0, "show all: " + t.join("; "));
   const grow = (src) => src + "\n.fl-body { min-height: 2400px; }\n";
-  const p1 = await sweep(browser, grow);
+  const p1 = await sweep(browser, grow, { first: true });
   ok(p1.length > 0, "planted build 43 (modules taller than the stage) survived");
   const loose = (src) => src.replace(".fl-panel { grid-area: 1 / 1;", ".fl-panel { grid-area: auto;");
-  const p2 = await sweep(browser, loose);
+  const p2 = await sweep(browser, loose, { first: true });
   ok(p2.length > 0, "planted build 44 (panels not stacked) survived");
   const live = (src) => src.replace(".fl-panel { grid-area: 1 / 1; min-height: 0; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 12px; visibility: hidden; }", ".fl-panel { grid-area: 1 / 1; min-height: 0; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 12px; visibility: visible; }");
-  const p3 = await sweep(browser, live);
+  const p3 = await sweep(browser, live, { first: true });
   ok(p3.length > 0, "planted build 45 (inactive panels visible) survived");
+  const short = (src) => src.replace("  .fl-note { max-height: 5.2em; }\n", "");
+  const p4 = await sweep(browser, short, { first: true });
+  ok(p4.some((b) => / cuts the note of /.test(b)), "planted build 94 (phone notes held to three lines) survived: " + p4.join("; "));
 } finally {
   await browser.close();
 }

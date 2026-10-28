@@ -184,6 +184,18 @@ for (const name of ["deskPage", "sidePage", "watchPage"]) {
   GZIP_KIB[name] += MEMBER_EXPORT_JS.gzip / 1024;
 }
 
+const FLOWLAB_HEATMAP = { bytes: 363, gzip: 102, why: "Flow Lab reads fix: the heatmap kind draws a cell whose net range includes zero as an outlined cell rather than a colour, from an undecided grid the caller passes beside the values, thins its column labels by a step the caller states and hands its readout the row and column, so the strike map shows which strikes are undecided; flows-chart.js grew from 51,591 to 51,954 B raw and from 15,068 to 15,170 B gzip, and every route that ships it eagerly rises by exactly that, so no route's headroom moves" };
+const FLOWLAB_READS = { bytes: 10088, gzip: 2534, cssBytes: 724, cssGzip: 147, why: "Flow Lab reads fix: flows-flowlab.js names the class of every failed read to the reader (the sentence tables and the throttled, held and kept banners), draws the strike map and the strike rail with sided ranges, the expiry nets with their unknown share, the greek flow's ticks, the trade-code table and the group tiles (48,594 to 58,682 B raw, 13,164 to 15,698 B gzip); flows-flowlab.css carries the undecided bar, the range line, the hollow sign and the phone note height (13,953 to 14,677 B raw, 3,116 to 3,263 B gzip)" };
+const FLOWLAB_DRILL_READS = { bytes: 783, gzip: 215, why: "Flow Lab reads fix: the drill sheet names the class of a failed contract read and the number of contracts a structure search looked through (flows-drill.js 17,500 to 18,283 B raw, 5,256 to 5,471 B gzip); it is eager on Flow Lab and deferred on the pages that open a contract" };
+for (const name of ["tickerPage", "deskPage", "overviewPage", "strategyPage", "sidePage", "watchPage", "marketPage", "flowlabPage", "unusualPage"]) {
+  CEILING_KIB[name] += FLOWLAB_HEATMAP.bytes / 1024;
+  GZIP_KIB[name] += FLOWLAB_HEATMAP.gzip / 1024;
+}
+CEILING_KIB.flowlabPage += (FLOWLAB_READS.bytes + FLOWLAB_DRILL_READS.bytes) / 1024;
+GZIP_KIB.flowlabPage += (FLOWLAB_READS.gzip + FLOWLAB_DRILL_READS.gzip) / 1024;
+CSS_KIB.flowlabPage += FLOWLAB_READS.cssBytes / 1024;
+CSS_GZIP_KIB.flowlabPage += FLOWLAB_READS.cssGzip / 1024;
+
 const RATCHET_KIB = { raw: 12, gzip: 3, css: 3, cssGzip: 3 };
 const HELD_RAW_KIB = { eventsPage: 50 };
 
@@ -240,7 +252,7 @@ const ORACLE_DEFERRED_KIB = 60;
 const ORACLE_MARKUP_BYTES = 720;
 const DEFERRED_KIB = {
   tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + NETWORK_GROUP.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + (260 + 848) / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024 + DESK_CALLS.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024 + (2240 + 627) / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
-  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + (26400 + 745) / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024 + LEDGER_LIVE.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024,
+  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + (26400 + 745) / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024 + LEDGER_LIVE.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024 + FLOWLAB_HEATMAP.bytes / 1024,
 };
 const DARK_POOL_TIME = { bytes: 107, why: "lane 2 math audit: the Market page's dark-pool list drops canceled prints, prints its times in TRT through F.time and its prices through F.px, and says how many canceled prints it left out, measured as 58,946 to 59,053 B raw in the deferred flows-market-below.js" };
 DEFERRED_KIB.marketPage += DARK_POOL_TIME.bytes / 1024;
@@ -658,7 +670,7 @@ for (const name of Object.keys(CEILING_KIB)) {
       eq(PAGES.oracleShell(m.html, "off", "overview"), m.html, `${m.name}: with the switch off the page is untouched`);
     }
     const drillBytes = sizeOf("/assets/js/flows-drill.js");
-    ok(drillBytes > 0 && drillBytes <= FLOWLAB_ENTRY.bytes, `the drill sheet weighs ${drillBytes} B, inside its stated ${FLOWLAB_ENTRY.bytes} B, and loads only when a page carries #fxFlowlab`);
+    ok(drillBytes > 0 && drillBytes <= FLOWLAB_ENTRY.bytes + FLOWLAB_DRILL_READS.bytes, `the drill sheet weighs ${drillBytes} B, inside its stated ${FLOWLAB_ENTRY.bytes + FLOWLAB_DRILL_READS.bytes} B, and loads only when a page carries #fxFlowlab`);
     for (const slug of ["unusual", "ticker", "moves"]) {
       const base = "<html><body><main>x</main></body></html>";
       const shelled = flowlabShell(base, slug, true);

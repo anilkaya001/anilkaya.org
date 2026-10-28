@@ -91,6 +91,8 @@ function createState() {
     scFlights: new Map(),
     scRefreshes: new Map(),
     fundsFill: null,
+    flowlabFlights: new Map(),
+    flowlabLogged: new Map(),
   };
 }
 const state = createState();
@@ -2186,6 +2188,16 @@ function tickVendor(env) {
   };
 }
 
+const METER_KIND = Object.freeze({ timeout: "timeout", network: "network", too_large: "size", unparsable: "parse" });
+
+function meterOf(error) {
+  const upstream = Number.isInteger(error && error.upstream) ? error.upstream : 0;
+  const kind = error && error.cause && typeof error.cause === "object" ? METER_KIND[error.cause.kind] : undefined;
+  if (kind === "size" || kind === "parse") return { status: 200, kind };
+  if (upstream) return { status: upstream };
+  return { status: 0, kind: kind || (error && error.code === "chain_timeout" ? "timeout" : "network") };
+}
+
 async function uwFetch(env, path, params, opts) {
   if (!meterOn(env)) return uwFetchUnmetered(env, path, params, opts);
   const started = Date.now();
@@ -2195,21 +2207,44 @@ async function uwFetch(env, path, params, opts) {
     return body;
   } catch (error) {
     if (!(error instanceof HttpError && error.code === "chain_unconfigured")) {
-      const upstream = Number.isInteger(error && error.upstream) ? error.upstream : 0;
-      state.vendorMeter.record({ path, ms: Date.now() - started, status: upstream, kind: error && error.code === "chain_timeout" ? "timeout" : upstream ? undefined : "network" });
+      state.vendorMeter.record({ path, ms: Date.now() - started, ...meterOf(error) });
     }
     throw error;
   }
 }
 
+async function readCapped(response, maxBytes) {
+  if (!response.body) return { text: "", bytes: 0 };
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      reader.cancel().catch(() => {});
+      return { over: total };
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) { bytes.set(chunk, at); at += chunk.byteLength; }
+  return { text: new TextDecoder().decode(bytes), bytes: total };
+}
+
 async function uwFetchUnmetered(env, path, params, opts) {
-  if (!env.UW_API_KEY) throw new HttpError(503, "chain_unconfigured", "Live chain lookup is not configured");
+  const began = Date.now();
+  const maxBytes = opts && Number.isFinite(opts.maxBytes) && opts.maxBytes > 0 ? opts.maxBytes : null;
+  const tag = (error, kind, extra) => Object.assign(error, { cause: { kind, status: null, bytes: null, cap: maxBytes, ms: Date.now() - began, ...extra } });
+  if (!env.UW_API_KEY) throw tag(new HttpError(503, "chain_unconfigured", "Live chain lookup is not configured"), "unconfigured");
   const url = vendorUrl(vendorBase(env), path, params);
   const deadlineMs = opts && Number.isFinite(opts.deadlineMs) && opts.deadlineMs > 0 ? opts.deadlineMs : UW_DEADLINE_MS;
   const signal = AbortSignal.timeout(deadlineMs);
-  const failed = (message) => signal.aborted
-    ? new HttpError(504, "chain_timeout", "Market data provider did not answer within " + deadlineMs + " ms")
-    : new HttpError(502, "chain_upstream", message);
+  const failed = (message, kind, extra) => signal.aborted
+    ? tag(new HttpError(504, "chain_timeout", "Market data provider did not answer within " + deadlineMs + " ms"), "timeout", extra)
+    : tag(new HttpError(502, "chain_upstream", message), kind, extra);
   let response;
   try {
     response = await fetch(url, {
@@ -2217,41 +2252,46 @@ async function uwFetchUnmetered(env, path, params, opts) {
       signal,
     });
   } catch {
-    throw failed("Market data provider unreachable");
+    throw failed("Market data provider unreachable", "network");
   }
   const seen = vendorMeter(response.headers, Date.now());
   if (seen) {
     state.keyCounter = newerMeter(state.keyCounter, seen);
     if (opts && typeof opts.onMeter === "function") opts.onMeter(seen);
   }
-  if (response.status === 429) throw Object.assign(new HttpError(429, "chain_rate_limited", "Market data provider is rate limiting"), { upstream: 429 });
-  if (!response.ok) throw Object.assign(new HttpError(502, "chain_upstream", "Market data provider returned an error"), { upstream: response.status });
+  if (response.status === 429) {
+    if (response.body) response.body.cancel().catch(() => {});
+    throw tag(Object.assign(new HttpError(429, "chain_rate_limited", "Market data provider is rate limiting"), { upstream: 429 }), "limited", { status: 429 });
+  }
+  if (!response.ok) {
+    if (response.body) response.body.cancel().catch(() => {});
+    throw tag(Object.assign(new HttpError(502, "chain_upstream", "Market data provider returned an error"), { upstream: response.status }), "status", { status: response.status });
+  }
 
-  const maxBytes = opts && Number.isFinite(opts.maxBytes) && opts.maxBytes > 0 ? opts.maxBytes : null;
-  const tooLarge = () => new HttpError(502, "chain_too_large", "Market data provider body is over the parse ceiling");
+  const tooLarge = (bytes) => tag(new HttpError(502, "chain_too_large", "Market data provider body is over the parse ceiling"), "too_large", { status: response.status, bytes });
   if (maxBytes !== null) {
     const declared = Number(response.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > maxBytes) {
       if (response.body) response.body.cancel().catch(() => {});
-      throw tooLarge();
+      throw tooLarge(declared);
     }
-    let text;
+    let read;
     try {
-      text = await response.text();
+      read = await readCapped(response, maxBytes);
     } catch {
-      throw failed("Market data provider returned malformed data");
+      throw failed("Market data provider returned malformed data", "network", { status: response.status });
     }
-    if (text.length > maxBytes) throw tooLarge();
+    if (typeof read.text !== "string") throw tooLarge(read.over);
     try {
-      return JSON.parse(text);
+      return JSON.parse(read.text);
     } catch {
-      throw new HttpError(502, "chain_upstream", "Market data provider returned malformed data");
+      throw tag(new HttpError(502, "chain_upstream", "Market data provider returned malformed data"), "unparsable", { status: response.status, bytes: read.bytes });
     }
   }
   try {
     return await response.json();
   } catch {
-    throw failed("Market data provider returned malformed data");
+    throw failed("Market data provider returned malformed data", "unparsable", { status: response.status });
   }
 }
 
@@ -2353,7 +2393,11 @@ async function buildLivePayload(env, ticker) {
   };
 }
 
-async function serveCachedVendorRead({ env, ctx, cacheKey, wantsRefresh, build, ttlSeconds, gate }) {
+const FLIGHT_JOIN_MS = 18000;
+
+const readClassOf = (error) => (error && error.details && error.details.read && typeof error.details.read.class === "string" ? error.details.read.class : null);
+
+async function serveCachedVendorRead({ env, ctx, cacheKey, wantsRefresh, build, ttlSeconds, gate, ttlOf = null, failKey = null, failTtlSeconds = 0, flights = null }) {
   const ttl = Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds : CHAIN_TTL_SECONDS;
   const keep = Math.max(ttl, VENDOR_COPY_KEEP_SECONDS);
   const cache = edgeCache.handle();
@@ -2362,8 +2406,10 @@ async function serveCachedVendorRead({ env, ctx, cacheKey, wantsRefresh, build, 
   const storedAt = match ? Number(match.headers.get("X-Chain-Stored")) : NaN;
   const ageSeconds = Number.isFinite(storedAt) ? (Date.now() / 1000) - storedAt : Infinity;
   const hit = match && ageSeconds < keep ? match : null;
+  const ownTtl = hit ? Number(hit.headers.get("X-Chain-Ttl")) : NaN;
+  const fresh = Number.isFinite(ownTtl) && ownTtl > 0 ? Math.min(ttl, ownTtl) : ttl;
 
-  const serveCached = hit && ageSeconds < (wantsRefresh ? CHAIN_REFRESH_FLOOR_SECONDS : ttl);
+  const serveCached = hit && ageSeconds < (wantsRefresh ? CHAIN_REFRESH_FLOOR_SECONDS : fresh);
   if (serveCached) {
     const out = new Response(hit.body, hit);
     out.headers.set("X-Chain-Cache", wantsRefresh ? "throttled" : "hit");
@@ -2373,40 +2419,94 @@ async function serveCachedVendorRead({ env, ctx, cacheKey, wantsRefresh, build, 
     return out;
   }
 
-  const refuse = () => {
-    if (!hit) {
-      throw new HttpError(429, "rate_limited", "Too many market data reads in the last minute; try again shortly.",
-        { "Retry-After": String(MEMBER_VENDOR_PERIOD_S) });
-    }
+  const kept = (reason) => {
     const out = new Response(hit.body, hit);
     out.headers.set("X-Chain-Cache", "throttled");
     out.headers.set("X-Chain-Age", String(Math.max(0, Math.round(ageSeconds))));
     out.headers.set("Cache-Control", "no-store");
     out.headers.set("X-Fresh-State", "stale");
-    out.headers.set("X-Fresh-Reason", "throttled");
+    out.headers.set("X-Fresh-Reason", reason);
+    return out;
+  };
+
+  const refuse = () => {
+    if (!hit) {
+      throw new HttpError(429, "rate_limited", "Too many market data reads in the last minute; try again shortly.",
+        { "Retry-After": String(MEMBER_VENDOR_PERIOD_S) });
+    }
+    const out = kept("throttled");
     out.headers.set("X-Fresh-Throttled", "1");
     return out;
   };
 
-  if (gate && !(await gate.member())) return refuse();
-
-  let payload;
-  try {
-    payload = await build(gate ? chargedFetch(env, gate) : (path, params, opts) => uwFetch(env, path, params, opts));
-  } catch (error) {
-    if (error instanceof VendorRefused) return refuse();
+  const failure = (error) => {
+    if (failKey && hit) return kept(readClassOf(error) || error.code);
     throw error;
+  };
+
+  if (failKey && cache) {
+    const mark = await cache.match(failKey).catch(() => null);
+    const held = mark ? await mark.json().catch(() => null) : null;
+    if (held && held.error && typeof held.error.code === "string" && Number.isInteger(held.status)) {
+      return failure(new HttpError(held.status, held.error.code, held.error.message, undefined, held.read ? { read: held.read } : undefined));
+    }
   }
+
+  const key = cacheKey.url;
+  if (flights && flights.has(key)) {
+    const joined = flights.get(key);
+    const since = Date.now();
+    if (await FLOWS_LIVE.settledWithin(joined, FLIGHT_JOIN_MS) !== "settled") {
+      FLOWS_LIVE.flightAbandoned("vendor-read", since, 1, false);
+      return failure(HttpError.of("chain_timeout"));
+    }
+    const out = await joined;
+    if (out.payload !== undefined) return json(out.payload, 200, { "Cache-Control": "no-store", "X-Chain-Cache": "joined", "X-Chain-Age": "0" });
+    if (out.error instanceof HttpError) return failure(out.error);
+    if (!out.refused) throw out.error;
+  }
+
+  const flight = (async () => {
+    if (gate && !(await gate.member())) return { refused: true };
+    try {
+      return { payload: await build(gate ? chargedFetch(env, gate) : (path, params, opts) => uwFetch(env, path, params, opts)) };
+    } catch (error) {
+      return error instanceof VendorRefused ? { refused: true } : { error };
+    }
+  })();
+  if (flights) {
+    flights.set(key, flight);
+    flight.then(() => { if (flights.get(key) === flight) flights.delete(key); });
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(flight);
+  }
+  const done = await flight;
+  if (done.refused) return refuse();
+  if (done.error) {
+    const error = done.error;
+    if (!(error instanceof HttpError)) throw error;
+    if (failKey && cache && failTtlSeconds > 0) {
+      const read = error.details && error.details.read ? error.details.read : null;
+      const body = JSON.stringify({ status: error.status, error: { code: error.code, message: error.message }, ...(read ? { read } : {}) });
+      const put = edgeCache.put(failKey, new Response(body, {
+        headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": `max-age=${Math.round(failTtlSeconds)}` },
+      }));
+      if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put);
+      else await put;
+    }
+    return failure(error);
+  }
+  const payload = done.payload;
   const body = JSON.stringify(payload);
+  const own = typeof ttlOf === "function" ? Number(ttlOf(payload)) : NaN;
 
   if (cache) {
-    const store = new Response(body, {
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "Cache-Control": `max-age=${keep}`,
-        "X-Chain-Stored": String(Math.floor(Date.now() / 1000)),
-      },
-    });
+    const headers = {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": `max-age=${keep}`,
+      "X-Chain-Stored": String(Math.floor(Date.now() / 1000)),
+    };
+    if (Number.isFinite(own) && own > 0) headers["X-Chain-Ttl"] = String(Math.round(own));
+    const store = new Response(body, { headers });
 
     if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(edgeCache.put(cacheKey, store));
     else await edgeCache.put(cacheKey, store);
@@ -3099,12 +3199,22 @@ async function renderCourse(request, env, url, meta, ctx) {
 
 const rtServe = (request, env, url) => serveRt(request, env, url, { json, HttpError, requireSameOrigin, getSession: () => currentFlowsUser(request, env) });
 
-const FLOWLAB_BUILDERS = createFlowlab({ isRefusal: (error) => error instanceof VendorRefused });
+const FLOWLAB_LOG_EVERY_MS = 600000;
+
+function reportFlowlabRead(read) {
+  const key = read.op + "/" + read.class;
+  const at = Date.now();
+  if (at - (state.flowlabLogged.get(key) || 0) < FLOWLAB_LOG_EVERY_MS) return;
+  state.flowlabLogged.set(key, at);
+  logFailure("warn", "flowlab read failed", { route: "/api/flows/flowlab", code: read.class, op: read.op, status: read.status, bytes: read.bytes, cap: read.cap });
+}
+
+const FLOWLAB_BUILDERS = createFlowlab({ isRefusal: (error) => error instanceof VendorRefused, report: reportFlowlabRead });
 
 const ROUTER = createRouter(flowsReadRows({ readServed, readFlowsPayload, readWithOverlay, passthrough, recallLastGood, storeGone,
   absentKey, cardWithEngine, briefWithLive, briefFeedsAhead, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK }),
 flowsDeskRows({ scRefreshAllowed, vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }),
-flowsFlowlabRows({ vendorGate, serveCachedVendorRead, readServed, passthrough, builders: FLOWLAB_BUILDERS, now: chainReadMs,
+flowsFlowlabRows({ vendorGate, serveCachedVendorRead, readServed, passthrough, builders: FLOWLAB_BUILDERS, now: chainReadMs, flights: state.flowlabFlights,
   isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsAiRows({ askSpend, summaryResponse, readFlowsSummary, neuronProvenance, ensureFlowsTables, dossierResponse, askQuestion, askAnswer,
   readFlowsPayload, briefWithLive, askFloodPeriodS: ASK_FLOOD_PERIOD_S, aiCap: FLOWS_READING.aiCapOf }),

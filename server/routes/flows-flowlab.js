@@ -1,13 +1,15 @@
 import { HttpError, internalKey, requireTicker, fixtureRefused } from "../http.js";
-import { flowlabMode, parseOsi, PRESET_IDS, GROUPS, NAME_VIEWS, CONTRACT_PARTS, NIGHTLY_KEYS } from "../../shared/flows-flowlab.js";
-import { phaseAt, easternDay } from "../../shared/flows-freshness.js";
+import { flowlabMode, analyticsOn, parseOsi, PRESET_IDS, GROUPS, NAME_VIEWS, CONTRACT_PARTS, NIGHTLY_KEYS } from "../../shared/flows-flowlab.js";
+import { phaseAt, easternDay, easternInstant, PHASE_MINUTES } from "../../shared/flows-freshness.js";
 import { isRealDate } from "../../shared/flows-premium.js";
 
 const UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
-const TTL = Object.freeze({ live: 60, rest: 300, past: 86400 });
+export const TTL = Object.freeze({ live: 60, rest: 300, settled: 21600, past: 86400, failLive: 60, failRest: 300, groupsLive: 300, venuesLive: 120 });
+
+const HOUR_MS = 3600000;
 
 const row = (name, handler) => ({ id: "flows.flowlab." + name, path: "/api/flows/flowlab/" + name, methods: ["GET"], auth: "flows", handler });
 
@@ -16,10 +18,26 @@ export function readClock(now) {
   if (!phase) return null;
   const live = phase.phase === "rth";
   const day = phase.phase === "post" || live ? phase.session : phase.lastClosed;
-  return { day, today: easternDay(now), live, closed: !live, phase: phase.phase };
+  const today = easternDay(now);
+  const before = typeof day === "string" && day < today;
+  const sameDay = day === phase.day && Number.isFinite(phase.close);
+  const optionsFinal = before || (sameDay && now >= phase.close + HOUR_MS);
+  const stockFinal = before || (sameDay && now >= easternInstant(day, PHASE_MINUTES.postEnd));
+  return { day, today, live, closed: !live, phase: phase.phase, optionsFinal, stockFinal };
 }
 
-export const ttlFor = (clock, day) => (day < clock.day ? TTL.past : clock.live ? TTL.live : TTL.rest);
+export const ttlFor = (clock, day, kind = "options") => {
+  if (day < clock.day) return TTL.past;
+  if (clock.live) return TTL.live;
+  return (kind === "stock" ? clock.stockFinal : clock.optionsFinal) ? TTL.settled : TTL.rest;
+};
+
+export const failTtlFor = (clock) => (clock.live ? TTL.failLive : TTL.failRest);
+
+export const nightlyTtlFor = (clock, k) => {
+  if (clock.live) return k === "groups" ? TTL.groupsLive : TTL.venuesLive;
+  return clock.optionsFinal ? TTL.settled : TTL.rest;
+};
 
 const expiryOf = (url) => {
   const raw = url.searchParams.get("exp");
@@ -27,20 +45,26 @@ const expiryOf = (url) => {
   return raw;
 };
 
+const plain = (value) => new Response(JSON.stringify(value), { status: 200, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } });
+
 export function flowsFlowlabRows(deps) {
-  const { vendorGate, serveCachedVendorRead, readServed, passthrough, isOwner, builders, now = () => Date.now() } = deps;
+  const { vendorGate, serveCachedVendorRead, readServed, passthrough, isOwner, builders, now = () => Date.now(), flights = null } = deps;
 
   const gate = (env, session) => {
     if (flowlabMode(env, isOwner(env, session.username)) !== "on") throw HttpError.of("flowlab_off");
   };
 
-  const serve = ({ env, ctx, url, session }, key, ttl, build) => serveCachedVendorRead({
+  const serve = ({ env, ctx, url, session }, clock, key, ttl, build) => serveCachedVendorRead({
     env,
     ctx,
     cacheKey: internalKey("flowlab", key),
     wantsRefresh: url.searchParams.get("refresh") === "1",
     gate: vendorGate(env, session),
     ttlSeconds: ttl,
+    ttlOf: (payload) => (payload && payload.partial === true ? failTtlFor(clock) : null),
+    failKey: internalKey("flowlab-fail", key),
+    failTtlSeconds: failTtlFor(clock),
+    flights,
     build,
   });
 
@@ -58,7 +82,7 @@ export function flowsFlowlabRows(deps) {
     if (!PRESET_IDS.includes(preset)) throw HttpError.of("invalid_preset");
     const ticker = url.searchParams.has("t") ? requireTicker(url) : null;
     const { ms, clock } = clockOf(env);
-    return serve(rc, `screen/${preset}/${ticker || "*"}/${clock.day}`, ttlFor(clock, clock.day),
+    return serve(rc, clock, `screen/${preset}/${ticker || "*"}/${clock.day}`, ttlFor(clock, clock.day),
       (vf) => builders.buildScreen(vf, { preset, ticker, session: clock.day, now: ms, closed: clock.closed }));
   };
 
@@ -82,7 +106,7 @@ export function flowsFlowlabRows(deps) {
     const ttl = ttlFor(clock, day);
     const closed = clock.closed || day < clock.day;
     const key = `c/${c}/${day}/${part}${part === "alert" || part === "legs" ? "/" + id.toLowerCase() : ""}`;
-    return serve(rc, key, ttl, (vf) => {
+    return serve(rc, clock, key, ttl, (vf) => {
       if (part === "core") return builders.buildContractCore(vf, { c, session: day, now: ms, closed });
       if (part === "alert") return builders.buildAlert(vf, { id, session: day, now: ms, closed });
       if (part === "legs") return builders.buildLegs(vf, { id, c, session: day, now: ms, closed });
@@ -97,19 +121,11 @@ export function flowsFlowlabRows(deps) {
     const view = url.searchParams.get("view");
     if (!NAME_VIEWS.includes(view)) throw HttpError.of("invalid_view");
     const exp = view === "greek" ? expiryOf(url) : null;
-    let spot = null;
-    if (view === "strikes" || view === "levels") {
-      const raw = url.searchParams.get("spot");
-      if (raw !== null) {
-        const n = Number(raw);
-        if (!Number.isFinite(n) || n <= 0 || n >= 1e6) throw HttpError.of("invalid_view");
-        spot = Math.round(n);
-      }
-    }
     const { ms, clock } = clockOf(env);
-    const key = `n/${t}/${view}${exp ? "/" + exp : ""}${spot ? "/s" + spot : ""}/${clock.day}`;
-    return serve(rc, key, ttlFor(clock, clock.day),
-      (vf) => builders.buildNameView(vf, { t, view, exp, spot, session: clock.day, now: ms, closed: clock.closed }));
+    const key = `n/${t}/${view}${exp ? "/" + exp : ""}/${clock.day}`;
+    const kind = view === "levels" || view === "lit" ? "stock" : "options";
+    return serve(rc, clock, key, ttlFor(clock, clock.day, kind),
+      (vf) => builders.buildNameView(vf, { t, view, exp, session: clock.day, now: ms, closed: clock.closed }));
   };
 
   const group = async (rc) => {
@@ -119,7 +135,7 @@ export function flowsFlowlabRows(deps) {
     if (!GROUPS.includes(g)) throw HttpError.of("invalid_group");
     const exp = expiryOf(url);
     const { ms, clock } = clockOf(env);
-    return serve(rc, `g/${g}/${exp}/${clock.day}`, ttlFor(clock, clock.day),
+    return serve(rc, clock, `g/${g}/${exp}/${clock.day}`, ttlFor(clock, clock.day),
       (vf) => builders.buildGroup(vf, { g, exp, session: clock.day, now: ms, closed: clock.closed }));
   };
 
@@ -127,7 +143,7 @@ export function flowsFlowlabRows(deps) {
     const { env, session } = rc;
     gate(env, session);
     const { ms, clock } = clockOf(env);
-    return serve(rc, `lit/${clock.day}`, ttlFor(clock, clock.day),
+    return serve(rc, clock, `lit/${clock.day}`, ttlFor(clock, clock.day, "stock"),
       (vf) => builders.buildLitMarket(vf, { session: clock.day, now: ms, closed: clock.closed }));
   };
 
@@ -136,17 +152,40 @@ export function flowsFlowlabRows(deps) {
     gate(env, session);
     const t = requireTicker(url);
     const { ms, clock } = clockOf(env);
-    return serve(rc, `v/${t}/${clock.day}`, ttlFor(clock, clock.day),
+    return serve(rc, clock, `v/${t}/${clock.day}`, ttlFor(clock, clock.day),
       (vf) => builders.buildVenuesToday(vf, { t, session: clock.day, now: ms, closed: clock.closed }));
   };
 
-  const nightly = async ({ env, url, session }) => {
+  const nightly = async (rc) => {
+    const { env, url, session } = rc;
     gate(env, session);
     const k = url.searchParams.get("k");
     if (!NIGHTLY_KEYS.includes(k)) throw HttpError.of("invalid_view");
-    const stored = await readServed(env, "flowlab-" + k);
-    if (stored === null) return new Response(JSON.stringify({ status: "pending" }), { status: 200, headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" } });
-    return passthrough(stored);
+    if (k === "corr" && !analyticsOn(env)) return plain({ status: "off" });
+    if (k !== "groups" && k !== "venues") {
+      const stored = await readServed(env, "flowlab-" + k);
+      if (stored === null) return plain({ status: "pending" });
+      return passthrough(stored);
+    }
+    const { ms, clock } = clockOf(env);
+    let held = null;
+    if (clock.closed) {
+      held = await readServed(env, "flowlab-" + k);
+      if (held && held.fresh && held.fresh.session === clock.day) return passthrough(held);
+    }
+    const build = k === "groups"
+      ? (vf) => builders.buildGroups(vf, { session: clock.day, now: ms, closed: clock.closed })
+      : (vf) => builders.buildVenuesUniverse(vf, { session: clock.day, now: ms, closed: clock.closed });
+    try {
+      return await serve(rc, clock, `od/${k}/${clock.day}`, nightlyTtlFor(clock, k), build);
+    } catch (error) {
+      if (!(error instanceof HttpError)) throw error;
+      const earlier = held || (await readServed(env, "flowlab-" + k).catch(() => null));
+      if (!earlier) throw error;
+      const out = passthrough(earlier);
+      out.headers.set("X-Flowlab-Held", error.code);
+      return out;
+    }
   };
 
   return [row("screen", screen), row("contract", contract), row("name", name), row("group", group), row("lit", lit), row("venues", venues), row("nightly", nightly)];
