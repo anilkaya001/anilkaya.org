@@ -9,7 +9,7 @@
   const FONT = "Inter, system-ui, sans-serif";
   const PITCH_X = 1, PITCH_Z = 1.9, PITCH_Z_PHONE = 1.45, PHONE_COLS = 6, PED = 0.88, PIL = 0.58, STRIPE = 0.06;
   const HMAX = 2.1, HMAX_PHONE = 1.5;
-  const LEAN_EDGE_PCT = 10, LEAN_EDGE = LEAN_EDGE_PCT / 100, LEAN_FULL = 0.6;
+  const LEAN_EDGE_PCT = 10, LEAN_EDGE = 0.1, LEAN_FULL = 0.6;
   const SIDE_HITS = 12;
   const MEASURES = [
     { id: "premium", label: "Premium", noun: "flagged premium", nounS: "whole-session premium" },
