@@ -85,6 +85,9 @@ function answer(route, u) {
     case "card": return emitted("card-" + q.get("t")) || { status: "pending" };
     case "card-x": return emitted("card-x-" + q.get("t")) || { status: "pending" };
     case "hist": return emitted("hist-" + q.get("t")) || { status: "pending" };
+    case "flowlab/nightly": return emitted("flowlab-" + q.get("k")) || { status: "pending" };
+    case "flowlab/screen": case "flowlab/contract": case "flowlab/name": case "flowlab/group": case "flowlab/lit": case "flowlab/venues":
+      return { v: 1, asOf: new Date(NOW).toISOString(), session: null, part: route.slice(8), calls: 1, why: "empty", x: null };
     case "ai-usage": return { spend: { neurons: 4200, cap: 30000, calls: 40 } };
     case "summary": return { status: "ok", scope: q.get("t") || "", summary: null, ideas: [], tier: "family", code: null, why: "x", read: READ };
     case "lk": {
@@ -124,6 +127,7 @@ const SPECS = [
 
   { id: "unusual", fn: "unusualPage", url: "/flows/unusual/" },
   { id: "ledger", fn: "ledgerPage", url: "/flows/ledger/" },
+  { id: "flowlab", fn: "flowlabPage", url: "/flows/flowlab/" },
   { id: "events", fn: "eventsPage", url: "/flows/events/" },
   { id: "moves", fn: "movesPage", url: "/flows/moves/" },
   { id: "political", fn: "politicalPage", url: "/flows/political/" },

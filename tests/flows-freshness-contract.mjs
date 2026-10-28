@@ -10,7 +10,7 @@ import { nyseHolidays, nyseEarlyCloses, closeUtcMs, etDayOf } from "../shared/fl
 import { briefAge } from "../shared/flows-ask.js";
 import { sessionsBetween } from "../shared/flows-cross.js";
 import { nextSessionAfter } from "../shared/flows-variation.js";
-import { serveNow, RTH_CRON, FOCUS_CRON, HOUSEKEEPING_CRON, SUMMARY_CRON } from "../shared/flows-live-worker.js";
+import { serveNow, RTH_CRON, FOCUS_CRON, FUNDS_CRON, HOUSEKEEPING_CRON, SUMMARY_CRON } from "../shared/flows-live-worker.js";
 import { LIVE_KEYS } from "../shared/flows-live.js";
 import { MARKET_STALE_MS, MARKET_CRON_STALE_MS, marketRefreshDue } from "../shared/markets.js";
 
@@ -294,6 +294,8 @@ const NYSE_PUBLISHED = Object.freeze({
     "and live:focus promises the cadence its cron keeps, so its Live pill lapses when a tick is missed, not before");
   ok(start % step !== Number(rth[1]) % step && end - start > 60 - 2 * step,
     `the focus ticks (minute ${start} of every ${step}) fall between Tier 1's (minute ${rth[1]}), on every step of the hour`);
+  ok(crons.includes(`"${FUNDS_CRON}"`) && FUNDS_CRON === "2-57/5 13-21 * * MON-FRI" && LIVE_KEYS["live:funds"].cadenceS === 5 * 60,
+    `wrangler.toml carries the funds clock (${FUNDS_CRON}), a minute after Tier 1's and a minute before the focus tick's, and live:funds promises its five-minute cadence`);
   ok(crons.includes(`"${HOUSEKEEPING_CRON}"`) && crons.includes(`"${SUMMARY_CRON}"`),
     "wrangler.toml carries the half-hour housekeeping clock and the quarter-hour summary clock beside them");
   const minutesOf = (cron) => {

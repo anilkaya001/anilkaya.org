@@ -401,7 +401,22 @@
         h("tbody", null, rows(false)));
       const more = net.paths.length > 12 ? h("button", { type: "button", class: "fnw-more" }, "Show all " + net.paths.length + " paths") : null;
       if (more) more.addEventListener("click", () => { t.querySelector("tbody").replaceChildren(...rows(true)); more.remove(); });
-      tableBox.replaceChildren(t, more);
+      tableBox.replaceChildren(t, more, drillList());
+    }
+
+    function drillList() {
+      const root = typeof card.ticker === "string" ? card.ticker : null;
+      if (!root || !document.getElementById("fxFlowlab") || !X || !X.alerts || !Array.isArray(X.alerts.dots)) return null;
+      const top = X.alerts.dots.filter((d) => d && num(d.p) > 0 && (d.cp === "C" || d.cp === "P") && num(d.k) > 0 && /^\d{4}-\d{2}-\d{2}$/.test(String(d.e))).sort((x, y) => y.p - x.p).slice(0, 3);
+      if (!top.length) return null;
+      const osi = (d) => root + d.e.slice(2, 4) + d.e.slice(5, 7) + d.e.slice(8, 10) + d.cp + String(Math.round(d.k * 1000)).padStart(8, "0");
+      return h("div", { class: "fnw-drill" }, h("span", null, "Open a contract"), top.map((d) => {
+        const c = osi(d);
+        return h("button", { type: "button", class: "fnw-more", "data-oc": c, onclick: () => {
+          const go = () => window.FlowsUI.drill && window.FlowsUI.drill.open({ c });
+          if (window.FlowsUI.drill) go(); else if (UI.defer) UI.defer("drill").then(go);
+        } }, root + " " + F.day(d.e) + " " + F.px(d.k, d.k % 1 ? 1 : 0) + (d.cp === "C" ? " Call" : " Put") + " " + money(d.p));
+      }));
     }
 
     function paint() {

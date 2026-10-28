@@ -11,6 +11,10 @@ import { DRY_RUN } from "../flags.mjs";
 import { pathFor } from "../../../shared/flows-vendor-ops.js";
 import { num } from "../../../shared/flows-features.js";
 import { runSigmaLedger } from "../../flows-legs/sigma-ledger.mjs";
+import { runFundsLeg, unavailable as fundsUnavailable } from "../../flows-legs/funds.mjs";
+import { fakeFundsRead } from "../../flows-legs/funds-fake.mjs";
+import { stampNow } from "../../flows-legs/stamp.mjs";
+import { nightlyFundsOn } from "../../../shared/flows-floor-funds.js";
 import { decodeLedger, recentReporters } from "../../../shared/flows-reports.js";
 import { extrasCap, extrasMode } from "../../../shared/flows-vendor-extras.js";
 import { positioningCap, positioningNightly } from "../../../shared/flows-pos-switch.js";
@@ -22,10 +26,29 @@ export async function runMarket(ctx) {
     universeSource, screenerFilters, eligibleFor, byCard, deepTickers, gateOrigin, tilted, picks, liquid, payloads,
     enriched, deepen,
   } = ctx;
+  let funds = fundsUnavailable("not_read");
+  await stages.run("funds", async () => {
+    const priorMarket = await readStored("market");
+    funds = await runFundsLeg({
+      session: sessionDate,
+      readAt: stampNow(),
+      uw: DRY_RUN ? (path, params) => fakeFundsRead(path, params, sessionDate) : uw,
+      prior: priorMarket && priorMarket.payload ? priorMarket.payload.funds || null : null,
+      mode: nightlyFundsOn(process.env) ? "on" : "off",
+      screenerDated: !(ctx.dating && ctx.dating.screenerDate === false),
+      run: (items, work) => runPooled(items, work, { width: poolWidth().width }),
+      stop: () => Date.now() > stats.startedAt + DEADLINE_MS * 0.5 || stats.calls >= CALL_BUDGET * (1 + CALL_OVERRUN_MARGIN),
+    });
+    console.log(`  funds: ${funds.status}` + (funds.counts ? ` — ${funds.counts.read} of ${funds.counts.listed} read` : ""));
+  }, (error) => {
+    console.warn(`  funds: ${error.message}`);
+  });
+
   await stages.run("market", async () => {
     await publish("market", {
       v: BOARD_SCHEMA_VERSION,
       generatedAt, sessionDate,
+      funds,
       ...marketAggregate(
         withTilt.map((w) => w.row),
         new Map(withTilt.map((w) => [w.row.ticker, w.tilt])),

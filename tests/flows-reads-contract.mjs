@@ -17,6 +17,7 @@ import { flowsReadyRows } from "../server/routes/flows-ready.js";
 import { flowsOpsRows } from "../server/routes/flows-ops.js";
 import { flowsLedgerRows, LEDGER_ROW_CEILING } from "../server/routes/flows-ledger.js";
 import { flowsPositioningRows } from "../server/routes/flows-positioning.js";
+import { flowsFlowlabRows } from "../server/routes/flows-flowlab.js";
 import { createRouter } from "../server/router.js";
 
 let checks = 0;
@@ -809,17 +810,19 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   const ASK = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const getOwner = await client(f.D1, { FLOWS_RT_USERS: FIXTURE_ROSTER[0], FLOWS_OPS: "on", FLOWS_READY: "on", FLOWS_RT_MODE: "off" });
   const getBook = await client(f.D1, { FLOWS_RT_USERS: FIXTURE_ROSTER[0], FLOWS_LEDGER_LIVE: "owner" });
+  const getLab = await client(f.D1, { FLOWS_FLOWLAB: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
+  const getFunds = await client(f.D1, { FLOWS_FLOOR_FUNDS: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
   const getPos = await client(f.D1, { FLOWS_POSITIONING: "on" });
-  const cost = async (path, { init, vendor = false, owner = false, coverage = false, book = false, pos = false } = {}) => {
+  const cost = async (path, { init, vendor = false, owner = false, coverage = false, book = false, lab = false, funds = false, pos = false } = {}) => {
     const n = f.trips.length;
-    const r = await (pos ? getPos : book ? getBook : coverage ? getCoverage : owner ? getOwner : vendor ? getVendor : get)(path, init);
+    const r = await (pos ? getPos : funds ? getFunds : lab ? getLab : book ? getBook : coverage ? getCoverage : owner ? getOwner : vendor ? getVendor : get)(path, init);
     return { rows: f.rowsRead(n), trips: f.trips.length - n, status: r.res.status };
   };
   const CEILING = [
     ["/api/flows/board?side=long", 1], ["/api/flows/board?side=watch", 1], ["/api/flows/market", 1], ["/api/flows/flowalerts", 3],
     ["/api/flows/events", 1], ["/api/flows/scoretrack", 1], ["/api/flows/sector-premium", 1], ["/api/flows/news", 2],
     ["/api/flows/pulse", 3], ["/api/flows/regime", 1], ["/api/flows/focus", 1], [HOME_LIVE, 6],
-    ["/api/flows/now?n=board:long,board:short,meta,focus", 4], ["/api/flows/lk?k=market", 1],
+    ["/api/flows/now?n=board:long,board:short,meta,focus", 4], ["/api/flows/lk?k=market", 1], ["/api/flows/lk?k=funds", 3, { funds: true }],
     ["/api/flows/card?t=NVDA", 2], ["/api/flows/hist?t=IDX", 3], ["/api/flows/summary?t=NVDA", 20], ["/api/flows/summary?t=LITE", names.length + 70], ["/api/flows/summary?t=ZZZZ", names.length + 70],
     ["/api/flows/meta", 1], ["/api/flows/universe", 1], ["/api/flows/universe?cols=t,sec,chg,iv30p,ed", 1], ["/api/flows/roster", 1], ["/api/flows/ideas", 3], ["/api/flows/movers", 1],
     ["/api/flows/sectors", 1], ["/api/flows/political", 1], ["/api/flows/unusual", 1], ["/api/flows/record", 1], ["/api/flows/calib", 1], ["/api/flows/dispersion", 1],
@@ -841,6 +844,13 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
     ["/api/flows/positioning", 1, { pos: true }],
     ["/api/flows/positioning?t=NVDA", 1, { pos: true }],
     ["/api/flows/positioning?t=ZZZZ", 1, { pos: true }],
+    ["/api/flows/flowlab/screen?preset=premium", 0, { lab: true }],
+    ["/api/flows/flowlab/contract?c=NVDA261218C00200000", 0, { lab: true }],
+    ["/api/flows/flowlab/name?t=NVDA&view=levels", 0, { lab: true }],
+    ["/api/flows/flowlab/group?g=mag7&exp=2026-12-18", 0, { lab: true }],
+    ["/api/flows/flowlab/lit", 0, { lab: true }],
+    ["/api/flows/flowlab/venues?t=NVDA", 0, { lab: true }],
+    ["/api/flows/flowlab/nightly?k=roots", 1, { lab: true }],
   ];
   let home = 0;
   for (const [path, ceiling, opts = {}] of CEILING) {
@@ -870,9 +880,9 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   const source = workerSource();
   expect(source, /path === "(\/api\/flows\/[a-z-]+)"/, { min: 3, why: "the Flows routes not yet in the table are declared in the Worker chain" });
   const stub = new Proxy({}, { get: () => () => null });
-  const routerPaths = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub), flowsIngestRows(stub), flowsReadyRows(stub), flowsPipelineRows(stub), flowsOpsRows(stub), flowsLedgerRows(stub), flowsPositioningRows(stub))
+  const routerPaths = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub), flowsIngestRows(stub), flowsReadyRows(stub), flowsPipelineRows(stub), flowsOpsRows(stub), flowsLedgerRows(stub), flowsFlowlabRows(stub), flowsPositioningRows(stub))
     .rows.map((r) => r.path).filter((path) => path.startsWith("/api/flows/"));
-  ok(routerPaths.length >= 24 && routerPaths.every((path) => /^\/api\/flows\/[a-z-]+$/.test(path)), "the router table holds the flows-read, flows-desk, flows-ai, ingest, ready and ops families: " + routerPaths.length + " rows");
+  ok(routerPaths.length >= 24 && routerPaths.every((path) => /^\/api\/flows\/[a-z-]+(?:\/[a-z-]+)?$/.test(path)), "the router table holds the flows-read, flows-desk, flows-ai, ingest, ready and ops families: " + routerPaths.length + " rows");
   ok(routerPaths.includes("/api/flows/ready") && routerPaths.includes("/api/flows/ops"), "and the ready and ops routes are among them, so neither can escape the enumeration");
   expect(source, /createRouter\(flowsReadRows\(/, { min: 1, max: 1, why: "the Worker builds its table from the flows-read family" });
   const chain = [...source.matchAll(/path === "(\/api\/flows\/[a-z-]+)"/g)].map((m) => m[1]);

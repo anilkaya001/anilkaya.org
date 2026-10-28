@@ -6,7 +6,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 
 ## Per-name operations (87 paths with a ticker in the path)
 
-84 spec paths carry a ticker, and 3 more are read from the live documentation: 45 read before this branch, 4 added, 7 probe only, 3 deprecated, 3 Enterprise only, 25 not added.
+84 spec paths carry a ticker, and 3 more are read from the live documentation: 47 read, 4 added, 7 probe only, 3 deprecated, 3 Enterprise only, 23 not added.
 
 | Operation | Status | Registry id | Plan | Wire | Returns | Unit status | Surface | Decision |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -21,12 +21,12 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/etfs/{ticker}/exposure` | added | etf-exposure | any | not observed | every ETF that holds the name: ticker, shares, weight, fund name, prices | ticker and shares stated; weight, prices and fund name withheld | peers packet | added: `vx.etf`, refreshed every 7 days, top ten by weight |
 | `/api/etfs/{ticker}/holdings` | read | etf-holdings | any | observed | ticker, type, weight | read by the code | nightly | read |
 | `/api/etfs/{ticker}/in-outflow` | read | etf-in-outflow | any | observed | whole body | read by the code | nightly | read |
-| `/api/etfs/{ticker}/info` | not added | - | any | not observed | an ETF's identity, assets, expense ratio | stated for ETFs only | fund cards (nine funds) | no: an ETF-only read, a follow-up for the fund cards |
-| `/api/etfs/{ticker}/weights` | not added | - | any | not observed | an ETF's sector and country weights | stated for ETFs only | fund cards | no: an ETF-only read, a follow-up for the fund cards |
+| `/api/etfs/{ticker}/info` | read | etf-info | any | not observed | an ETF's name, issuer and holdings count; assets and expense ratio withheld | name, issuer and holdings count stated; amounts withheld | Market Floor readout | read: the Floor funds leg (WP1), 12 funds a night, kept 14 days |
+| `/api/etfs/{ticker}/weights` | read | etf-weights | any | not observed | an ETF's sector and country weights | weights are shares of the fund | Market Floor readout | read: the Floor funds leg (WP1), top three of each |
 | `/api/insider/{ticker}` | read | insiders | any | not observed | the names of a company's insiders | third-party names | none | no: names of people; the insider batch and `insider-flow` already carry the flow |
 | `/api/insider/{ticker}/ticker-flow` | read | insider-flow | any | observed | date, buy_sell, transactions, uniq_insiders, volume, ... | read by the code | dossier | read |
 | `/api/institution/{ticker}/ownership` | read | ownership | any | observed | name, short_name, units, units_changed, historical_units, ... | read by the code | dossier | read |
-| `/api/lit-flow/{ticker}` | probe only | - | any | not observed | lit-exchange stock prints | stated | none | no: print-level and heavy; asked weekly as an entitlement question (tier 2) |
+| `/api/lit-flow/{ticker}` | read | lit-ticker | any | not observed | lit-exchange stock prints | stated | none | no: print-level and heavy; asked weekly as an entitlement question (tier 2) |
 | `/api/market/{ticker}/etf-tide` | read | etf-tide | any | observed | timestamp, net_call_premium, net_put_premium, net_volume, underlying_price | read by the code | Tier 2, nightly | read |
 | `/api/politician-portfolios/holders/{ticker}` | read | politician-holders | Enterprise | not observed | whole body | read by the code | nightly | read |
 | `/api/politics/fec/company/{ticker}/lobbying` | enterprise | - | Enterprise | not observed | lobbying spend by quarter and issue | stated | none | no: Enterprise only |
@@ -48,8 +48,8 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/stock/{ticker}/flow-alerts` | deprecated | - | any | not observed | a name's flow alerts | - | - | deprecated: the market-wide alerts route is read |
 | `/api/stock/{ticker}/flow-per-expiry` | read | flow-per-expiry | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/flow-per-strike` | read | flow-per-strike | any | observed | whole body | read by the code | nightly | read |
-| `/api/stock/{ticker}/flow-per-strike-intraday` | probe only | - | any | not observed | flow by strike through the day | stated | flow | no: entitlement unanswered; asked weekly (tier 2) |
-| `/api/stock/{ticker}/flow-recent` | not added | - | any | not observed | call and put premium and volume splits by expiry | stated | flow | no: duplicate of `flow-per-expiry` |
+| `/api/stock/{ticker}/flow-per-strike-intraday` | read | strike-flow-intraday | any | not observed | flow by strike through the day | stated | flow | no: entitlement unanswered; asked weekly (tier 2) |
+| `/api/stock/{ticker}/flow-recent` | read | flow-recent | any | not observed | call and put premium and volume splits by expiry | stated | flow | no: duplicate of `flow-per-expiry` |
 | `/api/stock/{ticker}/fundamental-breakdown` | read | fundamental-breakdown | any | observed | rev_breakdown, report_date, rev_group, members, value, ... | read by the code | dossier | read |
 | `/api/stock/{ticker}/gex-levels` | read | gex-levels | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/greek-exposure` | read | greek-exposure | any | observed | whole body | read by the code | nightly | read |
@@ -57,7 +57,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/stock/{ticker}/greek-exposure/strike` | not added | - | any | not observed | greek exposure by strike | stated | gamma modules | no: duplicate of `spot-exposures/strike` |
 | `/api/stock/{ticker}/greek-exposure/strike-expiry` | not added | - | any | not observed | greek exposure by strike and expiry | stated | gamma modules | no: duplicate of `spot-exposures/expiry-strike` |
 | `/api/stock/{ticker}/greek-flow` | read | greek-flow | any | observed | whole body | read by the code | nightly | read |
-| `/api/stock/{ticker}/greek-flow/{expiry}` | not added | - | any | not observed | delta and vega flow per minute for one expiry | stated | flow | no: large, and the engines use the all-expiry series |
+| `/api/stock/{ticker}/greek-flow/{expiry}` | read | greek-flow-expiry | any | not observed | delta and vega flow per minute for one expiry | stated | flow | no: large, and the engines use the all-expiry series |
 | `/api/stock/{ticker}/greeks` | probe only | - | any | observed | the vendor's greeks per strike and expiry | strings | engine cross-check | no: observed on the wire but large; a follow-up as an independent check of the engine's greeks |
 | `/api/stock/{ticker}/historical-risk-reversal-skew` | read | rr-skew | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/income-statements` | not added | - | any | not observed | income statements | stated | fundamentals packet | no: duplicate of `financials` |
@@ -75,7 +75,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/stock/{ticker}/option-chains` | probe only | - | any | observed | option chains with greeks | strings | options | no: observed on the wire (tier 1) but duplicates `option-contracts` |
 | `/api/stock/{ticker}/option-contracts` | read | option-contracts | any | observed | whole body | read by the code | Worker, nightly | read |
 | `/api/stock/{ticker}/option-stance` | probe only | - | any | not observed | a vendor trade-stance ranking of contracts with a fit score, return on capital and pop | return on capital unit not stated | none | probe only: asked weekly (tier 2) for a later comparison with our own ratio and Win %, never displayed |
-| `/api/stock/{ticker}/option/stock-price-levels` | not added | - | any | not observed | option volume by price level | stated | flow | no: low value |
+| `/api/stock/{ticker}/option/stock-price-levels` | read | option-price-levels | any | not observed | option volume by price level | stated | flow | no: low value |
 | `/api/stock/{ticker}/option/volume-oi-expiry` | not added | - | any | not observed | volume and open interest per expiry | stated | options | no: a sum of `option-contracts` |
 | `/api/stock/{ticker}/options-pulse` | not added | - | any | not observed | the Nasdaq options pulse for a name | the spec documents no response | flow | no: the response schema is empty in the committed spec |
 | `/api/stock/{ticker}/options-volume` | read | options-volume | any | observed | whole body | read by the code | nightly | read |
@@ -86,7 +86,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/stock/{ticker}/spot-exposures/strike` | read | spot-exposures-strike | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/spot-exposures/{expiry}/strike` | deprecated | - | any | not observed | spot gamma by strike for one expiry | - | - | deprecated: the expiry-strike route is read |
 | `/api/stock/{ticker}/stock-state` | read | stock-state | any | observed | close, prev_close, open, high, low, ... | read by the code | Worker, dossier, engines | read |
-| `/api/stock/{ticker}/stock-volume-price-levels` | probe only | - | any | not observed | lit and off-lit stock volume by price | shares stated | flow | no: entitlement unanswered; asked weekly (tier 2); if it answers it ranks above the ETF read |
+| `/api/stock/{ticker}/stock-volume-price-levels` | read | stock-price-levels | any | not observed | lit and off-lit stock volume by price | shares stated | flow | no: entitlement unanswered; asked weekly (tier 2); if it answers it ranks above the ETF read |
 | `/api/stock/{ticker}/technical-indicator/{function}` | not added | - | any | not observed | any technical indicator series | per function | price packet | no: computed from the candles the nightly holds |
 | `/api/stock/{ticker}/volatility/anomaly` | read | vol-anomaly | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/volatility/character` | read | vol-character | any | observed | whole body | read by the code | nightly | read |
@@ -100,7 +100,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 
 ## Registered operations without a ticker in the path
 
-30 registry operations (market-wide, calendars, screeners, groups, sectors) all read before this branch.
+31 registry operations (market-wide, calendars, screeners, groups, sectors, the ticker directory), the directory read by the Floor funds leg (WP1) and the rest before this branch.
 
 | Operation | Status | Registry id | Plan | Wire | Consumers |
 | --- | --- | --- | --- | --- | --- |
@@ -114,6 +114,19 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/market/market-tide` | read | market-tide | Advanced | observed | engines, nightly |
 | `/api/market/total-options-volume` | read | total-options-volume | Advanced | observed | nightly |
 | `/api/market/oi-change` | read | market-oi-change | Advanced | observed | nightly |
+| `/api/stock-directory/ticker-exchanges` | read | ticker-exchanges | Advanced | not observed | Floor funds leg, weekly |
+| `/api/screener/option-contracts` | read | contract-screener | advanced | not observed | Flow Lab, nightly and on demand |
+| `/api/option-contract/{id}/flow` | read | contract-flow | advanced | not observed | Flow Lab, nightly and on demand |
+| `/api/option-contract/{id}/intraday` | read | contract-intraday | advanced | not observed | Flow Lab, nightly and on demand |
+| `/api/option-contract/{id}/volume-profile` | read | contract-profile | advanced | not observed | Flow Lab, nightly and on demand |
+| `/api/option-trades/flow-alerts/{id}` | read | flow-alert-trades | advanced | not observed | Flow Lab, nightly and on demand |
+| `/api/option-trades/multi-leg/{id}/legs` | read | multi-leg-legs | advanced | not observed | Flow Lab, nightly and on demand |
+| `/api/option-trades/exchange-breakdown/{date}` | read | exchange-breakdown | advanced | not observed | Flow Lab, nightly and on demand |
+| `/api/option-trades/optionable-tickers` | read | optionable-roots | advanced | not observed | Flow Lab, nightly and on demand |
+| `/api/group-flow/{flow_group}/greek-flow/{expiry}` | read | group-greek-flow-expiry | advanced | not observed | Flow Lab, nightly and on demand |
+| `/api/lit-flow/recent` | read | lit-recent | advanced | not observed | Flow Lab, nightly and on demand |
+| `/api/analytics/window` | read | analytics-window | advanced | not observed | Flow Lab, nightly and on demand |
+| `/api/analytics/sliding` | read | analytics-sliding | advanced | not observed | Flow Lab, nightly and on demand |
 | `/api/market/top-net-impact` | read | top-net-impact | Advanced | observed | nightly |
 | `/api/market/insider-buy-sells` | read | insider-buy-sells | Advanced | observed | nightly |
 | `/api/darkpool/recent` | read | darkpool-recent | Advanced | observed | nightly |

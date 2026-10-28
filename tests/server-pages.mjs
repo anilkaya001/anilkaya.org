@@ -14,8 +14,8 @@ const { HttpError, redirect, requireMethod } = K;
 const STUB = { currentFlowsUser: async () => null, readFlowsSummary: async () => null, isOwner: () => false };
 const table = createRouter(flowsPageRows(STUB));
 
-const SLUGS = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "unusual", "ledger", "events", "political", "positioning", "status"];
-eq(FLOWS_PAGE_SLUGS, SLUGS, "the page list is the gated pages in their old order, the Network and Flagged now pop-outs after Market and the owner-gated moves page before unusual");
+const SLUGS = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "flowlab", "unusual", "ledger", "events", "political", "positioning", "status"];
+eq(FLOWS_PAGE_SLUGS, SLUGS, "the page list is the gated pages in their old order, the Network and Flagged now pop-outs after Market and the owner-gated moves and Flow Lab pages before unusual");
 eq(FLOWS_PUBLIC_SLUGS, ["about", "glossary"], "and the public front door is the two pages a signed-out reader gets");
 const expectedPaths = ["/flows", "/flows/login/"];
 for (const slug of SLUGS) {
@@ -72,6 +72,7 @@ function oldChain(path, rc, d) {
       "/flows/strategy/": (u) => FLOWS_PAGES.strategyPage({ username: u }),
       "/flows/ticker/": (u) => FLOWS_PAGES.tickerPage({ username: u }),
       "/flows/moves/": (u) => FLOWS_PAGES.movesPage({ username: u }),
+      "/flows/flowlab/": (u) => FLOWS_PAGES.flowlabPage({ username: u }),
       "/flows/unusual/": (u, summary, owner) => FLOWS_PAGES.unusualPage({ username: u, owner }),
       "/flows/ledger/": (u) => FLOWS_PAGES.ledgerPage({ username: u }),
       "/flows/events/": (u) => FLOWS_PAGES.eventsPage({ username: u }),
@@ -89,6 +90,10 @@ function oldChain(path, rc, d) {
       }
       const summary = session && path === "/flows/" ? await d.readFlowsSummary(env, "board") : null;
       const owner = session ? d.isOwner(env, session.username) : false;
+      if (session && path === "/flows/flowlab/") {
+        const lab = String(env.FLOWS_FLOWLAB || "").trim().toLowerCase();
+        if (!(lab === "on" || (lab === "owner" && owner))) throw HttpError.of("not_found");
+      }
       if (session && path === "/flows/status/" && !owner) throw new HttpError(404, "not_found", "Not found");
       const page = session ? FLOWS_ROUTES[path](session.username, summary, owner, env) : FLOWS_PAGES.loginPage();
       const body = session && owner ? ownerNav(page) : page;
@@ -97,7 +102,7 @@ function oldChain(path, rc, d) {
     if (path === "/flows/long" || path === "/flows/short" || path === "/flows/desk"
         || path === "/flows/watch"
         || path === "/flows/market" || path === "/flows/network" || path === "/flows/now" || path === "/flows/ticker"
-        || path === "/flows/moves" || path === "/flows/unusual" || path === "/flows/ledger" || path === "/flows/events"
+        || path === "/flows/moves" || path === "/flows/flowlab" || path === "/flows/unusual" || path === "/flows/ledger" || path === "/flows/events"
         || path === "/flows/political" || path === "/flows/positioning"
         || path === "/flows/strategy"
         || path === "/flows/status" || path === "/flows/about" || path === "/flows/glossary") {
@@ -212,10 +217,10 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
   eq(await gate({ username: "anilkaya" }), [200, "page"], "the Status page is served to an owner");
   eq(await gate({ username: "member<x>" }), [404, "not_found"], "a signed-in member who is not an owner gets the unknown-page 404");
   eq(await gate(null), [200, "login"], "and an anonymous visitor gets the sign-in page like every gated page");
-  const SIDEBAR_PAGES = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "unusual", "ledger", "events", "political", "positioning", "status"];
+  const SIDEBAR_PAGES = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "flowlab", "unusual", "ledger", "events", "political", "positioning", "status"];
   for (const slug of SIDEBAR_PAGES) {
     const path = "/flows/" + (slug ? slug + "/" : "");
-    const env = { FLOWS_MOVES: "on", FLOWS_LEDGER: "on", FLOWS_POSITIONING: "on" };
+    const env = { FLOWS_MOVES: "on", FLOWS_LEDGER: "on", FLOWS_FLOWLAB: "on", FLOWS_POSITIONING: "on" };
     const call = (deps) => createRouter(flowsPageRows(deps)).find(path).handler({ ...rc(path), env }).then((r) => r.text());
     const asOwner = await call(scenario({ username: "anilkaya" }).deps);
     if (slug === "status") {
