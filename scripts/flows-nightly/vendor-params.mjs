@@ -45,7 +45,7 @@ export const CALL_COST = Object.freeze({
   activity: 1,
   sigmaLedger: 240,
   ivp: 1,
-  funds: 1 + 24 + 12 * 3 + 1,
+  funds: 1 + 1 + 24 + 12 * 3 + 1,
   slow: 1500,
   misc: 67,
 });

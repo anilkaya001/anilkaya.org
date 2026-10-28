@@ -156,7 +156,10 @@ const asked = (cases) => {
   });
   eq(refused.rows.UNG.why, "refused", "a refused per-fund read is refused");
   eq(refused.rows.SIL.why, "failed", "and a failing one is failed");
-  const dead = await runFundsLeg({ session: S, readAt: S + "T21:00:00Z", uw: async () => { throw new Error("/api -> HTTP 503"); } });
+  const deadCalls = [];
+  const dead = await runFundsLeg({ session: S, readAt: S + "T21:00:00Z", uw: async (p) => { deadCalls.push(p); throw new Error("/api -> HTTP 503"); } });
+  eq(deadCalls.filter((p) => p === "/api/market/sector-etfs").length, 1, "a screener that fails sends the leg to the sector fund rows once");
+  ok(deadCalls.length <= CALL_COST.funds, `and its worst night, ${deadCalls.length} calls with every fallback taken, is inside the ${CALL_COST.funds} the budget counts`);
   ok(dead.status === "unavailable" && dead.counts.read === 0, "a feed that answers nothing is unavailable, never a wall of zeros");
   ok(Object.values(dead.rows).every((r) => r.alias || r.why), "and every row says why");
   const old = { ...block, dir: { at: "2026-09-10", absent: ["TBT"] } };
