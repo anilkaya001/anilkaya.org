@@ -270,7 +270,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
   eq(await macroAs({ username: "member<x>" }, { FLOWS_MACRO: "members" }), [404, "not_found"], "a value that is not on, off or owner fails closed");
   eq(await macroAs(null, {}), [200, "login"], "an anonymous visitor is answered with the sign-in page whatever the switch says");
   const wrangler = (await import("node:fs")).readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
-  ok(/^FLOWS_MACRO = "owner"$/m.test(wrangler) && /^FLOWS_MACRO_LIVE = "owner"$/m.test(wrangler), "wrangler.toml ships both Macro switches at owner");
+  ok(/^FLOWS_MACRO = "on"$/m.test(wrangler) && /^FLOWS_MACRO_LIVE = "on"$/m.test(wrangler), "wrangler.toml ships both Macro switches open to every signed-in member");
   ok(/^FLOWS_LEDGER = "owner"$/m.test(wrangler), "wrangler.toml ships the switch at owner: the page is the owner's until the production checks pass and the value is changed to on");
   const bare = await router.find("/flows/political").handler(rc("/flows/political"));
   eq([bare.status, bare.headers.get("Location")], [308, "https://anilkaya.org/flows/political/"], "a bare page path is a 308 to its slash form");
