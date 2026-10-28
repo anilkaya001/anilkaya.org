@@ -166,7 +166,7 @@ for (const [id, transforms, named] of MUTANTS) {
   ok(/voldeskOn: \(env, username\)/.test(worker) && /env\.FLOWS_VOLDESK/.test(worker), "and passes the page predicate that reads FLOWS_VOLDESK");
   ok(/"voldesk"\]\)/.test(worker) || /"hist", "voldesk"\]/.test(worker), "and keeps a last good copy of the read");
   const toml = scan("wrangler.toml");
-  ok(/^FLOWS_VOLDESK = "owner"$/m.test(toml), "wrangler.toml ships the switch staged for the owner");
+  ok(/^FLOWS_VOLDESK = "on"$/m.test(toml), "wrangler.toml ships the switch open to every signed-in member");
   ok(/^FLOWS_VOLDESK = "on"$/m.test(scan("wrangler.staging.toml")), "and staging opens it");
 }
 
