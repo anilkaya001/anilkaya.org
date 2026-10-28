@@ -17,6 +17,7 @@ import { stampNow } from "../../flows-legs/stamp.mjs";
 import { nightlyFundsOn } from "../../../shared/flows-floor-funds.js";
 import { decodeLedger, recentReporters } from "../../../shared/flows-reports.js";
 import { extrasCap, extrasMode } from "../../../shared/flows-vendor-extras.js";
+import { positioningCap, positioningNightly } from "../../../shared/flows-pos-switch.js";
 import { BOARD_SCHEMA_VERSION, MOVER_ROWS, barsInHand, buildMovers, candleDate, candlesAscending, daysToEarnings, repairCandles, sessionCandles, sessionRow } from "../rank.mjs";
 
 export async function runMarket(ctx) {
@@ -162,7 +163,7 @@ export async function runMarket(ctx) {
       deepTickers,
       windowTickers: windowTickersOf(withTilt.map((w) => w.row), { origin: sessionDate || gateOrigin }),
       deadline: stats.startedAt + DEADLINE_MS, pool: runPooled, width: poolWidth(2).width, stats,
-      extras: extrasMode(process.env) === "off" ? null : { readPrior: (t) => readStored("card-x:" + t), cap: extrasCap(process.env) },
+      extras: extrasMode(process.env) === "off" ? null : { readPrior: (t) => readStored("card-x:" + t), cap: extrasCap(process.env), positioning: positioningNightly(process.env) ? { cap: positioningCap(process.env), deep: new Set(deepTickers) } : null },
       log: (line) => console.log(line),
     });
     for (const [t, part] of marketLegs.ownership) {
@@ -174,6 +175,7 @@ export async function runMarket(ctx) {
       for (const [t, sec] of marketLegs.extras.sections) {
         if (sec.dx) cardX.add(t, "dx", sec.dx);
         if (sec.vx) cardX.add(t, "vx", sec.vx);
+        if (sec.ps) cardX.add(t, "ps", sec.ps);
       }
     }
     console.log(`  market legs: ${marketLegs.calls ?? 0} vendor call(s)`);

@@ -2,9 +2,9 @@ export const LIMITERS = Object.freeze(["ondemand", "feature"]);
 
 export const LICENCES = Object.freeze(["aggregate", "derived", "print", "quote", "text"]);
 
-export const PLANS = Object.freeze(["advanced", "addon:volatility", "addon:futures", "enterprise"]);
+export const PLANS = Object.freeze(["advanced", "addon:volatility", "addon:futures", "enterprise", "premium"]);
 
-const DEFAULTS = Object.freeze({ method: "GET", plan: "advanced", envelope: "data", limiter: null, liveOnly: false, maxBytes: null, reads: null });
+const DEFAULTS = Object.freeze({ method: "GET", plan: "advanced", envelope: "data", limiter: null, liveOnly: false, deprecated: false, maxBytes: null, reads: null });
 
 const RAW = [
   { id: "ohlc-1d", path: "/api/stock/{ticker}/ohlc/1d", op: "/api/stock/{ticker}/ohlc/{candle_size}", licence: "quote", klass: "static", limiter: "ondemand", reads: ["open", "high", "low", "close", "volume"] },
@@ -120,6 +120,32 @@ const RAW = [
   { id: "etf-info", path: "/api/etfs/{ticker}/info", licence: "text", klass: "slow", maxBytes: 32768, reads: ["name", "etf_company", "holdings_count", "has_options"] },
   { id: "etf-weights", path: "/api/etfs/{ticker}/weights", licence: "aggregate", klass: "slow", maxBytes: 32768, reads: ["sector", "country", "weight"] },
   { id: "ticker-exchanges", path: "/api/stock-directory/ticker-exchanges", licence: "aggregate", klass: "slow", maxBytes: 1048576, reads: ["ticker", "exchange"] },
+  { id: "inst-list", path: "/api/institutions", licence: "text", klass: "slow", maxBytes: 262144, reads: ["cik", "name", "short_name", "is_hedge_fund", "date", "filing_date", "total_value", "share_value", "call_value", "put_value", "buy_value", "sell_value"] },
+  { id: "inst-latest", path: "/api/institutions/latest_filings", licence: "text", klass: "slow", maxBytes: 131072, reads: ["cik", "name", "short_name", "is_hedge_fund", "filing_date"] },
+  { id: "inst-holdings", path: "/api/institution/{name}/holdings", licence: "aggregate", klass: "slow", maxBytes: 262144, reads: ["ticker", "sector", "units", "units_change", "value", "perc_of_share_value", "put_call", "security_type", "date"] },
+  { id: "inst-activity-v1", path: "/api/institution/{name}/activity", licence: "aggregate", klass: "slow", deprecated: true, maxBytes: 262144, reads: ["ticker", "units", "units_change", "report_date", "filing_date", "put_call", "security_type", "price_on_report"] },
+  { id: "inst-activity", path: "/api/institution/{name}/activity/v2", licence: "aggregate", klass: "slow", maxBytes: 262144, reads: ["ticker", "units", "units_change", "report_date", "filing_date", "put_call", "security_type", "price_on_report"] },
+  { id: "inst-sectors", path: "/api/institution/{name}/sectors", licence: "aggregate", klass: "slow", maxBytes: 32768, reads: ["sector", "report_date", "value", "positions", "positions_increased", "positions_decreased", "positions_closed"] },
+  { id: "insider-sector", path: "/api/insider/{sector}/sector-flow", licence: "aggregate", klass: "slow", maxBytes: 131072, reads: ["date", "buy_sell", "transactions", "uniq_insiders", "volume"] },
+  { id: "insiders", path: "/api/insider/{ticker}", licence: "text", klass: "slow", maxBytes: 65536, reads: ["is_person"] },
+  { id: "insider-bs", path: "/api/stock/{ticker}/insider-buy-sells", licence: "aggregate", klass: "slow", maxBytes: 65536, reads: ["filing_date", "purchases", "sells"] },
+  { id: "ftds", path: "/api/shorts/{ticker}/ftds", licence: "aggregate", klass: "slow", maxBytes: 65536, reads: ["date", "quantity", "price"] },
+  { id: "short-venues", path: "/api/shorts/{ticker}/volumes-by-exchange", licence: "aggregate", klass: "slow", maxBytes: 131072, reads: ["date", "exchange_name", "market_center", "short_volume", "total_volume"] },
+  { id: "cg-unusual", path: "/api/congress/unusual-trades", plan: "premium", licence: "print", klass: "nightly", maxBytes: 262144, reads: ["id", "ticker", "transaction_date", "filing_date", "transaction_type", "amount", "asset_type", "unusual_activity_tags", "politician_id", "politician_name"] },
+  { id: "cg-unusual-tickers", path: "/api/congress/unusual-trades/by-tickers", plan: "premium", licence: "print", klass: "nightly", maxBytes: 262144, reads: ["id", "ticker", "transaction_date", "filing_date", "transaction_type", "amount", "asset_type", "unusual_activity_tags", "politician_id", "politician_name"] },
+  { id: "cg-unusual-stats", path: "/api/congress/unusual-trades/stats", plan: "premium", licence: "aggregate", klass: "nightly", maxBytes: 65536, reads: ["data"] },
+  { id: "cg-unusual-chart", path: "/api/congress/unusual-trades/chart-data", plan: "premium", licence: "aggregate", klass: "nightly", maxBytes: 524288, reads: ["spy_prices", "date", "close", "trades", "id", "ticker", "transaction_date", "price_at_trade", "price_current", "sector", "is_unusual"] },
+  { id: "cg-late", path: "/api/congress/late-reports", licence: "print", klass: "nightly", maxBytes: 262144, reads: ["ticker", "transaction_date", "filed_at_date", "txn_type", "amounts", "politician_id", "name", "reporter", "member_type"] },
+  { id: "cg-politicians", path: "/api/congress/politicians", licence: "text", klass: "nightly", maxBytes: 262144, reads: ["politician_id", "name", "member_type"] },
+  { id: "cg-trader", path: "/api/congress/congress-trader", licence: "print", klass: "nightly", maxBytes: 262144, reads: ["ticker", "transaction_date", "filed_at_date", "txn_type", "amounts", "politician_id", "name", "reporter", "member_type"] },
+  { id: "pp-disclosures", path: "/api/politician-portfolios/disclosures", plan: "enterprise", licence: "text", klass: "slow", maxBytes: 131072, reads: ["politician_id", "disclosure_year", "filing_date", "chamber"] },
+  { id: "pp-people", path: "/api/politician-portfolios/people", plan: "enterprise", licence: "text", klass: "slow", maxBytes: 131072, reads: ["id", "name"] },
+  { id: "pp-recent", path: "/api/politician-portfolios/recent_trades", plan: "enterprise", licence: "print", klass: "nightly", maxBytes: 262144, reads: ["ticker", "transaction_date", "filed_at_date", "txn_type", "amounts", "politician_id", "name", "reporter", "member_type"] },
+  { id: "pp-portfolio", path: "/api/politician-portfolios/{politician_id}", plan: "enterprise", licence: "aggregate", klass: "slow", maxBytes: 524288, reads: ["stock_holdings", "ticker"] },
+  { id: "pol-trades", path: "/api/politics/politician/trades", plan: "enterprise", licence: "print", klass: "nightly", maxBytes: 262144, reads: ["ticker", "transaction_date", "filed_at_date", "txn_type", "amounts", "politician_id", "name", "reporter", "member_type"] },
+  { id: "fec-candidates", path: "/api/politics/fec/candidates", plan: "enterprise", licence: "aggregate", klass: "slow", maxBytes: 262144, reads: ["data"] },
+  { id: "fec-companies", path: "/api/politics/fec/companies", licence: "aggregate", klass: "slow", maxBytes: 262144, reads: ["ticker", "cycle", "pac_total", "pac_count", "pac_contribution_count", "dem_total", "rep_total", "other_total", "lobbying_total", "employee_total_estimated"] },
+  { id: "fec-contributions", path: "/api/politics/fec/contributions", plan: "enterprise", licence: "aggregate", klass: "slow", maxBytes: 262144, reads: ["data"] },
 ];
 
 export const OPS = Object.freeze(RAW.map((e) => Object.freeze({
@@ -161,6 +187,7 @@ export const BUDGETS = Object.freeze({
   rail: Object.freeze({ window: "04:00-20:00 ET, trading days, while demanded", perMinute: 240 }),
   voldesk: Object.freeze({ window: "17:30-17:50 ET", marketCalls: 17, perName: 8, names: 40, maxCalls: 337 }),
   premarketNews: Object.freeze({ window: "04:00-09:30 ET, trading days", everyMin: 30, callsPerFiring: 1, maxFiringsPerDay: 11, perMinute: 1 }),
+  positioning: Object.freeze({ window: "night", nightlyMax: 720 }),
   ondemand: Object.freeze({ binding: "UW_ONDEMAND", limit: 120, periodS: 60, failsOpen: true }),
   flowlab: Object.freeze({
     nightlyMax: 40,

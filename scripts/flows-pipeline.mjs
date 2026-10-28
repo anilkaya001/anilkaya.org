@@ -30,6 +30,7 @@ import { runCards } from "./flows-nightly/sections/cards.mjs";
 import { runClose } from "./flows-nightly/sections/close.mjs";
 import { runContext } from "./flows-nightly/sections/context.mjs";
 import { runFocus } from "./flows-nightly/sections/focus.mjs";
+import { runPositioning } from "./flows-nightly/sections/positioning.mjs";
 import { runDeepenLedger, runDeepenPlan } from "./flows-nightly/sections/deepen.mjs";
 import { pathFor } from "../shared/flows-vendor-ops.js";
 import { processCpuMs, runCompute } from "./flows-nightly/sections/compute.mjs";
@@ -285,6 +286,7 @@ async function main() {
   await runContext(ctx);
   await runCards(ctx);
   await runFocus(ctx);
+  await runPositioning(ctx);
   await runOraclePrep(ctx);
   await runCompute(ctx);
   await runOraclePublish(ctx);

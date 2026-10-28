@@ -18,18 +18,25 @@ export const PARTS = Object.freeze({
   splits: Object.freeze({ group: "vx", op: "splits", rv: 1, refreshS: 14 * DAY_S, maxS: 28 * DAY_S }),
   etf: Object.freeze({ group: "vx", op: "etf-exposure", rv: 1, refreshS: 7 * DAY_S, maxS: 14 * DAY_S }),
   ivp: Object.freeze({ group: "vx", op: "interpolated-iv", rv: 1, refreshS: 20 * 3600, maxS: 3 * DAY_S }),
+  ftd: Object.freeze({ group: "ps", op: "ftds", rv: 1, refreshS: 7 * DAY_S, maxS: 21 * DAY_S }),
+  svx: Object.freeze({ group: "ps", op: "short-venues", rv: 1, refreshS: 20 * 3600, maxS: 3 * DAY_S }),
+  ibs: Object.freeze({ group: "ps", op: "insider-bs", rv: 1, refreshS: 3 * DAY_S, maxS: 7 * DAY_S }),
+  ins: Object.freeze({ group: "ps", op: "insiders", rv: 1, refreshS: 30 * DAY_S, maxS: 60 * DAY_S }),
 });
 
-export const SLOW_IDS = Object.freeze(Object.keys(PARTS).filter((id) => id !== "ivp"));
+export const SLOW_IDS = Object.freeze(Object.keys(PARTS).filter((id) => id !== "ivp" && PARTS[id].group !== "ps"));
+
+export const PS_IDS = Object.freeze(Object.keys(PARTS).filter((id) => PARTS[id].group === "ps"));
 
 export const NIGHTLY_IDS = Object.freeze(["ivp"]);
 
 export const GROUPS = Object.freeze({
   dx: Object.freeze(Object.keys(PARTS).filter((id) => PARTS[id].group === "dx")),
   vx: Object.freeze(Object.keys(PARTS).filter((id) => PARTS[id].group === "vx")),
+  ps: Object.freeze(Object.keys(PARTS).filter((id) => PARTS[id].group === "ps")),
 });
 
-export const SECTION_BYTES = Object.freeze({ dx: 24 * 1024, vx: 8 * 1024 });
+export const SECTION_BYTES = Object.freeze({ dx: 24 * 1024, vx: 8 * 1024, ps: 8 * 1024 });
 
 export const SLOW_CAP = 2000;
 
@@ -52,7 +59,7 @@ export function extrasCap(env = {}, fallback = SLOW_CAP) {
   return Math.min(Math.floor(n), SLOW_CAP_MAX);
 }
 
-export const SHED_ORDER = Object.freeze(["financials", "breakdown", "ownership", "analysts", "estimates", "profile", "info", "etf", "splits", "dividends", "ivp"]);
+export const SHED_ORDER = Object.freeze(["svx", "ins", "ibs", "ftd", "financials", "breakdown", "ownership", "analysts", "estimates", "profile", "info", "etf", "splits", "dividends", "ivp"]);
 
 export const FAIL_REASONS = Object.freeze(["unshaped", "missing", "type", "empty", "plan", "limited", "failed", "deadline", "cap", "size", "unread"]);
 
@@ -74,6 +81,14 @@ export const UNIT_STATUS = Object.freeze({
   "etf-exposure.full_name": Object.freeze({ state: "withheld", why: "third-party text" }),
   "etf-exposure.last_price": Object.freeze({ state: "withheld", why: "ambiguous" }),
   "etf-exposure.prev_price": Object.freeze({ state: "withheld", why: "ambiguous" }),
+  "insider-bs.purchases_notional": Object.freeze({ state: "withheld", why: "unit" }),
+  "insider-bs.sells_notional": Object.freeze({ state: "withheld", why: "unit" }),
+  "insider-sector.premium": Object.freeze({ state: "withheld", why: "unit" }),
+  "insider-sector.avg_price": Object.freeze({ state: "withheld", why: "unit" }),
+  "ftds.quantity": Object.freeze({ state: "stated", unit: "shares" }),
+  "ftds.price": Object.freeze({ state: "stated", unit: "usd" }),
+  "short-venues.short_volume": Object.freeze({ state: "stated", unit: "shares" }),
+  "short-venues.total_volume": Object.freeze({ state: "stated", unit: "shares" }),
 });
 
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -279,6 +294,119 @@ export function reduceEtfExposure(raw) {
   return x;
 }
 
+export const FTD_ROWS = 20;
+
+export const VENUE_DAYS = 10;
+
+export const VENUE_ROWS = 16;
+
+export const IBS_ROWS = 12;
+
+const dollarsToCents = (v) => {
+  if (v === null || v === undefined || v === "") return null;
+  const n = typeof v === "number" ? v : /^\d+(\.\d+)?$/.test(String(v).trim()) ? Number(String(v).trim()) : NaN;
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const c = Math.round(n * 100);
+  return Number.isSafeInteger(c) ? c : null;
+};
+
+const wholeCount = (v) => {
+  const n = typeof v === "number" ? v : typeof v === "string" && /^\d+$/.test(v.trim()) ? Number(v.trim()) : NaN;
+  return Number.isSafeInteger(n) && n >= 0 ? n : null;
+};
+
+export function reduceFtd(raw) {
+  const rows = rowsOfList(raw);
+  if (rows === null) return fail("unshaped");
+  if (!rows.length) return fail("empty");
+  const out = [];
+  const seen = new Set();
+  let bad = 0;
+  for (const r of rows) {
+    const d = isoDay(typeof r.date === "string" ? r.date : "");
+    const q = wholeCount(r.quantity);
+    if (!d || q === null) { bad++; continue; }
+    if (seen.has(d)) continue;
+    seen.add(d);
+    out.push([d, q, dollarsToCents(r.price)]);
+  }
+  if (!out.length) return fail("type:quantity");
+  out.sort((a, b) => (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0));
+  const x = { ok: true, rv: PARTS.ftd.rv, rows: out.slice(0, FTD_ROWS) };
+  if (bad) x.bad = bad;
+  return x;
+}
+
+export function reduceShortVenues(raw) {
+  const rows = rowsOfList(raw);
+  if (rows === null) return fail("unshaped");
+  if (!rows.length) return fail("empty");
+  const byDay = new Map();
+  let bad = 0;
+  for (const r of rows) {
+    const d = isoDay(typeof r.date === "string" ? r.date : "");
+    const s = wholeCount(r.short_volume);
+    const t = wholeCount(r.total_volume);
+    const name = typeof r.exchange_name === "string" ? r.exchange_name.trim().slice(0, 40) : "";
+    if (!d || s === null || t === null || !name) { bad++; continue; }
+    if (!byDay.has(d)) byDay.set(d, []);
+    byDay.get(d).push([name, typeof r.market_center === "string" ? r.market_center.trim().slice(0, 8) : "", s, t]);
+  }
+  if (!byDay.size) return fail("type:short_volume");
+  const days = [...byDay.keys()].sort().reverse().slice(0, VENUE_DAYS);
+  const last = byDay.get(days[0]).slice().sort((a, b) => (b[3] - a[3]) || (a[0] < b[0] ? -1 : 1)).slice(0, VENUE_ROWS);
+  const x = {
+    ok: true, rv: PARTS.svx.rv,
+    days: days.map((d) => [d, byDay.get(d).reduce((a, v) => a + v[2], 0), byDay.get(d).reduce((a, v) => a + v[3], 0)]),
+    last: { date: days[0], venues: last },
+  };
+  if (bad) x.bad = bad;
+  return x;
+}
+
+export function reduceInsiderBs(raw) {
+  const rows = rowsOfList(raw);
+  if (rows === null) return fail("unshaped");
+  if (!rows.length) return fail("empty");
+  const out = [];
+  const seen = new Set();
+  let bad = 0;
+  for (const r of rows) {
+    const d = isoDay(typeof r.filing_date === "string" ? r.filing_date : "");
+    const p = wholeCount(r.purchases);
+    const s = wholeCount(r.sells);
+    if (!d || p === null || s === null) { bad++; continue; }
+    if (seen.has(d)) continue;
+    seen.add(d);
+    out.push([d, p, s]);
+  }
+  if (!out.length) return fail("type:purchases");
+  out.sort((a, b) => (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0));
+  const x = { ok: true, rv: PARTS.ibs.rv, rows: out.slice(0, IBS_ROWS), notional: { withheld: "unit" } };
+  if (bad) x.bad = bad;
+  return x;
+}
+
+export function reduceInsiders(raw) {
+  const rows = rowsOfList(raw);
+  if (rows === null) return fail("unshaped");
+  if (!rows.length) return fail("empty");
+  let persons = 0;
+  let entities = 0;
+  let bad = 0;
+  for (const r of rows) {
+    if (r.is_person === true) persons++;
+    else if (r.is_person === false) entities++;
+    else bad++;
+  }
+  if (!persons && !entities) return fail("type:is_person");
+  const x = { ok: true, rv: PARTS.ins.rv, persons, entities, total: persons + entities };
+  if (bad) x.bad = bad;
+  return x;
+}
+
+export const REDUCERS_PS = Object.freeze({ ftd: reduceFtd, svx: reduceShortVenues, ibs: reduceInsiderBs, ins: reduceInsiders });
+
 export const REDUCERS_X = Object.freeze({
   dividends: reduceDividends, splits: reduceSplits, ivp: reduceIvPercentile, etf: reduceEtfExposure,
 });
@@ -361,12 +489,13 @@ export function urgency(part, id, now) {
   return ((now - part.at) / 1000) / PARTS[id].maxS;
 }
 
-export function planSlow({ names, priors, now, cap = SLOW_CAP, ids = SLOW_IDS }) {
+export function planSlow({ names, priors, now, cap = SLOW_CAP, ids = SLOW_IDS, scopeOf = null }) {
   const due = [];
   let fresh = 0;
   for (const t of names) {
     const sections = priors && priors.get ? priors.get(t) : null;
     for (const id of ids) {
+      if (scopeOf && !scopeOf(id, t)) continue;
       const group = PARTS[id].group;
       const part = sections && isObj(sections[group]) && isObj(sections[group].parts) ? sections[group].parts[id] : null;
       const u = urgency(part, id, now);

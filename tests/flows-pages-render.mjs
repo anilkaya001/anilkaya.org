@@ -78,7 +78,7 @@ function answer(route, u) {
   switch (route) {
     case "board": return emitted("board-" + (q.get("side") || "long"));
     case "market": case "events": case "scoretrack": case "meta": case "flowalerts": case "pulse": case "news":
-    case "political": case "unusual": case "movers": case "universe": case "regime": case "ideas": case "focus": case "roster": case "record": case "brief":
+    case "political": case "positioning": case "unusual": case "movers": case "universe": case "regime": case "ideas": case "focus": case "roster": case "record": case "brief":
       return emitted(route) || { status: "pending" };
     case "sectors": return emitted("sector-trix") || { status: "pending", rows: [] };
     case "sector-premium": return emitted("sector-premium") || { status: "pending", sectors: [] };
@@ -131,6 +131,8 @@ const SPECS = [
   { id: "events", fn: "eventsPage", url: "/flows/events/" },
   { id: "moves", fn: "movesPage", url: "/flows/moves/" },
   { id: "political", fn: "politicalPage", url: "/flows/political/" },
+  { id: "political-layers", fn: "politicalPage", args: { layers: true }, url: "/flows/political/" },
+  { id: "positioning", fn: "positioningPage", url: "/flows/positioning/" },
   { id: "strategy", fn: "strategyPage", url: "/flows/strategy/?t=NVDA" },
   { id: "desk", fn: "deskPage", url: "/flows/desk/" },
   { id: "ticker", fn: "tickerPage", url: "/flows/ticker/?t=NVDA" },

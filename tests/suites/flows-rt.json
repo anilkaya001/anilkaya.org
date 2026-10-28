@@ -1,1 +1,1 @@
-{"name": "flows-rt", "class": "N", "group": "shard", "timing": true, "medianS": 69.9, "shard": 2, "files": ["flows-rt-contract.mjs"], "covers": ["assets/js/flows-fresh.js","schema.sql","scripts/flows-pipeline.mjs","tests/flows-rt-server.mjs","worker.js","wrangler.toml"]}
+{"name": "flows-rt", "class": "N", "group": "shard", "timing": true, "medianS": 69.9, "shard": 1, "files": ["flows-rt-contract.mjs"], "covers": ["assets/js/flows-fresh.js","schema.sql","scripts/flows-pipeline.mjs","tests/flows-rt-server.mjs","worker.js","wrangler.toml"]}

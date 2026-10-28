@@ -42,6 +42,8 @@ import { flowsFlowlabRows } from "./server/routes/flows-flowlab.js";
 import { createFlowlab } from "./server/flowlab.js";
 import { flowsAiRows } from "./server/routes/flows-ai.js";
 import { flowsReadyRows } from "./server/routes/flows-ready.js";
+import { flowsPositioningRows } from "./server/routes/flows-positioning.js";
+import { positioningMode } from "./shared/flows-pos-switch.js";
 import { flowsOracleRows } from "./server/routes/flows-oracle.js";
 import { flowsLedgerRows } from "./server/routes/flows-ledger.js";
 import { flowsMeRows } from "./server/routes/flows-me.js";
@@ -3103,7 +3105,8 @@ const rtServe = (request, env, url) => serveRt(request, env, url, { json, HttpEr
 const FLOWLAB_BUILDERS = createFlowlab({ isRefusal: (error) => error instanceof VendorRefused });
 
 const ROUTER = createRouter(flowsReadRows({ readServed, readFlowsPayload, readWithOverlay, passthrough, recallLastGood, storeGone,
-  absentKey, cardWithEngine, briefWithLive, briefFeedsAhead, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK }),
+  absentKey, cardWithEngine, briefWithLive, briefFeedsAhead, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK,
+  positioningOpen: (env, session) => positioningMode(env, Boolean(session) && rtIsOwner(rtSwitches(env), session.username)) }),
 flowsDeskRows({ scRefreshAllowed, vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }),
 flowsFlowlabRows({ vendorGate, serveCachedVendorRead, readServed, passthrough, builders: FLOWLAB_BUILDERS, now: chainReadMs,
   isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
@@ -3112,6 +3115,7 @@ flowsAiRows({ askSpend, summaryResponse, readFlowsSummary, neuronProvenance, ens
 flowsIngestRows({ store: FLOWS_STORE, ensureFlowsTables, storeGone, passthrough }),
 flowsReadyRows({ store: FLOWS_STORE, ensureFlowsTables, readClock: FLOWS_LIVE.readClock, railReadiness,
   isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
+flowsPositioningRows({ readServed, passthrough, storeGone, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsDispatchRows({ ensureFlowsTables, check: FLOWS_LIVE.checkDispatchCredential, record: FLOWS_LIVE.recordDispatchWhy,
   isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
   claim: (at) => {
