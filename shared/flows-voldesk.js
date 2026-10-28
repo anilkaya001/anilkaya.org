@@ -838,12 +838,12 @@ export function fitStance(ring, cap = STANCE_CAP) {
   return out;
 }
 
-export function buildStance(priorRing, today, { session, test = false } = {}) {
+export function buildStance(priorRing, today, { session, generatedAt = null, test = false } = {}) {
   const rows = {};
   for (const [t, ex] of today) if (ex.rows.length) rows[t] = ex.rows;
   const prior = (Array.isArray(priorRing) ? priorRing : []).filter((e) => e && e.session !== session);
   const ring = fitStance([{ session, rows }, ...prior]);
-  const payload = { v: VOLDESK_VERSION, sessionDate: session, ring, ...(test ? { fixture: true } : {}) };
+  const payload = { v: VOLDESK_VERSION, sessionDate: session, generatedAt, ring, ...(test ? { fixture: true } : {}) };
   leak(payload, test);
   return payload;
 }

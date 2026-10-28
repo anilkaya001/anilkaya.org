@@ -85,7 +85,7 @@ export async function runVoldeskStage(ctx) {
       site: siteDispersion(store.dispersion || null), character, audit, ops,
     }, { session: sessionDate, generatedAt, test: test() });
     await publish("voldesk", payload);
-    const stance = buildStance(ring, ctx.volAudit ? ctx.volAudit.stance : new Map(), { session: sessionDate, test: test() });
+    const stance = buildStance(ring, ctx.volAudit ? ctx.volAudit.stance : new Map(), { session: sessionDate, generatedAt, test: test() });
     await publish("voldesk-stance", stance);
     stages.detail({ marketCalls: desk.calls, audited: audit.names, ring: stance.ring.length });
     console.log(`  voldesk: published, futures ${desk.futures.status}, ${payload.character.movers === null ? "no movers yet" : payload.character.movers.length + " mover(s)"}, stance ring ${stance.ring.length} session(s)`);

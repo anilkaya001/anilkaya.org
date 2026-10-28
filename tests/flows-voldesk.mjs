@@ -487,6 +487,7 @@ function battery(M, HM) {
     se(ok_.fixture, true, "and stamped inside it");
     const stanceFx = M.buildStance([], new Map([["SYX101", { rows: [["SYX101261218C00100000", 0.5, 0.3, 0.4, 5, 4]] }]]), { session: SESSION, test: true });
     se(stanceFx.fixture, true, "the stance store is stamped too");
+    se(M.buildStance([], new Map(), { session: SESSION, generatedAt: "2026-08-24T21:45:00.000Z", test: true }).generatedAt, "2026-08-24T21:45:00.000Z", "and carries the run's build stamp, which every view the ingest door inspects must have");
     let threw3 = false;
     try { M.buildStance([], new Map([["SYX101", { rows: [["SYX101261218C00100000", 0.5, 0.3, 0.4, 5, 4]] }]]), { session: SESSION }); } catch { threw3 = true; }
     st(threw3, "and refused without the flag");
