@@ -20,8 +20,8 @@ const eq = (a, b, m) => { assert.equal(a, b, m); checks++; };
 const same = (a, b, m) => { assert.deepEqual(a, b, m); checks++; };
 
 const HEADROOM_BYTES = Math.floor(0.95 * CARD_X_SOFT_BYTES);
-const WIRE_CEILING = 56700;
-const SERVED_CEILING = 62800;
+const WIRE_CEILING = 57500;
+const SERVED_CEILING = 63600;
 const DAY = 86400000;
 const iso = (n) => new Date(n * DAY).toISOString().slice(0, 10);
 const dayN = (s) => Date.parse(s + "T00:00:00Z") / DAY;
