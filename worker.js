@@ -50,6 +50,7 @@ import { flowsDispatchRows } from "./server/routes/flows-dispatch.js";
 import { flowsPipelineRows } from "./server/routes/flows-pipeline.js";
 import { createCallMeter, summarize as summarizeCalls } from "./shared/flows-call-meter.js";
 import { flowsOpsRows } from "./server/routes/flows-ops.js";
+import { flowsVoldeskRows } from "./server/routes/flows-voldesk.js";
 import { flowsIngestRows } from "./server/routes/flows-ingest.js";
 import { flowsPageRows } from "./server/routes/flows-pages.js";
 import { flowsFilmRows } from "./server/routes/flows-film.js";
@@ -998,7 +999,7 @@ const LAST_GOOD_REFRESH_MS = 10 * 60 * 1000;
 const LAST_GOOD_MAX_KEYS = 256;
 const LAST_GOOD_PATHS = new Set(["board", "market", "events", "scoretrack", "calib", "dispersion", "meta", "flowalerts", "pulse", "political", "unusual",
   "movers", "sectors", "sector-premium", "universe", "regime", "ideas", "focus", "roster", "news", "record", "card", "card-x",
-  "hist"].map((name) => "/api/flows/" + name));
+  "hist", "voldesk"].map((name) => "/api/flows/" + name));
 
 function lastGoodKey(request, url) {
   if (request.method !== "GET" || !LAST_GOOD_PATHS.has(url.pathname)) return null;
@@ -3233,12 +3234,17 @@ flowsPipelineRows({ store: FLOWS_STORE, ensureFlowsTables, readClock: FLOWS_LIVE
   vendorCalls: (env) => (meterOn(env) ? summarizeCalls(state.vendorMeter.snapshot()) : null) }),
 flowsOpsRows({ ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), meter: () => state.keyCounter }),
 flowsOracleRows({ store: FLOWS_STORE, ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), nightlyFreshHeaders, recallLastGood }),
+flowsVoldeskRows({ store: FLOWS_STORE, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), passthrough, recallLastGood, storeGone }),
 flowsLedgerRows({ store: FLOWS_STORE, ensureFlowsTables, readLiveRows: FLOWS_LIVE.readLiveRows, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsMeRows({ store: MEMBER_STORE, flowsStore: FLOWS_STORE, readLiveRows: FLOWS_LIVE.readLiveRows, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsFilmRows(),
 flowsPageRows({ currentFlowsUser, readFlowsSummary: readHomeSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
   scenesOn: (env, username) => {
     const mode = String((env && env.FLOWS_SCENES) || "").trim().toLowerCase();
+    return mode === "on" || (mode === "owner" && rtIsOwner(rtSwitches(env), username));
+  },
+  voldeskOn: (env, username) => {
+    const mode = env && typeof env.FLOWS_VOLDESK === "string" ? env.FLOWS_VOLDESK : "";
     return mode === "on" || (mode === "owner" && rtIsOwner(rtSwitches(env), username));
   } }),
 flowsRtRows({ serveRt: rtServe }));

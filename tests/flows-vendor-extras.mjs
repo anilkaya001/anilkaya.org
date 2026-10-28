@@ -37,14 +37,14 @@ const NEW_OPS = ["dividends", "splits", "interpolated-iv", "etf-exposure"];
     same(e.reads.filter((n) => !documented.has(n)), [], `${id}: every name it reads is one the committed spec documents`);
   }
   const stance = list.probes.find((p) => p.id === "option-stance");
-  ok(stance && stance.tier === "2" && list.entitlement.includes(stance.op), "option-stance is asked about weekly as an entitlement question and never read");
+  ok(stance && stance.tier === "used" && !list.entitlement.includes(stance.op), "option-stance is read by the volatility audit, so its weekly probe is labelled used and no longer an entitlement question");
   const sources = [];
   for (const dir of ["shared", "scripts", "server"]) {
     const walk = (d) => fs.readdirSync(path.join(ROOT, d), { withFileTypes: true }).flatMap((en) => (en.isDirectory() ? walk(path.join(d, en.name)) : [path.join(d, en.name)]));
     sources.push(...walk(dir).filter((f) => /\.m?js$/.test(f)));
   }
   const reads = sources.filter((f) => !/flows-vendor-ops\.js$|flows-probe/.test(f) && fs.readFileSync(path.join(ROOT, f), "utf8").includes("option-stance"));
-  same(reads, [], "and no production source names the option-stance operation");
+  same(reads, ["scripts/flows-legs/voldesk-fake.mjs", "scripts/flows-legs/voldesk.mjs"], "and only the volatility audit and its dry-run fake name the option-stance operation");
 
   for (const [id, spec] of Object.entries(X.PARTS)) {
     ok(opById(spec.op), `${id}: its operation is registered`);
@@ -435,7 +435,7 @@ const NOW = Date.parse("2026-10-20T21:45:00Z");
   ok(tight.cone && tight.gex && tight.contracts, "and the engine's own sections are intact");
   const tighter = cardXPayload("SYX101", { ...parts, dx, vx }, { generatedAt: F.GENERATED, sessionDate: F.SESSION, readAt: F.GENERATED, budgetBytes: own.bytes - 25000 });
   same(tighter.shed.slice(0, 2), ["dx.parts", "vx.parts"], "then vx, in that order");
-  same(CARD_X_SHED.slice(0, 2).map((e) => e[0]), ["dx.parts", "vx.parts"], "which is the order the table declares");
+  same(CARD_X_SHED.slice(1, 3).map((e) => e[0]), ["dx.parts", "vx.parts"], "which is the order the table declares");
   const next = composeCardXPayload(base("SYX101"), cardXPayload("SYX101", { dx, vx, short: { status: "ok" } }, { generatedAt: F.GENERATED, sessionDate: F.SESSION, readAt: F.GENERATED }));
   ok(next.dx && next.vx && next.engine && next.short, "composing the market legs' sections onto a same-session base keeps both");
 }
@@ -701,9 +701,9 @@ for (const [title, transforms, expected] of planted) {
   const stubbed = { dx: { v: 1, status: "partial", parts: Object.fromEntries(X.GROUPS.dx.map((id) => [id, { at: NOW - 6 * DAY, rv: 1, shed: 1 }])) } };
   await runExtras({ uw: wz.uw, names: ["SYX101"], sessionDate: TODAY, now: NOW, cap: 1000, only: X.GROUPS.dx, readPrior: async () => ({ payload: stubbed }) });
   eq(wz.calls.filter((c) => c.key === "financials").length, 0, "the leg makes no financials call for a part the card shed within its maximum age");
-  const noSoft = await loadMutated("scripts/flows-legs/card-x.mjs", [["while (overSoft(payload) && shedNextPart(payload))", "while (false && shedNextPart(payload))"]], { salt: checks + 20 });
+  const noSoft = await loadMutated("scripts/flows-legs/card-x.mjs", [["while (overSoft(payload)) {", "while (false) {"]], { salt: checks + 20 });
   ok(noSoft.cardXPayload("SYX101", big, stamp).bytes > CARD_X_SOFT_BYTES, "PLANTED WRONG BUILD, a card-x that ignores the soft ceiling: it stays over it, which the real one does not");
-  const reversed = await loadMutated("shared/flows-vendor-extras.js", [["export function shedNextPart(payload) {\n  for (const id of SHED_ORDER) {", "export function shedNextPart(payload) {\n  for (const id of [...SHED_ORDER].reverse()) {"]], { salt: checks + 21 });
+  const reversed = await loadMutated("shared/flows-vendor-extras.js", [["  }\n  for (const id of SHED_ORDER) {", "  }\n  for (const id of [...SHED_ORDER].reverse()) {"]], { salt: checks + 21 });
   const cut = { dx: { v: 1, parts: { info: xp(300), financials: xp(3000) } }, vx: { v: 1, parts: { dividends: xp(100) } } };
   reversed.shedNextPart(cut);
   ok(cut.vx.parts.dividends.shed === 1 && cut.dx.parts.financials.x, "PLANTED WRONG BUILD, a shedder that drops the nightly-only data first: it does, which the real one does not");

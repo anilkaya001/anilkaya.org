@@ -4594,7 +4594,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(compute.names > 0 && compute.names <= cardCount, "and with the Oracle registered it computes the carded names the run built");
   ok(cardCount > 0 && /compute: \d+ of \d+ deep name\(s\), 1 job\(s\)/.test(log), "its log line counts the carded names it was offered");
   ok(meta.stages.every((r) => Number.isInteger(r.cpu) && r.cpu >= 0), "every stage record carries whole-number CPU milliseconds");
-  ok(JSON.stringify(meta.stages).length < 3200, `and the records add under 3.2 KiB to meta, the funds stage being the one record added since 3 KiB (${JSON.stringify(meta.stages).length} bytes)`);
+  ok(JSON.stringify(meta.stages).length < 3400, `and the records add under 3.4 KiB to meta, the Vol desk and its audit and the funds stage being the records added since 3 KiB (${JSON.stringify(meta.stages).length} bytes)`);
   same(meta.health, { failures: 0, warnings: 0, first: [] }, "meta carries the gate's verdict: a clean dry run has none");
   const wrote = [...log.matchAll(/^ {2}\[dry-run\] (\S+): .*, \d+ bytes$/gm)].map((m) => m[1]);
   ok(wrote.length > 400, `the dry run printed ${wrote.length} writes`);
@@ -4669,7 +4669,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 }
 
 {
-  const measured = callModel({ enriched: 149, deep: 50, cross: 99, dossiers: 3, earnings: 73 }, { ...CALL_COST, sigmaLedger: 0, ivp: 0, slow: 0, funds: 0, flowlab: 0 });
+  const measured = callModel({ enriched: 149, deep: 50, cross: 99, dossiers: 3, earnings: 73 }, { ...CALL_COST, sigmaLedger: 0, ivp: 0, slow: 0, voldesk: 0, funds: 0, flowlab: 0 });
   ok(Math.abs(measured.total - 3071) / 3071 < 0.01,
      `the call model reproduces the 2026-09-24 nightly (3,071 calls, before the sigma ledger's rotation existed) from its own shape: ${measured.total}`);
   eq(measured.legs.vol, 632, "leg by leg: the vol leg's 632 calls exactly (8 deep, 2 cross, 10 per dossier, 4 radar)");
@@ -5282,7 +5282,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     }
     r.finish();
     ok(r.records().filter((y) => y.why).every((y) => y.why.length <= WHY_CAP && !/\s{2}/.test(y.why)), "a failure reason is one line and capped");
-    ok(JSON.stringify(r.records()).length < 6200, `even with every isolated stage failed the records stay under 6.2 KB, the funds stage being the record added since 5.9 KB (${JSON.stringify(r.records()).length})`);
+    ok(JSON.stringify(r.records()).length < 6500, `even with every isolated stage failed the records stay under 6.5 KB, the funds stage, the Vol desk and its audit being the records added since 6 KB (${JSON.stringify(r.records()).length})`);
     let n = 0;
     const bigClock = () => (n += 98765);
     const wide = createStageRunner({ clock: bigClock, calls: () => n / 30 });

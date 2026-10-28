@@ -16,12 +16,16 @@ export const cardXBytes = (payload) => (cardXWire() ? wireBytes(payload) : serve
 const overSoft = (payload) => cardXBytes(payload) > CARD_X_SOFT_BYTES || servedBytes(payload) > CARD_X_SERVED_BYTES;
 
 function fitSoft(payload) {
-  while (overSoft(payload) && shedNextPart(payload)) {
-    if (!payload.shed.includes("extras.soft")) payload.shed.push("extras.soft");
+  while (overSoft(payload)) {
+    const id = shedNextPart(payload);
+    if (!id) break;
+    const mark = id === "va" ? "va.soft" : "extras.soft";
+    if (!payload.shed.includes(mark)) payload.shed.push(mark);
   }
 }
 
 export const CARD_X_SHED = Object.freeze([
+  ["va", (p) => { if (!p.va) return false; delete p.va; return true; }],
   ["dx.parts", (p) => { if (!hasLiveParts(p.dx)) return false; p.dx = stubSection(p.dx, "dx"); return true; }],
   ["vx.parts", (p) => { if (!hasLiveParts(p.vx)) return false; p.vx = stubSection(p.vx, "vx"); return true; }],
   ["insiders.dots", (p) => { if (p.insiders && p.insiders.dots) p.insiders.dots = p.insiders.dots.slice(-10); }],

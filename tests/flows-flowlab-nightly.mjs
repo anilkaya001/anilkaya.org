@@ -23,6 +23,13 @@ const ok = (c, m) => { assert.ok(c, m); checks++; };
 const eq = (a, b, m) => { assert.deepStrictEqual(a, b, m); checks++; };
 
 const SESSION = FX.session;
+
+{
+  const { CALL_COST } = await import("../scripts/flows-nightly/vendor-params.mjs");
+  eq(CALL_COST.flowlab, Object.values(LEG.SECTION_COST).reduce((a, b) => a + b, 0), "the nightly call model prices the Flow Lab stage at every section it can run, the two analytics reads included, since the analytics switch ships on");
+  ok(CALL_COST.flowlab <= LEG.NIGHTLY_MAX, "and that is inside the stage's own allowance");
+}
+
 const AT = "2026-10-23T21:45:00.000Z";
 
 function vendorOf(world = N, { refuse = [], calls = [], screener = null } = {}) {

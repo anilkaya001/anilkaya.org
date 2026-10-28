@@ -421,6 +421,10 @@ export function fitSection(section, group, budget = SECTION_BYTES[group]) {
 }
 
 export function shedNextPart(payload) {
+  if (payload && isObj(payload.va)) {
+    delete payload.va;
+    return "va";
+  }
   for (const id of SHED_ORDER) {
     const group = PARTS[id].group;
     const section = payload && isObj(payload[group]) && isObj(payload[group].parts) ? payload[group] : null;

@@ -292,7 +292,7 @@ export function validateList(list) {
 
 export function registryReads(ops) {
   const out = {};
-  for (const entry of OPS) if (entry.reads && ops.has(entry.op)) out[entry.op] = [...entry.reads];
+  for (const entry of OPS) if (entry.reads && entry.reads.length && ops.has(entry.op)) out[entry.op] = [...entry.reads];
   return out;
 }
 
