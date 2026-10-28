@@ -55,7 +55,7 @@ async function battery(M) {
     }
   }
   const wrangler = fs.readFileSync(path.join(ROOT, "wrangler.toml"), "utf8");
-  ok(/^FLOWS_POSITIONING = "owner"$/m.test(wrangler), "the page ships to owners only");
+  ok(/^FLOWS_POSITIONING = "on"$/m.test(wrangler), "the page ships to every signed-in member");
   ok(!/FLOWS_POSITIONING_NIGHTLY|FLOWS_POSITIONING_CAP/.test(wrangler), "and the nightly switches are the pipeline's, not the Worker's");
   for (const name of ["FLOWS_POSITIONING", "FLOWS_POSITIONING_NIGHTLY", "FLOWS_POSITIONING_CAP"]) ok(OPS_SWITCHES.includes(name), `${name} is on the owner's Status switch list`);
   const wf = fs.readFileSync(path.join(ROOT, ".github/workflows/flows-pipeline.yml"), "utf8");
