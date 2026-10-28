@@ -465,7 +465,10 @@
       };
       const say2 = (i, j) => { read.textContent = sentence(i, j); };
       const move = (i, j) => { cur = { i, j }; draw(); say2(i, j); };
+      let keyed = false;
+      box.addEventListener("pointermove", () => { keyed = false; });
       box.addEventListener("pointerover", (ev) => {
+        if (keyed) return;
         const r = ev.target.closest && ev.target.closest(".vd-cell");
         if (r) say2(Number(r.dataset.i), Number(r.dataset.j));
       });
@@ -480,9 +483,10 @@
         else if (ev.key === "ArrowDown") { if (i < n - 1) i += 1; }
         else if (ev.key === "Home") j = 0;
         else if (ev.key === "End") j = i - 1;
-        else if (ev.key === "Escape") { read.textContent = restText(); if (strongest) { cur = { i: strongest.i, j: strongest.j }; draw(); } return; }
+        else if (ev.key === "Escape") { keyed = true; read.textContent = restText(); if (strongest) { cur = { i: strongest.i, j: strongest.j }; draw(); } return; }
         else return;
         ev.preventDefault();
+        keyed = true;
         move(i, j);
       });
       tbtn.addEventListener("click", () => {
