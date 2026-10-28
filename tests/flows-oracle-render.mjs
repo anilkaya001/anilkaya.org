@@ -176,6 +176,19 @@ async function restoreProbe(mutate) {
     need((await read(q.page)).pref === "quiet", "a reader who hid it from Count gets Count back");
   }
   await q.close();
+  const capped = await open(browser, { mode: "quiet", mutate, records: RECORDS, topBody: FX.top(), cookies: [{ name: "fn_oracle", value: "on", path: "/flows" }] });
+  await waitOracle(capped.page);
+  await settle(capped.page, 300);
+  await capped.page.click(".orc-orb");
+  await sleep(400);
+  await capped.page.click('.orc-pref-b[data-pref="off"]');
+  await settle(capped.page, 300);
+  if (await press(capped.page, ".orc-restore", "a page that caps the Neuron at Count still offers Undo")) {
+    await settle(capped.page, 300);
+    const e = await read(capped.page);
+    need(e.pref === "quiet" && /(^|; )fn_oracle=on(;|$)/.test(e.cookies), `a page that caps the Neuron at Count does not overwrite the reader's Pill: ${e.pref} ${e.cookies}`);
+  }
+  await capped.close();
   return fails;
 }
 
@@ -185,6 +198,7 @@ async function restoreProbe(mutate) {
     ["hiding with no way back", { "flows-oracle.js": (t) => t.replace("    restore.hidden = !off;\n", "    restore.hidden = true;\n") }],
     ["restore always lands on Count", { "flows-oracle.js": (t) => t.replace('setPref(PREF[p] > 0 ? p : "on");', 'setPref("quiet");') }],
     ["no undo window", { "flows-oracle.js": (t) => t.replace("S.undoUntil = Date.now() + UNDO_MS;", "S.undoUntil = 0;") }],
+    ["a capped page saves its cap as the reader's choice", { "flows-oracle.js": (t) => t.replace('setCookie("fn_oracle_prev", PREF[chosen] > 0 ? chosen : was);', 'setCookie("fn_oracle_prev", was);') }],
   ]) ok((await restoreProbe(mutate)).length > 0, `planted wrong build "${name}" is caught`);
 }
 

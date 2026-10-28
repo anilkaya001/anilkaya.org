@@ -287,7 +287,8 @@
   function setPref(p) {
     var was = S.pref;
     if (p === "off" && was !== "off") {
-      setCookie("fn_oracle_prev", was);
+      var chosen = cookie("fn_oracle");
+      setCookie("fn_oracle_prev", PREF[chosen] > 0 ? chosen : was);
       S.undoUntil = Date.now() + UNDO_MS;
       clearTimeout(S.undoTimer);
       S.undoTimer = setTimeout(paintOrb, UNDO_MS + 50);
