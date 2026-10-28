@@ -1,0 +1,531 @@
+diff --git a/assets/css/flows-boards.css b/assets/css/flows-boards.css
+index a65a27f..f83d907 100644
+--- a/assets/css/flows-boards.css
++++ b/assets/css/flows-boards.css
+@@ -493,10 +493,7 @@
+   #bdHero .bd-v-full { display: none; }
+   #bdHero .bd-v-short { display: inline; }
+ }
+-.flows-body:has(> #fxOracle:not([hidden])) .bd-mod > .bd-table { padding-bottom: 56px; }
+-.flows-body:has(> #fxOracle:not([hidden])) .bd-mod > .bd-map > .bd-map-foot { padding-inline-end: 64px; }
+ .flows-head .bd-meta { min-height: 18px; margin: var(--sp-1) 0 0; color: var(--label-2); font: var(--t-footnote); font-variant-numeric: tabular-nums; }
+ @media (max-width: 767.98px) {
+   .flows-body:is([data-flows-page="long"], [data-flows-page="short"], [data-flows-page="watch"]) .flows-main { padding-bottom: calc(var(--tab-h) + var(--safe-b) + var(--sp-3)); }
+ }
+-@media (min-width: 768px) { .flows-body:has(> #fxOracle:not([hidden])) .bd-mod > .bd-map { padding-bottom: 28px; } }
+diff --git a/assets/css/flows-market.css b/assets/css/flows-market.css
+index df43ce9..e2f5008 100644
+--- a/assets/css/flows-market.css
++++ b/assets/css/flows-market.css
+@@ -443,10 +443,6 @@
+ .mk-hc-v { grid-column: 1; margin-top: 2px; color: var(--tone, var(--label-1)); font: 650 24px / 1.1 var(--font-text); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+ .mk-hc-s { grid-column: 1 / -1; margin-top: 2px; color: var(--label-2); font: 400 12px / 1.25 var(--font-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+ .mk-panel > .mk-mod > .mk-body[id]:empty::before { content: "Loading\2026"; display: block; padding: var(--sp-2) 0; color: var(--label-3); font: var(--t-footnote); }
+-.flows-body[data-flows-page="market"]:has(#fxOracle:not([hidden])) .mk-stage { margin-right: max(0px, calc(84px - max(var(--gutter), var(--safe-r)))); }
+-@media (max-width: 767.98px) {
+-  .flows-body[data-flows-page="market"]:has(#fxOracle:not([hidden])) .mk-stage { margin-right: 0; margin-bottom: 64px; }
+-}
+ .mk-hc-p { position: absolute; top: 8px; right: 10px; width: 46px; height: 38px; pointer-events: none; }
+ .mk-hc:first-child .mk-hc-p { width: 84px; }
+ .mk-hc-p .ui-spark { display: block; width: 100%; height: 38px; }
+diff --git a/assets/css/flows-oracle.css b/assets/css/flows-oracle.css
+index 5106820..beed486 100644
+--- a/assets/css/flows-oracle.css
++++ b/assets/css/flows-oracle.css
+@@ -1,35 +1,32 @@
+-.orc {
+-  position: fixed;
+-  right: max(24px, var(--safe-r));
+-  bottom: calc(24px + var(--safe-b));
+-  z-index: 110;
+-  width: 52px;
+-  height: 52px;
++.orc, .fx-orb {
+   font-family: var(--font-text);
+   --orc-ease: cubic-bezier(0.2, 0.9, 0.25, 1);
+   --orc-tint: var(--accent);
+ }
++.orc { position: fixed; top: 0; right: 0; z-index: 110; width: 0; height: 0; }
+ .orc[hidden] { display: none; }
+-.orc[data-pref="off"]:not(.is-open) { width: 0; height: 0; }
+-.orc[data-state="signal"] { --orc-tint: var(--accent); }
+-.orc[data-state="conflict"] { --orc-tint: var(--warn); }
+-.orc[data-state="stale"] { --orc-tint: var(--label-3); }
+-@media (min-width: 768px) {
+-  .has-dock-open .orc:not(.is-open) { transform: translateX(calc(-1 * (min(420px, 100vw) + 24px))); }
++.fx-orb {
++  position: relative;
++  display: flex;
++  align-items: center;
++  justify-content: flex-end;
++  min-width: 44px;
++  height: 44px;
++  container: fxorb / inline-size;
+ }
++.fx-orb[data-state="signal"] { --orc-tint: var(--accent); }
++.fx-orb[data-state="conflict"] { --orc-tint: var(--warn); }
++.fx-orb[data-state="stale"] { --orc-tint: var(--label-3); }
+ @media (max-width: 767.98px) {
+-  .orc { right: max(16px, var(--safe-r)); bottom: calc(var(--tab-h) + var(--safe-b) + 12px); }
+-  .has-dock-open .orc:not(.is-open) { visibility: hidden; }
+-}
+-@media (prefers-reduced-motion: no-preference) {
+-  .orc { transition: transform var(--dur-open) var(--orc-ease); }
++  .fx-bar:has(> .fx-orb:not(:empty)) > #fxSearch { display: none; }
+ }
+ 
+ .orc-orb {
+   position: relative;
+   display: block;
+-  width: 52px;
+-  height: 52px;
++  flex: none;
++  width: 44px;
++  height: 44px;
+   padding: 0;
+   border: 0;
+   border-radius: var(--r-pill);
+@@ -40,8 +37,8 @@
+ }
+ .orc-orb:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 3px; }
+ .orc-orb > .orc-disc { position: absolute; inset: 0; inline-size: auto; block-size: auto; }
+-.orc[data-state="signal"] .orc-disc, .orc[data-state="conflict"] .orc-disc {
+-  box-shadow: inset 0 1px 0 var(--nn-cap), inset 0 0 0 0.5px var(--nn-hair), 0 0 22px color-mix(in srgb, var(--orc-tint) 38%, transparent), 0 6px 20px color-mix(in srgb, var(--ground-base) 70%, transparent);
++.fx-orb[data-state="signal"] .orc-disc, .fx-orb[data-state="conflict"] .orc-disc {
++  box-shadow: inset 0 1px 0 var(--nn-cap), inset 0 0 0 0.5px var(--nn-hair), 0 0 6px color-mix(in srgb, var(--orc-tint) 45%, transparent);
+ }
+ .orc-rim {
+   position: absolute;
+@@ -49,8 +46,8 @@
+   border-radius: inherit;
+   box-shadow: inset 0 0 0 1.4px var(--sep-strong);
+ }
+-.orc[data-state="watching"] .orc-rim, .orc[data-state="signal"] .orc-rim, .orc[data-state="conflict"] .orc-rim { box-shadow: inset 0 0 0 1.4px color-mix(in srgb, var(--orc-tint) 55%, var(--sep-strong)); }
+-.orc[data-state="conflict"] .orc-rim { box-shadow: inset 1.6px 0 0 var(--up-mark), inset -1.6px 0 0 var(--down-mark), inset 0 0 0 1px var(--sep-strong); }
++.fx-orb[data-state="watching"] .orc-rim, .fx-orb[data-state="signal"] .orc-rim, .fx-orb[data-state="conflict"] .orc-rim { box-shadow: inset 0 0 0 1.4px color-mix(in srgb, var(--orc-tint) 55%, var(--sep-strong)); }
++.fx-orb[data-state="conflict"] .orc-rim { box-shadow: inset 1.6px 0 0 var(--up-mark), inset -1.6px 0 0 var(--down-mark), inset 0 0 0 1px var(--sep-strong); }
+ 
+ .orc-badge {
+   position: absolute;
+@@ -78,46 +75,25 @@
+   display: flex;
+   align-items: center;
+   gap: var(--sp-3);
+-  width: var(--pw, 200px);
+-  max-width: calc(100vw - 32px - 8px);
+-  height: 52px;
+-  padding: 0 60px 0 var(--sp-5);
++  width: max-content;
++  max-width: 100cqi;
++  height: 44px;
++  padding: 0 52px 0 var(--sp-4);
+   box-sizing: border-box;
+   border-radius: var(--r-pill);
+   background: var(--mat-opaque);
+-  box-shadow: var(--mat-edge), 0 6px 20px color-mix(in srgb, var(--ground-base) 70%, transparent);
+-  clip-path: inset(0 0 0 calc(100% - 52px) round 26px);
++  box-shadow: var(--mat-edge);
++  clip-path: inset(0 0 0 calc(100% - 44px) round 22px);
+   opacity: 0;
+   pointer-events: none;
+ }
+ @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+   .orc-pill { background: var(--mat-regular); -webkit-backdrop-filter: var(--mat-blur); backdrop-filter: var(--mat-blur); }
+ }
+-.orc.has-pill .orc-pill { clip-path: inset(0 0 0 0 round 26px); opacity: 1; pointer-events: auto; }
++.fx-orb.has-pill .orc-pill { clip-path: inset(0 0 0 0 round 22px); opacity: 1; pointer-events: auto; }
+ .orc-pill-g { flex: none; color: var(--orc-tint); font-size: 11px; line-height: 1; }
+-.orc-pill-t { min-width: 0; overflow: hidden; color: var(--label-1); font: var(--t-callout); letter-spacing: var(--t-callout-track); text-overflow: ellipsis; white-space: nowrap; }
+-@media (max-width: 767.98px) {
+-  .orc-pill { display: none; }
+-}
+-
+-.orc-toast {
+-  position: absolute;
+-  right: 0;
+-  bottom: 64px;
+-  width: max-content;
+-  max-width: calc(100vw - 32px);
+-  margin: 0;
+-  padding: var(--sp-4) var(--sp-5);
+-  box-sizing: border-box;
+-  border-radius: var(--r-md);
+-  background: var(--mat-thick);
+-  box-shadow: var(--mat-edge), var(--lift-3);
+-  color: var(--label-1);
+-  font: var(--t-callout);
+-  opacity: 0;
+-}
+-.orc-toast[hidden] { display: none; }
+-.orc-toast.is-on { opacity: 1; }
++.orc-pill-t { min-width: 0; overflow: hidden; color: var(--label-1); font: var(--t-callout); letter-spacing: var(--t-callout-track); white-space: nowrap; }
++.orc-pill.is-short .orc-pill-t { font-weight: 600; }
+ 
+ .orc-scrim {
+   position: fixed;
+@@ -130,21 +106,22 @@
+ .orc.is-open .orc-scrim { opacity: 1; }
+ 
+ .orc-sheet {
+-  position: absolute;
+-  right: 0;
+-  bottom: 64px;
++  position: fixed;
++  top: calc(var(--bar-h) + var(--safe-t) + 8px);
++  left: var(--orc-x, auto);
++  right: auto;
+   display: flex;
+   flex-direction: column;
+   width: 380px;
+   max-width: calc(100vw - 32px);
+-  max-height: calc(100dvh - 24px - 64px - 16px - var(--safe-b));
++  max-height: calc(100dvh - var(--bar-h) - var(--safe-t) - 24px - var(--safe-b));
+   box-sizing: border-box;
+   overflow: hidden;
+   border-radius: var(--r-lg);
+   background: var(--mat-opaque);
+   box-shadow: var(--mat-edge), var(--lift-3);
+   color: var(--label-1);
+-  transform-origin: calc(100% - 26px) 100%;
++  transform-origin: calc(100% - 22px) 0;
+   opacity: 0;
+ }
+ .orc .orc-sheet, .orc .orc-sheet:focus, .orc .orc-sheet:focus-visible, .orc .orc-list:focus-visible { outline: none; }
+@@ -158,23 +135,23 @@
+ .orc:not(.is-open) .orc-sheet, .orc:not(.is-open) .orc-scrim { pointer-events: none; }
+ .orc.is-open .orc-sheet { opacity: 1; }
+ @media (prefers-reduced-motion: no-preference) {
+-  .orc-sheet { transform: translateY(8px) scale(0.98); transition: transform 260ms var(--orc-ease), opacity 260ms linear; }
++  .orc-sheet { transform: translateY(-8px) scale(0.98); transition: transform 260ms var(--orc-ease), opacity 260ms linear; }
+   .orc.is-open .orc-sheet { transform: none; transition: transform var(--dur-enter) var(--spring-smooth), opacity var(--dur-open) linear; }
+   .orc-scrim { transition: opacity var(--dur-open) linear; }
+   .orc-pill { transition: clip-path var(--dur-enter) var(--orc-ease), opacity 120ms linear; }
+   .orc.has-pill .orc-pill { transition: clip-path var(--dur-enter) var(--spring-smooth), opacity 120ms linear 40ms; }
+   .orc-orb:active .orc-disc { transform: scale(0.96); transition: transform var(--dur-tap) linear; }
+   .orc-disc { transition: transform var(--dur-quick) var(--spring-snappy); }
+-  .orc-toast { transition: opacity var(--dur-fade) linear; }
+ }
+ @supports (transition-timing-function: linear(0, 1)) {
+-  .orc { --orc-ease: var(--ease-out); }
++  .orc, .fx-orb { --orc-ease: var(--ease-out); }
+ }
+ .orc-grab { display: none; }
+ @media (max-width: 767.98px) {
+   .orc-sheet {
+     position: fixed;
+     inset: auto 0 0 0;
++    top: auto;
+     width: 100%;
+     max-width: none;
+     max-height: 70dvh;
+@@ -183,7 +160,6 @@
+     transform-origin: 50% 100%;
+   }
+   .orc-grab { display: block; width: 36px; height: 5px; margin: 8px auto 0; border-radius: var(--r-pill); background: var(--fill-1); }
+-  .orc-toast { right: 0; bottom: 64px; }
+ }
+ @media (prefers-reduced-motion: no-preference) and (max-width: 767.98px) {
+   .orc-sheet { transform: translateY(40px); }
+@@ -386,9 +362,8 @@
+ 
+ .orc-orb[hidden] { display: none; }
+ .orc-restore {
+-  position: absolute;
+-  right: 0;
+-  bottom: 0;
++  position: relative;
++  flex: none;
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+@@ -412,7 +387,11 @@
+ .orc-restore:hover, .orc-restore:focus-visible, .orc-restore.is-undo { opacity: 1; }
+ .orc-restore:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 3px; }
+ .orc-restore .orc-spark { width: 16px; height: 16px; flex: none; }
+-.orc-restore.is-undo { min-height: 44px; padding: 0 var(--sp-4); color: var(--label-1); }
++.orc-restore.is-undo { min-height: 44px; max-width: 100cqi; padding: 0 var(--sp-4); color: var(--label-1); }
++@container fxorb (max-width: 199.98px) {
++  .orc-restore.is-undo { min-width: 44px; padding: 0 6px; font: 600 13px / 1 var(--font-text); }
++  .orc-restore.is-undo > .orc-spark, .orc-restore.is-undo .orc-restore-t { display: none; }
++}
+ .orc-restore-t[hidden], .orc-restore-u[hidden] { display: none; }
+ .orc-restore-u { color: var(--accent-ink); font-weight: 600; }
+ @media (pointer: coarse) { .orc-restore { min-width: 44px; min-height: 44px; } }
+@@ -422,6 +401,6 @@
+ 
+ @media (forced-colors: active) {
+   .orc-restore { background: Canvas; color: CanvasText; border: 1px solid ButtonBorder; box-shadow: none; opacity: 1; }
+-  .orc-disc, .orc-pill, .orc-sheet, .orc-toast { background: Canvas; color: CanvasText; border: 1px solid ButtonBorder; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
++  .orc-disc, .orc-pill, .orc-sheet { background: Canvas; color: CanvasText; border: 1px solid ButtonBorder; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
+   .orc-badge { background: Highlight; color: HighlightText; box-shadow: none; }
+ }
+diff --git a/assets/css/flows-political.css b/assets/css/flows-political.css
+index 9139d6c..ba39366 100644
+--- a/assets/css/flows-political.css
++++ b/assets/css/flows-political.css
+@@ -250,9 +250,6 @@
+ @media (max-width: 767.98px) {
+   .flows-body[data-flows-page="political"] .flows-main { --pl-pad-b: calc(var(--tab-h) + var(--safe-b) + var(--sp-3)); }
+ }
+-@media (min-width: 768px) {
+-  .flows-body.has-dock-open:has(#fxOracle:not([hidden])) .pl-acts { padding-inline-end: 28px; }
+-}
+ @media (pointer: coarse) {
+   .pl-row, .pl-trow { --rh: 44px; }
+   .pl-seg button, .pl-seg.sm button, .pl-seg5 button { min-height: 44px; }
+@@ -270,6 +267,4 @@
+ .pl-rc.ctx .kv small.why { display: none; }
+ @container pl (max-width: 899.98px) {
+   .pl-rc.ctx .kv small.why { display: inline; }
+-  .flows-body:has(#fxOracle:not([hidden])) .pl-acts, .flows-body:has(#fxOracle:not([hidden])) .pl-rc.ev { padding-inline-end: 56px; }
+-  .flows-body:has(#fxOracle:not([hidden])) .pl-selbar { width: calc(100% - 72px); }
+ }
+diff --git a/assets/css/flows-ticker.css b/assets/css/flows-ticker.css
+index 3736788..1639af6 100644
+--- a/assets/css/flows-ticker.css
++++ b/assets/css/flows-ticker.css
+@@ -794,8 +794,6 @@ button.ft-eng { cursor: pointer; }
+   .ftg-card:is([data-fit="3"], [data-fit="4"]) .ftg-sub { display: none; }
+   .ftg-card[data-fit="4"] :is(.ftg-cb, .ftg-chips) { display: none; }
+ }
+-.flows-body:has(#fxOracle:not([hidden])) .ft-glance[data-glance="on"] .ft-dock { padding-inline-end: 64px; }
+-@media (max-width: 767.98px) { .flows-body:has(#fxOracle:not([hidden])) .ft-glance[data-glance="on"] { padding-bottom: calc(var(--sp-5) + 64px); } }
+ .ftg-live, .ftg-gx { font: var(--t-footnote); font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--label-1); }
+ .ftg-gx { font-weight: 600; color: var(--accent-ink); }
+ .ftg-gx[data-side="short"] { color: var(--warn); }
+diff --git a/assets/js/flows-oracle.js b/assets/js/flows-oracle.js
+index 03f59c9..3dffc87 100644
+--- a/assets/js/flows-oracle.js
++++ b/assets/js/flows-oracle.js
+@@ -5,8 +5,8 @@
+   if (!U || typeof U.h !== "function" || U.oracle) return;
+   var h = U.h, s = U.s;
+   var W = U.oracleWords, L = U.oracleLive, K = U.oracleKit;
+-  var host = document.getElementById("fxOracle");
+-  if (!host || !W || !L || !K) return;
++  var host = document.getElementById("fxOracle"), slot = document.getElementById("fxOrb");
++  if (!host || !slot || !W || !L || !K) return;
+ 
+   var MIN = 60000;
+   var DASH = "—";
+@@ -38,12 +38,12 @@
+   var INFO_TEXT = "Cheap means the market charges less than the model's fair price; rich, more. The model's price comes from the engine's fitted smile and its own model of returns, not from a quote.";
+   var SHEET_ID = "orcSheet";
+   var UNDO_MS = 10000;
+-  var HIDDEN_TEXT = "Hidden. The button in the corner shows it again.";
++  var HIDDEN_TEXT = "Hidden. The Neuron button in the top bar shows it again.";
+ 
+   var S = {
+     pref: "on", mode: host.getAttribute("data-oracle") === "quiet" ? "quiet" : "on", route: "idle",
+     top: null, rec: new Map(), recFail: new Map(), msgs: [], open: false, opener: null, behind: [], expanded: new Set(),
+-    lastFlowAt: null, announceAt: 0, announceQ: null, announceTimer: null, gesture: false, toastTimer: null, undoUntil: 0, undoTimer: null,
++    lastFlowAt: null, announceAt: 0, announceQ: null, announceTimer: null, gesture: false, undoUntil: 0, undoTimer: null, hl: null, ro: null,
+     liveState: L.createState(), unsub: null, hidden: false, asked: new Set(), batchAt: 0, nnState: ""
+   };
+ 
+@@ -174,7 +174,7 @@
+     return null;
+   }
+ 
+-  var orb, pill, pillGlyph, pillText, badge, restore, restoreTxt, restoreUndo, liveEl, toast, sheet, scrim, list, titleEl, subEl, closeBtn, infoBtn, infoNote, prefSeg, prefBtns = {};
++  var orb, pill, pillGlyph, pillText, badge, restore, restoreTxt, restoreUndo, liveEl, sheet, scrim, list, titleEl, subEl, closeBtn, infoBtn, infoNote, prefSeg, prefBtns = {};
+ 
+   function spark() {
+     var svg = s("svg", { class: "ui-g orc-spark", "aria-hidden": "true", focusable: "false" });
+@@ -184,17 +184,17 @@
+ 
+   function build() {
+     host.replaceChildren();
++    slot.replaceChildren();
+     pillGlyph = h("span", { class: "orc-pill-g", "aria-hidden": "true" });
+     pillText = h("span", { class: "orc-pill-t" });
+     pill = h("span", { class: "orc-pill", "aria-hidden": "true" }, pillGlyph, pillText);
+     badge = h("span", { class: "orc-badge", "aria-hidden": "true", hidden: "" });
+     orb = h("button", { type: "button", class: "orc-orb", "aria-haspopup": "dialog", "aria-expanded": "false", "aria-controls": SHEET_ID },
+-      pill, h("span", { class: "orc-disc nn-orb nn-mirror is-52" }, h("i"), h("i"), h("i"), h("span", { class: "orc-rim", "aria-hidden": "true" }), spark()), badge);
++      pill, h("span", { class: "orc-disc nn-orb nn-mirror is-44" }, h("i"), h("i"), h("i"), h("span", { class: "orc-rim", "aria-hidden": "true" }), spark()), badge);
+     restoreTxt = h("span", { class: "orc-restore-t" }, "Neuron hidden");
+     restoreUndo = h("span", { class: "orc-restore-u" }, "Undo");
+     restore = h("button", { type: "button", class: "orc-restore", hidden: "", title: "Show the Neuron (Alt+Shift+N)" }, spark(), restoreTxt, restoreUndo);
+     liveEl = h("p", { class: "visually-hidden", role: "status", "aria-live": "polite" });
+-    toast = h("p", { class: "orc-toast", "aria-hidden": "true", hidden: "" });
+     scrim = h("div", { class: "orc-scrim", hidden: "" });
+     titleEl = h("h2", { class: "orc-title", id: "orcTitle" }, "Neuron’s view");
+     subEl = h("p", { class: "orc-sub" });
+@@ -214,7 +214,8 @@
+       h("div", { class: "orc-head" }, h("div", { class: "orc-head-t" }, titleEl, subEl), closeBtn),
+       list,
+       h("div", { class: "orc-foot" }, h("p", { class: "orc-model" }, W.MODEL_IMPLIED), h("div", { class: "orc-foot-r" }, infoBtn, h("div", { class: "orc-pref-w" }, h("span", { class: "orc-pref-l", id: "orcPrefL" }, "Show the Neuron as"), prefSeg)), infoNote));
+-    host.append(orb, restore, toast, liveEl, scrim, sheet);
++    slot.append(orb, restore);
++    host.append(liveEl, scrim, sheet);
+     orb.addEventListener("click", function () { setOpen(!S.open); });
+     restore.addEventListener("click", function () { restorePref(); });
+     restore.addEventListener("focusout", function () { if (S.undoUntil > Date.now()) { S.undoUntil = 0; clearTimeout(S.undoTimer); paintOrb(); } });
+@@ -226,7 +227,6 @@
+       infoBtn.setAttribute("aria-expanded", on ? "true" : "false");
+     });
+     sheet.addEventListener("keydown", onSheetKey);
+-    toast.addEventListener("click", function () { setOpen(true); });
+   }
+ 
+   function trapKeys(e) {
+@@ -261,6 +261,7 @@
+     if (open) {
+       var a = document.activeElement;
+       S.opener = a && a !== document.body ? a : orb.hidden ? restore : orb;
++      place();
+       sheet.hidden = false;
+       scrim.hidden = false;
+       void sheet.offsetWidth;
+@@ -300,7 +301,7 @@
+     }
+     setCookie("fn_oracle", p);
+     S.pref = readPref();
+-    if (S.pref === "off") { setOpen(false); dropToast(); }
++    if (S.pref === "off") setOpen(false);
+     else if (S.route === "idle") { loadTop(); loadRec(ticker()); }
+     paint();
+     if (S.pref === "off" && was !== "off") {
+@@ -313,7 +314,7 @@
+     var p = readPref(), was = S.pref;
+     if (p === was) return;
+     S.pref = p;
+-    if (p === "off") { setOpen(false); dropToast(); }
++    if (p === "off") setOpen(false);
+     else {
+       if (S.route === "idle") { loadTop(); loadRec(ticker()); }
+       if (was === "off") U.defer("nn-orb", { when: "idle" }).then(function () { if (window.FlowsUI.nnOrb) window.FlowsUI.nnOrb.scan(); });
+@@ -354,10 +355,10 @@
+     var want = state === "stale" ? "off" : "idle";
+     if (S.route === "idle" && S.pref !== "off") want = "think";
+     else if (state === "signal" && S.nnState !== "signal") want = "spoke";
+-    else if (want === "idle" && host.dataset.nn === "spoke") want = "spoke";
++    else if (want === "idle" && slot.dataset.nn === "spoke") want = "spoke";
+     S.nnState = state;
+-    if (want === "spoke" && host.dataset.nn === "spoke") return;
+-    U.nn(host, want, "oracle");
++    if (want === "spoke" && slot.dataset.nn === "spoke") return;
++    U.nn(slot, want, "oracle");
+   }
+ 
+   function paintOrb() {
+@@ -373,12 +374,11 @@
+     restoreTxt.hidden = !undo;
+     restoreUndo.hidden = !undo;
+     restore.setAttribute("aria-label", undo ? "Neuron hidden. Undo" : "Show the Neuron");
+-    host.setAttribute("data-state", state);
++    [host, slot].forEach(function (e) { e.setAttribute("data-state", state); e.setAttribute("data-pref", S.pref); });
+     nnApply(state);
+-    host.setAttribute("data-pref", S.pref);
+-    host.classList.toggle("has-pill", !!showPill);
+-    if (hl) { pillGlyph.textContent = hl.glyph; pillText.textContent = hl.text; }
+-    pill.style.setProperty("--pw", Math.min(300, 100 + (hl ? hl.text.length * 7.4 : 0)) + "px");
++    S.hl = showPill ? hl : null;
++    if (hl) pillGlyph.textContent = hl.glyph;
++    fit();
+     badge.hidden = n < 1;
+     badge.textContent = String(n);
+     var name = nameOf(state, n);
+@@ -387,6 +387,23 @@
+     orb.setAttribute("aria-expanded", S.open ? "true" : "false");
+   }
+ 
++  function fit() {
++    var hl = S.hl, on = !!hl;
++    if (on) {
++      pillText.textContent = hl.text;
++      pill.classList.remove("is-short");
++      if (pillText.scrollWidth > pillText.clientWidth + 0.5) { pill.classList.add("is-short"); pillText.textContent = hl.text.split(" ")[0]; }
++      on = pillText.scrollWidth <= pillText.clientWidth + 0.5;
++    }
++    host.classList.toggle("has-pill", on);
++    slot.classList.toggle("has-pill", on);
++  }
++
++  function place() {
++    var a = (orb.hidden ? restore : orb).getBoundingClientRect(), w = Math.min(380, innerWidth - 32);
++    sheet.style.setProperty("--orc-x", Math.round(Math.max(16, Math.min(innerWidth - 16 - w, a.right - w))) + "px");
++  }
++
+   function pctText(v) { return K.pct0(v); }
+ 
+   function noView(rec) {
+@@ -708,26 +725,10 @@
+     S.msgs = S.msgs.filter(function (m) { return now - m.at <= 120 * MIN; });
+     var top = out.slice().sort(function (a, b) { return b.strength - a.strength; })[0];
+     if (S.pref !== "off") say("Neuron: " + top.say);
+-    if (S.pref === "on" && !S.open && window.matchMedia("(max-width: 767.98px)").matches) showToast(top.ticker + " · " + KIND_SHORT[top.kind]);
+     buzz();
+     paint();
+   }
+ 
+-  function dropToast() {
+-    clearTimeout(S.toastTimer);
+-    toast.hidden = true;
+-    toast.classList.remove("is-on");
+-  }
+-
+-  function showToast(text) {
+-    toast.textContent = text;
+-    toast.hidden = false;
+-    toast.classList.remove("is-on");
+-    void toast.offsetWidth;
+-    toast.classList.add("is-on");
+-    clearTimeout(S.toastTimer);
+-    S.toastTimer = setTimeout(function () { toast.hidden = true; toast.classList.remove("is-on"); }, 6000);
+-  }
+   function buzz() {
+     if (!S.gesture || U.reduced() || cookie("fn_oracle_haptic") !== "on" || typeof navigator.vibrate !== "function") return;
+     try { navigator.vibrate(8); } catch (e) {   }
+@@ -768,6 +769,8 @@
+     document.addEventListener("visibilitychange", onVis);
+     document.addEventListener("pointerdown", function () { S.gesture = true; }, { once: true });
+     if (U.rt && typeof U.rt.on === "function") S.unsub = U.rt.on("fl", onFlow);
++    if (typeof ResizeObserver === "function") { S.ro = new ResizeObserver(fit); S.ro.observe(slot); }
++    window.addEventListener("resize", function () { if (S.open) place(); });
+     var tick = setInterval(function () { if (!document.hidden) paintOrb(); }, 60000);
+     S.timer = tick;
+     paint();
+@@ -779,13 +782,14 @@
+   function destroy() {
+     if (S.unsub) S.unsub();
+     clearInterval(S.timer);
+-    clearTimeout(S.toastTimer);
++    if (S.ro) S.ro.disconnect();
+     clearTimeout(S.announceTimer);
+     clearTimeout(S.undoTimer);
+     document.removeEventListener("keydown", onKey);
+     document.removeEventListener("visibilitychange", onVis);
+     setInert(false);
+     host.replaceChildren();
++    slot.replaceChildren();
+     host.hidden = true;
+   }
+ 
+diff --git a/shared/flows-pages.js b/shared/flows-pages.js
+index 464c402..33e69ac 100644
+--- a/shared/flows-pages.js
++++ b/shared/flows-pages.js
+@@ -1572,16 +1572,20 @@ ${scripts.map((src) => `<script src="${v(String(src))}" defer></script>`).join("
+ }
+ 
+ const ORACLE_MODES = Object.freeze(["on", "quiet"]);
++const ORB_ROOM = '<span class="fx-bar-sp"></span>';
+ 
+ export function oracleShell(html, mode, slug) {
+   if (typeof html !== "string" || !ORACLE_MODES.includes(mode)) return html;
++  const at = html.indexOf(ORB_ROOM);
++  if (at === -1 || at !== html.lastIndexOf(ORB_ROOM)) return html;
+   const page = escapeHTML(String(slug || "overview"));
+   const slot = `<div id="fxOracle" class="orc" hidden data-state="calm" data-page="${page}" data-oracle="${mode}"></div>
+ <i hidden data-defer="oracle" data-src="${v("/assets/js/flows-oracle-core.js")}" data-css="${v("/assets/css/flows-oracle.css")} ${v("/assets/css/flows-nn.css")}"></i>${html.includes('data-defer="nn-orb"') ? "" : `
+ <i hidden data-defer="nn-orb" data-src="${v("/assets/js/flows-nn-orb.js")}"></i>`}
+ <i hidden data-defer="oracle" data-src="${v("/assets/js/flows-oracle.js")}"></i>
+ <script src="${v("/assets/js/flows-oracle-boot.js")}" defer></script>`;
+-  let out = html.replace("</body>", () => slot + "\n</body>");
++  let out = html.replace(ORB_ROOM, () => '<span class="fx-bar-sp fx-orb" id="fxOrb" data-state="calm"></span>');
++  out = out.replace("</body>", () => slot + "\n</body>");
+   if (page === "overview") {
+     out = out.replace('<p class="visually-hidden" id="flowsStatus"', () => '<div class="orc-strip" id="orcHome" data-state="idle" style="min-height:40px"></div>\n  <p class="visually-hidden" id="flowsStatus"');
+   }

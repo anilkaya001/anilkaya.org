@@ -1,0 +1,218 @@
+{
+ "specPaths": 217,
+ "specOperations": 218,
+ "nonGet": [
+  {
+   "method": "POST",
+   "path": "/api/alerts/configuration",
+   "writesToAccount": true,
+   "alsoHasGet": true
+  }
+ ],
+ "mainUsed": 95,
+ "mainLiveForMembers": 81,
+ "perBranch": [
+  {
+   "name": "main (origin/main dfe0cad)",
+   "used": 95,
+   "newVsMain": 0
+  },
+  {
+   "name": "WP3 (pkg-WP3-volatility-structure 3ccce72)",
+   "used": 87,
+   "newVsMain": 13
+  },
+  {
+   "name": "WP4 (pkg-WP4-institutional-positioning 8ed8d6a)",
+   "used": 100,
+   "newVsMain": 26
+  },
+  {
+   "name": "WP5 (pkg-WP5-cross-asset-macro efbd05f)",
+   "used": 110,
+   "newVsMain": 36
+  },
+  {
+   "name": "WP6 (pkg-WP6-event-risk 2d5e6f2)",
+   "used": 90,
+   "newVsMain": 16
+  }
+ ],
+ "unionAfterTrain": 186,
+ "uncoveredAfterTrain": [
+  {
+   "path": "/api/companies/{ticker}/transcripts/{quarter}",
+   "tag": "companies",
+   "why": "Left out on purpose. It returns the full earnings-call text, and docs/vendor-coverage.md rejects it for its size, the 8 KiB cache rows and the sanitiser's surface. WP6 also lists transcripts as out of scope."
+  },
+  {
+   "path": "/api/option-trades",
+   "tag": "option-trade",
+   "why": "Nothing reads raw prints. This is the latest day's whole filtered trade tape, and the site works from flow alerts, multi-leg trades and per-strike and per-expiry aggregates instead."
+  },
+  {
+   "path": "/api/option-trades/full-tape/{date}",
+   "tag": "option-trade",
+   "why": "It is a bulk zip of every option print for a date, a data-lake file rather than a JSON read, and nothing stores or parses the full tape."
+  },
+  {
+   "path": "/api/options-pulse/sectors",
+   "tag": "options-pulse",
+   "why": "WP1 left it out on purpose because it gives sentiment scores, not activity, and regime.optionsPulse already summarises them from /api/options-pulse/total. No later package added it."
+  },
+  {
+   "path": "/api/options-pulse/top",
+   "tag": "options-pulse",
+   "why": "WP1 left it out on purpose because this per-ticker sentiment scanner gives scores, not activity. regime.optionsPulse already summarises the pulse from /api/options-pulse/total."
+  },
+  {
+   "path": "/api/politics/fec/company/{ticker}/lobbying",
+   "tag": "politics",
+   "why": "Enterprise-only, and the key is on the Advanced plan. WP4 takes company lobbying totals from /api/politics/fec/companies instead."
+  },
+  {
+   "path": "/api/politics/fec/company/{ticker}/people",
+   "tag": "politics",
+   "why": "Enterprise-only, and the key is on the Advanced plan (docs/vendor-coverage.md: no, Enterprise only)."
+  },
+  {
+   "path": "/api/predictions/search-users",
+   "tag": "predictions",
+   "why": "WP5 excludes it by design ('the site does not look people up'), and a WP5 test fails on the string. Prediction-market users are read by id through /api/predictions/user/{user_id}."
+  },
+  {
+   "path": "/api/shorts/{ticker}/interest-float",
+   "tag": "short",
+   "why": "Deprecated V1. The dossier reads /api/shorts/{ticker}/interest-float/v2."
+  },
+  {
+   "path": "/api/socket",
+   "tag": "websocket",
+   "why": "A REST endpoint that lists channels, and nothing asks for it. The rail opens wss://<feed host>/socket?token=... (path /socket, not /api/socket) with a fixed channel set."
+  },
+  {
+   "path": "/api/socket/contract_screener",
+   "tag": "websocket",
+   "why": "The rail does not join this channel. Flow Lab reads the contract screener over REST (/api/screener/option-contracts)."
+  },
+  {
+   "path": "/api/socket/custom_alerts",
+   "tag": "websocket",
+   "why": "The rail does not join this channel. WP6 reads fired alerts over REST (/api/alerts) in its nightly, which is off by default."
+  },
+  {
+   "path": "/api/socket/flow_alerts",
+   "tag": "websocket",
+   "why": "This only documents the flow-alerts channel. The rail does join that channel over wss /socket, but no request ever goes to this path."
+  },
+  {
+   "path": "/api/socket/gex",
+   "tag": "websocket",
+   "why": "This only documents the gex:<T> channel, which the rail joins for up to three names over wss /socket. No request goes to this path."
+  },
+  {
+   "path": "/api/socket/greeks",
+   "tag": "websocket",
+   "why": "The rail does not join this channel and nothing consumes live greeks. Greeks are read nightly over REST (/api/stock/{ticker}/greeks on WP3) or computed by the site's own engine."
+  },
+  {
+   "path": "/api/socket/interpolated_iv",
+   "tag": "websocket",
+   "why": "The rail does not join this channel. Interpolated IV is read nightly over REST (/api/stock/{ticker}/interpolated-iv)."
+  },
+  {
+   "path": "/api/socket/interval_flow",
+   "tag": "websocket",
+   "why": "The rail does not join this channel and no consumer is built. The socket probe measured about 5.9 MB in 30 s on it."
+  },
+  {
+   "path": "/api/socket/iv_term_structure",
+   "tag": "websocket",
+   "why": "The rail does not join this channel. The term structure is read nightly over REST."
+  },
+  {
+   "path": "/api/socket/lit_trades",
+   "tag": "websocket",
+   "why": "A firehose, and by design the rail never joins a firehose."
+  },
+  {
+   "path": "/api/socket/market_tide",
+   "tag": "websocket",
+   "why": "The rail does not join this channel because the market (mk) topic stays on REST (/api/market/market-tide)."
+  },
+  {
+   "path": "/api/socket/net_flow",
+   "tag": "websocket",
+   "why": "The rail does not join this channel because the mk topic stays on REST."
+  },
+  {
+   "path": "/api/socket/news",
+   "tag": "websocket",
+   "why": "This only documents the news channel, which the rail joins over wss /socket. No request goes to this path."
+  },
+  {
+   "path": "/api/socket/off_lit_trades",
+   "tag": "websocket",
+   "why": "A firehose, and by design the rail never joins one."
+  },
+  {
+   "path": "/api/socket/option_trades",
+   "tag": "websocket",
+   "why": "A firehose of every option print (6 to 10 million a day), and by design the rail never joins one."
+  },
+  {
+   "path": "/api/socket/periscope",
+   "tag": "websocket",
+   "why": "The rail does not join this channel and no consumer is built."
+  },
+  {
+   "path": "/api/socket/price",
+   "tag": "websocket",
+   "why": "This only documents the price:<T> channel, which the rail joins for up to eight focus names over wss /socket. No request goes to this path."
+  },
+  {
+   "path": "/api/socket/risk_reversal_skew",
+   "tag": "websocket",
+   "why": "The rail does not join this channel. Risk-reversal skew is read nightly over REST (/api/stock/{ticker}/historical-risk-reversal-skew)."
+  },
+  {
+   "path": "/api/socket/trading_halts",
+   "tag": "websocket",
+   "why": "WP6 registers it as the liveOnly entry socket-halts, but nothing joins it. HALT_CHANNEL (shared/flows-er-feed.js:138) is never read and FLOWS_EVENTRISK_HALTS is off. The halt channel has not been built yet."
+  },
+  {
+   "path": "/api/stock/{ticker}/flow-alerts",
+   "tag": "stock",
+   "why": "Deprecated. The code reads the market-wide /api/option-trades/flow-alerts instead."
+  },
+  {
+   "path": "/api/stock/{ticker}/ownership",
+   "tag": "stock",
+   "why": "Enterprise-only. The code reads /api/institution/{ticker}/ownership instead."
+  },
+  {
+   "path": "/api/stock/{ticker}/spot-exposures/{expiry}/strike",
+   "tag": "Gex/Greeks",
+   "why": "Deprecated. The code reads /api/stock/{ticker}/spot-exposures/expiry-strike instead."
+  }
+ ],
+ "usedNotInSpec": [
+  "term-structure-dist: GET /api/stock/{ticker}/volatility/term-structure/distribution. liveOnly; the nightly vol leg calls it at scripts/flows-legs/vol.mjs:40 on all five branches.",
+  "iv-dist: GET /api/stock/{ticker}/interpolated-iv/distribution. liveOnly; the vol leg's cone read calls it at scripts/flows-legs/vol.mjs:38 on all five branches.",
+  "vol-sentiment: GET /api/stock/{ticker}/volatility/option-sentiment. liveOnly; the vol leg calls it at scripts/flows-legs/vol.mjs:46 on all five branches.",
+  "vol-sentiment-top: GET /api/volatility/option-sentiment/top. liveOnly; the vol radar's bullish and bearish reads call it at scripts/flows-legs/vol.mjs:59-60 on all five branches.",
+  "daily-report: GET /api/market/daily-report. liveOnly; the regime leg calls it at scripts/flows-legs/regime.mjs:34 on all five branches."
+ ],
+ "declaredButNeverCalledMain": [],
+ "disagreementsResolved": [
+  "No count differs between A and B. Both give the same used lists per branch (main 95, WP3 87, WP4 100, WP5 110, WP6 90) and the same behindSwitchOff lists (14, 0, 0, 7, 1). Both report the same 5 liveOnly entries, the same declared-but-never-called entry (WP6 socket-halts), a union of 186 and the same 31 uncovered paths. My own pass reproduces every figure. I extracted each ref with git archive, imported its registry, walked the import closure from worker.js and scripts/flows-pipeline.mjs, and read the call sites of every id: wrapper calls for WP4's ask(id), table jobs for WP5 and WP6, and the dossier's sourceOf.",
+  "Stale main: both counts read origin/main at b0b6e7c, but after the fetch origin/main is dfe0cad (#285, Market Floor funds). I re-derived main at dfe0cad. It still has 100 registry entries (the commit only adds BUDGETS.funds) and the same 95 spec paths, 14 of them behind switches. The funds read moved from the Actions live leg to a new Worker cron (2-57/5 13-21 MON-FRI) and an on-demand fill behind /api/flows/lk. Both paths it reads, /api/screener/stocks and /api/market/sector-etfs, were already used, so no count changes.",
+  "WebSocket, where A and B describe the same call differently. A filed the rail's upgrade under calledOutsideRegistry as '/api/socket' plus four '/api/socket/<channel>' paths, and said counting them would give 191 used and 26 uncovered. B said the upgrade goes to /socket, which is not a spec path. The code agrees with B. socketUrl in shared/flows-rt-socket.js sets the pathname to '/socket' (wss://<feed host>/socket?token=...), and that file is the same on all five branches. The spec's GET /api/socket is a separate REST endpoint that lists channels, and nothing calls it. The entries /api/socket/price, /gex, /flow_alerts and /news document channels the rail joins, but no request goes to those paths. I kept the stricter reading: none of the 19 /api/socket* paths counts as used. If joined channels were counted, the union would be 190 (B's figure), not 191.",
+  "WP5 owner-only route name: A wrote /api/flows/macro-now and B wrote /api/flows/macro/now. The route row is /api/flows/macro/now (server/routes/flows-macro.js:103), behind FLOWS_MACRO=owner and FLOWS_MACRO_LIVE=owner. 'macro-now' is only its cache-key namespace. No count changes: the 7 paths reached only from buildMacroNow (fx-rate, crypto-state, futures-trades, digital-intraday, crypto-whales, crypto-whale-tx, fx-intraday) stay in behindSwitchOff.",
+  "Main live for members: 95 - 14 = 81. Of the 14, 12 are Flow Lab reads in server/flowlab.js, reachable only through /api/flows/flowlab/* behind FLOWS_FLOWLAB=owner. The other 2 are /api/analytics/window and /api/analytics/sliding, which the nightly runs only when FLOWS_FLOWLAB_ANALYTICS is exactly 'on'; wrangler.toml sets it to 'off' and the workflow does not pass it. Of the remaining 81, 4 are nightly Flow Lab reads whose payloads only the owner can open while FLOWS_FLOWLAB=owner: /api/option-trades/optionable-tickers, /api/option-trades/exchange-breakdown/{date}, /api/screener/option-contracts and /api/group-flow/{flow_group}/greek-flow/{expiry}. They still count as live by the definition, because no wrangler.toml switch gates their nightly call sites.",
+  "After the train: 186 of 217 paths are used (85.7%), and 186 of 218 operations. Every use is a GET, so 32 operations stay uncovered: the 31 uncovered GETs and the one POST. 22 of the 186 sit behind wrangler.toml switches: 20 owner-only (12 Flow Lab, 7 WP5 macro live, 1 WP6 quote) and 2 off (analytics), which leaves 164. Another 15 WP6 paths run only when the repository variable FLOWS_EVENTRISK_NIGHTLY is set, and the workflow defaults it to 'off'. That leaves 149 paths requested by default by members or by scheduled jobs with no switch. Repository variables cannot be read statically.",
+  "More registry entries than paths, because some entries share a spec path. In WP5, economy and treasury-yield both resolve to /api/economy/{indicator}: 111 in-spec entries for 110 paths. In WP6, listings-active and listings-delisted both resolve to /api/companies/listings: 91 entries for 90 paths. ohlc-1d, treasury-yield and tech-natr match through their op templates. The POST on /api/alerts/configuration creates or updates an alert configuration on the account. WP6's alerts-config entry is a GET, so no branch writes anything.",
+  "newVsMain: every package branch forked at 36c1ea1, where 74 paths were used, and each keeps all 74. Main has added 21 since (#282, #283). WP3 adds 13 paths, all in the voldesk nightly. WP4 adds 26: 22 through its ask(id) wrapper and 4 as extras ps parts. WP5 adds 36 from 37 entries. WP6 adds 16 from 18 entries, after dropping socket-halts and the duplicate listings path. No new path overlaps another branch's or main's 21. WP3 and WP4 have nothing behind switches: their reads run in the nightly under repository variables that default to on (FLOWS_VOLDESK_BUILD, FLOWS_POSITIONING_NIGHTLY). FLOWS_VOLDESK=owner and FLOWS_POSITIONING=owner only close the pages and read routes."
+ ],
+ "confidence": "High. Three derivations agree on every figure (A by registry, B by call site, and mine with independent scripts), and mine was rerun on the current origin/main. The SHAs counted are main dfe0cad, WP3 3ccce72, WP4 8ed8d6a, WP5 efbd05f and WP6 2d5e6f2. The spec docs/uw-openapi.yaml is the same blob on all five branches (217 paths: 217 GET plus 1 POST). Caveats: the figures hold only for these SHAs, and WP3 is being merged now. The union assumes each package merges with its calls intact. Repository variables (vars.*) cannot be read statically and could change the nightly gates. My scripts and outputs are in <scratchpad>/census-reconcile/ (census.mjs, union.mjs, data/union.json, data/census-*.json)."
+}
