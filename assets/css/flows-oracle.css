@@ -10,6 +10,7 @@
   --orc-tint: var(--accent);
 }
 .orc[hidden] { display: none; }
+.orc[data-pref="off"]:not(.is-open) { width: 0; height: 0; }
 .orc[data-state="signal"] { --orc-tint: var(--accent); }
 .orc[data-state="conflict"] { --orc-tint: var(--warn); }
 .orc[data-state="stale"] { --orc-tint: var(--label-3); }

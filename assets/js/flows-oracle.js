@@ -38,6 +38,7 @@
   var INFO_TEXT = "Cheap means the market charges less than the model's fair price; rich, more. The model's price comes from the engine's fitted smile and its own model of returns, not from a quote.";
   var SHEET_ID = "orcSheet";
   var UNDO_MS = 10000;
+  var HIDDEN_TEXT = "Hidden. The button in the corner shows it again.";
 
   var S = {
     pref: "on", mode: host.getAttribute("data-oracle") === "quiet" ? "quiet" : "on", route: "idle",
@@ -216,6 +217,7 @@
     host.append(orb, restore, toast, liveEl, scrim, sheet);
     orb.addEventListener("click", function () { setOpen(!S.open); });
     restore.addEventListener("click", function () { restorePref(); });
+    restore.addEventListener("focusout", function () { if (S.undoUntil > Date.now()) { S.undoUntil = 0; clearTimeout(S.undoTimer); paintOrb(); } });
     closeBtn.addEventListener("click", function () { setOpen(false); });
     scrim.addEventListener("click", function () { setOpen(false); });
     infoBtn.addEventListener("click", function () {
@@ -258,7 +260,7 @@
     S.open = open;
     if (open) {
       var a = document.activeElement;
-      S.opener = a && a !== document.body ? a : orb;
+      S.opener = a && a !== document.body ? a : orb.hidden ? restore : orb;
       sheet.hidden = false;
       scrim.hidden = false;
       void sheet.offsetWidth;
@@ -278,7 +280,7 @@
       var done = function () { if (!S.open) { sheet.hidden = true; scrim.hidden = true; } };
       if (U.reduced()) done(); else setTimeout(done, 260);
       paintOrb();
-      var back = S.opener && S.opener.isConnected && S.opener.getClientRects().length ? S.opener : orb;
+      var back = S.opener && S.opener.isConnected && S.opener.getClientRects().length ? S.opener : orb.hidden ? restore : orb;
       S.opener = null;
       try { back.focus(); } catch (e) {   }
     }
@@ -287,8 +289,8 @@
   function setPref(p) {
     var was = S.pref;
     if (p === "off" && was !== "off") {
-      var chosen = cookie("fn_oracle");
-      setCookie("fn_oracle_prev", PREF[chosen] > 0 ? chosen : was);
+      var raw = cookie("fn_oracle");
+      if (raw !== "off") setCookie("fn_oracle_prev", PREF[raw] > 0 ? raw : "on");
       S.undoUntil = Date.now() + UNDO_MS;
       clearTimeout(S.undoTimer);
       S.undoTimer = setTimeout(paintOrb, UNDO_MS + 50);
@@ -298,7 +300,7 @@
     }
     setCookie("fn_oracle", p);
     S.pref = readPref();
-    if (S.pref === "off") setOpen(false);
+    if (S.pref === "off") { setOpen(false); dropToast(); }
     else if (S.route === "idle") { loadTop(); loadRec(ticker()); }
     paint();
     if (S.pref === "off" && was !== "off") {
@@ -306,6 +308,20 @@
       try { restore.focus(); } catch (e) {   }
     }
   }
+
+  function syncPref() {
+    var p = readPref(), was = S.pref;
+    if (p === was) return;
+    S.pref = p;
+    if (p === "off") { setOpen(false); dropToast(); }
+    else {
+      if (S.route === "idle") { loadTop(); loadRec(ticker()); }
+      if (was === "off") U.defer("nn-orb", { when: "idle" }).then(function () { if (window.FlowsUI.nnOrb) window.FlowsUI.nnOrb.scan(); });
+    }
+    paint();
+  }
+
+  function onVis() { if (!document.hidden) syncPref(); }
 
   function restorePref() {
     var p = cookie("fn_oracle_prev");
@@ -352,7 +368,7 @@
     var off = S.pref === "off", undo = off && S.undoUntil > Date.now();
     host.hidden = false;
     orb.hidden = off;
-    restore.hidden = !off;
+    restore.hidden = !off || S.open;
     restore.classList.toggle("is-undo", undo);
     restoreTxt.hidden = !undo;
     restoreUndo.hidden = !undo;
@@ -588,9 +604,10 @@
     var el = document.getElementById("orcHome");
     if (!el) return;
     el.replaceChildren();
-    var items = S.top && Array.isArray(S.top.items) ? S.top.items.filter(function (i) { return !refuses(i.t); }).slice(0, 3) : [];
-    el.setAttribute("data-state", items.length ? "ok" : S.route);
+    var items = S.pref === "off" ? [] : S.top && Array.isArray(S.top.items) ? S.top.items.filter(function (i) { return !refuses(i.t); }).slice(0, 3) : [];
+    el.setAttribute("data-state", S.pref === "off" ? "off" : items.length ? "ok" : S.route);
     el.append(h("span", { class: "orc-home-k" }, h("span", { class: "orc-home-s", "aria-hidden": "true" }, spark()), "Neuron’s view"));
+    if (S.pref === "off") { el.append(h("span", { class: "orc-home-t" }, HIDDEN_TEXT)); return; }
     if (!items.length) {
       var txt = { idle: "Reading…", ok: noCallText(), absent: "Resting. No view is published yet.", failed: "Resting. The read failed." }[S.route] || "Resting.";
       el.append(h("span", { class: "orc-home-t" }, txt));
@@ -608,6 +625,7 @@
     var now = Date.now();
     var msgs = S.msgs.filter(function (m) { return now - m.at <= 30 * MIN; }).sort(function (a, b) { return b.strength - a.strength || b.at - a.at; }).slice(0, 3);
     el.replaceChildren(h("span", { class: "orc-band-k" }, "Right now"));
+    if (S.pref === "off") { el.append(h("span", { class: "orc-band-q" }, HIDDEN_TEXT)); return; }
     if (!msgs.length) {
       el.append(h("span", { class: "orc-band-q" }, feedLive() ? "Watching. Nothing has cleared its bar." : S.lastFlowAt ? "Quiet. Last flow " + K.trt(S.lastFlowAt) + "." : "Quiet."));
       return;
@@ -695,6 +713,12 @@
     paint();
   }
 
+  function dropToast() {
+    clearTimeout(S.toastTimer);
+    toast.hidden = true;
+    toast.classList.remove("is-on");
+  }
+
   function showToast(text) {
     toast.textContent = text;
     toast.hidden = false;
@@ -741,6 +765,7 @@
     S.pref = readPref();
     build();
     document.addEventListener("keydown", onKey);
+    document.addEventListener("visibilitychange", onVis);
     document.addEventListener("pointerdown", function () { S.gesture = true; }, { once: true });
     if (U.rt && typeof U.rt.on === "function") S.unsub = U.rt.on("fl", onFlow);
     var tick = setInterval(function () { if (!document.hidden) paintOrb(); }, 60000);
@@ -756,7 +781,9 @@
     clearInterval(S.timer);
     clearTimeout(S.toastTimer);
     clearTimeout(S.announceTimer);
+    clearTimeout(S.undoTimer);
     document.removeEventListener("keydown", onKey);
+    document.removeEventListener("visibilitychange", onVis);
     setInert(false);
     host.replaceChildren();
     host.hidden = true;
