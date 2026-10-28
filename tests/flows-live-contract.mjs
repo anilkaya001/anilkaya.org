@@ -68,9 +68,12 @@ const cronMinutes = (cron) => {
     ok(L.LIVE_KEY_RE.test(key) && spec.cadenceS === FRESH_CLASSES[spec.klass].cadenceS && spec.maxBytes <= 120 * 1024,
       `${key} is a live:* key with its class's cadence and a byte cap under the ingest's 128 KB (${spec.maxBytes})`);
   }
-  deep(Object.keys(L.LIVE_KEYS).filter((k) => L.LIVE_KEYS[k].writer === "worker"), ["live:market", "live:focus"],
-    "exactly two live keys are written by the Worker itself (live:market from Tier 1, live:focus from the focus " +
+  deep(Object.keys(L.LIVE_KEYS).filter((k) => L.LIVE_KEYS[k].writer === "worker"), ["live:market", "live:focus", "live:funds"],
+    "exactly three live keys are written by the Worker itself (live:market and live:funds from Tier 1, live:focus from the focus " +
     "cron); every other live key has the Actions run as its single writer");
+  deep([L.LIVE_KEYS["live:funds"].klass, L.LIVE_KEYS["live:funds"].cadenceS, L.LIVE_KEYS["live:funds"].reads, L.LIVE_KEYS["live:funds"].maxBytes],
+    ["market", 300, 1, 16 * 1024],
+    "live:funds is on the market clock (Tier 1's five-minute cadence) and costs Tier 1 one vendor call a tick, under 16 KiB");
   deep([L.LIVE_KEYS["live:focus"].klass, L.LIVE_KEYS["live:focus"].cadenceS, L.LIVE_KEYS["live:focus"].reads],
     ["market", 300, 1],
     "live:focus is on the market clock (a five-minute cadence, live for 11 minutes) and costs one vendor call a tick");
@@ -761,7 +764,9 @@ const cronMinutes = (cron) => {
   ok(!writes.test(sched) && !/refreshFlowsIntraday/.test(worker), "and the scheduled handler writes no nightly row either");
   const puts = [...leg.matchAll(/put\("([^"]+)"/g)].map((m) => m[1]);
   deep([...puts].sort(), Object.keys(L.LIVE_KEYS).filter((k) => L.LIVE_KEYS[k].writer === "actions").sort(), "the live leg puts exactly the registry's Actions keys");
-  ok(puts.length === 10 && puts.every((k) => /^live:/.test(k)), `the live leg publishes only live:* keys (${puts.join(", ")})`);
+  ok(puts.length === 9 && puts.every((k) => /^live:/.test(k)), `the live leg publishes only live:* keys (${puts.join(", ")})`);
+  ok(!puts.includes("live:funds") && /note\(fundsNote\(await readStored\("live:funds"\)\)\)/.test(leg),
+    "live:funds is the Worker's now: the pass reads the held row back through the door and writes a witness note, with no vendor call of its own");
   ok(/if \(LIVE_MODE && !\/\^live:\[a-z\]\+\(\?::\[a-z\]\+\)\?\$\/\.test\(key\)\) \{\s*throw/.test(pipeline),
     "and publish() itself throws on any other key in --live mode, before the network");
   ok(/LIVE_MODE \? await liveCredential\(\) : process\.env\.FLOWS_INGEST_TOKEN/.test(pipeline),
@@ -1060,10 +1065,10 @@ const cronMinutes = (cron) => {
     "the live half of the summary stamp is a pure reduction of the two rows, sorted, so that batch can carry its query");
   eq(W.liveBriefStampOf(null), "", "and no rows is the empty stamp");
   ok(toml.includes(`"${W.RTH_CRON}"`) && toml.includes(`"${W.FOCUS_CRON}"`) && toml.includes(`"${W.HOUSEKEEPING_CRON}"`) &&
-     toml.includes(`"${W.SUMMARY_CRON}"`),
-    "the four crons the Worker branches on are the four wrangler.toml registers");
+     toml.includes(`"${W.SUMMARY_CRON}"`) && toml.includes(`"${W.FUNDS_CRON}"`),
+    "the five crons the Worker branches on are the five wrangler.toml registers");
   const cronList = (toml.match(/^crons = \[([^\]]*)\]/m) || [null, ""])[1].match(/"[^"]+"/g) || [];
-  eq(cronList.length, 4, "four Worker crons, inside the five Workers Free allows an account");
+  eq(cronList.length, 5, "five Worker crons: the five Workers Free allows an account (the staging Worker registers none), far inside Workers Paid's 250");
   ok(cronList.length >= 2 && cronList.every((c) => { const f = c.slice(1, -1).trim().split(/\s+/); return f.length === 5 && /^(\*|[A-Za-z]{3}(-[A-Za-z]{3})?(,[A-Za-z]{3}(-[A-Za-z]{3})?)*)$/.test(f[4]); }),
     "EVERY WORKER CRON NAMES ITS WEEKDAYS BY NAME: Cloudflare counts 1 = Sunday to 7 = Saturday, so the numeric 1-5 " +
     "this file carried ran Tier 1 Sunday to Thursday and never on a Friday, as 2026-09-25 showed (" + cronList.join(", ") + ")");
@@ -1088,8 +1093,8 @@ const cronMinutes = (cron) => {
         `${key} carries the fresh envelope of the Actions writer`);
       ok(text.length <= L.LIVE_KEYS[key].maxBytes, `${key} (${text.length} bytes) is inside its cap`);
     }
-    deep(keys.sort(), ["live:alerts", "live:alerts:head", "live:breadth", "live:funds", "live:heartbeat", "live:movers", "live:news", "live:strips", "live:strips:series", "live:vol"],
-      "and that is ten keys: live:alerts:head is the ninth, live:funds the tenth, and live:gex and live:tape are no longer written");
+    deep(keys.sort(), ["live:alerts", "live:alerts:head", "live:breadth", "live:heartbeat", "live:movers", "live:news", "live:strips", "live:strips:series", "live:vol"],
+      "and that is nine keys: live:alerts:head is the ninth, live:funds is the Worker's Tier 1 key now, and live:gex and live:tape are no longer written");
     const calls = [...out.matchAll(/live: (\d+) call\(s\)/g)].map((m) => Number(m[1]));
     ok(calls.length === 2 && calls.every((c) => c <= 24),
       `each dry tick spends ${calls.join(" and ")} vendor calls, inside the 24 a pass needs without the retired legs`);
@@ -3737,6 +3742,31 @@ const cronMinutes = (cron) => {
   console.log(`  focus CPU: cold ${coldCpu.toFixed(2)} ms (${colds[0].clock}, mean of 10), cold wall ${coldWall.toFixed(2)} ms ` +
     `(median), warm ${warm.median.toFixed(2)} ms median, ${warm.worst.toFixed(2)} ms worst window, ${warm.bytes} bytes ` +
     `read, ${warm.payloadBytes} written`);
+}
+
+{
+  const child = (arg) => {
+    const out = execFileSync("node", [new URL("tests/live-stubs.mjs", ROOT).pathname, "--funds-budget", ...arg],
+      { encoding: "utf8" });
+    return JSON.parse(out.trim().split("\n").pop());
+  };
+  const colds = Array.from({ length: 10 }, () => child(["cold"]));
+  ok(colds.every((c) => c.written && c.calls === 1 && c.read === 72),
+    "the budget child's cold funds ticks each wrote live:funds with all 72 funds read, from one feed call");
+  const coldCpu = colds.reduce((a, c) => a + c.cold, 0) / colds.length;
+  const warm = child([]);
+  ok(warm.rows === 72 && warm.fields >= 202 && warm.bytes / warm.rows > 6000,
+    `THE FUNDS TICK READS A PRODUCTION-SIZE BODY: ${warm.rows} screener rows of ${warm.fields} fields each, ${warm.bytes} bytes of JSON, ` +
+    "which is why it has a cron firing of its own and is not inside Tier 1's 7.5 ms or the focus tick's 6 ms");
+  ok(coldCpu < 14,
+    `COLD ISOLATE: the first funds tick of a fresh process (the body's JSON.parse included) takes ${coldCpu.toFixed(2)} ms of ` +
+    `${colds[0].clock} time, the mean of ten processes, under 14 ms: over the Workers Free plan's 10 ms on a cold isolate, so a ` +
+    "downgrade turns it off with FLOWS_FLOOR_FUNDS=off and leaves Tier 1 and the focus tick as they are");
+  ok(warm.median < 9 && warm.worst < 14,
+    `WARM: ${warm.median.toFixed(2)} ms median over windows of ${warm.window} ticks, ${warm.worst.toFixed(2)} ms in the costliest window`);
+  ok(warm.payloadBytes <= L.LIVE_KEYS["live:funds"].maxBytes, `writing ${warm.payloadBytes} bytes of live:funds`);
+  console.log(`  funds CPU: cold ${coldCpu.toFixed(2)} ms (${colds[0].clock}, mean of 10), warm ${warm.median.toFixed(2)} ms median, ` +
+    `${warm.worst.toFixed(2)} ms worst window, ${warm.bytes} bytes read, ${warm.payloadBytes} written`);
 }
 
 {
