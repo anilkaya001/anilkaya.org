@@ -6,7 +6,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 
 ## Per-name operations (87 paths with a ticker in the path)
 
-84 spec paths carry a ticker, and 3 more are read from the live documentation: 45 read before this branch, 4 added, 7 probe only, 3 deprecated, 3 Enterprise only, 25 not added.
+84 spec paths carry a ticker, and 3 more are read from the live documentation: 47 read, 4 added, 7 probe only, 3 deprecated, 3 Enterprise only, 23 not added.
 
 | Operation | Status | Registry id | Plan | Wire | Returns | Unit status | Surface | Decision |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -21,8 +21,8 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/etfs/{ticker}/exposure` | added | etf-exposure | any | not observed | every ETF that holds the name: ticker, shares, weight, fund name, prices | ticker and shares stated; weight, prices and fund name withheld | peers packet | added: `vx.etf`, refreshed every 7 days, top ten by weight |
 | `/api/etfs/{ticker}/holdings` | read | etf-holdings | any | observed | ticker, type, weight | read by the code | nightly | read |
 | `/api/etfs/{ticker}/in-outflow` | read | etf-in-outflow | any | observed | whole body | read by the code | nightly | read |
-| `/api/etfs/{ticker}/info` | not added | - | any | not observed | an ETF's identity, assets, expense ratio | stated for ETFs only | fund cards (nine funds) | no: an ETF-only read, a follow-up for the fund cards |
-| `/api/etfs/{ticker}/weights` | not added | - | any | not observed | an ETF's sector and country weights | stated for ETFs only | fund cards | no: an ETF-only read, a follow-up for the fund cards |
+| `/api/etfs/{ticker}/info` | read | etf-info | any | not observed | an ETF's name, issuer and holdings count; assets and expense ratio withheld | name, issuer and holdings count stated; amounts withheld | Market Floor readout | read: the Floor funds leg (WP1), 12 funds a night, kept 14 days |
+| `/api/etfs/{ticker}/weights` | read | etf-weights | any | not observed | an ETF's sector and country weights | weights are shares of the fund | Market Floor readout | read: the Floor funds leg (WP1), top three of each |
 | `/api/insider/{ticker}` | not added | - | any | not observed | the names of a company's insiders | third-party names | none | no: names of people; the insider batch and `insider-flow` already carry the flow |
 | `/api/insider/{ticker}/ticker-flow` | read | insider-flow | any | observed | date, buy_sell, transactions, uniq_insiders, volume, ... | read by the code | dossier | read |
 | `/api/institution/{ticker}/ownership` | read | ownership | any | observed | name, short_name, units, units_changed, historical_units, ... | read by the code | dossier | read |
@@ -100,7 +100,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 
 ## Registered operations without a ticker in the path
 
-30 registry operations (market-wide, calendars, screeners, groups, sectors) all read before this branch.
+31 registry operations (market-wide, calendars, screeners, groups, sectors, the ticker directory), the directory read by the Floor funds leg (WP1) and the rest before this branch.
 
 | Operation | Status | Registry id | Plan | Wire | Consumers |
 | --- | --- | --- | --- | --- | --- |
@@ -114,6 +114,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/market/market-tide` | read | market-tide | Advanced | observed | engines, nightly |
 | `/api/market/total-options-volume` | read | total-options-volume | Advanced | observed | nightly |
 | `/api/market/oi-change` | read | market-oi-change | Advanced | observed | nightly |
+| `/api/stock-directory/ticker-exchanges` | read | ticker-exchanges | Advanced | not observed | Floor funds leg, weekly |
 | `/api/market/top-net-impact` | read | top-net-impact | Advanced | observed | nightly |
 | `/api/market/insider-buy-sells` | read | insider-buy-sells | Advanced | observed | nightly |
 | `/api/darkpool/recent` | read | darkpool-recent | Advanced | observed | nightly |

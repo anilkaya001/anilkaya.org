@@ -82,7 +82,7 @@ export const COLD_START = Object.freeze({
 
 export const TIER2 = Object.freeze({
   passesPerWeekday: 84,
-  pass: Object.freeze({ trips: 10, read: 0, written: 12 }),
+  pass: Object.freeze({ trips: 11, read: 0, written: 13 }),
   storedReadsPerPass: 5,
   watchReadsPerWeekday: 520,
   source: "W02 section 2.5: 84 passes a weekday; scripts/flows-legs/live.mjs reads board:long, board:short, board:watch, focus and live:heartbeat once a pass; watch.mjs at most 5 reads a 5-minute tick in session",
