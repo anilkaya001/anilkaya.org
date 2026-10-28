@@ -58,7 +58,7 @@ function dry(env) {
 
 {
   const wf = fs.readFileSync(path.join(ROOT, ".github/workflows/flows-pipeline.yml"), "utf8");
-  ok(/FLOWS_EVENTRISK_NIGHTLY: \$\{\{ vars\.FLOWS_EVENTRISK_NIGHTLY \|\| 'off' \}\}/.test(wf), "the workflow ships the nightly off until the repository variable says on");
+  ok(/FLOWS_EVENTRISK_NIGHTLY: \$\{\{ vars\.FLOWS_EVENTRISK_NIGHTLY \|\| 'on' \}\}/.test(wf), "the workflow ships the nightly on unless the repository variable says off");
 }
 
 console.log(`flows-er-nightly: ${checks} checks`);

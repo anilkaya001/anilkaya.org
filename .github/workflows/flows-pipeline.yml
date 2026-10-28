@@ -97,7 +97,7 @@ jobs:
           FLOWS_DEEPEN: ${{ vars.FLOWS_DEEPEN }}
           FLOWS_EXTRAS: ${{ vars.FLOWS_EXTRAS }}
           FLOWS_EXTRAS_CAP: ${{ vars.FLOWS_EXTRAS_CAP }}
-          FLOWS_EVENTRISK_NIGHTLY: ${{ vars.FLOWS_EVENTRISK_NIGHTLY || 'off' }}
+          FLOWS_EVENTRISK_NIGHTLY: ${{ vars.FLOWS_EVENTRISK_NIGHTLY || 'on' }}
           FLOWS_EVENTRISK_CAP: ${{ vars.FLOWS_EVENTRISK_CAP }}
           FLOWS_DEEPEN_CAP: ${{ (github.event_name == 'workflow_dispatch' && inputs.deepen_cap) || vars.FLOWS_DEEPEN_CAP }}
           FLOWS_UW_PLAN: advanced
