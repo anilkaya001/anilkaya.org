@@ -1,1 +1,1 @@
-{"name": "flows-truth", "class": "N", "group": "shard", "timing": false, "medianS": 48.2, "shard": 3, "files": ["flows-truth.mjs"], "covers": ["shared/flows-evt.js","tests/fixtures-truth.json","tests/gen-truth-fixtures.py"]}
+{"name": "flows-truth", "class": "N", "group": "shard", "timing": false, "medianS": 48.2, "shard": 6, "files": ["flows-truth.mjs"], "covers": ["shared/flows-evt.js","tests/fixtures-truth.json","tests/gen-truth-fixtures.py"]}

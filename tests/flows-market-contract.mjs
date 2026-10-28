@@ -186,7 +186,7 @@ const FEEDS =["mkTide", "mkVolume", "mkOi", "mkImpact", "mkInsiders", "mkDark", 
 
 const browser = revealBelow(await chromium.launch());
 
-async function openMarket({ stub = true, routes = [], viewport, at } = {}) {
+async function openMarket({ stub = true, routes = [], viewport, at, lens = "raw" } = {}) {
   const page = await browser.newPage(viewport ? { viewport } : undefined);
   if (at) await page.clock.setFixedTime(new Date(at));
   await page.context().addCookies([{ name: "flows_session", value: token, url: server.baseURL }]);
@@ -207,6 +207,20 @@ async function openMarket({ stub = true, routes = [], viewport, at } = {}) {
     return s && !/^Loading the session/.test(s.textContent) &&
       document.querySelector("#mkVolume > *") && document.querySelector("#mktAgainst > *");
   }, null, { timeout: 15000 });
+  const lensNow = await page.evaluate(() => {
+    const b = document.querySelector("#mktMovers .mk-lens .ui-seg-i[aria-selected=true]");
+    return b ? b.textContent : null;
+  });
+  page.lensAtOpen = lensNow;
+  if (lens === "raw" && lensNow === "In IV-days") {
+    await page.evaluate(() => [...document.querySelectorAll("#mktMovers .mk-lens .ui-seg-i")].find((b) => b.textContent === "Raw change").click());
+    await page.waitForFunction(() => {
+      const b = document.querySelector("#mktMovers .mk-lens .ui-seg-i[aria-selected=true]");
+      const c = document.querySelector("#mktMovers .mk-movers-col");
+      return b && b.textContent === "Raw change" && c && !/in IV-days$/.test(c.getAttribute("aria-label") || "") &&
+        !document.querySelector("#mktMovers .mk-lens-note");
+    }, null, { timeout: 5000 });
+  }
   return page;
 }
 const painted = (p) => p.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))));
@@ -460,6 +474,8 @@ try {
   }
 
   const page = await openMarket();
+  eq(page.lensAtOpen, "In IV-days",
+     "a member's Market opens the extremes on IV-days, now that the lens is every member's; the reads below choose Raw change first, as a member can");
 
   const read = await page.evaluate(() => {
     const chartOf = (sel) => {
