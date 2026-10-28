@@ -1,1 +1,1 @@
-{"name": "flows-chain-panels", "class": "N", "group": "shard", "timing": false, "medianS": 0.2, "shard": 9, "files": ["flows-chain-panels.mjs"], "covers": []}
+{"name": "flows-chain-panels", "class": "N", "group": "shard", "timing": false, "medianS": 0.2, "shard": 7, "files": ["flows-chain-panels.mjs"], "covers": []}

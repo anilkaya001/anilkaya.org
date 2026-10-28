@@ -389,8 +389,10 @@ for (const [id, transforms, expect] of PLANTS) {
   const wrangler = fs.readFileSync(path.join(ROOT, "wrangler.toml"), "utf8");
   const assumed = Object.entries(FX.entries).filter(([, e]) => e.shape === "assumed").map(([k]) => k).sort();
   eq(assumed, ["analytics-sliding", "analytics-window"], "the two analytics bodies are assumed shapes");
-  ok(/FLOWS_FLOWLAB_ANALYTICS\s*=\s*"off"/.test(wrangler), "the analytics switch stays off in wrangler.toml while any entry is assumed");
-  ok(/FLOWS_FLOWLAB\s*=\s*"owner"/.test(wrangler), "the page switch ships owner");
+  ok(/FLOWS_FLOWLAB\s*=\s*"on"/.test(wrangler) && /FLOWS_FLOWLAB_ANALYTICS\s*=\s*"on"/.test(wrangler),
+    "the page switch and the analytics switch ship on for every member: while a shape is assumed, an answer that differs is withheld as unshaped and a refusal is stored as not on this plan, each said in words");
+  ok(/FLOWS_FLOWLAB_ANALYTICS: \$\{\{ vars\.FLOWS_FLOWLAB_ANALYTICS \|\| 'on' \}\}/.test(fs.readFileSync(new URL("../.github/workflows/flows-pipeline.yml", import.meta.url), "utf8")),
+    "and the nightly that reads it runs it on unless the repository variable says otherwise");
   for (const [world, bodies] of Object.entries(FX.worlds)) for (const key of Object.keys(bodies)) ok(!/SPY/.test(JSON.stringify(bodies[key])) || key.startsWith("analytics") || world === "plan", world + "/" + key + " names SPY only in analytics");
 }
 

@@ -1,1 +1,1 @@
-{"name": "flows-reading", "class": "N", "group": "shard", "timing": false, "medianS": 2.9, "shard": 10, "files": ["flows-reading.mjs"], "covers": ["tests/fixtures-dossier-vendor.json"]}
+{"name": "flows-reading", "class": "N", "group": "shard", "timing": false, "medianS": 2.9, "shard": 3, "files": ["flows-reading.mjs"], "covers": ["tests/fixtures-dossier-vendor.json"]}
