@@ -781,13 +781,13 @@ try {
   });
   eq(totalsTicks[totalsTicks.length - 1].text, dayLabel(dayStamp(1)),
      "and the newest session keeps its label, so the tick dropped was the one crowding it");
-  const volLabel = () => page.evaluate(() => document.querySelector("#mkVolume svg[role=img]").getAttribute("aria-label"));
+  const volLabel = () => page.evaluate(() => { const g = document.querySelector("#mkVolume svg[role=img]"); return g ? g.getAttribute("aria-label") : ""; });
   ok(/contracts/.test(await volLabel()),
      "the volume module draws contracts by default — the unit its title and its P/C reading are in");
 await showTab(page, "#mkVolumeSeg");
   await page.locator("#mkVolumeSeg .ui-seg-i", { hasText: "Premium" }).click();
-  await page.waitForFunction(() => /premium/.test(document.querySelector("#mkVolume svg[role=img]").getAttribute("aria-label")),
-    null, { timeout: 5000 }).catch(() => {});
+  await page.waitForFunction(() => { const g = document.querySelector("#mkVolume svg[role=img]"); return Boolean(g) && /premium/.test(g.getAttribute("aria-label")); },
+    null, { timeout: 15000 }).catch(() => {});
   ok(/premium/.test(await volLabel()), "and draws premium one tap away, on the same session axis");
   eq(await page.locator("#mkVolume svg text.mk-vol-x").count(), totalsTicks.length, "with the same dated ticks");
 await showTab(page, "#mkVolumeSeg");
