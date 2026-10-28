@@ -1,1 +1,1 @@
-{"name": "flows-tape-stats", "class": "N", "group": "shard", "timing": false, "medianS": 0.1, "shard": 6, "files": ["flows-tape-stats.mjs"], "covers": ["tests/fixtures-ask-share.json"]}
+{"name": "flows-tape-stats", "class": "N", "group": "shard", "timing": false, "medianS": 0.1, "shard": 1, "files": ["flows-tape-stats.mjs"], "covers": ["tests/fixtures-ask-share.json"]}

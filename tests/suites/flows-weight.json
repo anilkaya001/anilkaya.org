@@ -1,1 +1,1 @@
-{"name": "flows-weight", "class": "N", "group": "shard", "timing": false, "medianS": 0.3, "shard": 4, "files": ["flows-weight.mjs"], "covers": ["assets/js/flows-chart.js","assets/js/flows-ticker.js","assets/js/flows-ui.js"]}
+{"name": "flows-weight", "class": "N", "group": "shard", "timing": false, "medianS": 0.3, "shard": 3, "files": ["flows-weight.mjs"], "covers": ["assets/js/flows-chart.js","assets/js/flows-ticker.js","assets/js/flows-ui.js"]}
