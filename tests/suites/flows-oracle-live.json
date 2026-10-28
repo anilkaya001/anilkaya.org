@@ -1,1 +1,1 @@
-{"name": "flows-oracle-live", "class": "N", "group": "shard", "timing": false, "medianS": 0.1, "shard": 4, "command": "node flows-oracle-live.mjs", "files": ["flows-oracle-live.mjs"], "covers": ["assets/js/flows-oracle-core.js"]}
+{"name": "flows-oracle-live", "class": "N", "group": "shard", "timing": false, "medianS": 0.1, "shard": 1, "command": "node flows-oracle-live.mjs", "files": ["flows-oracle-live.mjs"], "covers": ["assets/js/flows-oracle-core.js"]}

@@ -1,1 +1,1 @@
-{"name": "flows-pulse", "class": "N", "group": "shard", "timing": false, "medianS": 0.1, "shard": 2, "files": ["flows-pulse-contract.mjs"], "covers": []}
+{"name": "flows-pulse", "class": "N", "group": "shard", "timing": false, "medianS": 0.1, "shard": 8, "files": ["flows-pulse-contract.mjs"], "covers": []}
