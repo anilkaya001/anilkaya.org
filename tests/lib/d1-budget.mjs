@@ -82,7 +82,7 @@ export const COLD_START = Object.freeze({
 
 export const TIER2 = Object.freeze({
   passesPerWeekday: 84,
-  pass: Object.freeze({ trips: 10, read: 0, written: 12 }),
+  pass: Object.freeze({ trips: 11, read: 0, written: 13 }),
   storedReadsPerPass: 5,
   watchReadsPerWeekday: 520,
   source: "W02 section 2.5: 84 passes a weekday; scripts/flows-legs/live.mjs reads board:long, board:short, board:watch, focus and live:heartbeat once a pass; watch.mjs at most 5 reads a 5-minute tick in session",
@@ -108,6 +108,8 @@ export const MEMBERS = Object.freeze({
 
 export const PLANNED = Object.freeze([
   Object.freeze({ id: "oracle.nightly", row: "oracle", written: 1730, read: 1730, source: "docs/oracle.md: one oracle row for each of the 856 carded names, oracle-top and oracle-norm, each post adding one manifest row through the door trigger (written 862 x 2) and, in warn mode, reading two rows for its tuple" }),
+  Object.freeze({ id: "flowlab.nightly", row: "WP2", written: 10, read: 10, source: "docs/packages/WP2-flow-intelligence.md 7.3: five nightly keys, each post adding one manifest row through the door trigger (written 5 x 2) and, in warn mode, reading two rows for its tuple" }),
+  Object.freeze({ id: "flowlab.nightly-read", row: "WP2", written: 0, read: 600, source: "docs/packages/WP2-flow-intelligence.md 7.3: one row a read of the nightly route; twelve members at fifty reads a day" }),
   Object.freeze({ id: "observer", row: "P1-25", written: 4, read: 672, source: "PLAN.final.md 5.3: transitions only; 48 firings of a 14-row batch" }),
   Object.freeze({ id: "ai.counters", row: "P1-08, P1-44", written: 660, read: 0, source: "PLAN.final.md 5.3: about 260 outcome and 400 class rows at about 200 calls" }),
   Object.freeze({ id: "ai.notes", row: "P1-45", written: 40, read: 0, source: "PLAN.final.md 5.3" }),

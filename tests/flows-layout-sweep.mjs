@@ -84,6 +84,9 @@ function answer(route, u) {
     case "card": return emitted("card-" + q.get("t")) || { status: "pending" };
     case "card-x": return emitted("card-x-" + q.get("t")) || { status: "pending" };
     case "hist": return emitted("hist-" + q.get("t")) || { status: "pending" };
+    case "flowlab/nightly": return emitted("flowlab-" + q.get("k")) || { status: "pending" };
+    case "flowlab/screen": case "flowlab/contract": case "flowlab/name": case "flowlab/group": case "flowlab/lit": case "flowlab/venues":
+      return { v: 1, asOf: new Date(NOW).toISOString(), session: null, part: route.slice(8), calls: 1, why: "empty", x: null };
     case "ai-usage": return { spend: { neurons: 4200, cap: 30000, calls: 40 } };
     case "ledger": { ledgerAnswer ||= respondWith(realisticWorld()); return ledgerAnswer(u); }
     case "summary": return { status: "ok", scope: q.get("t") || "", summary: null, ideas: [], tier: "family", code: null, why: "x", read: READ };
@@ -131,6 +134,7 @@ const SPECS = [
   { id: "desk", fn: "deskPage", url: "/flows/desk/" },
   { id: "ticker", fn: "tickerPage", url: "/flows/ticker/?t=NVDA" },
   { id: "ledger", fn: "ledgerPage", url: "/flows/ledger/" },
+  { id: "flowlab", fn: "flowlabPage", url: "/flows/flowlab/" },
   { id: "status", fn: "statusPage", url: "/flows/status/" },
 ];
 
@@ -191,7 +195,7 @@ async function mount(page, html, url, patch = null) {
 
 
 const SIZES = (process.env.SIZES || "1920x1080,1440x820,1024x768,390x844").split(",").map((s) => s.split("x").map(Number));
-const ONE_SCREEN = new Set(["overview", "market", "moves", "unusual", "events", "political", "status", "network", "now", "ledger"]);
+const ONE_SCREEN = new Set(["overview", "market", "moves", "unusual", "events", "political", "status", "network", "now", "ledger", "flowlab"]);
 
 const SWEEP = () => {
   const vis = (e) => {

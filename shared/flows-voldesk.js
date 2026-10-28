@@ -823,7 +823,7 @@ export function fitVoldesk(payload, cap = VOLDESK_CAP) {
 
 export function buildVoldesk(parts, { session, generatedAt, test = false } = {}) {
   const payload = {
-    v: VOLDESK_VERSION, session, generatedAt,
+    v: VOLDESK_VERSION, session, sessionDate: session, generatedAt,
     term: parts.term, ivrv: parts.ivrv, matrix: parts.matrix, site: parts.site || null,
     character: parts.character, audit: parts.audit, basis: { ops: parts.ops || {} },
   };
@@ -843,7 +843,7 @@ export function buildStance(priorRing, today, { session, test = false } = {}) {
   for (const [t, ex] of today) if (ex.rows.length) rows[t] = ex.rows;
   const prior = (Array.isArray(priorRing) ? priorRing : []).filter((e) => e && e.session !== session);
   const ring = fitStance([{ session, rows }, ...prior]);
-  const payload = { v: VOLDESK_VERSION, ring, ...(test ? { fixture: true } : {}) };
+  const payload = { v: VOLDESK_VERSION, sessionDate: session, ring, ...(test ? { fixture: true } : {}) };
   leak(payload, test);
   return payload;
 }

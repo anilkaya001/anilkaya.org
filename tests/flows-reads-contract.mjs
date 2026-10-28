@@ -17,6 +17,7 @@ import { flowsReadyRows } from "../server/routes/flows-ready.js";
 import { flowsOpsRows } from "../server/routes/flows-ops.js";
 import { flowsLedgerRows, LEDGER_ROW_CEILING } from "../server/routes/flows-ledger.js";
 import { flowsVoldeskRows } from "../server/routes/flows-voldesk.js";
+import { flowsFlowlabRows } from "../server/routes/flows-flowlab.js";
 import { createRouter } from "../server/router.js";
 
 let checks = 0;
@@ -808,9 +809,10 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   const ASK = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const getOwner = await client(f.D1, { FLOWS_RT_USERS: FIXTURE_ROSTER[0], FLOWS_OPS: "on", FLOWS_READY: "on", FLOWS_VOLDESK: "on", FLOWS_RT_MODE: "off" });
   const getBook = await client(f.D1, { FLOWS_RT_USERS: FIXTURE_ROSTER[0], FLOWS_LEDGER_LIVE: "owner" });
-  const cost = async (path, { init, vendor = false, owner = false, coverage = false, book = false } = {}) => {
+  const getLab = await client(f.D1, { FLOWS_FLOWLAB: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
+  const cost = async (path, { init, vendor = false, owner = false, coverage = false, book = false, lab = false } = {}) => {
     const n = f.trips.length;
-    const r = await (book ? getBook : coverage ? getCoverage : owner ? getOwner : vendor ? getVendor : get)(path, init);
+    const r = await (lab ? getLab : book ? getBook : coverage ? getCoverage : owner ? getOwner : vendor ? getVendor : get)(path, init);
     return { rows: f.rowsRead(n), trips: f.trips.length - n, status: r.res.status };
   };
   const CEILING = [
@@ -837,6 +839,13 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
     ["/api/flows/ledger", LEDGER_ROW_CEILING],
     ["/api/flows/ledger?part=book&v=1", LEDGER_ROW_CEILING, { book: true }],
     ["/api/flows/ledger?scope=sector%3AEnergy&period=session", LEDGER_ROW_CEILING],
+    ["/api/flows/flowlab/screen?preset=premium", 0, { lab: true }],
+    ["/api/flows/flowlab/contract?c=NVDA261218C00200000", 0, { lab: true }],
+    ["/api/flows/flowlab/name?t=NVDA&view=levels", 0, { lab: true }],
+    ["/api/flows/flowlab/group?g=mag7&exp=2026-12-18", 0, { lab: true }],
+    ["/api/flows/flowlab/lit", 0, { lab: true }],
+    ["/api/flows/flowlab/venues?t=NVDA", 0, { lab: true }],
+    ["/api/flows/flowlab/nightly?k=roots", 1, { lab: true }],
   ];
   let home = 0;
   for (const [path, ceiling, opts = {}] of CEILING) {
@@ -866,9 +875,9 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   const source = workerSource();
   expect(source, /path === "(\/api\/flows\/[a-z-]+)"/, { min: 3, why: "the Flows routes not yet in the table are declared in the Worker chain" });
   const stub = new Proxy({}, { get: () => () => null });
-  const routerPaths = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub), flowsIngestRows(stub), flowsReadyRows(stub), flowsPipelineRows(stub), flowsOpsRows(stub), flowsLedgerRows(stub), flowsVoldeskRows(stub))
+  const routerPaths = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub), flowsIngestRows(stub), flowsReadyRows(stub), flowsPipelineRows(stub), flowsOpsRows(stub), flowsLedgerRows(stub), flowsVoldeskRows(stub), flowsFlowlabRows(stub))
     .rows.map((r) => r.path).filter((path) => path.startsWith("/api/flows/"));
-  ok(routerPaths.length >= 24 && routerPaths.every((path) => /^\/api\/flows\/[a-z-]+$/.test(path)), "the router table holds the flows-read, flows-desk, flows-ai, ingest, ready and ops families: " + routerPaths.length + " rows");
+  ok(routerPaths.length >= 24 && routerPaths.every((path) => /^\/api\/flows\/[a-z-]+(?:\/[a-z-]+)?$/.test(path)), "the router table holds the flows-read, flows-desk, flows-ai, ingest, ready and ops families: " + routerPaths.length + " rows");
   ok(routerPaths.includes("/api/flows/ready") && routerPaths.includes("/api/flows/ops"), "and the ready and ops routes are among them, so neither can escape the enumeration");
   expect(source, /createRouter\(flowsReadRows\(/, { min: 1, max: 1, why: "the Worker builds its table from the flows-read family" });
   const chain = [...source.matchAll(/path === "(\/api\/flows\/[a-z-]+)"/g)].map((m) => m[1]);

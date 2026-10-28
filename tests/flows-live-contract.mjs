@@ -761,7 +761,7 @@ const cronMinutes = (cron) => {
   ok(!writes.test(sched) && !/refreshFlowsIntraday/.test(worker), "and the scheduled handler writes no nightly row either");
   const puts = [...leg.matchAll(/put\("([^"]+)"/g)].map((m) => m[1]);
   deep([...puts].sort(), Object.keys(L.LIVE_KEYS).filter((k) => L.LIVE_KEYS[k].writer === "actions").sort(), "the live leg puts exactly the registry's Actions keys");
-  ok(puts.length === 9 && puts.every((k) => /^live:/.test(k)), `the live leg publishes only live:* keys (${puts.join(", ")})`);
+  ok(puts.length === 10 && puts.every((k) => /^live:/.test(k)), `the live leg publishes only live:* keys (${puts.join(", ")})`);
   ok(/if \(LIVE_MODE && !\/\^live:\[a-z\]\+\(\?::\[a-z\]\+\)\?\$\/\.test\(key\)\) \{\s*throw/.test(pipeline),
     "and publish() itself throws on any other key in --live mode, before the network");
   ok(/LIVE_MODE \? await liveCredential\(\) : process\.env\.FLOWS_INGEST_TOKEN/.test(pipeline),
@@ -1088,8 +1088,8 @@ const cronMinutes = (cron) => {
         `${key} carries the fresh envelope of the Actions writer`);
       ok(text.length <= L.LIVE_KEYS[key].maxBytes, `${key} (${text.length} bytes) is inside its cap`);
     }
-    deep(keys.sort(), ["live:alerts", "live:alerts:head", "live:breadth", "live:heartbeat", "live:movers", "live:news", "live:strips", "live:strips:series", "live:vol"],
-      "and that is nine keys: live:alerts:head is the ninth, and live:gex and live:tape are no longer written");
+    deep(keys.sort(), ["live:alerts", "live:alerts:head", "live:breadth", "live:funds", "live:heartbeat", "live:movers", "live:news", "live:strips", "live:strips:series", "live:vol"],
+      "and that is ten keys: live:alerts:head is the ninth, live:funds the tenth, and live:gex and live:tape are no longer written");
     const calls = [...out.matchAll(/live: (\d+) call\(s\)/g)].map((m) => Number(m[1]));
     ok(calls.length === 2 && calls.every((c) => c <= 24),
       `each dry tick spends ${calls.join(" and ")} vendor calls, inside the 24 a pass needs without the retired legs`);
@@ -1138,7 +1138,7 @@ const cronMinutes = (cron) => {
     const spans = [];
     const uw = async (path, params, opts) => {
       const start = clock;
-      try { return await fake(path, params, opts); } finally { spans.push({ path, start, end: clock }); }
+      try { return await fake(path, params, opts); } finally { spans.push({ path, start, end: clock, funds: path === "/api/screener/stocks" && String(params.ticker || "").includes("TLT") }); }
     };
     const published = {};
     await runLive({ uw, now: () => (clock += 250), log: () => {}, warn: () => {}, force: true, shapeNews,
@@ -1149,7 +1149,7 @@ const cronMinutes = (cron) => {
     const first = (list) => Math.min(...list.map((c) => c.start));
     const last = (list) => Math.max(...list.map((c) => c.end));
     const tides = group(/sector-tide|etf-tide|net-flow\/expiry/);
-    const screener = group(/screener\/stocks/);
+    const screener = group(/screener\/stocks/).filter((c) => !c.funds);
     const flows = group(/flow-alerts/);
     const news = group(/news\/headlines/);
     ok(tides.length > 10 && screener.length === 1 && flows.length >= 1 && news.length === 1, "the pass made the reads of every group");

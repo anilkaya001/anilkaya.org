@@ -1,1 +1,1 @@
-{"name": "flows-chart-kernel", "class": "C", "group": "shard", "timing": false, "medianS": 8.7, "shard": 10, "files": ["flows-chart-kernel.mjs"], "covers": ["assets/js/flows-chart.js","assets/version.txt","tests/fixtures-chart-kernel.json"]}
+{"name": "flows-chart-kernel", "class": "C", "group": "shard", "timing": false, "medianS": 8.7, "shard": 7, "files": ["flows-chart-kernel.mjs"], "covers": ["assets/js/flows-chart.js","assets/version.txt","tests/fixtures-chart-kernel.json"]}

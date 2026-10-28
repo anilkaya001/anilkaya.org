@@ -400,6 +400,23 @@
     ];
   }
 
+  function osiOf(r) {
+    const e = String(r.expiry || "");
+    const k = n(r.k);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(e) || k === null || !(k > 0) || (r.cp !== "C" && r.cp !== "P") || typeof r.t !== "string" || !r.t) return null;
+    return r.t + e.slice(2, 4) + e.slice(5, 7) + e.slice(8, 10) + r.cp + String(Math.round(k * 1000)).padStart(8, "0");
+  }
+
+  function withDrill(row, r) {
+    const c = document.getElementById("fxFlowlab") ? osiOf(r) : null;
+    if (!c) return row;
+    const go = () => {
+      const open = () => window.FlowsUI.drill && window.FlowsUI.drill.open({ c });
+      if (window.FlowsUI.drill) open(); else if (UI.defer) UI.defer("drill").then(open);
+    };
+    return h("div", { class: "fu-cw", style: { display: "grid", gridTemplateColumns: "minmax(0, 1fr) 44px", alignItems: "stretch" } }, row, h("button", { type: "button", class: "fu-oc", style: { minWidth: "44px", minHeight: "44px", color: "var(--accent-ink)", background: "none", border: "0", cursor: "pointer" }, "data-oc": c, "aria-label": "Open contract " + String(r.t) + " " + contractText(r).trim(), title: "Open the contract's prints", onclick: go }, UI.glyph("levels")));
+  }
+
   function paintFeed() {
     if (S.feedKind !== "ok") return;
     const all = feedRows();
@@ -429,7 +446,7 @@
       if (Array.isArray(r.cls)) title.push("by exchange code, as of " + F.day(String((activityOf() || {}).asOf || "")) + ": " + codeText(r) + (n(r.pm) === null ? "" : "; premium " + F.money(n(r.pm))));
       if (flagged) title.push("also flagged by the vendor's rule " + (flagged.rule || "") + (n(flagged.prem) === null ? "" : ", carrying " + F.money(n(flagged.prem)) + " of premium"));
       const covered = S.payload && Array.isArray(S.payload.coverage) && S.payload.coverage.some((c) => c && c.t === r.t);
-      return h(covered ? "a" : "div", {
+      const row = h(covered ? "a" : "div", {
         class: "fu-crow", href: covered ? tickerHref(r.t) : null, role: covered ? null : "listitem", title: title.join(" " + MID + " "),
         "data-t": String(r.t || ""), "data-both": flagged ? "1" : null, "data-stage": r.st || null,
       },
@@ -440,6 +457,7 @@
       h("span", { class: "fu-meter", "aria-hidden": "true" }, vor === null ? null : h("i", { style: { width: ((Math.log10(Math.max(1, vor)) / lmax) * 100).toFixed(1) + "%", "--i": String(i) } })),
       h("span", { class: "fu-v fu-strong" }, vor === null ? DASH : (vor >= 100 ? vor.toFixed(0) : vor.toFixed(1)) + "×"),
       h("span", { class: "fu-v fu-wide", "data-tone": doi === null ? null : doi > 0 ? "up" : doi < 0 ? "down" : "flat" }, doi === null ? DASH : F.num(doi, true)));
+      return withDrill(row, r);
     });
     keep(host.feed, () => host.feed.replaceChildren(
       h("div", { class: "fu-crow fu-head", "aria-hidden": "true" }, h("span"), h("span", null, "Contract"), h("span", null, "Volume ÷ OI"), h("span", { class: "fu-v" }, "Ratio"), h("span", { class: "fu-v fu-wide" }, "ΔOI")),
