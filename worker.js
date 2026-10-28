@@ -1795,7 +1795,7 @@ async function generateNeuron(env, ticker, ctx, fingerprint, startedAt) {
 }
 
 const SCREEN_TTL_S = 300;
-const SCREEN_PROVENANCE = "Read from the screener row alone by fixed rules: no model was asked and no vendor call was made for it.";
+const SCREEN_PROVENANCE = "Read from the screener row alone by fixed rules: no model was asked and no feed call was made for it.";
 const EXPIRED_PROVENANCE = "Deterministic: no model was asked about a card this old.";
 const NONE_WHY = "This name is not in the nightly universe, so no dealer positioning or option chain is held for it; the ticker page can read a quote for it on demand and nothing more.";
 

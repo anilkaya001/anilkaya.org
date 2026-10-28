@@ -173,7 +173,7 @@ async function runLiveMode() {
     readClock, watch, progress: wireProgress.lastAt,
     onHung: ({ why }) => {
       if (why === "tick-deadline") return;
-      console.warn(`live: ${stats.timedOut - timedOutAtPass} vendor request(s) timed out after ${vendorTimeoutMs() / 1000} s ` +
+      console.warn(`live: ${stats.timedOut - timedOutAtPass} feed request(s) timed out after ${vendorTimeoutMs() / 1000} s ` +
         "in the abandoned pass before it was given up");
     },
     pass: async ({ first, clock }) => {
@@ -183,7 +183,7 @@ async function runLiveMode() {
       const result = await runLive({ uw, publish, readStored, shapeNews, origin, skipRecent: first, clock });
       const outcome = reportErrors(result);
       const timedOut = stats.timedOut - timedOutBefore;
-      if (timedOut) console.warn(`live: ${timedOut} vendor request(s) timed out after ${vendorTimeoutMs() / 1000} s`);
+      if (timedOut) console.warn(`live: ${timedOut} feed request(s) timed out after ${vendorTimeoutMs() / 1000} s`);
       return timedOut ? { ...outcome, timedOut } : outcome;
     },
     chain: ({ at }) => (keep
@@ -246,8 +246,8 @@ async function main() {
   const wall = easternNow();
   if (gate.skip && sessionBarOverdue(sessionDate, wall)) {
     console.warn(
-      `NOTE: the vendor's SPY series carries no bar for ${wall.date}, a trading day, so the newest ` +
-      `closed session is ${sessionDate}, which is already archived. The vendor has not published ` +
+      `NOTE: the feed's SPY series carries no bar for ${wall.date}, a trading day, so the newest ` +
+      `closed session is ${sessionDate}, which is already archived. The feed has not published ` +
       "its bar yet and the workflow should be dispatched again once it has.");
   }
   if (gate.skip) {

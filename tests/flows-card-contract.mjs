@@ -229,9 +229,9 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "the panel claims no return, and for the ONE reason that cannot expire: a " +
      "disclosure reports an opening with no paired closing print. This message " +
      "also used to argue that congress-trader has no pagination — which was " +
-     "true, then stopped being true when the vendor documented `page` and " +
+     "true, then stopped being true when the feed documented `page` and " +
      "`date_from`, and the political section now walks exactly that ladder. A " +
-     "refusal resting on a vendor limitation has to be re-read when the vendor " +
+     "refusal resting on a feed limitation has to be re-read when the feed " +
      "changes, or it becomes folklore that outlives its own reason");
 
   eq(buildCongress([]).status, "quiet",
@@ -541,7 +541,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
      "put_gex is dealer-signed, so the gross front-week share sums the legs");
 
   ok(buildCalendar([{ expiry: "2026-08-28", call_gamma: null, put_gamma: null }]).status === "unavailable",
-     "rows the vendor returned with null greeks are NOT a measured zero — this is " +
+     "rows the feed returned with null greeks are NOT a measured zero — this is " +
      "the exact shape that made family V identically zero on all 34 live names");
   eq(buildCalendar(cal.schedule.length ? [] : []).asOf, null, "an unavailable calendar carries no date");
 
@@ -553,7 +553,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(pm.high, 105, "and its high the mirror");
 
   eq(pm.horizonRule, "the nearest end-of-week expiry",
-     "the quote is labelled by the vendor's stated rule, not by an inferred date");
+     "the quote is labelled by the feed's stated rule, not by an inferred date");
   ok(!("horizonExpiry" in pm) && !("horizonDays" in pm),
      "and carries no date at all, so no renderer can print one");
 
@@ -647,7 +647,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(HORIZON_SESSIONS > 0, "the default horizon is a positive number of sessions");
 
   const noQuote = buildPricedMove({ spot: 100, impliedMovePerc: null, iv30: 0.42, rv30: 0.2, asOf: "2026-08-24" });
-  eq(noQuote.status, "ok", "no vendor quote is not a dead panel when implied vol is present");
+  eq(noQuote.status, "ok", "no feed quote is not a dead panel when implied vol is present");
   eq(noQuote.movePerc, null, "the quoted band is withheld");
   ok(noQuote.impliedMove > 0, "while the fixed-horizon band is published");
   const noIv = buildPricedMove({ spot: 100, impliedMovePerc: 0.05, iv30: null, rv30: null, asOf: "2026-08-24" });
@@ -681,7 +681,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(buildPricedMove({ spot: 0, impliedMovePerc: 0.05 }).status === "unavailable",
      "and no spot means no band either");
   eq(buildPricedMove({ spot: 100, impliedMovePerc: null, iv30: 0.4, asOf: "2026-08-24" }).horizonRule, null,
-     "with no vendor quote there is no rule to state either");
+     "with no feed quote there is no rule to state either");
 
   for (const k of ["iv30", "rv30", "vrp", "vrpTrailing", "vrpForward", "vrpForwardVar", "vrpForwardRel", "rvForward",
     "ivMomentum", "impliedMovePerc", "spotGammaShare"]) {
@@ -733,7 +733,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
     { expiry: "2026-09-18", max_pain: "120" },
     { expiry: "2026-08-28", max_pain: "102" },
   ]);
-  eq(mp.expiry, "2026-08-28", "the NEAREST expiry, whatever order the vendor returned");
+  eq(mp.expiry, "2026-08-28", "the NEAREST expiry, whatever order the feed returned");
   eq(mp.px, 102, "with its level");
   eq(pickMaxPain([]), null, "an empty chain has no max pain");
   eq(pickMaxPainRow([{ expiry: "2026-08-28", max_pain: null }]), null,
@@ -827,7 +827,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   const at100 = sparse.strikes.indexOf(100);
   const sep = sparse.expiries.indexOf("2026-09-18");
   ok(sparse.grid[at100][sep] === null,
-     "a pair the vendor did not return is null, not a confident zero");
+     "a pair the feed did not return is null, not a confident zero");
 
   const noLegs = buildSurface([
     cell(100, "2026-08-28", 5e6),
@@ -906,18 +906,18 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ];
   const surf = buildSurface(rows, { spot: 100, asOf: "2026-08-25" });
   eq(surf.status, "ok");
-  ok(surf.oi && surf.oi.source === "vendor", "the surface keeps the vendor's open-interest legs and says whose they are");
-  eq(surf.oi.basis, SURFACE_OI_BASIS, "with the sentence that names their basis and the unit the vendor does not state for charm and vanna");
+  ok(surf.oi && surf.oi.source === "vendor", "the surface keeps the feed's open-interest legs and says whose they are");
+  eq(surf.oi.basis, SURFACE_OI_BASIS, "with the sentence that names their basis and the unit the feed does not state for charm and vanna");
   assert.deepEqual(Object.keys(SURFACE_OI_LEGS), ["gamma", "charm", "vanna"]); checks++;
   for (const name of ["gamma", "charm", "vanna"]) {
     ok(Array.isArray(surf.oi[name]) && surf.oi[name].length === surf.strikes.length &&
        surf.oi[name].every((row) => row.length === surf.expiries.length),
        `the ${name} grid has the strike-by-expiry shape of the flow grid, so one index reads both`);
   }
-  eq(surf.oi.gamma[0][0], 1e6 - 4e5, "a cell is the call leg plus the put leg as the vendor signs them (gamma, 90 strike, first expiry)");
+  eq(surf.oi.gamma[0][0], 1e6 - 4e5, "a cell is the call leg plus the put leg as the feed signs them (gamma, 90 strike, first expiry)");
   eq(surf.oi.charm[2][1], 5 * 2.5e5 + 5 * 1.5e5, "charm of the 110 strike in the second expiry");
   eq(surf.oi.vanna[1][0], -3 * 3e5 + 3 * 1e5, "vanna of the 100 strike in the first expiry");
-  eq(surf.oi.gamma[1][1], null, "a pair the vendor did not return is null in the new grids as in the flow grid");
+  eq(surf.oi.gamma[1][1], null, "a pair the feed did not return is null in the new grids as in the flow grid");
   eq(surf.grid[1][1], null, "and in the same cell");
 
   const stripped = buildSurface(rows.map((r) => {
@@ -932,7 +932,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
     withOi(100, "2026-08-28", { call_charm_oi: "7e5", put_charm_oi: "1e5" }),
     withOi(105, "2026-08-28", { call_charm_oi: "0", put_charm_oi: "0" }),
   ], { spot: 100 });
-  eq(onlyCharm.oi.gamma, null, "a quantity the vendor did not return at all is a null grid");
+  eq(onlyCharm.oi.gamma, null, "a quantity the feed did not return at all is a null grid");
   eq(onlyCharm.oi.vanna, null, "for each quantity on its own");
   eq(onlyCharm.oi.charm[onlyCharm.strikes.indexOf(100)][0], 8e5, "while the one it returned is kept");
   eq(onlyCharm.oi.charm[onlyCharm.strikes.indexOf(105)][0], 0, "a measured zero stays a zero");
@@ -974,12 +974,12 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
     for (const f of readdirSync(new URL(dir, root))) {
       if (!ext.test(f) || /\.bundle\.js$/.test(f) || f === "flows-card.js" || (dir === "scripts/" && f === "flows-pipeline.mjs")) continue;
       const src = readFileSync(new URL(dir + f, root), "utf8");
-      if (/surface\??\.oi\b|\.oi\??\.(gamma|charm|vanna)\b|SURFACE_OI_LEGS/.test(src) && !src.includes("on the vendor's convention (dealers long calls, short puts)")) readers.push(dir + f);
+      if (/surface\??\.oi\b|\.oi\??\.(gamma|charm|vanna)\b|SURFACE_OI_LEGS/.test(src) && !src.includes("on the feed's convention (dealers long calls, short puts)")) readers.push(dir + f);
     }
   }
   ok(readers.length === 0,
      "no AI fact, chart, brief or card consumer reads the stored open-interest grids until the registry ids of P3-19 exist " +
-     "(or a reader labels them the vendor's with the dealer clause); the nightly's shedder is their one writer besides the card builder, " +
+     "(or a reader labels them the feed's with the dealer clause); the nightly's shedder is their one writer besides the card builder, " +
      `and these read them: ${readers.join(", ")}`);
 }
 
@@ -1001,7 +1001,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
 
   const quiet = buildCard({ ...base, darkpool: [], oiDeltas: [], termStructure: [], ivRank: [] }).panels;
   eq(quiet.darkpool.status, "quiet",
-     "while a vendor that ANSWERED with nothing is quiet — a different fact, " +
+     "while a feed that ANSWERED with nothing is quiet — a different fact, " +
      "worth a different sentence on the page");
   eq(quiet.volContext.status, "quiet", "for the vol context too");
 
@@ -1183,7 +1183,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
     { oi_change: "15.6149126946672959", curr_oi: 35207, last_oi: 2119 },
     { oi_change: "0.21534300646906180330", curr_oi: 33253, last_oi: 27361 },
   ]).basis, "ratio",
-     "and the vendor's own documented example reconciles as a RATIO of the previous " +
+     "and the feed's own documented example reconciles as a RATIO of the previous " +
      "snapshot — the two forms are what this reconciliation exists to tell apart");
   eq(measureOiBasis([{ oi_change: "9", curr_oi: 500, last_oi: 100 }]).basis, null,
      "a change that reconciles as neither resolves to no basis at all, rather than to the " +
@@ -1250,7 +1250,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(idx.oiChange.asOf, "2026-08-21", "the feed publishes the session ITS OWN ROWS describe");
   eq(idx.oiChange.asOfStated, true, "and says that it stated one");
   eq(idx.oiChange.sameSession, false,
-     "which is NOT the session the cards describe — the vendor updates this feed at about " +
+     "which is NOT the session the cards describe — the feed updates this feed at about " +
      "06:45 ET and this pipeline runs after the close, so a live join is normally a prior " +
      "session's cross-section laid onto today's per-name data");
   const sameDay = indexMarketCross({
@@ -1319,7 +1319,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   eq(indexCrossFeed("oiChange", { __failed: "HTTP 500" }, { tickers: names }).status, "unavailable",
      "and so is one whose fetch threw");
   ok(/HTTP 500/.test(indexCrossFeed("oiChange", { __failed: "HTTP 500" }, {}).reason),
-     "with the vendor's own reason carried through rather than paraphrased");
+     "with the feed's own reason carried through rather than paraphrased");
   const emptyFeed = indexCrossFeed("darkpool", { data: [] },
     { limit: 100, tickers: names, sessionDate: "2026-08-24" });
   eq(emptyFeed.status, "quiet",
@@ -1336,7 +1336,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
     { underlying_symbol: "BBB", oi_change: "300", curr_oi: 305, last_oi: 5 },
   ] }, { limit: 100, tickers: ["AAA", "BBB"] });
   eq(gappy.population, 1,
-     "a row whose change the vendor did not publish is counted OUT of the population, not " +
+     "a row whose change the feed did not publish is counted OUT of the population, not " +
      "carried at zero — Number(null) is 0 and a zero here would rank a name on a reading " +
      "nobody took");
   eq(readCrossFeed(gappy, "AAA").present, false,
@@ -1385,7 +1385,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   ok(/SELECTIONS/.test(CROSS_NOTES.absence),
      "the payload states in words that these lists are selections rather than the market");
   ok(/exchange-traded-fund/.test(CROSS_NOTES.absence),
-     "and names the exclusion the vendor documents — the open-interest list carries no index " +
+     "and names the exclusion the feed documents — the open-interest list carries no index " +
      "or fund contracts, so a fund's absence from it is a fact about the list's construction " +
      "and not a reading of the fund");
   ok(/06:45/.test(CROSS_NOTES.timing) && /17:30 Eastern/.test(CROSS_NOTES.timing) &&
@@ -1567,7 +1567,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   const vc = buildCard({ ...input, termStructure: [{ expiry: day(4), dte: 3, volatility: 0.4 }, { expiry: session, dte: 0, volatility: 0.9 }],
     ivRank: [{ date: day(1), volatility: 0.5, close: 101 }, { date: session, volatility: 0.4, close: 100 }] }).panels.volContext;
   eq(vc.term.rows.length, 1, "the term structure drops the expiry that lapsed at the session's close");
-  eq(vc.term.rows[0].dte, 4, "and counts days from the session, as the greeks on the same card do, not the vendor's 3");
+  eq(vc.term.rows[0].dte, 4, "and counts days from the session, as the greeks on the same card do, not the feed's 3");
   ok(vc.ivRank.rows.every((r) => r.date <= session) && vc.ivRank.afterSession === 1,
      "the implied-volatility history drops the row dated after the session and counts it");
 }
@@ -1577,7 +1577,7 @@ const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} —
   const page = (n) => Array.from({ length: n }, (_, i) => row(i));
   eq(SPOT_EXPOSURE_PAGE, 500, "the strike-ladder page is 500 rows, the limit the nightly asks for");
   ok(buildGammaProfile(page(SPOT_EXPOSURE_PAGE), { spot: 200 }).truncated === true,
-     "UW-F12: a ladder that fills the vendor's 500-row page is flagged truncated, since strikes beyond it were never read and its sums depend on the window");
+     "UW-F12: a ladder that fills the feed's 500-row page is flagged truncated, since strikes beyond it were never read and its sums depend on the window");
   ok(buildGammaProfile(page(SPOT_EXPOSURE_PAGE - 1), { spot: 200 }).truncated === false, "and one row short of a full page is not");
   const pipe = nightlySource();
   ok(/pathFor\("spot-exposures-strike", \{ ticker \}\), \{ \.\.\.band, \.\.\.dated, limit: SPOT_EXPOSURE_PAGE \}/.test(pipe),

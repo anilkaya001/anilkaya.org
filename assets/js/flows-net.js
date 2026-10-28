@@ -388,16 +388,16 @@
       const m = M;
       return {
         title: "Flow network",
-        lead: "Each flagged window's premium, split by the vendor's own attribution against the quote, routed through its sector and its name to its lean or its expiry.",
+        lead: "Each flagged window's premium, split by the feed's own attribution against the quote, routed through its sector and its name to its lean or its expiry.",
         facts: m ? [["Windows", count(m.windows)], ["Flagged", money(m.flagged)], ["Sided", m.cover ? money(m.total) + " " + MID + " " + pct(m.cover.share) : DASH], ["Names", count(m.names)], ["Sectors", U.state === "ok" ? "Nightly universe" : U.state === "fail" ? "Not readable" : "Pending"], ["Read", S.readAt ? F.time(S.readAt) : null]] : [],
         notes: [
-          "These are the vendor's flagged alerts, not every execution: the selection is the vendor's rules, so a name missing here is not a quiet name.",
-          "Ask side and bid side are the vendor's split of each flagged window's premium. For contract volume the vendor defines the ask side as a fill above the midpoint; it does not document the alert field. Lean is a convention: ask-side calls and bid-side puts are drawn bullish, bid-side calls and ask-side puts bearish, and none of it is proof of who initiated.",
-          "Premium the vendor left between the quotes, or in a window it never split by side, has no stated side. Premium with no stated side is not drawn as a node. Lean is shown as a range from the sided premium alone. Beside it is the share of flagged premium with a stated side.",
+          "These are the feed's flagged alerts, not every execution: the selection is the feed's rules, so a name missing here is not a quiet name.",
+          "Ask side and bid side are the feed's split of each flagged window's premium. For contract volume the feed defines the ask side as a fill above the midpoint; it does not document the alert field. Lean is a convention: ask-side calls and bid-side puts are drawn bullish, bid-side calls and ask-side puts bearish, and none of it is proof of who initiated.",
+          "Premium the feed left between the quotes, or in a window it never split by side, has no stated side. Premium with no stated side is not drawn as a node. Lean is shown as a range from the sided premium alone. Beside it is the share of flagged premium with a stated side.",
           "Every layer is ranked by premium, largest at the top; Other, No sector and the unread or pending sector buckets sit at the bottom whatever their size.",
           "Sphere area and band width are premium in dollars, on one scale for every node and band, and every layer carries the same total. Motion has two classes. Live motion is an arrival or your hand: a flare marks a window that reached this page while it was open, a band carries light only for premium that arrived in the last five minutes, ranks glide when new data reorders them, and the view moves only while you drag it. Ambient is ambient motion, not data: light runs along every band at a pace set by its size, spheres breathe and the view sways, and none of it is a trade. Ambient starts on after the close and stays as you leave it.",
           "Sectors come from the nightly universe; index products such as SPX and VIX are Index options, SPY, QQQ, IWM and DIA are Index funds, and any other name the universe does not carry is drawn under No sector. Expiry is counted in calendar days from the window's own US session date.",
-          "Contracts are shown for a name, a sector or an expiry only when every window in it states its size; a side or a lean shows none, because the vendor splits premium by side, not contracts.",
+          "Contracts are shown for a name, a sector or an expiry only when every window in it states its size; a side or a lean shows none, because the feed splits premium by side, not contracts.",
           "Only the largest names and sectors get their own node; the rest are folded into Other, so every layer still sums to the same premium. Drag to turn the network; double click or R recentres it; Freeze holds it still.",
         ],
       };
@@ -439,7 +439,7 @@
       if (M && M.windows) {
         bits.push(h("b", null, money(M.total)), " of sided premium in " + count(M.windows) + " " + plural(M.windows, "window", "windows") + ", " + leanText() + ", by convention. ");
       }
-      bits.push(h("span", { class: "fn-lede-x" }, "The vendor's flagged alerts, not every execution."));
+      bits.push(h("span", { class: "fn-lede-x" }, "The feed's flagged alerts, not every execution."));
       lede.replaceChildren(...bits);
     }
 
@@ -775,7 +775,7 @@
       else {
         const def = UI.STATES[st.state] || UI.STATES.pending;
         const word = { ok: "Nothing flagged", quiet: "Nothing flagged", pending: "Reading", unavailable: "Unavailable" }[st.state] || def.word;
-        empty.replaceChildren(UI.glyph(def.g), h("b", null, word), h("span", null, st.reason || "The vendor's rules flagged nothing in this read."));
+        empty.replaceChildren(UI.glyph(def.g), h("b", null, word), h("span", null, st.reason || "The feed's rules flagged nothing in this read."));
         empty.dataset.state = st.state;
         empty.hidden = false;
       }

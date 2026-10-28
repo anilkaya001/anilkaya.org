@@ -41,7 +41,7 @@ export function intradayRefusal(sessionDate, { at = new Date(), allow = false } 
           "screener, chains, flow alerts, news and every other undated read describe " +
           `${clock.date}'s session in progress, published under ${sessionDate || "no session date"}.`
         : `refusing to publish session ${sessionDate || "(unresolved)"} from an in-progress ` +
-          `session: ${said}, so every undated vendor read — the screener, the chains, flow ` +
+          `session: ${said}, so every undated feed read — the screener, the chains, flow ` +
           `alerts, news — would describe ${clock.date}'s session in progress under the ` +
           `${sessionDate || "unresolved"} label. Run after the close, or dispatch with ` +
           "allow_intraday to publish it anyway.",

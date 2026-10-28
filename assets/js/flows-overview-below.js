@@ -373,7 +373,7 @@
     }
     infoInto("hmVol", "volatility", () => ({
       title: "Volatility", asOf: sess ? "Session " + F.day(sess) : null,
-      lead: "The index ETFs' fixed-tenor implied volatility stands in for the VIX curve, which the vendor plan does not serve.",
+      lead: "The index ETFs' fixed-tenor implied volatility stands in for the VIX curve, which the feed plan does not serve.",
       facts: [["Source", spy.src], ["SPY 30d", spy.iv30 === null ? DASH : F.pct(spy.iv30, 1)],
         ["Term slope 30/90", spy.ts === null ? DASH : F.pct(spy.ts, 1, true)],
         ["Implied correlation SPY", rho === null ? DASH : rho.toFixed(3)], ["Implied correlation QQQ", rhoQ === null ? DASH : rhoQ.toFixed(3)],
@@ -383,7 +383,7 @@
         "Implied correlation is the index variance left after the members' own variances, over what perfect correlation would add.",
         "Dispersion is the SPY members' weighted 30-day IV minus SPY's own, in vol points.",
         "The 0DTE share is |0DTE net| over |0DTE net| + |weekly net|, from the live breadth layer when it is as new as the regime key.",
-        radar ? "Rich and cheap are the vendor's volatility anomaly screen; a linked name has a card today." : null],
+        radar ? "Rich and cheap are the feed's volatility anomaly screen; a linked name has a card today." : null],
     }));
   }
 
@@ -484,14 +484,14 @@
     if (silent(into, payload, "headlines feed", 64)) return;
     if (payload.status === "quiet") {
       hush(into, "empty",
-        "The headlines feed was read and the vendor returned no rows: a measurement — the " +
+        "The headlines feed was read and the feed returned no rows: a measurement — the " +
         "feed was checked and was empty — and not a request that failed.", "headlines", 64);
       return;
     }
     if (payload.status === "unreadable") {
       hush(into, "unreadable",
         "The headlines feed returned rows and not one carried a headline, so nothing here " +
-        "is publishable. A fault on the wire between the vendor and this pipeline, not a " +
+        "is publishable. A fault on the wire between the feed and this pipeline, not a " +
         "quiet news day.", "headlines", 64);
       return;
     }
@@ -533,7 +533,7 @@
     const requested = isNum(payload.requested), returned = isNum(payload.returned);
     const cap = isNum(payload.cap), shed = isNum(payload.shed);
     if (payload.atVendorLimit === true) {
-      said.push("The vendor returned " + (returned === null ? "its own maximum number of rows" : returned + " rows") +
+      said.push("The feed returned " + (returned === null ? "its own maximum number of rows" : returned + " rows") +
         (requested === null ? "" : " against the " + requested + " asked for") +
         ", which is its documented ceiling — so the true population is UNKNOWN and at least that large.");
     }
@@ -564,7 +564,7 @@
       : /after the close/i.test(payload.cadence) ? "After-close snapshot"
         : /morning/i.test(payload.cadence) ? "Morning snapshot" : "Snapshot; cadence not specified";
     const coverage = [readAge ? "Fetched " + readAge : "Fetch age unknown", cadence];
-    if (payload.atVendorLimit === true) coverage.push("Vendor ceiling reached; total unknown");
+    if (payload.atVendorLimit === true) coverage.push("Feed ceiling reached; total unknown");
     if (payload.capped === true && shed > 0) coverage.push(shed + " received rows omitted");
     if (undatedKept > 0) coverage.push(undatedKept + " undated rows");
 
@@ -579,15 +579,15 @@
           h("p", { class: "cc-nw-h" }, typeof row.headline === "string" && row.headline ? row.headline : DASH),
           h("p", { class: "cc-nw-m" },
             h("span", { class: "cc-nw-age", title: at === null ? "This row carried no timestamp, so its age is not known and none is claimed."
-              : "The vendor's own stamp, verbatim: " + (typeof row.createdAt === "string" ? row.createdAt : String(at)) },
+              : "The feed's own stamp, verbatim: " + (typeof row.createdAt === "string" ? row.createdAt : String(at)) },
             at === null ? "undated" : (age === null ? "stamped ahead of this clock" : age)),
             typeof row.source === "string" && row.source ? h("span", { class: "cc-nw-src" }, row.source) : null,
             typeof row.sentiment === "string" && row.sentiment
-              ? h("span", { class: "cc-nw-sent", title: "The vendor's sentiment label, verbatim: not this product's score and not an input to it." }, row.sentiment) : null,
-            row && row.major === true ? h("span", { class: "cc-nw-major", title: "The vendor flagged this headline as major." }, "major") : null,
+              ? h("span", { class: "cc-nw-sent", title: "The feed's sentiment label, verbatim: not this product's score and not an input to it." }, row.sentiment) : null,
+            row && row.major === true ? h("span", { class: "cc-nw-major", title: "The feed flagged this headline as major." }, "major") : null,
             tickers.length ? h("span", { class: "cc-nw-tks" },
               tickers.slice(0, NEWS_TICKERS).map((t) => (cards.has(t) ? nameNode(t, true)
-                : h("span", { class: "cc-nw-tk", title: "Named by the vendor on this headline; no card was built for it." }, t))),
+                : h("span", { class: "cc-nw-tk", title: "Named by the feed on this headline; no card was built for it." }, t))),
               tickers.length > NEWS_TICKERS ? h("span", { class: "cc-nw-more" }, "+" + (tickers.length - NEWS_TICKERS) + " more") : null) : null));
       })));
 

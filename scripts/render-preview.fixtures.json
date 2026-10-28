@@ -1209,7 +1209,7 @@
    },
    "shareClasses": [],
    "deep": 23,
-   "deepRule": "The 50 names furthest from neutral across both boards carry a chain and a detail card. Every other row is scored and ranked from the same five sources, and has no card: the card costs vendor calls the run cannot spend on a hundred names.",
+   "deepRule": "The 50 names furthest from neutral across both boards carry a chain and a detail card. Every other row is scored and ranked from the same five sources, and has no card: the card costs feed calls the run cannot spend on a hundred names.",
    "selection": "Every name in the screened universe whose market capitalisation puts it in the largest hundred, plus any Nasdaq-100 member the screen returned. Market cap is the selection axis because it is observable, stable, and independent of the option flow being scored \u2014 selecting on the flow itself would trim the cross-section to its own tails before the score is taken.",
    "selectionEpoch": "2026-08-26",
    "status": "ok"
@@ -1982,7 +1982,7 @@
    },
    "shareClasses": [],
    "deep": 27,
-   "deepRule": "The 50 names furthest from neutral across both boards carry a chain and a detail card. Every other row is scored and ranked from the same five sources, and has no card: the card costs vendor calls the run cannot spend on a hundred names.",
+   "deepRule": "The 50 names furthest from neutral across both boards carry a chain and a detail card. Every other row is scored and ranked from the same five sources, and has no card: the card costs feed calls the run cannot spend on a hundred names.",
    "selection": "Every name in the screened universe whose market capitalisation puts it in the largest hundred, plus any Nasdaq-100 member the screen returned. Market cap is the selection axis because it is observable, stable, and independent of the option flow being scored \u2014 selecting on the flow itself would trim the cross-section to its own tails before the score is taken.",
    "selectionEpoch": "2026-08-26",
    "status": "ok"
@@ -2031,7 +2031,7 @@
     "ivRankQuoted": 420
    },
    "notes": {
-    "population": "Every reading here is over the SCREENED UNIVERSE and not over the market: the names this run's band ladder returned and the universe gate admitted. The vendor caps each band at about fifty rows, so the population is bounded by how the ladder was walked.",
+    "population": "Every reading here is over the SCREENED UNIVERSE and not over the market: the names this run's band ladder returned and the universe gate admitted. The feed caps each band at about fifty rows, so the population is bounded by how the ladder was walked.",
     "presence": "Net premium is measured only where BOTH legs were quoted. A name quoting one leg is counted separately, never folded into a total \u2014 an unquoted leg treated as a zero would publish a name as balanced when one side was never reported.",
     "weighting": "Breadth counts names; premium tilt weights them by dollars. When they disagree in sign, that is the reading.",
     "concentration": "A market-wide total is a number one large print can own, so the five largest names' share of gross net premium is published beside it.",
@@ -2413,11 +2413,11 @@
    },
    "status": "ok",
    "notes": {
-    "unit": "One row is one alert: a window of activity in one contract that one of the vendor's own rules flagged, carrying the vendor's stated span, its count of executions, a total size and a total premium with its ask-side/bid-side split. A row aggregates that whole window, so it is never a single transaction and this page does not present it as one.",
-    "selection": "The population is what the vendor's rules chose to flag. The rules are named per row but their definitions are the vendor's own \u2014 not published, not reproducible from this payload \u2014 so absence from this list is not evidence of quiet, and presence is not a ranking of the whole market. The premium ordering below ranks only within what was flagged.",
-    "sides": "Ask-side and bid-side premium are the vendor's attribution of the window's dollars against the quote. The split is carried as published; this page adds no inference about who initiated, and the two need not sum to the total where the vendor left dollars between the quotes.",
-    "flags": "Sweep, floor, single-leg and all-opening are the vendor's flags, reported as sent. A dash means the vendor did not carry the flag on that row \u2014 which is not the same fact as the flag being off.",
-    "record": "During the session this feed is a RECORD, not a snapshot. The vendor's list is a rolling window \u2014 a name flagged at 09:31 has usually fallen off it by midday \u2014 so each fifteen-minute read is merged into the day's record rather than replacing it. Every row says when the record first held it, when a read last carried it, and how many reads carried it; the first of those is the early fact and it never advances. The record covers one Eastern session, names that date, and starts empty at the next one \u2014 yesterday's flags under today's timestamp would be a claim about a day that never made it. When the union outgrows its ceiling the smallest premiums are shed first, in the same order the list is ranked, and both the ceiling and what it removed are published beside it \u2014 with a running count of everything that has entered the record today, because the ceiling compounds and the count of what the record still holds would otherwise stop growing at the moment it began to overflow.",
+    "unit": "One row is one alert: a window of activity in one contract that one of the feed's own rules flagged, carrying the feed's stated span, its count of executions, a total size and a total premium with its ask-side/bid-side split. A row aggregates that whole window, so it is never a single transaction and this page does not present it as one.",
+    "selection": "The population is what the feed's rules chose to flag. The rules are named per row but their definitions are the feed's own \u2014 not published, not reproducible from this payload \u2014 so absence from this list is not evidence of quiet, and presence is not a ranking of the whole market. The premium ordering below ranks only within what was flagged.",
+    "sides": "Ask-side and bid-side premium are the feed's attribution of the window's dollars against the quote. The split is carried as published; this page adds no inference about who initiated, and the two need not sum to the total where the feed left dollars between the quotes.",
+    "flags": "Sweep, floor, single-leg and all-opening are the feed's flags, reported as sent. A dash means the feed did not carry the flag on that row \u2014 which is not the same fact as the flag being off.",
+    "record": "During the session this feed is a RECORD, not a snapshot. The feed's list is a rolling window \u2014 a name flagged at 09:31 has usually fallen off it by midday \u2014 so each fifteen-minute read is merged into the day's record rather than replacing it. Every row says when the record first held it, when a read last carried it, and how many reads carried it; the first of those is the early fact and it never advances. The record covers one Eastern session, names that date, and starts empty at the next one \u2014 yesterday's flags under today's timestamp would be a claim about a day that never made it. When the union outgrows its ceiling the smallest premiums are shed first, in the same order the list is ranked, and both the ceiling and what it removed are published beside it \u2014 with a running count of everything that has entered the record today, because the ceiling compounds and the count of what the record still holds would otherwise stop growing at the moment it began to overflow.",
     "refusals": "No intent and no identity: nothing here says who was active or why, and no flag makes that observable. Rows are windows, not executions, so no number here is an execution price either."
    },
    "vendorLimit": 200,
@@ -3025,8 +3025,8 @@
      "vt": "volume tilt \u2014 ask-side minus bid-side contracts, calls against puts, over total contracts, a share",
      "sut": "surprise tilt \u2014 the log ratio of the call and put volume surprises, each against this name's own 30-day average",
      "ot": "open-interest tilt \u2014 call minus put open-interest change over the standing book, a share",
-     "pcr": "the vendor's own put/call ratio, passed through",
-     "rvol": "the vendor's own relative volume, passed through"
+     "pcr": "the feed's own put/call ratio, passed through",
+     "rvol": "the feed's own relative volume, passed through"
     },
     "units": "every tilt is a share or a log ratio, so all of them are unit-free and comparable across names; none is a dollar amount"
    },
@@ -3035,11 +3035,11 @@
     "gate": "The board's composite is a predictive ranking, and a name with a scheduled binary event is not being priced by the same process as one without \u2014 so the pipeline removes those names before scoring. They are, by construction, the most event-exposed names in the universe. Until this page existed they were reported as a single number in a log line and discarded. A name marked gated is one the board was FORBIDDEN from holding an opinion on; it is not a name the board found nothing in.",
     "clocks": "Two clocks, and they do not share an origin. Every PRICE here describes the last completed session. Every DAY COUNT is measured from the run's own Eastern date, which is the origin the earnings gate itself used \u2014 at 05:15 those differ by one to three days, and counting from the wrong one would draw the window early and classify every name against a gate that never ran.",
     "sessions": "Sessions are NYSE trading days on the exchange's published calendar: weekends and scheduled holidays are not sessions, and early closes are. A closure the exchange did not schedule cannot be known in advance, so a count that spans one is one session long until the day has passed.",
-    "priced": "The priced move scales the name's 30-day implied volatility to the sessions between the run and the report, by the square root of time. No rate, no dividend, no distribution. It is not a forecast of what the stock will do, and it is not this desk's opinion of either. IT IS ALSO NOT A QUOTE. Square-root-of-time assumes variance accrues evenly across sessions, and a scheduled report is precisely the case that violates it: the 30-day implied volatility already contains the event's variance, and spreading it evenly over the two sessions before the report understates the pre-event move badly. So this column is a CONSTANT-VOL BENCHMARK computed by this desk, it is expected to sit below the vendor's own event-bracketing quote beside it, and the amount by which it does is published as its own column rather than left as a discrepancy.",
-    "eventPremium": "The event premium is the vendor's own implied move divided by the constant-vol benchmark beside it \u2014 a ratio of two published numbers, unit-free, and the only quantity on this row that is about the REPORT rather than about the name's ambient volatility. A reading of 1 means the vendor is charging no more than an ordinary stretch of the same length; a reading of 3 means it is charging three times that. It is not an average of the two horizons, which the note above refuses: an average of two numbers quoted to two horizons is quoted to neither, while their ratio is quoted to the difference between them, which is the event.",
-    "flow": "The flow columns are the tilts the screener already carries for every eligible name: premium, net premium, aggressed contracts, volume surprise and open-interest change, each as a share of that name's own gross, plus the vendor's own put/call ratio and relative volume. They were computed on every run and published for no name on this page, so the surface built for the most event-exposed names in the universe could not say which of them was seeing anomalous option activity. They cost no vendor call.",
+    "priced": "The priced move scales the name's 30-day implied volatility to the sessions between the run and the report, by the square root of time. No rate, no dividend, no distribution. It is not a forecast of what the stock will do, and it is not this desk's opinion of either. IT IS ALSO NOT A QUOTE. Square-root-of-time assumes variance accrues evenly across sessions, and a scheduled report is precisely the case that violates it: the 30-day implied volatility already contains the event's variance, and spreading it evenly over the two sessions before the report understates the pre-event move badly. So this column is a CONSTANT-VOL BENCHMARK computed by this desk, it is expected to sit below the feed's own event-bracketing quote beside it, and the amount by which it does is published as its own column rather than left as a discrepancy.",
+    "eventPremium": "The event premium is the feed's own implied move divided by the constant-vol benchmark beside it \u2014 a ratio of two published numbers, unit-free, and the only quantity on this row that is about the REPORT rather than about the name's ambient volatility. A reading of 1 means the feed is charging no more than an ordinary stretch of the same length; a reading of 3 means it is charging three times that. It is not an average of the two horizons, which the note above refuses: an average of two numbers quoted to two horizons is quoted to neither, while their ratio is quoted to the difference between them, which is the event.",
+    "flow": "The flow columns are the tilts the screener already carries for every eligible name: premium, net premium, aggressed contracts, volume surprise and open-interest change, each as a share of that name's own gross, plus the feed's own put/call ratio and relative volume. They were computed on every run and published for no name on this page, so the surface built for the most event-exposed names in the universe could not say which of them was seeing anomalous option activity. They cost no feed call.",
     "cap": "The table publishes the nearest reporters up to a row cap. Because the rows are ordered by date, a bound cap does not thin the table \u2014 it ENDS it, at a date earlier than the window, and everything past that date is absent from the drawing rather than sparse in it. Whether the cap bound is published beside the last date shown, so an empty right-hand half is never attributed to the window when the cap is what stopped it.",
-    "vendorMove": "The vendor's own implied move is quoted to the vendor's own next expiry, which is a different horizon from the one beside it. Both are published and neither is reconciled into the other: an average of two numbers quoted to two horizons is quoted to neither.",
+    "vendorMove": "The feed's own implied move is quoted to the feed's own next expiry, which is a different horizon from the one beside it. Both are published and neither is reconciled into the other: an average of two numbers quoted to two horizons is quoted to neither.",
     "announce": "Whether a name reports before the open or after the close is not on the screener. The endpoints that carry it are scoped to a single date, so covering this window would cost forty-four calls \u2014 a twelve per cent increase on the run for one column. It is withheld rather than half-filled, because a column populated for the first fortnight and blank after invites the wrong inference about everything in the blank half.",
     "order": "Sorted by date, then by name. Never by the priced move: that would make this a leaderboard of expensive options, which is a different page and a claim this one does not make.",
     "coverage": "Realized volatility is measured only for the enriched names, so most rows withhold it. The count of rows that carry one is published beside the column rather than left to be inferred from the em dashes."
@@ -5158,14 +5158,14 @@
    "refreshed": "nightly",
    "cadenceMinutes": 15,
    "notes": {
-    "tide": "The vendor's own net premium series, carried without cumulation, differencing or smoothing. A rising line is premium flow, never a forecast of price.",
-    "totals": "The call/put split is the vendor's attribution. No ratio here says who initiated anything.",
-    "oiChange": "The vendor's selection and ordering, under a rule it does not publish \u2014 so this ranks inside what the vendor chose to surface, not the chain universe. Open-interest change compares two clearing snapshots, so it is a day late by construction, never today's trading.",
-    "netImpact": "Sign is the vendor's attribution against the quote. Its definition of impact is not reproducible from this payload.",
+    "tide": "The feed's own net premium series, carried without cumulation, differencing or smoothing. A rising line is premium flow, never a forecast of price.",
+    "totals": "The call/put split is the feed's attribution. No ratio here says who initiated anything.",
+    "oiChange": "The feed's selection and ordering, under a rule it does not publish \u2014 so this ranks inside what the feed chose to surface, not the chain universe. Open-interest change compares two clearing snapshots, so it is a day late by construction, never today's trading.",
+    "netImpact": "Sign is the feed's attribution against the quote. Its definition of impact is not reproducible from this payload.",
     "insiders": "Filings arrive with statutory delay: the latest row is the most recent FILING day, not the most recent trading day.",
     "darkpool": "These ARE executions, unlike the option feeds' windows \u2014 but the print feed reports them with delay and attributes no side and no participant. 'Dark pool' here is the off-exchange reporting facility, not a venue.",
     "seasonality": "Arithmetic over history. It carries no claim about the month ahead.",
-    "refusals": "No feed here supports intent or identity: nothing says who was active or which side initiated. The tide and impact rankings use the vendor's unpublished definitions, so absence from a list is not evidence of quiet."
+    "refusals": "No feed here supports intent or identity: nothing says who was active or which side initiated. The tide and impact rankings use the feed's unpublished definitions, so absence from a list is not evidence of quiet."
    },
    "tide": {
     "status": "ok",
@@ -5839,7 +5839,7 @@
     "ivRankQuoted": 412
    },
    "notes": {
-    "population": "Every reading here is over the SCREENED UNIVERSE and not over the market: the names this run's band ladder returned and the universe gate admitted. The vendor caps each band at about fifty rows, so the population is bounded by how the ladder was walked.",
+    "population": "Every reading here is over the SCREENED UNIVERSE and not over the market: the names this run's band ladder returned and the universe gate admitted. The feed caps each band at about fifty rows, so the population is bounded by how the ladder was walked.",
     "presence": "Net premium is measured only where BOTH legs were quoted. A name quoting one leg is counted separately, never folded into a total \u2014 an unquoted leg treated as a zero would publish a name as balanced when one side was never reported.",
     "weighting": "Breadth counts names; premium tilt weights them by dollars. When they disagree in sign, that is the reading.",
     "concentration": "A market-wide total is a number one large print can own, so the five largest names' share of gross net premium is published beside it.",
@@ -6691,7 +6691,7 @@
      }
     ],
     "byContract": {
-     "basis": "vendor-flagged windows",
+     "basis": "feed-flagged windows",
      "seen": 240,
      "shed": 232,
      "rows": [
@@ -6787,14 +6787,14 @@
    "refreshed": "cron",
    "cadenceMinutes": 15,
    "notes": {
-    "tide": "The vendor's own net premium series, carried without cumulation, differencing or smoothing. A rising line is premium flow, never a forecast of price.",
-    "totals": "The call/put split is the vendor's attribution. No ratio here says who initiated anything.",
-    "oiChange": "The vendor's selection and ordering, under a rule it does not publish \u2014 so this ranks inside what the vendor chose to surface, not the chain universe. Open-interest change compares two clearing snapshots, so it is a day late by construction, never today's trading.",
-    "netImpact": "Sign is the vendor's attribution against the quote. Its definition of impact is not reproducible from this payload.",
+    "tide": "The feed's own net premium series, carried without cumulation, differencing or smoothing. A rising line is premium flow, never a forecast of price.",
+    "totals": "The call/put split is the feed's attribution. No ratio here says who initiated anything.",
+    "oiChange": "The feed's selection and ordering, under a rule it does not publish \u2014 so this ranks inside what the feed chose to surface, not the chain universe. Open-interest change compares two clearing snapshots, so it is a day late by construction, never today's trading.",
+    "netImpact": "Sign is the feed's attribution against the quote. Its definition of impact is not reproducible from this payload.",
     "insiders": "Filings arrive with statutory delay: the latest row is the most recent FILING day, not the most recent trading day.",
     "darkpool": "These ARE executions, unlike the option feeds' windows \u2014 but the print feed reports them with delay and attributes no side and no participant. 'Dark pool' here is the off-exchange reporting facility, not a venue.",
     "seasonality": "Arithmetic over history. It carries no claim about the month ahead.",
-    "refusals": "No feed here supports intent or identity: nothing says who was active or which side initiated. The tide and impact rankings use the vendor's unpublished definitions, so absence from a list is not evidence of quiet."
+    "refusals": "No feed here supports intent or identity: nothing says who was active or which side initiated. The tide and impact rankings use the feed's unpublished definitions, so absence from a list is not evidence of quiet."
    },
    "tide": {
     "status": "ok",

@@ -70,7 +70,7 @@ export function checkCard(w, name, card, plain, lost) {
       const said = String(now && now.reason);
       const named = feeders.find((route) => {
         const r = name.routes.find((x) => x.route === route).fail;
-        return said.includes("vendor's " + route + " read") && (r.status !== null ? said.includes("HTTP " + r.status) : r.kind === "timeout" ? said.includes("timed out") : said.includes("body that could not be read"));
+        return said.includes("feed's " + route + " read") && (r.status !== null ? said.includes("HTTP " + r.status) : r.kind === "timeout" ? said.includes("timed out") : said.includes("body that could not be read"));
       });
       w.check(named !== undefined, `${label}: the ${panel} reason names one of the failed routes and what went wrong (${said.slice(0, 100)})`);
     } else {
@@ -99,7 +99,7 @@ export async function cardScenario(seed, { time = null, rank = null, card: cardM
         const run = rank.readDeepFeeds({ ticker: name.ticker, sessionDate: SESSION, surfaceExpiries: ["2026-09-18", "2026-10-16"], spotPx: 100, quantPrep: {}, carried: [] });
         const out = await time.drive(run);
         if (!w.check(!out.hung, `LIVENESS: the reads for ${name.ticker} must settle`)) continue;
-        if (!w.check(out.ok, `${name.ticker}: the reads never throw, whatever the vendor does (${out.error && out.error.message})`)) continue;
+        if (!w.check(out.ok, `${name.ticker}: the reads never throw, whatever the feed does (${out.error && out.error.message})`)) continue;
         feeds = out.value;
         lost = feeds.lost;
       } else {

@@ -21,7 +21,7 @@ export const SCREEN_LINES = Object.freeze({
   EXPIRED_SESSIONS: 2,
 });
 
-const IVP_LABEL = "Vendor 1-year IV percentile (tenor not documented)";
+const IVP_LABEL = "Feed 1-year IV percentile (tenor not documented)";
 
 export const SCREEN_INPUTS = Object.freeze([
   ["gexAdv", "Dealer book gamma"], ["iv30", "30-day implied volatility"], ["dex", "Dealer delta"], ["vanna", "Dealer vanna"],
@@ -74,7 +74,7 @@ export function screenReading(input) {
   const conflicts = [];
   const notes = [];
   const withhold = (key, label, reason) => { withheld.push({ key, label, reason }); };
-  const absent = (k) => (has(u, k) ? "the vendor's screener row carried no value for it" : "the column is not in tonight's universe payload");
+  const absent = (k) => (has(u, k) ? "the feed's screener row carried no value for it" : "the column is not in tonight's universe payload");
   const push = (f) => { facts.push({ ...f, display: f.text + " " + f.unit }); };
 
   const g = v("gexAdv"), iv30 = v("iv30");
@@ -89,7 +89,7 @@ export function screenReading(input) {
     push({
       key: "gamma", group: "positioning", label: "Dealer book gamma", value: r4(g * 100),
       text: signed(g * 100, 2) + "%", unit: "of average daily dollar volume for each 1% move in the stock", grade: 1,
-      note: "The vendor's open-interest gamma in dollars per 1% move, on its convention that dealers hold every call long and every put short. That is a convention and not an observed position." +
+      note: "The feed's open-interest gamma in dollars per 1% move, on its convention that dealers hold every call long and every put short. That is a convention and not an observed position." +
         (num(pct.gexAdv) !== null ? " The " + ordinal(pct.gexAdv) + " percentile of the screened names, where the 100th is the most long gamma." : ""),
     });
     push({
@@ -107,8 +107,8 @@ export function screenReading(input) {
   else {
     push({
       key: "dex", group: "positioning", label: "Dealer delta", value: r4(dex),
-      text: signed(dex, 2), unit: "times average daily dollar volume, as the vendor's dollars per 1% move", grade: 1,
-      note: "The vendor documents no sign convention for this field. On the gamma convention it is positive by construction and measures the size of the hedge book, not which way dealers lean, so no direction is read from it.",
+      text: signed(dex, 2), unit: "times average daily dollar volume, as the feed's dollars per 1% move", grade: 1,
+      note: "The feed documents no sign convention for this field. On the gamma convention it is positive by construction and measures the size of the hedge book, not which way dealers lean, so no direction is read from it.",
     });
   }
 
@@ -117,8 +117,8 @@ export function screenReading(input) {
   else {
     push({
       key: "vanna", group: "positioning", label: "Dealer vanna", value: r4(vanna * 100),
-      text: signed(vanna * 100, 2) + "%", unit: "of average daily dollar volume, as the vendor's dollars per 1% move", grade: 1,
-      note: "The vendor documents no sign convention for the put leg of this field, so which way it moves dealer hedges when implied volatility changes is not read. Shown as the vendor's number and not used.",
+      text: signed(vanna * 100, 2) + "%", unit: "of average daily dollar volume, as the feed's dollars per 1% move", grade: 1,
+      note: "The feed documents no sign convention for the put leg of this field, so which way it moves dealer hedges when implied volatility changes is not read. Shown as the feed's number and not used.",
     });
   }
 
@@ -127,8 +127,8 @@ export function screenReading(input) {
   else {
     push({
       key: "charm", group: "positioning", label: "Dealer charm", value: charm === 0 ? "zero" : charm > 0 ? "positive" : "negative",
-      text: charm === 0 ? "zero" : charm > 0 ? "positive" : "negative", unit: "in the vendor's sign, size not shown", grade: 0,
-      note: "The vendor documents no unit for this field, and on its own sample row it is larger than the delta it acts on, so it is not a per-day change. Only its sign is shown, for the record, and nothing is read from it.",
+      text: charm === 0 ? "zero" : charm > 0 ? "positive" : "negative", unit: "in the feed's sign, size not shown", grade: 0,
+      note: "The feed documents no unit for this field, and on its own sample row it is larger than the delta it acts on, so it is not a per-day change. Only its sign is shown, for the record, and nothing is read from it.",
     });
   }
 
@@ -168,8 +168,8 @@ export function screenReading(input) {
   else {
     push({
       key: "ivp", group: "premium", label: IVP_LABEL, value: r4(ivp),
-      text: ordinal(ivp), unit: "percentile, as the vendor reports it, over a window the field name gives as one year, on an implied-volatility tenor no document held for it states", grade: 1,
-      note: "The vendor's own percentile, a percentile and not the range-based IV rank. The field name says one year; no document held for it says which expiry's implied volatility it ranks, so it is not read as the 30-day figure.",
+      text: ordinal(ivp), unit: "percentile, as the feed reports it, over a window the field name gives as one year, on an implied-volatility tenor no document held for it states", grade: 1,
+      note: "The feed's own percentile, a percentile and not the range-based IV rank. The field name says one year; no document held for it says which expiry's implied volatility it ranks, so it is not read as the 30-day figure.",
     });
   }
   const ts = v("ts");
@@ -188,7 +188,7 @@ export function screenReading(input) {
     push({
       key: "move5", group: "premium", label: "Priced move, 5 days", value: r4(im5 * 100),
       text: "±" + plain(im5 * 100, 1) + "%", unit: "of price over 5 days, as the options market prices it", grade: 1,
-      note: "The vendor's implied move for the horizon as a fraction of price; a price and not a measure of what the stock does.",
+      note: "The feed's implied move for the horizon as a fraction of price; a price and not a measure of what the stock does.",
     });
   }
   if (im30 === null) withhold("im30", "Priced move, 30 days", absent("im30"));
@@ -196,7 +196,7 @@ export function screenReading(input) {
     push({
       key: "move30", group: "premium", label: "Priced move, 30 days", value: r4(im30 * 100),
       text: "±" + plain(im30 * 100, 1) + "%", unit: "of price over 30 days, as the options market prices it", grade: 1,
-      note: "The vendor's implied move for the horizon as a fraction of price; a price and not a measure of what the stock does.",
+      note: "The feed's implied move for the horizon as a fraction of price; a price and not a measure of what the stock does.",
     });
   }
 
@@ -222,7 +222,7 @@ export function screenReading(input) {
   else {
     push({
       key: "short", group: "context", label: "Short interest", value: r4(si * 100),
-      text: plain(si * 100, 1) + "%", unit: "of float, the vendor's short_int" + (num(pct.si) !== null ? " (the " + ordinal(pct.si) + " percentile of the screened names)" : ""), grade: 1,
+      text: plain(si * 100, 1) + "%", unit: "of float, the feed's short_int" + (num(pct.si) !== null ? " (the " + ordinal(pct.si) + " percentile of the screened names)" : ""), grade: 1,
       note: "Reported twice a month; context and never a vote.",
     });
   }

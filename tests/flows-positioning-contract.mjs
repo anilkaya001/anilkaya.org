@@ -139,7 +139,7 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   eq(s.u.net, "shareGamma", "under the documented share family the net book is labelled share-gamma");
   const dollars = gexHistory(FX.greekExposure, { sessionDate: probe.date, spot: 250, adv: 1e10, unit: "pct$" });
   eq(dollars.section.u.net, "usdPer1pct",
-    "when the run's unit probe reads the vendor in dollars per 1%, the same number is labelled in dollars, never share-gamma");
+    "when the run's unit probe reads the feed in dollars per 1%, the same number is labelled in dollars, never share-gamma");
   eq(dollars.section.usd1pct, dollars.section.net, "and is carried unscaled into the dollar reading");
   const packedDollars = buildHist({ ticker: "A", sessionDate: probe.date, generatedAt: "x", fresh: null,
     gex: dollars.series, volume: null, nope: [] });
@@ -177,7 +177,7 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   const v = volumeHistory(FX.optionsVolume, { sessionDate: SESSION }).section;
   eq(v.netPrem, -38987757 - 9102282,
     "net premium = net call premium minus net put premium: calls sold and puts bought are both bearish");
-  eq(v.bullBear, 194836481 - 240876420, "bull-bear premium is the vendor's two sums differenced, in whole dollars");
+  eq(v.bullBear, 194836481 - 240876420, "bull-bear premium is the feed's two sums differenced, in whole dollars");
   eq(v.volume, 801224 + 297310, "volume sums the legs");
   eq(v.volume, FX.contractHistoric.chains[0].ticker_vol, "and equals the contract feed's whole-name volume that day");
   near(v.pc, Number((297310 / 801224).toFixed(4)), 1e-12, "P/C is puts over calls");
@@ -213,19 +213,19 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
 
   const L = gexLevels(FX.gexLevels, { sessionDate: SESSION, spot: FX.spot, atr: FX.atr, strikes: ladder });
   eq(L.status, "ok", "the probe-shaped object reads from data, not from nearby_flips[]");
-  eq(L.flip, 331.42, "vendor levels arrive as strings and are coerced");
+  eq(L.flip, 331.42, "feed levels arrive as strings and are coerced");
   near(L.callWallAtr, Number(((345 - 341.2) / FX.atr).toFixed(3)), 1e-12, "wall distance in ATR");
   near(L.ambiguity, Number(((340.6 - 324.5) / FX.atr).toFixed(3)), 1e-12, "flip ambiguity = (max - min nearby flips) / ATR");
   near(L.flipGap, Number(((331.42 - (340 + 10 * 300 / 550)) / FX.atr).toFixed(3)), 1e-12,
-    "agreement is the vendor flip minus our book flip in ATR");
+    "agreement is the feed flip minus our book flip in ATR");
   eq(L.flipAgree, false, "more than half an ATR apart does not agree");
-  eq(L.callWallAgree, false, "vendor 345 against our 340");
-  eq(L.putWallAgree, true, "vendor 320 against our 320");
+  eq(L.callWallAgree, false, "feed 345 against our 340");
+  eq(L.putWallAgree, true, "feed 320 against our 320");
   const one = gexLevels({ data: { ...FX.gexLevels.data, nearby_flips: ["331.42"], gamma_flip: null } },
     { sessionDate: SESSION, spot: FX.spot, atr: FX.atr, strikes: ladder });
   eq(one.ambiguity, null, "a single nearby flip has no spread");
   eq(one.gaps.ambiguity, "single-flip", "and says so");
-  eq(one.flip, null, "a null vendor flip stays null");
+  eq(one.flip, null, "a null feed flip stays null");
   eq(one.gaps.flipGap, "no-level", "and the agreement is withheld with the level's code");
   eq(gexLevels({ data: [] }).status, "unreadable", "an array where the object belongs is unreadable");
   const noBook = gexLevels(FX.gexLevels, { sessionDate: SESSION, spot: FX.spot, atr: FX.atr, strikes: [] });
@@ -242,7 +242,7 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   eq(gexLevels(FX.gexLevels, { sessionDate: "2026-09-23" }).status, "stale", "and still drawn, in the secondary colour");
   const ahead = gexLevels(FX.gexLevels, { sessionDate: "2026-09-21", spot: FX.spot, atr: FX.atr });
   eq(ahead.status, "unavailable", "levels dated after the session are look-ahead, never published as its levels");
-  eq(ahead.vendorDate, "2026-09-22", "and the vendor's date is named");
+  eq(ahead.vendorDate, "2026-09-22", "and the feed's date is named");
   eq(ahead.callWall, undefined, "with no number carried");
   const aheadOi = oiWalls(FX.oiPerStrike, { sessionDate: "2026-09-21", spot: FX.spot, atr: FX.atr });
   eq(aheadOi.status, "unavailable", "open interest dated after the session is withheld the same way");
@@ -270,7 +270,7 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   eq(two.convictionBucket, "46-180", "and the bucket follows the larger net");
   const stale = flowExpiry(FX.flowPerExpiry, { sessionDate: "2026-09-23" });
   eq(stale.status, "unavailable", "a re-run during the next session does not read the partial day as this one");
-  eq(stale.vendorDate, "2026-09-22", "and names the date the vendor sent");
+  eq(stale.vendorDate, "2026-09-22", "and names the date the feed sent");
   eq(flowExpiry({ data: "x" }).status, "unreadable", "a non-list body is unreadable");
 }
 
@@ -313,7 +313,7 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
 {
   const probe = FX.nope.data[0];
   const n = nopeSection(FX.nope, { sessionDate: SESSION, candle: { open: 338, close: 339.75 } }).section;
-  eq(n.close, 0.285198, "the vendor's close NOPE is read from a string");
+  eq(n.close, 0.285198, "the feed's close NOPE is read from a string");
   near(n.closeCheck, (21406339.118273 - 12508176.402811) / 31200000, 1e-6,
     "and reproduced as (call delta + put delta) / stock volume: the put delta arrives negative");
   eq(n.checkAgrees, true, "the reproduction agrees to 1e-5");
@@ -513,7 +513,7 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   rows[5].total_bid_side_prem = "10";
   const a = alertsTape(rows, "aapl", { sessionDate: SESSION, adv: 1e5 });
   eq(a.n, 3, "only this name's alerts inside the session count, each once");
-  near(a.askShare, Number((440 / 770).toFixed(4)), 1e-12, "ask share = ask-side premium over the premium the vendor sided (ask plus bid), the site's one rule");
+  near(a.askShare, Number((440 / 770).toFixed(4)), 1e-12, "ask share = ask-side premium over the premium the feed sided (ask plus bid), the site's one rule");
   near(a.sidedShare, 0.77, 1e-12, "and the sided share of the premium is published beside it");
   const askOnly = alertsTape(rows.map((r) => ({ ...r, total_bid_side_prem: undefined })), "aapl", { sessionDate: SESSION, adv: 1e5 });
   ok(askOnly.askShare === null && askOnly.sidedShare === null && askOnly.gaps.askShare === "no-sided", "a name whose alerts state no bid side has no ask share, not an ask-over-premium figure that reads as a lean");
@@ -577,8 +577,8 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   eq(m.n, 3, "only this name's structures in the session count");
   eq(m.netPrem, 1500, "net premium sums signed nets: credits negative");
   eq(m.grossPrem, 6000, "gross premium sums the totals");
-  eq(m.netDelta, 7, "net delta in the vendor's unit");
-  eq(m.netVega, 70, "net vega in the vendor's unit");
+  eq(m.netDelta, 7, "net delta in the feed's unit");
+  eq(m.netVega, 70, "net vega in the feed's unit");
   near(m.creditShare, Number((1000 / 3500).toFixed(4)), 1e-12, "credit share of |net premium|");
   near(m.openingShare, Number((5000 / 6000).toFixed(4)), 1e-12, "all-opening share of gross premium");
   assert.deepEqual(m.byStrategy.map((s) => [s.s, s.n, s.np, s.tp]), [["iron_condor", 2, -500, 4000], ["straddle", 1, 2000, 2000]]); checks++;
@@ -603,33 +603,33 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
     rth("15:00", 9e9, { canceled: true }), rth("13:00", 7e9)] };
   const s = sessionPrints(raw, SESSION, { limit: 6 });
   assert.deepEqual(s.data.map((r) => Number(r.premium)), [100, 500, 300],
-    "the session cut keeps the vendor's own order, so the market cross can measure what the vendor ranked by"); checks++;
-  eq(s.session.capped, true, "and the session record says the vendor filled its page");
+    "the session cut keeps the feed's own order, so the market cross can measure what the feed ranked by"); checks++;
+  eq(s.session.capped, true, "and the session record says the feed filled its page");
   eq(s.session.outside, 2, "the 19:59 ET after-hours print and the 09:00 ET pre-market print are cut");
-  eq(s.session.extendedCode, 1, "the vendor's own extended-hours code agrees with the clock on the live row");
+  eq(s.session.extendedCode, 1, "the feed's own extended-hours code agrees with the clock on the live row");
   eq(s.session.canceled, 1, "a canceled print is dropped");
-  eq(s.session.vendorOrder, "time-or-other", "the vendor sent time order, which is recorded rather than assumed");
+  eq(s.session.vendorOrder, "time-or-other", "the feed sent time order, which is recorded rather than assumed");
   eq(s.vendorCapped, true, "a read that filled its limit is marked capped before the filter shrinks it");
   const shaped = shapeDarkpool({ data: [rth("14:00", 5), rth("14:01", 50), rth("14:02", null)] });
   assert.deepEqual(shaped.rows.map((r) => r.prem), [50, 5, null]); checks++;
   eq(shaped.rankedBy, "premium", "the pulse's print list is ranked by premium, never by arrival");
   const cross = indexCrossFeed("darkpool", s, { limit: 6, tickers: ["AAPL"], sessionDate: SESSION });
-  eq(cross.capped, true, "the market cross keeps the vendor's cap after the session filter");
+  eq(cross.capped, true, "the market cross keeps the feed's cap after the session filter");
   eq(cross.population, 3, "and ranks only the session's prints");
 
   const t = (m) => new Date(WIN.close - m * 60000).toISOString();
   const timeOrdered = { data: Array.from({ length: 100 }, (_, i) => ({ ticker: "T" + (i % 7), executed_at: t(1 + i * 2),
     premium: String(1000 + ((i * 37) % 100) * 1000), size: 10, price: "1", canceled: false })) };
   const tp = sessionPrints(timeOrdered, SESSION, { limit: 100 });
-  eq(tp.session.vendorOrder, "time-or-other", "a vendor that ignores order_by answers newest first");
+  eq(tp.session.vendorOrder, "time-or-other", "a feed that ignores order_by answers newest first");
   const tc = indexCrossFeed("darkpool", tp, { limit: 100, tickers: ["T1"], sessionDate: SESSION });
   eq(tc.orderedBy, "execution time, newest first",
     "and the cross then says the page was cut by time, never that it was ranked by dollar size");
   eq(tc.cutAt, t(199), "naming how far back the capped page reached");
-  eq(tc.cut, null, "with no premium threshold, because the vendor applied none");
+  eq(tc.cut, null, "with no premium threshold, because the feed applied none");
   const premOrdered = { data: timeOrdered.data.slice().sort((a, b) => Number(b.premium) - Number(a.premium)) };
   const pp = sessionPrints(premOrdered, SESSION, { limit: 100 });
-  eq(pp.session.vendorOrder, "premium", "a vendor that honours order_by=premium is recorded as such");
+  eq(pp.session.vendorOrder, "premium", "a feed that honours order_by=premium is recorded as such");
   const pc = indexCrossFeed("darkpool", pp, { limit: 100, tickers: ["T1"], sessionDate: SESSION });
   eq(pc.orderedBy, "the print's dollar size", "and only then is the cross a premium ranking");
   eq(pc.cut, 1000, "whose last place is the premium cut");
@@ -714,7 +714,7 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
     });
     const got = await readAlertBatch(pager, ["AAA"], WIN);
     eq(new Set(got.rows.map((r) => r.id)).size, 1000,
-      `a vendor that pages on ${key} loses no alert between pages (created_at trails start_time by seconds live)`);
+      `a feed that pages on ${key} loses no alert between pages (created_at trails start_time by seconds live)`);
     eq(got.complete, true, `and the ${key}-paged batch is complete only because it is`);
   }
 
@@ -771,7 +771,7 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   eq(c.payload.cone.pct, 0.4, "another leg's section on the same key is kept");
   eq(c.payload.gex.z, 1, "beside this leg's");
   eq(c.payload.fresh.readAt, "2026-09-22T21:35:00Z", "readAt is the oldest read in the payload");
-  eq(c.payload.fresh.vendorAt, "2026-09-22T20:00:00Z", "vendorAt the newest vendor stamp");
+  eq(c.payload.fresh.vendorAt, "2026-09-22T20:00:00Z", "vendorAt the newest feed stamp");
   const stale = composeCardX({ ...other, sessionDate: "2026-09-21" }, base, { gex: { status: "ok" } });
   eq(stale.payload.cone, undefined, "a section from another session is not carried forward");
   const pad = (n) => ({ status: "ok", pad: "x".repeat(n) });
@@ -803,7 +803,7 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
     strikesOf: () => [{ strike: "140", call_gamma_oi: "10", put_gamma_oi: "-90" }, { strike: "160", call_gamma_oi: "80", put_gamma_oi: "-5" }],
     cardOf: () => ({ panels: { oiDeltas: { status: "ok", rows: [{ oc: "AAA261016C00150000", diff: 900 }] } } }),
   });
-  eq(summary.calls, calls, "the leg counts every vendor call it makes");
+  eq(summary.calls, calls, "the leg counts every feed call it makes");
   for (const t of [...tickers, "DDD"]) {
     ok(published["card-x:" + t] && published["hist:" + t], `${t} publishes both keys`);
   }
@@ -966,7 +966,7 @@ const dir = nightlyEmit();
   ok(pulse.darkpool.rows.every((r, i) => i === 0 || pulse.darkpool.rows[i - 1].prem >= r.prem),
     "and ranked by premium");
   ok(pulse.darkpool.session && pulse.darkpool.session.extendedCode === 8,
-    "and the eight after-hours prints at the head of the vendor's answer were cut and counted");
+    "and the eight after-hours prints at the head of the feed's answer were cut and counted");
 }
 
 for (const file of ["shared/flows-positioning.js", "scripts/flows-legs/flow.mjs", "scripts/flows-legs/flow-fake.mjs"]) {

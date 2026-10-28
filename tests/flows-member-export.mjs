@@ -34,7 +34,7 @@ const routeBatteries = async (modules) => {
 await routeBatteries(MOD);
 
 const COLUMN_MUTANTS = [
-  ["a vendor column accepted", [['if (col.prov !== "own" && col.prov !== "agg") throw new Error("export: vendor column " + page + "." + key);', ""]]],
+  ["a feed column accepted", [['if (col.prov !== "own" && col.prov !== "agg") throw new Error("export: feed column " + page + "." + key);', ""]]],
   ["an unregistered column accepted", [['if (hits.length !== 1) throw new Error("export: unregistered or ambiguous " + page + "." + key);\n    const col = hits[0];', 'const col = hits[0] || { page, key, label: key, unit: "label", prov: "own", source: "x", dp: null, minN: 0, hold: null, note: "" };']]],
   ["the forbidden pair live", [['if (live.has(a) && live.has(b)) throw', "if (false) throw"]]],
   ["no hold ever active", [["const active = (c) => c.hold !== null && Object.hasOwn(holds, c.hold);", "const active = () => false;"]]],
@@ -43,7 +43,7 @@ const COLUMN_MUTANTS = [
   ["an undeclared hold accepted", [['if (col.hold !== null && !Object.hasOwn(HOLDS, col.hold)) throw new Error("export: unknown hold " + key);', ""]]],
   ["two windows enough", [["export const MIN_WINDOWS = 3;", "export const MIN_WINDOWS = 2;"]]],
   ["a reason grammar that allows anything", [["export const REASON_GRAMMAR = /^[A-Za-z0-9 ]{1,48}$/;", "export const REASON_GRAMMAR = /^.*$/;"]]],
-  ["the vendor premium registered as own", [['C("*", k, k, "label", "vendor", "a field of the vendor\'s row")', 'C("*", k, k, "label", k === "prem" ? "own" : "vendor", "a field of the vendor\'s row")']]],
+  ["the feed premium registered as own", [['C("*", k, k, "label", "feed", "a field of the feed\'s row")', 'C("*", k, k, "label", k === "prem" ? "own" : "feed", "a field of the feed\'s row")']]],
 ];
 
 for (const [label, transforms] of COLUMN_MUTANTS) {
@@ -125,7 +125,7 @@ const BUILD_MUTANTS = [
   ["a board of another session used", [["if (dayOf(b.sessionDate) !== session) { other = true; continue; }", ""]]],
   ["buys minus sells reversed", [["net_n: buys - sells,", "net_n: sells - buys,"]]],
   ["the held columns ignored", [["if (holds !== undefined) options.holds = holds;", ""]]],
-  ["a vendor field leaking into a row", [["const values = { ticker, sig: null, rd: null };", "const values = { ticker, sig: null, rd: null, px: 1 };"]]],
+  ["a feed field leaking into a row", [["const values = { ticker, sig: null, rd: null };", "const values = { ticker, sig: null, rd: null, px: 1 };"]]],
   ["an absent value without a reason", [["if (z.z === null) { values.move_z = null; why.move_z = z.why; } else values.move_z = z.z;", "if (z.z === null) { values.move_z = null; } else values.move_z = z.z;"]]],
   ["a reason outside the table", [["why.move_z = z.why;", 'why.move_z = "because";']]],
   ["the simple return instead of the log return", [["const z = moveZ(c === undefined ? null : c, sg === undefined ? null : sg);", "const z = { z: c === null || c === undefined || !(sg > 0) ? null : c / sg, why: \"no_change\" };"]]],

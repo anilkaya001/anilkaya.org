@@ -30,7 +30,7 @@
   const SCORE_SCALE = Math.atanh(0.80) / 2.0;
 
   const NO_CARD_SAID =
-    "No detail card: the chain and the card cost vendor calls the run spends " +
+    "No detail card: the chain and the card cost feed calls the run spends " +
     "only on the names furthest from neutral. This row is scored and ranked " +
     "from the same five sources as every other.";
 
@@ -958,7 +958,7 @@
   const COLUMN_NOTES = WATCH ? [
     "To band: how far the score sits from the nearest edge of the dead band, in score points. Zero means it would publish.",
     "Surprise: the log ratio of call-side to put-side volume surprise, each side against this name's own thirty-day norm. 0 is a balanced day for this name; positive means the call side is doing the surprising.",
-    "Rel vol: today's share volume against its own recent norm, as the vendor reports it. P/C: put contracts traded per call contract, a ratio of the prints and not a positioning estimate.",
+    "Rel vol: today's share volume against its own recent norm, as the feed reports it. P/C: put contracts traded per call contract, a ratio of the prints and not a positioning estimate.",
     "52w: where the last price sits between the 52-week low and high.",
     "5d: the score over the last five scored sessions, oldest first; a dot is a session the name was not scored.",
     "Back in: the name was outside the band when it was last scored and is inside it now; it came back through the edge.",

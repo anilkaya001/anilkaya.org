@@ -647,7 +647,7 @@ try {
   });
 
   await scenario("a priced move with no quoted implied move", { pm: { status: "ok", spot: 1234.56, impliedMove: 0.05, movePerc: null, asOf: SESSION } }, (got) => {
-    ok(got.impliedBig === null && /vendor quoted no implied move/.test(got.impliedWhy), "a modelled band is not passed off as the market's quoted move");
+    ok(got.impliedBig === null && /feed quoted no implied move/.test(got.impliedWhy), "a modelled band is not passed off as the market's quoted move");
   });
 
   await scenario("report outside the window", { next: { d: "2026-10-30", when: "premarket", source: "company", confirmed: false, sessions: 22 }, em: 0.05, ed: 22 }, (got) => {

@@ -188,7 +188,7 @@ const MODULES = ["m-worlds", "m-signal", "m-gamma", "m-hedge", "m-vol", "m-flow"
   eq([...built].sort().join(" "), [...MODULES, "m-screen"].sort().join(" "),
      "the page builds exactly the twelve dossier modules this contract sweeps, plus the lite page's Screen, swept by its own block below, and the glance's Ideas tab, which only holds the verdict");
   for (const p of TICKER_PANELS) {
-    ok(map.has(p.key), `registry panel "${p.key}" is placed in a module by the page's panel map — a panel no module reads is a vendor call nobody sees`);
+    ok(map.has(p.key), `registry panel "${p.key}" is placed in a module by the page's panel map — a panel no module reads is a feed call nobody sees`);
     ok(built.has(map.get(p.key)) || map.get(p.key) === "ftHero", `and "${p.key}" is placed in ${map.get(p.key)}, a module the page actually builds`);
   }
   for (const card of withChain) {
@@ -392,7 +392,7 @@ try {
     eq(r.rows["Strike-sum crossing"], "$101.25", "the strike-sum crossing under its own name");
     eq(r.rows["Zero-gamma level"], "$99.50", "and the zero-gamma level beside it, never merged with it");
     ok(!("Gamma flip" in r.rows), "no row is labelled with the ambiguous 'Gamma flip'");
-    eq(r.rows["Priced move to the end-of-week expiry"], "±7.3%", "the vendor's priced move, labelled with the horizon it is quoted for");
+    eq(r.rows["Priced move to the end-of-week expiry"], "±7.3%", "the feed's priced move, labelled with the horizon it is quoted for");
     eq(r.rows["IV rank"], "73.4% · 2026-08-28", "THE RANK IS PICKED BY DATE, NOT BY INDEX — 73.4 on 2026-08-28 is the newest of three shuffled rows");
 
     const edged = clone(base);
@@ -409,7 +409,7 @@ try {
        `a card with no published crossing says so under the quiet mark, with the gamma panel's own reason (${q.rows["Strike-sum crossing"]})`);
     ok(/^— unavailable/.test(q.rows["Zero-gamma level"]), "a card with no chain profile marks the zero-gamma level unavailable");
     const dead = clone(base);
-    dead.panels.volContext = { status: "unavailable", reason: "The vendor returned no volatility history." };
+    dead.panels.volContext = { status: "unavailable", reason: "The feed returned no volatility history." };
     const d = await read(dead);
     ok(/^— unavailable/.test(d.rows["IV rank"]) && /no volatility history/.test(d.rows["IV rank"]), `an unreadable source makes its row unavailable, never quiet, with the source's reason (${d.rows["IV rank"]})`);
     eq(d.rows.Spot, "$100.00", "and it does not silence the rows that came from panels that DID publish");
@@ -818,7 +818,7 @@ try {
       const r = screenReading({ ticker: card.ticker, u: card.u, pct: card.pct, sector: card.sector, sessionDate: session, expectedSession: session });
       return { status: "ok", scope: card.ticker, tier: r.tier, code: r.noIdeaCode, why: r.why, summary: r.summary, ideas: [], engine: false, verdict: null, verdictWord: "Screen read",
         claims: [], refused: [], context: null, llm: false, model: null, guard: null, generatedAt: full.generatedAt,
-        provenance: "Read from the screener row alone by fixed rules: no model was asked and no vendor call was made for it.", screen: r, ...extra };
+        provenance: "Read from the screener row alone by fixed rules: no model was asked and no feed call was made for it.", screen: r, ...extra };
     };
     const read = () => document.getElementById("ftVerdict") && ({
       hidden: document.getElementById("ftVerdict").hidden, head: (document.getElementById("ftVerdictT") || {}).textContent,
@@ -844,15 +844,15 @@ try {
       ok(/Not priced/.test(got.idea) && /soft tilt, not a signal for one name/.test(got.idea) && /No option chain was read for this name, so no strike, expiry, price, chance of profit or payoff estimate is shown/.test(got.idea),
         "it says it is not priced, that it is a soft tilt, and what is NOT known and why, in plain words");
       eq(got.slots, 0, "and draws none of the PoP, EV or Risk slots a priced idea has");
-      ok(/no model was asked and no vendor call was made/.test(got.src), "the provenance says nothing was asked of a model or the vendor");
+      ok(/no model was asked and no feed call was made/.test(got.src), "the provenance says nothing was asked of a model or the feed");
       const dl = Object.fromEntries(got.dl);
       ok(/^−2\.19% of average daily dollar volume for each 1% move in the stock · grade 1$/.test(dl["Dealer book gamma"]), `every fact carries its unit and its grade (${dl["Dealer book gamma"]})`);
       ok(/^\+2\.40 times average daily dollar volume/.test(dl["Dealer delta"] || ""), `dealer delta as a multiple of a day's dollar volume (${dl["Dealer delta"]})`);
-      ok(/^negative in the vendor's sign, size not shown · grade 0$/.test(dl["Dealer charm"]), "charm as a sign at grade zero");
+      ok(/^negative in the feed's sign, size not shown · grade 0$/.test(dl["Dealer charm"]), "charm as a sign at grade zero");
       ok(/^40 sessions away/.test(dl["Next earnings report"]) && /^withheld, /.test(dl["Short interest"]), "the earnings date is a fact and the missing short interest is listed as withheld with its reason");
       ok(got.spill <= 1 && got.page <= 0, `${width}px the block never reaches past the page (${got.spill}, ${got.page})`);
       const t = await infoText(page, "#ftVerdict .ft-idea");
-      ok(/documents no sign convention/.test(t) && /Dealer delta/.test(t) && /Dealer book gamma/.test(t), "and the idea's disclosure states each fact's note, the vendor's missing sign conventions among them");
+      ok(/documents no sign convention/.test(t) && /Dealer delta/.test(t) && /Dealer book gamma/.test(t), "and the idea's disclosure states each fact's note, the feed's missing sign conventions among them");
       eq(errors.length, 0, `${width}px the screen-tier page throws nothing (${errors.join("; ")})`);
       await page.close();
     }
@@ -929,7 +929,7 @@ try {
       waiting: [...document.querySelectorAll("#ftGrid [data-state=pending], #ftVerdict [data-state=pending]")].filter((n) => n.getClientRects().length).length,
       worlds: !!document.getElementById("m-worlds") }));
     ok(got.chip && /Stale/.test(got.chip) && got.chip.includes(got.day), `T5: a card behind the expected session shows a visible Stale chip with its date (${got.chip})`);
-    eq(got.px, "123.45", "and the headline price is the vendor's last price, not the old card's");
+    eq(got.px, "123.45", "and the headline price is the feed's last price, not the old card's");
     ok(/^Close /.test(got.last), `labelled Close with its day (${got.last})`);
     eq(got.waiting, 0, "T6: missing card-x and hist on a stale card are unavailable, never pending");
     eq(errors.length, 0, `the stale card throws nothing (${errors.join("; ")})`);
@@ -1099,7 +1099,7 @@ try {
   {
     const legacy = clone(withChain[0]);
     delete legacy.panels.ivSurface;
-    legacy.panels.aggressor = { status: "unavailable", reason: "the vendor reported no aggressor split." };
+    legacy.panels.aggressor = { status: "unavailable", reason: "the feed reported no aggressor split." };
     const page = await browser.newPage({ viewport: { width: 1280, height: 1200 } });
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
@@ -1228,7 +1228,7 @@ try {
     ok(/No cell on this surface carries a measured distance/.test(b) && !/flat smile/.test(b) && !/Steepest cell/.test(b), "an unmeasured surface reads the absence, never the flat word, and publishes no steepest cell");
     const trunc = cards.find((c) => c.panels && c.panels.ivSurface && c.panels.ivSurface.coverage && c.panels.ivSurface.coverage.truncated === true);
     const tc = clone(trunc || card);
-    if (!trunc) tc.panels.ivSurface.coverage = { truncated: true, rowsReturned: 500, filter: "contracts with no open interest are excluded upstream by the vendor" };
+    if (!trunc) tc.panels.ivSurface.coverage = { truncated: true, rowsReturned: 500, filter: "contracts with no open interest are excluded upstream by the feed" };
     await mount(page, tc);
     ok(/arbitrary subset of the book/.test(await modInfo(page, "m-vol")), "a truncated surface still says the picture may be an arbitrary slice of the book");
     const sk = clone(card);
@@ -1363,7 +1363,7 @@ try {
       const g = got.find((x) => x.name === name);
       let legs = 0;
       for (const r of p.rows) { if (typeof r.call === "number") legs++; if (typeof r.put === "number") legs++; }
-      eq(g && g.bars, legs, `${key}: one bar per PRESENT leg (${legs}), never one per expiry — each leg drawn as the vendor signed it`);
+      eq(g && g.bars, legs, `${key}: one bar per PRESENT leg (${legs}), never one per expiry — each leg drawn as the feed signed it`);
       ok(g && g.calls > 0 && g.puts > 0, `${key}: both legs are drawn and told apart by class`);
       ok(g && g.negBelow && g.posAbove, `${key}: every negative leg is drawn BELOW the zero line — sign lives in position, so it survives greyscale`);
       ok(info.includes(p.unit), `${key}: the panel's own published unit is in the disclosure verbatim`);
@@ -1378,7 +1378,7 @@ try {
     await pickView(page, "m-hedge", "Greeks");
     const flats = await page.evaluate(() => { const row = [...document.querySelectorAll("#m-hedge .ft-greek")].find((r) => /Charm/.test(r.textContent)); return [...row.querySelectorAll("rect.ft-gl.is-flat")].map((b) => Number(b.getAttribute("height"))); });
     eq(flats.length, 1, "a leg measured at exactly zero is still drawn");
-    ok(flats.every((h) => h >= 1), "as a visible hairline, because a zero-height bar is indistinguishable from the leg the vendor never sent");
+    ok(flats.every((h) => h >= 1), "as a visible hairline, because a zero-height bar is indistinguishable from the leg the feed never sent");
     eq(errors.length, 0, `the Greek ladders render without throwing (${errors.join("; ")})`);
     await page.close();
   }
@@ -1407,7 +1407,7 @@ try {
       eq(got.rowHeads, 5, `${width}px: five price rows, each a scope=row header`);
       eq(got.cells, 15, `${width}px: fifteen cells`);
       eq(got.silentCells, V.grid.cells.flat().filter((c) => c === null).length, `${width}px: a silent cell is drawn as a silence, not as zero`);
-      ok(/dealer-signed under the vendor's convention/.test(info), `${width}px: the disclosure states the dealer assumption every figure rests on`);
+      ok(/dealer-signed under the feed's convention/.test(info), `${width}px: the disclosure states the dealer assumption every figure rests on`);
       ok(info.includes(V.lead.say), `${width}px: the hedging lead is the publisher's sentence verbatim`);
       const negative = V.variance && Object.values(V.variance.shares).some((x) => x !== null && x < 0);
       ok(negative ? /channels offset/.test(info) : got.split >= 1, `${width}px: a part-of-whole bar is drawn only when every share is a part of the whole, and the offset is said otherwise`);
@@ -1685,7 +1685,7 @@ try {
     const broken = clone(fitted);
     broken.panels.context.breaks = [{ date: "2026-04-06", ratio: 0.0426, before: 117, volumeRatio: 20.5, shape: "split" }];
     await mount(page, broken);
-    const brk = /The vendor’s history steps on 2026-04-06 \(close ×0\.0426, volume ×21 against the sessions before, the shape of an unadjusted split\), so the 117 sessions before it are cut/;
+    const brk = /The feed’s history steps on 2026-04-06 \(close ×0\.0426, volume ×21 against the sessions before, the shape of an unadjusted split\), so the 117 sessions before it are cut/;
     ok(brk.test(await modInfo(page, "m-vol")), "a history break is named on the volatility disclosure with its date, the price and volume steps, its shape and the sessions cut");
     const older = clone(fitted);
     delete older.panels.context.garch.dist; delete older.panels.context.garch.lambda; delete older.panels.context.garch.nextVol;
@@ -2490,7 +2490,7 @@ try {
       c.regime = { ...(c.regime || {}), label };
       await mount(page, c);
       eq(await chipLead("Dealer γ"), "Dealers are " + label + " gamma " + DEALER_CLAUSE + ": their hedging " + hedge,
-        `the ${label}-gamma chip asserts a hedging direction only on the vendor's convention, and says so in DEALER_CLAUSE's words`);
+        `the ${label}-gamma chip asserts a hedging direction only on the feed's convention, and says so in DEALER_CLAUSE's words`);
     }
     {
       const withZero = clone(full);
@@ -2509,13 +2509,13 @@ try {
     ranked.panels.pricedMove.ivRank = 0.52;
     ranked.engine.noTrade = null;
     await mount(page, ranked, { neuron: engineSummary(ranked) });
-    eq(await chipLead("IV rank"), "IV rank, 52 of 100: where today sits between its 1-year low and high. The vendor does not document which tenor of implied volatility it ranks.",
+    eq(await chipLead("IV rank"), "IV rank, 52 of 100: where today sits between its 1-year low and high. The feed does not document which tenor of implied volatility it ranks.",
       "the IV rank chip names the statistic it shows: a place between the year's low and high, not a percentile of the year");
     ok(/\nIV rank\n52 of 100: where today sits between its 1-year low and high\n/.test(await modInfo(page, "m-vol")), "and so does the volatility module's own line for it");
     ok(!/percentile of its own year/.test(TICKER_SRC), "no line of the ticker calls the rank a percentile any more");
     ok(!/high, for 30-day|30-day implied volatility (sits|below)/.test(TICKER_SRC),
-      "and no line states the rank's or the percentile's tenor: the screener's iv_rank and iv percentile document none (the rank's schema reference in the vendor spec is a copy of the 30-day IV's), so no chip guesses it");
-    eq((TICKER_SRC.match(/The vendor does not document which tenor (of implied volatility )?it (ranks|reads)\./g) || []).length, 3,
+      "and no line states the rank's or the percentile's tenor: the screener's iv_rank and iv percentile document none (the rank's schema reference in the feed spec is a copy of the 30-day IV's), so no chip guesses it");
+    eq((TICKER_SRC.match(/The feed does not document which tenor (of implied volatility )?it (ranks|reads)\./g) || []).length, 3,
       "each of the three leads that describe the screener's rank or percentile (the card's IV rank chip and the screen tier's IV rank and IV pct chips) says the tenor is undocumented");
     const ideas = await page.evaluate(() => {
       const k = document.querySelector("#ftVerdict .ft-ideas-k");
@@ -2559,7 +2559,7 @@ try {
     });
     ok(ev, "the Events module draws for a card-x that holds an earnings history");
     eq(ev.subs.Beat, "2 of 4 moved > priced", "D6: the beat share says how many reports it is a share of, beside the share itself, so 50% of four reports is not read as a rate");
-    eq(ev.subs.Straddle, "2 of 3 hit, 1d", "and the straddle hit rate counts only the reports the vendor published a straddle value for: three of the four here, not the four the beat share reads");
+    eq(ev.subs.Straddle, "2 of 3 hit, 1d", "and the straddle hit rate counts only the reports the feed published a straddle value for: three of the four here, not the four the beat share reads");
     const evInfo = (await modInfo(page, "m-events")).replace(/\s+/g, " ");
     ok(/Beat share 50% \(2 of 4 reports\)/.test(evInfo), `the popover's beat share carries the same count (${evInfo.slice(0, 400)})`);
     ok(/Long straddle 1d \/ 1w 67% \/ 50% profitable \(2 of 3 \/ 1 of 2 reports\)/.test(evInfo), "and the 1d and 1w straddle rates each carry their own count");

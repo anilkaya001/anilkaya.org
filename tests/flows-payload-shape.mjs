@@ -382,7 +382,7 @@ assert.deepEqual(missingReport, [],
   ok(okFeed.asOfStated === true && typeof okFeed.asOf === "string",
      "the market-wide feed publishes the session IT describes, from its own rows");
   eq(okFeed.sameSession, false,
-     "and the corpus really exercises the timing trap: a run joins the vendor's morning " +
+     "and the corpus really exercises the timing trap: a run joins the feed's morning " +
      "update, which here describes the PREVIOUS " +
      "session's cross-section, onto today's card, and the payload says so rather than " +
      "letting the card imply the ranking is today's");
@@ -404,7 +404,7 @@ assert.deepEqual(missingReport, [],
      "the pipeline emits a sector:premium payload — the eleven sector option leans");
   ok(Array.isArray(p.sectors) && p.sectors.length === 11,
      `it publishes all eleven baskets under \`sectors\` (${p.sectors && p.sectors.length}), ` +
-     "present whatever the vendor answered — a panel that quietly shrinks from eleven bars " +
+     "present whatever the feed answered — a panel that quietly shrinks from eleven bars " +
      "to nine is how an outage goes unnoticed for a week");
   ok(!("rows" in p),
      "and NOT under `rows` — the name the sector renderer read for that panel's whole life " +
@@ -467,7 +467,7 @@ assert.deepEqual(missingReport, [],
   ok(typeof p.readAt === "string" && !Number.isNaN(Date.parse(p.readAt)),
      "the payload says when WE read it");
   eq(p.vendorDated, false,
-     "and says the vendor dated it, not us — /api/market/sector-etfs accepts no date parameter");
+     "and says the feed dated it, not us — /api/market/sector-etfs accepts no date parameter");
   ok(typeof p.notSameAs === "string" && /sector:trix/.test(p.notSameAs),
      "and names the key it must not be confused with, on the payload rather than only in a " +
      "comment no renderer reads");
@@ -478,7 +478,7 @@ assert.deepEqual(missingReport, [],
 
   ok(p.returned >= p.sectors.length,
      `the wire row count (${p.returned}) is published beside the eleven sectors, because the ` +
-     "vendor's response leads with SPY and a reader comparing the two would otherwise think " +
+     "feed's response leads with SPY and a reader comparing the two would otherwise think " +
      "a basket had gone missing");
 }
 
@@ -497,7 +497,7 @@ assert.deepEqual(missingReport, [],
      `the corpus really exercises truncation (${n.shed} shed by the ${n.cap}-row cap) — a ` +
      "fixture that fitted inside the cap would leave the disclosure certified by nothing");
   eq(n.atVendorLimit, true,
-     "and the vendor's own ceiling too: a full page means the true population is unknown and " +
+     "and the feed's own ceiling too: a full page means the true population is unknown and " +
      "at least that large, which is a DIFFERENT fact from our cap having shed rows we saw");
   ok(n.returned > n.kept, `and the two counts differ (${n.returned} returned, ${n.kept} kept)`);
 
@@ -516,9 +516,9 @@ assert.deepEqual(missingReport, [],
      `(${n.oldest} .. ${n.newest})`);
   for (const row of n.rows) {
     ok(Object.hasOwn(row, "createdAt") && Object.hasOwn(row, "createdAtMs"),
-       "every published row carries the vendor's own timestamp verbatim and our parse of it");
+       "every published row carries the feed's own timestamp verbatim and our parse of it");
     ok(Object.hasOwn(row, "tickers") && Array.isArray(row.tickers),
-       "and the ticker array that makes a per-name join a filter rather than a vendor call");
+       "and the ticker array that makes a per-name join a filter rather than a feed call");
     ok(row.headline && typeof row.headline === "string",
        "and a headline, which is the row");
   }
@@ -529,7 +529,7 @@ assert.deepEqual(missingReport, [],
   const dated = n.rows.map((r) => r.createdAtMs).filter((ms) => ms !== null);
   ok(dated.every((ms, i) => i === 0 || dated[i - 1] >= ms),
      "and the published rows really are newest-first — the cap is applied after the sort, so " +
-     "`kept` is the newest sixty and not the first sixty the vendor happened to send");
+     "`kept` is the newest sixty and not the first sixty the feed happened to send");
 
   ok(typeof n.scope === "string" && /filter/.test(n.scope),
      "the payload says the route is market-wide and that `ticker` on it is a filter — the " +
@@ -856,7 +856,7 @@ assert.deepEqual(missingReport, [],
     ok(typeof c.ticker === "string" && c.fresh && !("panels" in c), `card-x:${c.ticker} is its own key, not a card`);
     ok(c.scope === "index" || c.scope === "fund" || ["short", "insiders", "earnings"].some((k) => c[k]),
        `card-x:${c.ticker} carries at least one ownership part, unless it is an index or fund dossier the vol leg alone ` +
-       "writes (ETFs have no insiders or earnings at the vendor)");
+       "writes (ETFs have no insiders or earnings at the feed)");
     ok(Buffer.byteLength(JSON.stringify(c)) <= 100 * 1024, `card-x:${c.ticker} fits its cap`);
   }
 
@@ -971,7 +971,7 @@ console.log(`✓ flows-payload-shape: ${checks} assertions — the publisher and
   `publisher's side while that is still free to fix: the sector option lean's three reads ` +
   `and its measured zero, its vocabulary proven DISJOINT from the sector momentum key it ` +
   `must never be merged with, and the news tape's four counts, its stated ordering and the ` +
-  `vendor stamp on every row beside the instant we read them; and the volatility dossiers (card-x), the ` +
+  `feed stamp on every row beside the instant we read them; and the volatility dossiers (card-x), the ` +
   `card's x.vol summary and the regime's vol radar pinned field by field on every arm they are emitted on; and the per-name card-x and hist ` +
   `keys pinned the same way, every section's readable arm, silence codes, units and packed series; and the live layer's ten Tier 2 ` +
   `keys pinned the same way: a fresh envelope on each, series aligned to their axes, units and ` +

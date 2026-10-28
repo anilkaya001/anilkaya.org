@@ -388,7 +388,7 @@ export function readPxOf(e, readAt) {
       ? "The screener's last price when this run read it. Every level, distance and change " +
         "on this card is measured from the session's daily close instead, so the two differ " +
         "by whatever traded after that close."
-      : "The screener's last price when this run read it. The vendor returned no daily bar " +
+      : "The screener's last price when this run read it. The feed returned no daily bar " +
         "for this session, so this read price is also the reference every level on this " +
         "card is measured from.",
   };
@@ -1352,7 +1352,7 @@ export function holdersRefusal(prior, sessionDate, { days = HOLDERS_RETRY_DAYS }
   if (!(age >= 0) || age >= days) return null;
   return {
     status: Number(status[1]), since: first,
-    reason: `not requested this run: the vendor answered this route with HTTP ${status[1]}, ` +
+    reason: `not requested this run: the feed answered this route with HTTP ${status[1]}, ` +
       `refused since ${first}, and a refusal that is a property of the plan is not bought ` +
       `again every night — it is asked once more ${days} days after ${first}`,
   };

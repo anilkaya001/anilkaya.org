@@ -730,7 +730,7 @@ try {
      "detail card exists only for the names the board went deep on, so a link would " +
      "reliably lead nowhere");
   ok(read.movers.includes("AAA") && read.movers.includes("DDD"),
-     "all four mover lists reach the page — eleven vendor calls a run stop being dark");
+     "all four mover lists reach the page — eleven feed calls a run stop being dark");
 
   const head = (t) => read.moverHeads.find((h) => h.title === t);
   eq(head("Risers").cut, " · 8 of 9",
@@ -897,15 +897,15 @@ await showTab(page, "#mkVolumeSeg");
      "and ten-fold growth or more from a real base prints the multiple of the prior " +
      "snapshot, 1 + ratio = current / previous, rather than a five-digit percent");
   eq(read.oi[5][1], "new",
-     "a contract up 60,035 on a vendor ratio of 0 (a previous open interest of 1) reads 'new', NEVER '0%': " +
-     "the zero is the vendor's division by a base of almost nothing, not a growth of nothing");
+     "a contract up 60,035 on a feed ratio of 0 (a previous open interest of 1) reads 'new', NEVER '0%': " +
+     "the zero is the feed's division by a base of almost nothing, not a growth of nothing");
   ok(/From 1 contracts/.test(read.oiTitles[5] || ""), `with the base it grew from behind it (${read.oiTitles[5]})`);
   eq(read.oi[6][1], "new", "and the same ratio of 0 with no previous open interest published reads 'new' too");
-  ok(/ratio the vendor sent as 0/.test(read.oiTitles[6] || ""), `saying why there is no percentage (${read.oiTitles[6]})`);
+  ok(/ratio the feed sent as 0/.test(read.oiTitles[6] || ""), `saying why there is no percentage (${read.oiTitles[6]})`);
   eq(read.seaValues[0], "0.00%",
      "a seasonal average of exactly zero prints '0.00%', never '+0.00%'");
   eq(read.seaValues[1], "−1.25%",
-     "and a negative month keeps the U+2212 minus — read as the FRACTION the vendor sends (avg_change −0.0125 is " +
+     "and a negative month keeps the U+2212 minus — read as the FRACTION the feed sends (avg_change −0.0125 is " +
      "−1.25%), because a production read carried averages between −0.26 and +0.19 and positive-month shares between " +
      "0.44 and 0.71, which only a fraction explains; the old renderer printed them as −0.01%");
   deep(read.seaShares, ["50%", "42%"], "and the share of months that closed higher is a fraction made a percent too");
@@ -1149,7 +1149,7 @@ await showTab(page, "#mkVolumeSeg");
     eq(aged.lone.length, 1,
        "and the lone bucket whose neighbours were both null is drawn too, as a dot in the " +
        "series' own colour. A one-sample run used to emit a bare moveto — a path that moves " +
-       "and never paints — so a bucket the vendor did send disappeared from the chart " +
+       "and never paints — so a bucket the feed did send disappeared from the chart " +
        "entirely. The gap rule exists to stop a missing reading being invented, not to make " +
        "a taken one vanish");
     ok(aged.calls.length === 1 && (aged.calls[0].match(/M/g) || []).length === 1,
@@ -1502,7 +1502,7 @@ await showTab(page, "#mkVolumeSeg");
     const sil = await silenceAt(twice, "#mkSeason [data-empty]");
     await twice.close();
     eq(cells, 0,
-       "a seasonality payload that repeats a month draws no calendar: the vendor sends one row per ticker per month, " +
+       "a seasonality payload that repeats a month draws no calendar: the feed sends one row per ticker per month, " +
        "and a publisher that drops the ticker leaves twelve Januaries that read as a broken year");
     eq(sil && sil.kind, "unavailable", "it is the payload's gap, marked as one");
     ok(/does not say which ticker/.test((sil && sil.text) || ""), `and says what is missing (${sil && sil.text})`);
@@ -1702,7 +1702,7 @@ await showTab(pg, "#mkSeason");
     ok(/\b20 of 200 screened names quoted no usable\b/.test(note),
        `the breadth note prints the COERCED count (${note.slice(0, 120)}…). It tested ` +
        "`isNum(b.unpriced) !== null` and then concatenated the RAW field, so a count the " +
-       "vendor quoted as \"20 \" reached the sentence carrying the vendor's whitespace — " +
+       "feed quoted as \"20 \" reached the sentence carrying the feed's whitespace — " +
        "the same guarded-then-raw shape that sent a quoted ratio into String.prototype." +
        "toFixed two rows up, one string concatenation away from being a crash instead of " +
        "a typo");
@@ -1733,7 +1733,7 @@ await showTab(pg, "#mkSeason");
         equityShare: 0.203133, path: { t0: EXPECTED + "T13:30:00.000Z", step: 5,
           pts: Array.from({ length: 12 }, (_, i) => [i * 5, 1e6 * (i - 3), 500 + i]) } },
       sectors: { status: "ok", rows: SECTOR_NAMES.map(([sector], k) => (k === 8
-        ? { sector, status: "unavailable", reason: "the vendor answered 422 for this sector" }
+        ? { sector, status: "unavailable", reason: "the feed answered 422 for this sector" }
         : { sector, status: "ok", net: (k - 5) * 2e6, path: pathOf(k, 4e6 + k * 1e5) })) },
       etfTide: { status: "ok", byEtf: Object.fromEntries(["SPY", "QQQ", "IWM"].map((t, j) => [t, {
         status: "ok", net: (j - 1) * 5e7, ownNet: 4e7, agree: j !== 0, path: pathOf(j, 6e7) }])) },
@@ -1812,13 +1812,13 @@ await showTab(deepPage, "#mkTideSeg");
 
     eq(depth.smalls.length, 11, "the sector tides are eleven small multiples, one per sector");
     ok(depth.smalls.filter((c) => c.chart).length === 10 && depth.smalls.some((c) => c.empty === "unavailable"),
-       "ten draw their session path, and the one the vendor refused says it is unavailable rather than drawing flat");
+       "ten draw their session path, and the one the feed refused says it is unavailable rather than drawing flat");
     ok(depth.smalls.every((c) => c.chart ? c.svgH === 56 : true), "each at the same small height, so they compare by shape");
     const nets = depth.smalls.filter((c) => c.v !== "—").map((c) => c.v);
     ok(nets[0].startsWith("+") && nets[nets.length - 1].startsWith("−"),
        `ordered from the most net-bought sector to the most net-sold (${nets.join(" ")})`);
     ok(depth.smalls.some((c) => c.n === "Cyclicals" && c.full === "Consumer Cyclical"),
-       "with the long vendor sector names shortened to fit a small cell, and the full name kept on the cell");
+       "with the long feed sector names shortened to fit a small cell, and the full name kept on the cell");
     ok(depth.smalls.every((c) => c.n.length <= 13), `and no short name longer than a small cell holds (${depth.smalls.map((c) => c.n).join(", ")})`);
 
     eq(depth.spy["Net premium"], "−$24.0M",
@@ -1847,7 +1847,7 @@ await showTab(deepPage, "#mkTideSeg");
 
     deep(depth.radarTabs, [["Rich", false], ["Cheap", false], ["Bullish", false], ["Bearish", false]],
       "the radar offers all four screens");
-    deep(depth.radarRows.map((r) => r[1]), ["SOXS", "EEE"], "the rich screen lists the vendor's names in its order");
+    deep(depth.radarRows.map((r) => r[1]), ["SOXS", "EEE"], "the rich screen lists the feed's names in its order");
     deep(depth.radarRows[1], ["A", "EEE", "/flows/ticker/?t=EEE"], "and a name with a card today links to its reader");
     eq(depth.radarRows[0][0], "DIV", "while one without a card is plain");
 await showTab(deepPage, "#mkRadarSeg");
@@ -1855,7 +1855,7 @@ await showTab(deepPage, "#mkRadarSeg");
     await deepPage.waitForSelector("#mkRadar [data-empty]", { timeout: 5000 }).catch(() => {});
     const bearish = await silenceAt(deepPage, "#mkRadar [data-empty]");
     eq(bearish && bearish.kind, "quiet", "a screen that returned no names is QUIET, a fact about the day");
-    ok(/no bearish names/.test((bearish && bearish.text) || ""), `in the vendor's own reason (${bearish && bearish.text})`);
+    ok(/no bearish names/.test((bearish && bearish.text) || ""), `in the feed's own reason (${bearish && bearish.text})`);
 
     eq(depth.groups.length, 8, "the group module draws all eight industry groups");
     eq(depth.groups[0][0], "Consumer cyclical", "ordered by delta flow, most bought first");
@@ -1988,7 +1988,7 @@ await showTab(deepPage, "#mkRadarSeg");
        "a market tide holding one reading shows a calm Opening state instead of a chart with one dot on an empty axis");
     eq(opened.tideNet, "+$8.6M", "while the reading itself is still printed");
     deep(opened.tideTabs, ["Market", "SPY", "QQQ"],
-      "the tide's views take SPY from the breadth layer and QQQ from the market layer, and leave out a zero-day series the vendor could not shape");
+      "the tide's views take SPY from the breadth layer and QQQ from the market layer, and leave out a zero-day series the feed could not shape");
     deep(opened.waiting, [], "and no tide, ETF or sector-tide module carries a pending mark while its data exists");
     await openPage.close();
 
@@ -2008,7 +2008,7 @@ await showTab(deepPage, "#mkRadarSeg");
     const opening = await why(openB, "#mkSecTidesCard .ui-mod-t .mk-chip");
     ok(/first reading/.test(opening.lead), `whose Why says the path draws from the next refresh (${opening.lead})`);
     eq(b.iwm["Own net"], "+$5.5M",
-       "an IWM tide the vendor did not carry shows the ETF's own options net premium, labelled as such, instead of a pending dash");
+       "an IWM tide the feed did not carry shows the ETF's own options net premium, labelled as such, instead of a pending dash");
     eq(b.iwm["Net premium"], undefined, "and does not print it under the tide's label");
     deep(b.waiting.filter((id) => id !== "mkTideCard"), [], "no ETF or sector-tide module waits on data that exists");
     const overB = await openB.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -2134,4 +2134,4 @@ await showTab(deepPage, "#mkRadarSeg");
   await server.stop();
 }
 
-console.log(`✓ flows-market: ${checks} assertions — a level the board neutralises away by design, net premium measured only where both legs were quoted, ratios of sums over one population, an IV rank that is a fraction on both sides of the wire, sector momentum drawn from the RAW signed reading on the payload's own published band with a measured zero printed unsigned and unclassed, a failed request told apart from an unpublished key and from a quiet one by glyph and by sentence, twenty sessions of totals turned into a rank with its denominator, the boards read against the session's premium extremes, a stale banner that can finally fire carrying WHICH outage it found, no line bridged across a bucket the vendor never sent and none dropped either, a part-to-whole bar refused when one of its parts was never published, a rank whose denominator is the sessions that could be ranked and says so, a superlative withheld from a tie, a session date that parses but names no day refused before it can date anything, a reading the vendor quoted rendered as the number it is, two ratios that formatted the coerced value and a reading after them proving nothing threw, a ladder that admitted nobody rendered as the session it is, a blank string and a boolean refused before the coercion, the depth modules — sector tides as eleven small multiples, the three index ETFs with their tide, flow and vol, net flow by expiry, the index vol curve, the radar's four screens, group delta flow and the advancers histogram — each reading the live layers first and, at the open, standing in the last session dated or an Opening chip rather than a pending tile, every chart asserted at its DRAWN size, and no prose on the surface`);
+console.log(`✓ flows-market: ${checks} assertions — a level the board neutralises away by design, net premium measured only where both legs were quoted, ratios of sums over one population, an IV rank that is a fraction on both sides of the wire, sector momentum drawn from the RAW signed reading on the payload's own published band with a measured zero printed unsigned and unclassed, a failed request told apart from an unpublished key and from a quiet one by glyph and by sentence, twenty sessions of totals turned into a rank with its denominator, the boards read against the session's premium extremes, a stale banner that can finally fire carrying WHICH outage it found, no line bridged across a bucket the feed never sent and none dropped either, a part-to-whole bar refused when one of its parts was never published, a rank whose denominator is the sessions that could be ranked and says so, a superlative withheld from a tie, a session date that parses but names no day refused before it can date anything, a reading the feed quoted rendered as the number it is, two ratios that formatted the coerced value and a reading after them proving nothing threw, a ladder that admitted nobody rendered as the session it is, a blank string and a boolean refused before the coercion, the depth modules — sector tides as eleven small multiples, the three index ETFs with their tide, flow and vol, net flow by expiry, the index vol curve, the radar's four screens, group delta flow and the advancers histogram — each reading the live layers first and, at the open, standing in the last session dated or an Opening chip rather than a pending tile, every chart asserted at its DRAWN size, and no prose on the surface`);

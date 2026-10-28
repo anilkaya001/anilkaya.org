@@ -73,7 +73,7 @@ export const UNIVERSE_NOTES = Object.freeze({
     "independent of the option flow being scored — selecting on the flow itself " +
     "would trim the cross-section to its own tails before the score is taken.",
   index:
-    "Nasdaq-100 membership is read each night from the vendor's QQQ holdings " +
+    "Nasdaq-100 membership is read each night from the feed's QQQ holdings " +
     "(/api/etfs/QQQ/holdings, the stock rows with a positive weight), dated by " +
     "the holdings' own update stamp. When that read fails or lists fewer than " +
     "ninety weighted stocks, the repository constant dated " + NDX_AS_OF + " is " +

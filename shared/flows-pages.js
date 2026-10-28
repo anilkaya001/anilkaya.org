@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "414";
+export const ASSET_VERSION = "415";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -446,11 +446,11 @@ export function aboutPage() {
   <section aria-labelledby="aWhat">
     <h2 id="aWhat">What it does</h2>
     <ul>
-      <li><strong>Home.</strong> The session on one screen: the tide, the leaders on each side, what the vendor flagged, what changed and who reports next.</li>
+      <li><strong>Home.</strong> The session on one screen: the tide, the leaders on each side, what the feed flagged, what changed and who reports next.</li>
       <li><strong>Boards.</strong> The names whose option flow leans bullish or bearish for the session, and the names that nearly qualified (the Watchlist).</li>
       <li><strong>Market.</strong> The session tide, breadth, sectors, index ETFs, expiries and volatility, with the market-wide feeds.</li>
       <li><strong>Moves.</strong> Every name's move today against its own typical day and against the day its options implied, with how often a move that size has happened in the last year, and each sector&#39;s median move beside the list of names.</li>
-      <li><strong>Unusual.</strong> The option windows the vendor flagged, drawn as a flow network from sector through the side of the quote and name to lean, and the contracts trading far above their open interest.</li>
+      <li><strong>Unusual.</strong> The option windows the feed flagged, drawn as a flow network from sector through the side of the quote and name to lean, and the contracts trading far above their open interest.</li>
       <li><strong>Flow Lab.</strong> The contracts behind a name's flow: a screener ranked by the site's own ratios, strike and Greek flow, price ladders, routing, lit prints and group flow, each with its unit or a dash and the reason.</li>
       <li><strong>Ledger.</strong> The flagged option premium booked as a closed ledger: takers on one side, liquidity providers on the other, so every row and column sums to zero. It sets each sector's share against its market-cap share, with the bounds it can prove.</li>
       <li><strong>Events.</strong> Earnings, economic prints and FDA dates for the coming sessions, with the move each report is priced for.</li>
@@ -478,14 +478,14 @@ export function aboutPage() {
   <section aria-labelledby="aFire">
     <h2 id="aFire">Fire &amp; Forget&#8482;</h2>
     <p>Fire &amp; Forget is the name for the part of Flows that runs without anyone choosing tickers. A nightly run reads the options market for the whole universe, a rotation gives each name a full card within a bounded number of nights, and a live pass keeps the session's prices and alerts current.</p>
-    <p>It promises that the work is scheduled, bounded and checked, and that a name it could not read is shown as withheld with the reason. It does not promise that every name is fresh at every moment, that the vendor is never late, or that any figure is right.</p>
+    <p>It promises that the work is scheduled, bounded and checked, and that a name it could not read is shown as withheld with the reason. It does not promise that every name is fresh at every moment, that the feed is never late, or that any figure is right.</p>
   </section>
   <section aria-labelledby="aNot">
     <h2 id="aNot">What it is not</h2>
     <ul>
       <li>Not investment advice, a recommendation or an offer, and not a broker. It does not know your circumstances.</li>
       <li>Not a forecast. Options can lose their whole value, and a reading of past flow does not say what happens next.</li>
-      <li>Not real time unless a page says so. Vendor data can be late, revised or wrong.</li>
+      <li>Not real time unless a page says so. Feed data can be late, revised or wrong.</li>
     </ul>
   </section>
   <section aria-labelledby="aAccess">
@@ -747,9 +747,9 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="int-in">Includes {i} of intrinsic value, which assignment returns rather than keeps; the time value is {t}.</p>
       <p data-k="basis-rebased">{sym} priced against {spot}, the underlying the quotes imply; last regular print {print}{note}.</p>
       <p data-k="basis-mismatch">{sym}: these quotes do not agree with the price ({print}), so nothing is ranked.</p>
-      <p data-k="sm-aria">Implied volatility surface for {t}: {e} expiries by {r} moneyness bands. At-the-money implied volatility by expiry — {l}. Shade is each contract&#39;s implied volatility against its own expiry&#39;s at-the-money quote. Every volatility here is the vendor&#39;s last-transaction figure.</p>
+      <p data-k="sm-aria">Implied volatility surface for {t}: {e} expiries by {r} moneyness bands. At-the-money implied volatility by expiry — {l}. Shade is each contract&#39;s implied volatility against its own expiry&#39;s at-the-money quote. Every volatility here is the feed&#39;s last-transaction figure.</p>
       <p data-k="sm-rows">Rows are log-moneyness, ln(strike ÷ spot), in bands {w}% wide; columns are expiries, nearest first.</p>
-      <p data-k="sm-atm">At the money, on the vendor&#39;s last-transaction volatility: {l}.</p>
+      <p data-k="sm-atm">At the money, on the feed&#39;s last-transaction volatility: {l}.</p>
       <p data-k="sm-units">Volatility units resolved once for the whole chain: {b}.</p>
       <p data-k="fr-aria">Annualised yield, square-root scale, against {x} for {n} lines</p>
       <p data-k="fr-key">Frontier. Use the arrow keys to step through the lines.</p>
@@ -762,10 +762,10 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="f-week">of time value, scaled to seven days</p>
       <p data-k="f-vol">inverted from the mid, for delta, win % and EV</p>
       <p data-k="f-vol-c">on the row, for the cushion</p>
-      <p data-k="smile">Each cell is one quoted contract&#39;s implied volatility, the vendor&#39;s last-transaction figure, shaded by how far it sits above or below its own expiry&#39;s at-the-money level, so a seller can see where the smile pays for the risk.</p>
+      <p data-k="smile">Each cell is one quoted contract&#39;s implied volatility, the feed&#39;s last-transaction figure, shaded by how far it sits above or below its own expiry&#39;s at-the-money level, so a seller can see where the smile pays for the risk.</p>
       <p data-k="sm-shade">The shade is that volatility against its own expiry&#39;s at-the-money quote — hatched below it, plain above — so the smile is readable without the term structure swamping it. The strip beneath the grid, read left to right, is the term structure.</p>
-      <p data-k="sm-num">The number in a cell is the vendor&#39;s implied volatility for that contract&#39;s last transaction. It is not the volatility the lines above use for delta, win % and EV, which is inverted from each contract&#39;s mid, so a cell and the same contract&#39;s line need not agree.</p>
-      <p data-k="sm-narrow">The columns are too narrow at this width to print a volatility inside each cell, so every cell carries its own in a tooltip instead. It is the vendor&#39;s last-transaction volatility, not the one inverted from the mid that the lines above use.</p>
+      <p data-k="sm-num">The number in a cell is the feed&#39;s implied volatility for that contract&#39;s last transaction. It is not the volatility the lines above use for delta, win % and EV, which is inverted from each contract&#39;s mid, so a cell and the same contract&#39;s line need not agree.</p>
+      <p data-k="sm-narrow">The columns are too narrow at this width to print a volatility inside each cell, so every cell carries its own in a tooltip instead. It is the feed&#39;s last-transaction volatility, not the one inverted from the mid that the lines above use.</p>
       <p data-k="sm-nolevel">Those columns carry their quoted volatilities and no shade, and the term-structure line does not bridge them.</p>
       <p data-k="sc-frontier">Every call on the list that has an engine reading, as a point: annualised time value over collateral up, delta across. The time value is the bid less any in-the-money value; collateral is what the stated convention asks for one contract. The frontier joins the calls no other call beats on both, so a point below it pays less for the same risk. Contracts sold and buying power change the dollars in the list, never the points.</p>
       <p data-k="sc-frontier-x">Net delta is the position&#39;s exposure to the stock: minus the call&#39;s forward delta for an uncovered call, drawn as a magnitude, or one minus it under Shares held, where the shares add one. Win % (implied) is the risk-neutral chance the call expires worth less than the strike plus the bid collected; it is not a forecast. The yield axis is a square-root scale: equal steps up are equal steps in the square root of the ratio, and its ticks sit on that scale, zero included. A point pinned to the top edge pays more than the axis shows.</p>
@@ -807,7 +807,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="sc-conv-regt">the Reg-T style collateral is the requirement net of the premium received, so this ratio reads higher than a gross one</p>
       <p data-k="sc-conv-shares">the collateral is 100 shares at the price shown, assumed held</p>
       <p data-k="t-collat">What the stated convention asks for the contracts shown. See the information button for the formula.</p>
-      <p data-k="sm-last">This vendor&#39;s implied volatility is the LAST TRANSACTION&#39;s, not a quote.</p>
+      <p data-k="sm-last">This feed&#39;s implied volatility is the LAST TRANSACTION&#39;s, not a quote.</p>
       <p data-k="sm-fresh">every cell on this surface is a print from today.</p>
       <p data-k="sm-aged">so their volatility is of unknown age. Those cells are drawn with a broken border and NONE of them set an expiry&#39;s level — a stale cell is one marked number, but a stale level would tilt a whole column&#39;s smile with no marker on any cell it moved.</p>
       <p data-k="sm-built">Built from every contract with a two-sided quote, before the liquidity gates that decide the lines above and regardless of the Sell toggle — those gates fall hardest on the wings, and a smile with its tails cut off is a different smile.</p>
@@ -815,7 +815,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="sm-quoted">Quoted volatilities, and differences between quoted volatilities on the same expiry. Nothing here is fitted, interpolated or repriced.</p>
       <p data-k="sm-crowd">contracts fall in this row of this column; the one shown is the print this surface prefers — today&#39;s first, then nearest the row&#39;s centre. The cell is never an average of quotes.</p>
       <p data-k="sm-untraded">This contract has NOT traded today, so its implied volatility is the last transaction&#39;s — of unknown age. It is drawn but it did not set this expiry&#39;s level.</p>
-      <p data-k="sm-novol">The vendor reported no volume for this contract, so the age of its implied volatility is unknown. It did not set this expiry&#39;s level.</p>
+      <p data-k="sm-novol">The feed reported no volume for this contract, so the age of its implied volatility is unknown. It did not set this expiry&#39;s level.</p>
       <p data-k="f-uni">{p} of {least}{s} quoted contracts are sellable</p>
       <p data-k="f-gate">The rest fail a gate: {list} — each counted once, under the first gate it failed.</p>
       <p data-k="f-unc">{who} {is} outside those two numbers: {that} did not say how many contracts were screened or how many are sellable, and a count this page never received is not a count of nought.</p>
@@ -882,7 +882,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="sm-ex0">No earnings report falls before this expiry.</p>
       <p data-k="sm-exu">Whether this expiry outlives the next earnings report is not determined: no contract on it survived the sale gates, so nothing on this column was dated.</p>
       <p data-k="sm-lv0">{e} has no at-the-money level: {r}.</p>
-      <p data-k="sm-lv">{e} at the money: {v}% vendor volatility, from the {k} {w} — {m} from spot and traded today.</p>
+      <p data-k="sm-lv">{e} at the money: {v}% feed volatility, from the {k} {w} — {m} from spot and traded today.</p>
       <p data-k="sm-past">Past the shade cap of {c} vol points, so the shade understates it. Marked with a slash.</p>
       <p data-k="sm-c1">One contract shares a row with another; the cell shows one quoted contract and is never an average of two.</p>
       <p data-k="sm-cn">{n} contracts share a row with another; each cell shows one quoted contract and is never an average of two.</p>
@@ -1186,19 +1186,19 @@ export function ledgerPage({ username = "", live = false } = {}) {
 }
 
 export function unusualPage({ username = "", owner = false } = {}) {
-  return `${head("Flows — Unusual activity", "Windows of option activity the vendor flagged, and contracts carrying volume far above their own open interest.", [...FEEDS_CSS, "/assets/css/flows-net.css"])}
+  return `${head("Flows — Unusual activity", "Windows of option activity the feed flagged, and contracts carrying volume far above their own open interest.", [...FEEDS_CSS, "/assets/css/flows-net.css"])}
 ${shell("Unusual", "unusual", username, `${feedHead("ua", "Unusual")}
   <p class="visually-hidden" id="uaStatus" role="status">Loading the feed…</p>
   <div class="fd-about" id="uaAbout" hidden>
-    <p class="flows-lede">The timeline is the vendor&#39;s own flow alerts: windows of activity the
-    vendor&#39;s rules flagged, each carrying a stated span, a size, a premium and the vendor&#39;s
-    sweep flag. A window aggregates its executions and the selection is the vendor&#39;s, not the
+    <p class="flows-lede">The timeline is the feed&#39;s own flow alerts: windows of activity the
+    feed&#39;s rules flagged, each carrying a stated span, a size, a premium and the feed&#39;s
+    sweep flag. A window aggregates its executions and the selection is the feed&#39;s, not the
     market&#39;s, so a window is not a trade. Beneath it sit contracts whose volume counter stands
-    far above the open interest beside it. A counter, not a trade: the vendor reports a total for
+    far above the open interest beside it. A counter, not a trade: the feed reports a total for
     each strike with no size, no time and no execution price, and this endpoint carries no as-of
     date, so the counter is stamped with when it was read and nothing more. Nothing here says who
     traded, or why.</p>
-    <p>A dash where a vendor flag belongs means the vendor did not carry that flag on the window,
+    <p>A dash where a feed flag belongs means the feed did not carry that flag on the window,
     which is not the same fact as the flag being off.</p>
   </div>
   <div class="fd-chips" id="uaChips"></div>
@@ -1272,21 +1272,21 @@ export function tickerPage({ username = "", scenes = false, now = Date.now() } =
   <section class="ft-picker" id="ftPicker" aria-labelledby="ftPickerT" hidden></section>
   <div id="ftCopy" hidden>
     <p data-k="fc-unread">The run did not request this read for the name.</p>
-    <p data-k="fc-failed">The vendor call failed, so nothing was measured.</p>
-    <p data-k="fc-refused">The vendor refused the call for this plan.</p>
-    <p data-k="fc-malformed">The vendor answered with a body that is not the confirmed shape.</p>
-    <p data-k="fc-empty">The vendor answered with no rows: measured and empty.</p>
-    <p data-k="fc-not-session">The vendor dated these rows to a different session.</p>
+    <p data-k="fc-failed">The feed call failed, so nothing was measured.</p>
+    <p data-k="fc-refused">The feed refused the call for this plan.</p>
+    <p data-k="fc-malformed">The feed answered with a body that is not the confirmed shape.</p>
+    <p data-k="fc-empty">The feed answered with no rows: measured and empty.</p>
+    <p data-k="fc-not-session">The feed dated these rows to a different session.</p>
     <p data-k="fc-short-history">Fewer sessions of history than the statistic needs.</p>
     <p data-k="fc-deadline">The run passed its deadline before reaching this name.</p>
     <p data-k="fc-shed">Dropped to keep the payload under its byte cap.</p>
     <p data-k="fc-outside-band">No level fell inside the band around spot.</p>
     <p data-k="fc-no-contracts">No contract gained open interest to follow.</p>
-    <p data-k="fc-truncated">The read hit the vendor&#39;s row ceiling before reaching the session open.</p>
+    <p data-k="fc-truncated">The read hit the feed&#39;s row ceiling before reaching the session open.</p>
     <p data-k="fc-not_read">This run did not spend the call for this name.</p>
-    <p data-k="fc-absent">The vendor row did not carry this field.</p>
+    <p data-k="fc-absent">The feed row did not carry this field.</p>
     <p data-k="fc-too_few">Not enough observations for the statistic.</p>
-    <p data-k="fc-plan_gated">The vendor refused the route for this plan.</p>
+    <p data-k="fc-plan_gated">The feed refused the route for this plan.</p>
     <p data-k="fc-unreadable">The read failed or came back malformed.</p>
     <p data-k="fc-stale">The value is older than its freshness limit.</p>
     <p data-k="wh-unknown" data-w="Unknown">No listed security answers to this symbol.</p>
@@ -1327,7 +1327,7 @@ export function politicalPage({ username = "" } = {}) {
     <div class="pl-title" data-fx-hero>
       <h1 id="fxTitle">Political</h1>
       <div class="pl-stamp" id="plStamp"></div>
-      <div class="pl-chips" id="plChips"><span class="pl-chip warn">Ranges, not amounts</span><span class="pl-chip mut opt"><span class="l">Not advice \u00b7 not positions</span><span class="s">Not advice</span></span><span class="pl-chip mut" title="The vendor feed carries no party field, so no Republican or Democrat split is shown or inferred.">No party in feed</span></div>
+      <div class="pl-chips" id="plChips"><span class="pl-chip warn">Ranges, not amounts</span><span class="pl-chip mut opt"><span class="l">Not advice \u00b7 not positions</span><span class="s">Not advice</span></span><span class="pl-chip mut" title="The feed feed carries no party field, so no Republican or Democrat split is shown or inferred.">No party in feed</span></div>
       <button type="button" class="pl-ibtn" id="plInfoBtn" aria-label="How to read this page" aria-haspopup="dialog">${glyph("info")}</button>
     </div>
     <p class="pl-note" id="plNote" hidden></p>
@@ -1399,7 +1399,7 @@ export function strategyPage({ username = "" } = {}) {
       <dt>Buying power reduction</dt>
       <dd>Refused. It is a broker&#39;s number, not the market&#39;s: the same short put reduces buying power by
         different amounts at two brokers on the same afternoon, and by different amounts again in a
-        portfolio-margin account. Nothing in the vendor&#39;s specification mentions buying power, margin or
+        portfolio-margin account. Nothing in the feed&#39;s specification mentions buying power, margin or
         collateral anywhere in its 28,755 lines. The capital shown here is the maximum loss of a defined-risk
         position, or the exchange&#39;s Reg-T minimum formula for an uncovered one, and it is labelled as such.</dd>
       <dt>Conditional value at risk</dt>
@@ -1429,7 +1429,7 @@ export function strategyPage({ username = "" } = {}) {
       calculator, not advice.</p>
   </section>
   <div id="sgCopy" hidden>
-      <p data-k="ctx-dash">An em dash for beta means the vendor has none, never a beta of zero.</p>
+      <p data-k="ctx-dash">An em dash for beta means the feed has none, never a beta of zero.</p>
       <p data-k="ctx-earn">A contract that outlives an earnings report is a different trade at the same premium.</p>
       <p data-k="about">Pick a name and a structure; the engine chooses each strike by delta on this expiry&#39;s fitted smile and prices the position exactly as the server does. Drag a strike and everything re-prices in the page.</p>
       <p data-k="struct">Twenty-two structures from the engine&#39;s catalogue. Each chooses its expiry inside its own window of days to expiry and its strikes by forward delta on the fitted smile, snapped to a listed, two-sided strike.</p>
@@ -1460,7 +1460,7 @@ export function strategyPage({ username = "" } = {}) {
       <p data-k="no-legs">No listed strikes on {d} reach the deltas a {s} is built from.</p>
       <p data-k="why-jade">These strikes no longer make a jade lizard: the credit does not cover the call spread&#39;s width, so the position carries upside risk the structure exists to remove.</p>
       <p data-k="why-quote">A leg has no two-sided quote on the book the engine read, so the position has no mid to price from.</p>
-      <p data-k="ctx">every reading on this page is measured from. Re-loading the symbol re-reads it; picking another expiry does not, because a second read per pick would spend a shared vendor quota to re-learn a number the page already holds and can date.</p>
+      <p data-k="ctx">every reading on this page is measured from. Re-loading the symbol re-reads it; picking another expiry does not, because a second read per pick would spend a shared feed quota to re-learn a number the page already holds and can date.</p>
       <p data-k="exp-q">{n} of {m} contracts read at {d} carry a two-sided quote. Strike handles snap only to those.</p>
       <p data-k="exp-cut">{w} of this expiry is CUT OFF: the provider caps a page at {n} contracts and this page reads {p} of them per side, so strikes beyond those are not listed here at all.</p>
       <p data-k="exp-off">the provider returned belonged to a different expiry or option type and were dropped, so treat the strike list as incomplete.</p>
@@ -1523,7 +1523,7 @@ export function statusPage({ username = "" } = {}) {
   </header>
   <div class="st-ready"><p id="stReady" role="status">Reading readiness…</p><button type="button" class="st-more" id="stWhy" data-dlg="stReadyDlg" aria-haspopup="dialog" hidden>Blockers</button></div>
   <dialog class="st-dlg" id="stReadyDlg" aria-labelledby="stReadyDT"><header class="st-dh"><h2 id="stReadyDT">Readiness blockers</h2><button type="button" class="st-x" data-close>Close</button></header><div class="st-db" id="stReadyBody"></div></dialog>
-  <div class="st-tiles" id="stTiles" role="group" aria-label="Headline figures">${tile("stTilePx", "Prices")}${tile("stTileFl", "Flagged alerts")}${tile("stTileUw", "Vendor calls today")}${tile("stTileAi", "Model neurons today")}
+  <div class="st-tiles" id="stTiles" role="group" aria-label="Headline figures">${tile("stTilePx", "Prices")}${tile("stTileFl", "Flagged alerts")}${tile("stTileUw", "Feed calls today")}${tile("stTileAi", "Model neurons today")}
   </div>
   <div class="st-tabs" id="stTabs"></div>
   <div class="st-sub" id="stSub"></div>
@@ -1532,7 +1532,7 @@ ${card("hEng", "Engines", "Engines", wait, [["stEng", "Engine detail"]])}
 ${card("hRail", "Real-time rail", "Rail", wait, [["stRail", "Rail detail"]])}
 ${card("hNight", "Nightly run", "Nightly", wait, [["stNight", "Nightly stage ledger"]])}
 ${card("hSw", "Switches", "Switches", wait, [["stSw", "All switches"]])}`)}${panel("capacity", true, `
-${card("cVendor", "Vendor API", "Vendor", later, [["stConsumers", "Vendor calls by consumer"], ["stMix", "Nightly calls by operation"]])}
+${card("cVendor", "Feed API", "Feed", later, [["stConsumers", "Feed calls by consumer"], ["stMix", "Nightly calls by operation"]])}
 ${card("cAi", "Model day", "Model", later, [["stAi", "Model spend by model"], ["stOutcomes", "Model outcomes"]])}
 ${card("cPlat", "Platform meters", "Platform", later, [["stMeters", "All meters"]])}
 ${card("cLimits", "Limits enforced", "Limits", later, [["stLimits", "Limits enforced today"], ["stPlan", "Plan lines and sources"]])}`)}${panel("latency", true, `

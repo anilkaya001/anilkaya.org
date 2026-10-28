@@ -39,7 +39,7 @@ export const POLITICAL_NOTES = Object.freeze({
     "the span of their own bands are not meaningfully ranked apart, and the " +
     "low and high columns are there to make that visible rather than implied.",
   attribution:
-    "A filing may cover a spouse's or a dependent's account. Where the vendor " +
+    "A filing may cover a spouse's or a dependent's account. Where the feed " +
     "supplies an owner the rows carry it and the totals report the self-filed " +
     "share; where it does not, this payload says the share is unknown rather " +
     "than assuming the filer transacted for themselves.",
@@ -352,7 +352,7 @@ export function shapeRecent(rows, { cap = POLITICAL_CAPS.recent } = {}) {
 }
 
 export const HOLDER_QTY_UNIT =
-  "share quantity as the vendor's specification describes it, not dollars — " +
+  "share quantity as the feed's specification describes it, not dollars — " +
   "so these numbers carry no currency mark and are never summed with, or " +
   "ranked against, the disclosed dollar bands elsewhere on this page";
 

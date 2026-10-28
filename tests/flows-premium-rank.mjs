@@ -168,7 +168,7 @@ let lastReport = null;
 {
   const ch = regressionChain();
   const x = ch.xSymbol;
-  eq(ch.rows.findIndex((r) => r.option_symbol === x), 1200, "the regression row sits at vendor row 1,200, on the third page of 500");
+  eq(ch.rows.findIndex((r) => r.option_symbol === x), 1200, "the regression row sits at feed row 1,200, on the third page of 500");
   const terms = TERMS[0];
   const out = rankShortCalls(ch.rows, argsOf(ch, terms));
   const row = out.rows.find((r) => r.symbol === x);

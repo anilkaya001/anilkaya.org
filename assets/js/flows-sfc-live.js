@@ -307,7 +307,7 @@
     if (s.host.dataset.tone !== feed.tone) s.host.dataset.tone = feed.tone;
     setText(s.word, m.verdict.word);
     const caught = L.caughtAt !== null && nowMs() - L.caughtAt < 10000 && m.verdict.state !== "hidden" ? " · caught up " + kit.trtClock(L.caughtAt, { seconds: true }) : "";
-    fitStrip(m.verdict.state, feed.value + caught, lag.value === "— no new windows yet" || lag.value.startsWith("—") ? "" : "Vendor to hub " + lag.value);
+    fitStrip(m.verdict.state, feed.value + caught, lag.value === "— no new windows yet" || lag.value.startsWith("—") ? "" : "Feed to hub " + lag.value);
     const label = "Live ledger: " + m.verdict.word + ". Open for the latency details.";
     if (s.btn.getAttribute("aria-label") !== label) s.btn.setAttribute("aria-label", label);
     if (m.verdict.state !== L.announcedState) {

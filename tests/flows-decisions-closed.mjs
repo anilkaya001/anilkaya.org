@@ -65,7 +65,7 @@ const firstPageReads = (calls) => calls.filter((c) => c.kind === "chain" && c.pa
   const { world, calls } = chainWorld(ch);
   const out = await routes(await load(3), refreshes(), world, pinned, { cache: memoryCache() });
   eq(out.every((o) => o.res.status === 200), true, "every refresh answers");
-  eq(firstPageReads(calls), 3, "a member's fourth refresh inside a minute is served from the snapshot: three vendor reads of six requests");
+  eq(firstPageReads(calls), 3, "a member's fourth refresh inside a minute is served from the snapshot: three feed reads of six requests");
 }
 
 {

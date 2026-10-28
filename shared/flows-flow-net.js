@@ -48,9 +48,9 @@ export const FLAG_NODES = Object.freeze([
 export const TITLES = Object.freeze({ side: "Side", expiry: "Expiry", money: "Strike against spot", flags: "Flags" });
 
 export const FACE_LINES = Object.freeze({
-  gross: "Vendor-flagged windows, not every execution. Premium is gross; legs of a spread count separately.",
-  ask: "Ask side is the vendor's attribution of premium; the bid side is the same attribution for the other quote. Premium with no stated side is not drawn and is counted apart. No lean on this page.",
-  flags: "Opening: every trade in the window is flagged opening by the vendor. Sweep: the window contains a sweep.",
+  gross: "Feed-flagged windows, not every execution. Premium is gross; legs of a spread count separately.",
+  ask: "Ask side is the feed's attribution of premium; the bid side is the same attribution for the other quote. Premium with no stated side is not drawn and is counted apart. No lean on this page.",
+  flags: "Opening: every trade in the window is flagged opening by the feed. Sweep: the window contains a sweep.",
   spot: "One session spot, not the price at each window's time.",
 });
 

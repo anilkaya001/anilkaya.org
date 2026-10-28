@@ -156,7 +156,7 @@ async function runMain() {
       eq(s0.body.running, false, "idle: with nobody connected the hub is not running");
       deep(s0.body.worker, { mode: "on", audience: "members", users: ["anilkaya"], hint: "enam", binding: true }, "status: carries the Worker's switches, and the shipped audience is members");
       eq(s0.body.phase.phase, "rth", "the harness clock is pinned to 10:00 ET on a Wednesday");
-      eq(vendor.calls.length, 0, "idle: no viewer, no vendor call");
+      eq(vendor.calls.length, 0, "idle: no viewer, no feed call");
     }
 
     {
@@ -183,7 +183,7 @@ async function runMain() {
       const evilClient = connect(base, OWNER, { headers: { Origin: "https://evil.example" } });
       await until(() => evilClient.state.closed || evilClient.state.error, 5000, "a refused cross-origin socket");
       eq(evilClient.state.opened, false, "origin: a client from another origin never opens");
-      eq(vendor.calls.length, 0, "refused connections never wake the hub: still no vendor call");
+      eq(vendor.calls.length, 0, "refused connections never wake the hub: still no feed call");
       const page = await fetch(base + "/flows/", { headers: { Cookie: OWNER } });
       ok((page.headers.get("content-security-policy") || "").includes("connect-src 'self' wss://anilkaya.org"), "csp: HTML allows the secure socket to the apex explicitly");
     }
@@ -279,14 +279,14 @@ async function runMain() {
     ok(pxNames.has("SYL001") && pxNames.has("NVDA"), "px: the roster is the boards seeded in D1 plus the focus names");
     const pxCalls = vendor.paramsOf(/screener/).map((p) => p.ticker.split(","));
     const fullAt = pxCalls.findIndex((c) => c.includes("SYL001"));
-    ok(fullAt >= 0, "px: the vendor was asked for a board name");
+    ok(fullAt >= 0, "px: the feed was asked for a board name");
     const pxCall = pxCalls[fullAt];
-    ok(pxCall.includes("SYL001") && pxCall.includes("NVDA") && pxCall.length >= 60, `px: the vendor was asked for the roster in one call (${pxCall.length} names)`);
+    ok(pxCall.includes("SYL001") && pxCall.includes("NVDA") && pxCall.length >= 60, `px: the feed was asked for the roster in one call (${pxCall.length} names)`);
     ok(pxCalls.slice(fullAt).every((c) => c.join(",") === pxCall.join(",")), `px: the same call every time once the roster is applied (${pxCalls.length - fullAt} calls)`);
     ok(pxCalls.slice(0, fullAt).every((c) => c.length < pxCall.length && c.every((t) => pxCall.includes(t))), `px: and any call before it asked only base names, a subset of the roster (${fullAt} calls)`);
     eq(px.fresh.klass, "rt", "px: freshness class rt");
-    ok(["live", "fresh"].includes(px.fresh.state), `px: a stamped vendor read is ${px.fresh.state}`);
-    eq(uw.seen.unauthorised, 0, "the vendor key travelled as a bearer token on every call");
+    ok(["live", "fresh"].includes(px.fresh.state), `px: a stamped feed read is ${px.fresh.state}`);
+    eq(uw.seen.unauthorised, 0, "the feed key travelled as a bearer token on every call");
     ok(vendor.calls.some((c) => c.path === "/api/stock/NVDA/spot-exposures"), "gx: the focus ticker is read");
     const fl = c1.data("fl").find((f) => f.rows.length);
     ok(fl.rows.every((r) => typeof r.id === "string" && Number.isFinite(r.ts) && typeof r.prem === "number"), "fl: alert rows carry id, ts and the live:alerts fields");
@@ -325,14 +325,14 @@ async function runMain() {
       eq(body.running, true, "status: running while sockets are connected");
       deep(body.sockets.byUser, { anilkaya: 2 }, "status: sockets by user");
       eq(body.upstream.kind, "rest", "status: upstream kind");
-      ok(!JSON.stringify(body).includes(KEY), "status: the vendor key appears nowhere in the status body");
+      ok(!JSON.stringify(body).includes(KEY), "status: the feed key appears nowhere in the status body");
       ok(typeof body.upstream.host === "string" && body.upstream.host.length > 0 && !body.upstream.host.includes("/"), "status: the upstream is named by host only");
       deep(body.killSwitches, { FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "members", FLOWS_RT_UPSTREAM: "rest" }, "status: kill switches");
       for (const k of RT_TOPIC_KEYS) {
         const t = body.topics[k];
         ok(t.hasData && t.sq > 0 && t.frames > 0 && t.lastFrameAgeMs !== null && t.calls.minute > 0, `status ${k}: sq ${t.sq}, ${t.frames} frames, last frame ${t.lastFrameAgeMs} ms ago, ${t.calls.minute} calls in the last minute`);
       }
-      ok(body.topics.px.rowLagMs.n > 0 && body.topics.px.rowLagMs.p95 !== null, `status: px vendor lag p50 ${body.topics.px.rowLagMs.p50} ms, p95 ${body.topics.px.rowLagMs.p95} ms`);
+      ok(body.topics.px.rowLagMs.n > 0 && body.topics.px.rowLagMs.p95 !== null, `status: px feed lag p50 ${body.topics.px.rowLagMs.p50} ms, p95 ${body.topics.px.rowLagMs.p95} ms`);
       ok(body.topics.gx.lagMs.n > 0 && body.topics.mk.lagMs.n > 0, "status: gx and mk lag are sampled");
       ok(body.calls.minuteTotal > 0 && body.calls.perMinute === 1200, "status: calls against the budget (240 a minute, scaled by the harness clock to 1200)");
       ok(body.roster.n >= 60, `status: roster of ${body.roster.n} names from D1`);
@@ -473,7 +473,7 @@ async function runMain() {
       ok(d429.meta.retryAt, "429: degraded at once with the instant of the next try");
       const quietAt = vendor.calls.length;
       await sleep(900);
-      ok(vendor.calls.length - quietAt <= 2, `429: the pause holds the hub off the vendor (${vendor.calls.length - quietAt} calls in 0.9 s)`);
+      ok(vendor.calls.length - quietAt <= 2, `429: the pause holds the hub off the feed (${vendor.calls.length - quietAt} calls in 0.9 s)`);
       vendor.fault = null;
       vendor.retryAfterS = null;
       const mark2 = c.ctl("resync").length;
@@ -487,7 +487,7 @@ async function runMain() {
       await sleep(1200);
       const calls = vendor.calls.length;
       await sleep(2500);
-      eq(vendor.calls.length, calls, "idle: after the last socket closes the vendor is not called again");
+      eq(vendor.calls.length, calls, "idle: after the last socket closes the feed is not called again");
       const s = (await statusOf(base, OWNER)).body;
       deep([s.running, s.sockets.n], [false, 0], "idle: status says the hub stopped");
       const hitsAt = vendor.calls.length;
@@ -547,7 +547,7 @@ async function runOwnerAudience() {
     const refused = connect(base, MEMBER);
     await until(() => refused.state.closed || refused.state.error, 5000, "a refused member socket");
     eq(refused.state.opened, false, "owner audience: a member's client never opens");
-    eq(vendor.calls.length, 0, "owner audience: refused members never wake the hub: no vendor call");
+    eq(vendor.calls.length, 0, "owner audience: refused members never wake the hub: no feed call");
 
     const up = await rawUpgrade(base, "/api/rt/ws", { Cookie: OWNER });
     eq(up.status, 101, "owner audience: the owner still gets the 101");
@@ -583,10 +583,10 @@ async function runClosed() {
     await until(() => c.ctl("hb")[0], 8000, "a closed heartbeat");
     eq(c.ctl("hb")[0].meta.upstream, "closed", "closed: the heartbeat says the upstream is closed, not down");
     await sleep(2000);
-    eq(vendor.calls.length, 0, "closed: a whole socket's lifetime on a Saturday makes zero vendor calls");
+    eq(vendor.calls.length, 0, "closed: a whole socket's lifetime on a Saturday makes zero feed calls");
     const snap = await (await fetch(server.baseURL + "/api/rt/snap?k=px", { headers: { Cookie: OWNER } })).json();
     ok(snap.some((f) => f.k === "ctl" && f.t === "closed"), "closed: the snapshot route says so too");
-    eq(vendor.calls.length, 0, "closed: and still no vendor call");
+    eq(vendor.calls.length, 0, "closed: and still no feed call");
     c.close();
   } finally {
     await server.stop();
@@ -612,7 +612,7 @@ async function runClosedEpoch() {
     ok(beats.length >= 2, `epoch: a Saturday socket sees at least two closed heartbeats in 75 s (${beats.length})`);
     eq(eps.size, 1, `epoch: every frame and the status read after 75 s of silence carry the hello's epoch (${eps.size} seen)`);
     eq(c.ctl("resync").length, 0, "epoch: and no resync is ever sent, because the object never restarted");
-    eq(vendor.calls.length, 0, "epoch: still no vendor call");
+    eq(vendor.calls.length, 0, "epoch: still no feed call");
     c.close();
   } finally {
     await server.stop();
@@ -655,7 +655,7 @@ async function runCadence() {
     const per = (re) => window.filter((x) => re.test(x.path)).length;
     const secs = (Date.now() - startedAt) / 1000;
     const rates = { px: per(/screener/), fl: per(/flow-alerts/), gx: per(/spot-exposures/), mk: per(/market-tide|sector-etfs/), nw: per(/news/) };
-    console.log(`rt vendor calls in ${secs.toFixed(0)} s at production cadence: ${JSON.stringify(rates)} (${window.length} total)`);
+    console.log(`rt feed calls in ${secs.toFixed(0)} s at production cadence: ${JSON.stringify(rates)} (${window.length} total)`);
     ok(rates.px >= 11 && rates.px <= 13, `cadence: px about every 5 s (${rates.px} calls a minute)`);
     ok(rates.fl >= 11 && rates.fl <= 13, `cadence: fl about every 5 s (${rates.fl})`);
     ok(rates.gx >= 3 && rates.gx <= 5, `cadence: gx reads the one focus name about every 15 s (${rates.gx})`);
@@ -702,10 +702,10 @@ async function runSocket() {
     await until(() => c1.frames.length > 0, 8000, "the hello");
     deep([c1.frames[0].meta.upstream, c1.frames[0].meta.audience], ["socket", "members"], "socket: the hello names the socket upstream under the members audience");
     await until(() => ["flow-alerts", "news", "price:NVDA", "gex:NVDA"].every((c) => loop.joined().includes(c)), 20000, "the outbound socket to join its four channels");
-    deep(loop.joined().slice().sort(), ["flow-alerts", "gex:NVDA", "news", "price:NVDA"], "socket: real workerd opened one outbound WebSocket to the vendor and joined the global event channels and the focus name's two, nothing else");
+    deep(loop.joined().slice().sort(), ["flow-alerts", "gex:NVDA", "news", "price:NVDA"], "socket: real workerd opened one outbound WebSocket to the feed and joined the global event channels and the focus name's two, nothing else");
     eq(loop.state.connections, 1, "socket: one connection");
-    eq(loop.state.rejected, 0, "socket: the token travelled as the query parameter the vendor reads");
-    ok(loop.state.urls.every((u) => u === "/socket"), "socket: to the vendor's socket path");
+    eq(loop.state.rejected, 0, "socket: the token travelled as the query parameter the feed reads");
+    ok(loop.state.urls.every((u) => u === "/socket"), "socket: to the feed's socket path");
     await until(() => c1.data("px").some((f) => f.rows.some((r) => r[0] === "NVDA")), 20000, "a REST row for the focus name");
 
     const flBefore = vendor.calls.filter((x) => /flow-alerts/.test(x.path)).length;
@@ -722,7 +722,7 @@ async function runSocket() {
     for (const f of c1.data("fl")) for (const r of f.rows) if (String(r.id).startsWith("S") && !seen.has(r.id)) seen.set(r.id, f[RX]);
     const lat = sent.map((x) => seen.get(x.id) - wallOf(x.at));
     eq(seen.size, 24, "socket: all twenty-four alerts reached the client, once each");
-    console.log(`rt e2e (socket upstream, loopback): alert at the vendor -> client p50 ${pct(lat, 0.5)} ms, p95 ${pct(lat, 0.95)} ms over ${lat.length} alerts (the plan quotes REST at production cadence as p50 2300 ms, p95 4800 ms)`);
+    console.log(`rt e2e (socket upstream, loopback): alert at the feed -> client p50 ${pct(lat, 0.5)} ms, p95 ${pct(lat, 0.95)} ms over ${lat.length} alerts (the plan quotes REST at production cadence as p50 2300 ms, p95 4800 ms)`);
     ok(pct(lat, 0.95) < 1500, `socket: an alert reaches the client within ${pct(lat, 0.95)} ms at p95: one 250 ms flush and the hop`);
     const flAfter = vendor.calls.filter((x) => /flow-alerts/.test(x.path)).length;
     ok(flAfter - flBefore <= 1, `socket: while the channel is busy REST reads the alerts at most once (${flAfter - flBefore} calls in ${24 * 0.4} s)`);
@@ -743,13 +743,13 @@ async function runSocket() {
     const st = (await statusOf(base, OWNER)).body;
     deep([st.upstream.kind, st.upstream.asked, st.upstream.socket.connected, st.upstream.socket.joined], ["socket", "socket", true, 4], "socket: status shows the composite, connected, four channels");
     ok(st.upstream.socket.messages >= 30 && st.upstream.socket.flushes >= 5, `socket: ${st.upstream.socket.messages} messages in ${st.upstream.socket.flushes} flushes`);
-    ok(!JSON.stringify(st).includes(KEY), "socket: the vendor key appears nowhere in the status body");
+    ok(!JSON.stringify(st).includes(KEY), "socket: the feed key appears nowhere in the status body");
     ok(!String(server.output()).includes(KEY), "socket: nor in the Worker's log");
     deep([st.upstream.topics.fl.via, st.upstream.topics.px.via], ["socket", "rest"], "socket: flow alerts ride the socket and the price board stays on REST");
 
     loop.dropAll();
     await until(() => loop.state.connections >= 2 && loop.joined().length === 4, 20000, "the outbound socket to reconnect and join again");
-    ok(true, "socket: a dropped vendor connection is re-opened with every channel joined again");
+    ok(true, "socket: a dropped feed connection is re-opened with every channel joined again");
     const after = seqVerdicts(c1);
     ok(!after.gap && !after.dup && !after.orphan, `socket: and the client's sequences stay clean across it: ${JSON.stringify(after)}`);
 
@@ -774,4 +774,4 @@ await runClosedEpoch();
 await runOff();
 await runCadence();
 
-console.log(`✓ flows-rt-server: ${checks} assertions — real workerd, persisted Durable Object storage, a fake vendor on loopback and real WebSocket clients: 401 without a session, a signed-in member who is not an owner admitted under the shipped members audience (socket, snapshot, own cap) and refused 403 under an explicit owner audience, status owner-only under both, a cross-origin upgrade refused, the 101 through the finalizer with its security headers, hello and snapshots then deltas with per-topic sq rising by one, a warm second socket, messages validated (1009), sub, rs, laggard (4008), the connection cap (4009), expiry (4001), a vendor outage that degrades and recovers with a resync, a 429 pause, polling that stops when the last socket closes, the snapshot route with X-Fresh headers, owner-only status, a closed Saturday that costs no vendor call, the kill switch, the vendor call rate at production cadence, and the vendor socket upstream against a loopback WebSocket vendor: one outbound connection with the token in the query, only per-ticker and alert-rate channels joined, alerts, a price tick, a gex tick and a headline reaching the client within one flush of the vendor's send, REST silent while the channel is busy, a dropped vendor connection re-opened with every channel joined again, and the outbound socket closed the moment the last client leaves`);
+console.log(`✓ flows-rt-server: ${checks} assertions — real workerd, persisted Durable Object storage, a fake feed on loopback and real WebSocket clients: 401 without a session, a signed-in member who is not an owner admitted under the shipped members audience (socket, snapshot, own cap) and refused 403 under an explicit owner audience, status owner-only under both, a cross-origin upgrade refused, the 101 through the finalizer with its security headers, hello and snapshots then deltas with per-topic sq rising by one, a warm second socket, messages validated (1009), sub, rs, laggard (4008), the connection cap (4009), expiry (4001), a feed outage that degrades and recovers with a resync, a 429 pause, polling that stops when the last socket closes, the snapshot route with X-Fresh headers, owner-only status, a closed Saturday that costs no feed call, the kill switch, the feed call rate at production cadence, and the feed socket upstream against a loopback WebSocket feed: one outbound connection with the token in the query, only per-ticker and alert-rate channels joined, alerts, a price tick, a gex tick and a headline reaching the client within one flush of the feed's send, REST silent while the channel is busy, a dropped feed connection re-opened with every channel joined again, and the outbound socket closed the moment the last client leaves`);

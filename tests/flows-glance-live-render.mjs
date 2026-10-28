@@ -252,7 +252,7 @@ async function live(browser, o = {}) {
   r.todayDate = s0.today === "Aug 25";
   r.anchor = s0.anchor;
   r.gxLine = s0.gx === "Dealer \u03b3 now +$36.2M per 1%" && s0.gxSide === "long" && /dealers long calls, short puts/.test(s0.gxTitle || "");
-  r.describedLive = /Live: the last price is \d/.test(s0.desc) && /Live dealer gamma is \+\$36\.2M per 1%, the open-interest book on the vendor's convention \(dealers long calls, short puts\)/.test(s0.desc);
+  r.describedLive = /Live: the last price is \d/.test(s0.desc) && /Live dealer gamma is \+\$36\.2M per 1%, the open-interest book on the feed's convention \(dealers long calls, short puts\)/.test(s0.desc);
   const slot = await page.evaluate(SLOT);
   r.slotGeom = Math.abs(slot.x - slot.x1) < 0.06 && slot.d.split("M").filter(Boolean).length === 2 && Math.abs(+slot.d.slice(1).split(/[,L]/)[0] - slot.x0) < 0.06 && Math.abs(slot.midX - (slot.x0 + slot.x1) / 2) < 0.06 && Math.abs(slot.y0 - slot.yS) < 0.06;
   await shot(page, "live-0");
@@ -274,7 +274,7 @@ async function live(browser, o = {}) {
   }
   r.dotMoved = new Set(ys).size >= 4;
   r.dotDirection = ys[1] < ys[0] && ys[3] > ys[2];
-  await page.waitForFunction(() => { const b = document.getElementById("fxFresh"); return b && b.dataset.state === "live" && /behind the vendor/.test(b.textContent); }, null, { timeout: 4000, polling: 100 }).catch(() => {});
+  await page.waitForFunction(() => { const b = document.getElementById("fxFresh"); return b && b.dataset.state === "live" && /behind the feed/.test(b.textContent); }, null, { timeout: 4000, polling: 100 }).catch(() => {});
   const s1 = await snap(page);
   r.pillText = JSON.stringify(s1.pill);
   const segs = (p) => ((p || "").match(/[ML]/g) || []).length;
@@ -285,7 +285,7 @@ async function live(browser, o = {}) {
   r.noShift = s1.ls >= 0 && s1.ls < 0.001 && JSON.stringify(s1.boxes) === JSON.stringify(s0.boxes);
   r.cardsKept = s1.sameCards === true && s1.cardMut === 0;
   r.stampFollows = !!s1.stamp && s1.stamp.startsWith("Last " + px2(prices[prices.length - 1]));
-  r.pill = !!s1.pill && s1.pill.state === "live" && /Live\s*\u00b7\s*0\.8 s behind the vendor/.test(s1.pill.label) && !/null|NaN/.test(s1.pill.label);
+  r.pill = !!s1.pill && s1.pill.state === "live" && /Live\s*\u00b7\s*0\.8 s behind the feed/.test(s1.pill.label) && !/null|NaN/.test(s1.pill.label);
   await shot(page, "live-1");
 
   await resetMut(page);
@@ -296,7 +296,7 @@ async function live(browser, o = {}) {
   R.send(R.delta("gx", [gxRow(41.7e6, 2)]));
   await R.adv(200, 100);
   const sg = await snap(page);
-  r.gxPatched = sg.gx === "Dealer \u03b3 now +$41.7M per 1%" && sg.sameSvg && sg.mut.removed === 0 && /read 2 s after the vendor stamped it/.test(sg.gxTitle || "");
+  r.gxPatched = sg.gx === "Dealer \u03b3 now +$41.7M per 1%" && sg.sameSvg && sg.mut.removed === 0 && /read 2 s after the feed stamped it/.test(sg.gxTitle || "");
   R.send(R.delta("gx", [gxRow(-8.4e6, 2)]));
   await R.adv(200, 100);
   const sg2 = await snap(page);
@@ -346,8 +346,8 @@ async function live(browser, o = {}) {
   await R.adv(200, 100);
   const sl = await snap(page);
   r.staleDraws = !sl.hasLive && !sl.anchor && sl.stamp === null && /^Spot /.test(sl.label || "") && sl.cy === null;
-  r.staleSays = /No live price is drawn: the streamed quote is not live, it is behind the vendor\./.test(sl.desc) && !/Live: the last price/.test(sl.desc);
-  r.stalePill = !!sl.pill && !/behind the vendor/.test(sl.pill.label);
+  r.staleSays = /No live price is drawn: the streamed quote is not live, it is behind the feed\./.test(sl.desc) && !/Live: the last price/.test(sl.desc);
+  r.stalePill = !!sl.pill && !/behind the feed/.test(sl.pill.label);
   await R.adv(5000);
   R.tick(prices[0]);
   R.keep = true;
@@ -384,11 +384,11 @@ const base = await live(browser);
 const expectAll = [
   ["closedFirst", "the chart opens in its closed look"], ["topics", "the ticker connects px, fl and gx for its own name"], ["liveLayer", "the live layer is on the chart once the market is open"],
   ["todayFixed", "the today marker stays where it was"], ["labelLast", "the right-edge label reads Last"], ["stampShown", "the legend row prints the last price with its TRT time"],
-  ["todayDate", "the x axis today reads the live session date"], ["anchor", "the card close dot becomes a hollow anchor"], ["gxLine", "the gx topic prints a separately labelled dealer gamma line with the vendor's convention"],
+  ["todayDate", "the x axis today reads the live session date"], ["anchor", "the card close dot becomes a hollow anchor"], ["gxLine", "the gx topic prints a separately labelled dealer gamma line with the feed's convention"],
   ["describedLive", "the description carries the live price and the live dealer gamma with the convention clause"], ["slotGeom", "the session's TRT minutes map open to close across the today slot, a gap breaks the path, the connector starts at the card close"],
   ["dotY", "the live dot sits at the model's y for each price"], ["heroFollows", "the hero price follows every tick"], ["labelFollows", "the Last label follows every tick"], ["dotMoved", "the dot moved"], ["dotDirection", "up is up and down is down"],
   ["pathGrows", "the intraday path gains points"], ["slot", "the dot stays in the today slot"], ["sameSvg", "the same svg and the same path elements persist across the ticks"], ["noRemoval", "no element is removed from the chart across the ticks"],
-  ["noShift", "no layout shift and no host moved"], ["cardsKept", "no card element is replaced"], ["stampFollows", "the stamp follows the tick"], ["pill", "the pill says Live with the lag behind the vendor"],
+  ["noShift", "no layout shift and no host moved"], ["cardsKept", "no card element is replaced"], ["stampFollows", "the stamp follows the tick"], ["pill", "the pill says Live with the lag behind the feed"],
   ["census", "at rest nothing in the chart or the cards is written"], ["gxPatched", "a gx tick patches the live line in place"], ["gxShort", "a negative gx reads short"], ["flagged", "fl rows for this name add a flagged count to the Flow card in place"],
   ["tapeFetched", "the session flow was re-read"], ["tapeFlowOnly", "a session flow refresh changes only the Flow card, in place"], ["tapeKeepsFlagged", "and keeps the flagged count"],
   ["domainRepaint", "a price outside the y domain repaints once and keeps the live layer"], ["domainDot", "with the dot at the new scale"], ["afterRepaintInPlace", "and the next tick is in place again"],
@@ -445,7 +445,7 @@ for (const vp of [{ width: 390, height: 844 }, { width: 320, height: 700 }]) {
   ok(s.hasLive && s.cy !== null && s.cy >= 0 && s.cy <= s.svgWH[1] && s.cx <= s.svgWH[0], `${vp.width}: the live dot is drawn inside the chart (${s.cx},${s.cy} in ${s.svgWH})`);
   ok(!!s.stamp && s.stamp.startsWith("Last " + px2(S0 * 1.007)), `${vp.width}: the stamp is shown (${s.stamp})`);
   ok(s.sw <= s.iw, `${vp.width}: no sideways scroll (${s.sw} > ${s.iw})`);
-  ok(!/behind the vendor/.test((s.pill || {}).label || "") || (await page.evaluate(() => { const n = document.querySelector("#fxFresh .fx-fresh-lag"); return !n || !n.getClientRects().length; })), `${vp.width}: the pill's lag is not shown on a narrow screen`);
+  ok(!/behind the feed/.test((s.pill || {}).label || "") || (await page.evaluate(() => { const n = document.querySelector("#fxFresh .fx-fresh-lag"); return !n || !n.getClientRects().length; })), `${vp.width}: the pill's lag is not shown on a narrow screen`);
   await shot(page, "live-" + vp.width);
   ok(R.errors.length === 0, `${vp.width}: no page error (${R.errors.join(" | ")})`);
   await ctx.close();

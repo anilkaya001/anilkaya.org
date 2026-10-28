@@ -58,10 +58,10 @@ ok(["pooled", "mean"].every((b) => FX.scenarios.some((s) => s.expect.ratio5Basis
   const field = (k) => { const m = example.match(new RegExp("^\\s+" + k + ": '?([^'\\n]+)'?$", "m")); return m ? m[1] : null; };
   const row = { symbol: field("symbol"), market_date: field("market_date"), short_interest: Number(field("short_interest")), total_float: Number(field("total_float")),
     si_float: field("si_float"), days_to_cover: field("days_to_cover") };
-  ok(row.symbol === "EXMP" && row.short_interest === 75000 && row.total_float === 4250000, "the vendor's own short-interest example is read from the committed specification");
+  ok(row.symbol === "EXMP" && row.short_interest === 75000 && row.total_float === 4250000, "the feed's own short-interest example is read from the committed specification");
   const got = OWN.latestShortInterest([row], { sessionDate: "2023-04-17" }).byTicker.get("EXMP");
-  ok(Math.abs(got.si - 75000 / 4250000) < 1e-9, "the vendor's si_float is shares short over float as a fraction, 1.7647 per cent here and not 1.7647 as a percent");
-  ok(got.dtc === 2.1 && got.shares === 75000 && got.float === 4250000 && got.date === "2023-04-15" && got.stale === false, "and the days to cover, the shares, the float and the settlement date are carried as the vendor states them, the date being the settlement date and not the publication date");
+  ok(Math.abs(got.si - 75000 / 4250000) < 1e-9, "the feed's si_float is shares short over float as a fraction, 1.7647 per cent here and not 1.7647 as a percent");
+  ok(got.dtc === 2.1 && got.shares === 75000 && got.float === 4250000 && got.date === "2023-04-15" && got.stale === false, "and the days to cover, the shares, the float and the settlement date are carried as the feed states them, the date being the settlement date and not the publication date");
   const old = OWN.latestShortInterest([row], { sessionDate: "2023-06-30" }).byTicker.get("EXMP");
   ok(old.stale === true && old.ageDays === 76, "a settlement more than 45 days old is stale by its settlement date");
 }
@@ -85,4 +85,4 @@ for (const [name, transforms] of MUTANTS) {
   ok(cases(mod).length > 0, `planted wrong build must fail: ${name}`);
 }
 
-console.log(`✓ math-short: ${checks} assertions - the five-session short-volume ratio is the pooled sum of short over the sum of total when five sessions carry both counts, the mean of the five stated ratios otherwise with its basis named, and nothing under five sessions; the z is the sample deviation against the sixty sessions before the latest; the vendor's own short-interest example reads as a fraction of float with a settlement date; and ${MUTANTS.length} planted wrong builds that each fail`);
+console.log(`✓ math-short: ${checks} assertions - the five-session short-volume ratio is the pooled sum of short over the sum of total when five sessions carry both counts, the mean of the five stated ratios otherwise with its basis named, and nothing under five sessions; the z is the sample deviation against the sixty sessions before the latest; the feed's own short-interest example reads as a fraction of float with a settlement date; and ${MUTANTS.length} planted wrong builds that each fail`);

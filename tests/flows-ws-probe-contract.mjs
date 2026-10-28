@@ -131,9 +131,9 @@ function fakeVendor({ capJoins = 1000, refuse = new Set(["stock_screener"]), con
   eq([st.lagP50, st.lagP95, st.lagSamples, st.cxP50, st.cxP95], [30, 40, 4, 250, 250], "lag and created-minus-executed are percentiles of their own samples");
   eq(streamStats({ arrivals: [], spanMs: 0 }).msgPerS, null, "no span is no rate, never zero");
   eq(streamStats({ arrivals: [5], dataBytes: 9, spanMs: 1000 }).gapP50Ms, null, "one frame has no inter-arrival");
-  eq(stampOf({ executed_at: 1790000000123, created_at: "2026-10-01T14:00:00Z" }).key, "executed_at", "the frame's own trade stamp outranks the vendor's creation stamp");
+  eq(stampOf({ executed_at: 1790000000123, created_at: "2026-10-01T14:00:00Z" }).key, "executed_at", "the frame's own trade stamp outranks the feed's creation stamp");
   eq(stampOf({ created_at: "2026-10-01T14:00:00Z" }).key, "created_at", "a frame with only a creation stamp is measured against it");
-  eq(createdMinusExecuted({ executed_at: 1790000000000, created_at: new Date(1790000000250).toISOString() }), 250, "created_at minus executed_at is the vendor's own delay");
+  eq(createdMinusExecuted({ executed_at: 1790000000000, created_at: new Date(1790000000250).toISOString() }), 250, "created_at minus executed_at is the feed's own delay");
   eq(createdMinusExecuted({ executed_at: 1790000000000 }), null, "and null when either is absent");
   eq([verdictOf("a", { acks: { a: "error" } }), verdictOf("a", { acks: { a: "ok" } }), verdictOf("a", { acks: { a: "ok" }, messages: 2 }), verdictOf("a", {})],
     ["refused", "acked-silent", "data", "no-ack"], "a channel is refused, acknowledged but silent, streaming, or never answered");
@@ -182,7 +182,7 @@ function fakeVendor({ capJoins = 1000, refuse = new Set(["stock_screener"]), con
     const chans = records.filter((r) => r.probe === "channel");
     eq(chans.map((r) => r.channels[0]), [...CHANNELS], "channels are probed in the order of the one list, control first");
     eq(chans[0].role, "control", "the first record is marked as the control");
-    eq([chans[0].verdict, chans[0].acks[CONTROL_CHANNEL]], ["refused", "error"], "a vendor that refuses the control is classified refused");
+    eq([chans[0].verdict, chans[0].acks[CONTROL_CHANNEL]], ["refused", "error"], "a feed that refuses the control is classified refused");
     const summary = records.find((r) => r.probe === "channel-verdicts");
     eq([summary.control, summary.acksTrustworthy], ["refused", true], "and its acknowledgements are trusted");
     eq(summary.verdicts["flow-alerts"], "data", "a streaming channel is classified data");
@@ -202,14 +202,14 @@ function fakeVendor({ capJoins = 1000, refuse = new Set(["stock_screener"]), con
     ok(!records.some((r) => r.probe === "channel" && FIREHOSES.includes(r.channels[0])), "no firehose is read as a per-channel record");
     const joins = records.filter((r) => r.probe === "joins-per-connection");
     eq(joins.map((j) => j.requested), [...JOIN_STEPS], "every join step is probed");
-    eq(joins.map((j) => j.acksOk), [1, 10, 30, 30, 30, 30], "acknowledged joins stop at the vendor's cap");
+    eq(joins.map((j) => j.acksOk), [1, 10, 30, 30, 30, 30], "acknowledged joins stop at the feed's cap");
     const holds = records.filter((r) => r.probe === "hold-connection");
     eq(holds.map((h) => h.connection), Array.from({ length: HOLD_CONNECTIONS }, (_, i) => i + 1), "the hold part runs one record per connection");
     ok(holds.every((h) => h.joined === HOLD_JOINS && h.acksOk === 30 && h.acksRefused === HOLD_JOINS - 30 && h.survived && h.closed === null), "each held connection joins 60 price channels, is capped at 30 and stays up");
     ok(holds.every((h) => h.messages >= HOLD_JOINS && h.holdS === 1), "and counts the price frames it received");
     const conns = records.filter((r) => r.probe === "concurrent-connections");
     eq(conns.map((c) => c.asked), Array.from({ length: CONNECTION_STEPS - 1 }, (_, i) => i + 2), "connection counts are stepped");
-    ok(conns.every((c) => c.opened === c.asked && c.survivors === c.asked), "a permissive vendor holds every connection");
+    ok(conns.every((c) => c.opened === c.asked && c.survivors === c.asked), "a permissive feed holds every connection");
     const hs = records.filter((r) => r.probe.startsWith("handshake"));
     eq(hs.map((h) => h.outcome), ["upgraded", "upgraded", "upgraded"], "all three handshakes are recorded");
   } finally { v.close(); }
@@ -222,7 +222,7 @@ function fakeVendor({ capJoins = 1000, refuse = new Set(["stock_screener"]), con
     ok(held.every((h) => !h.survived && h.closed && h.closed.code === 1008), "a server-side close ends the held connection and its code is printed");
     ok(held.every((h) => h.closed.reason === "limit [token]" && typeof h.closedAtS === "number" && h.closedAtS < 5), "with its reason, redacted, and the time it happened");
     const closed = await holdConnections(v.url, TOKEN, 2, { settleMs: 1200 });
-    ok(Array.isArray(closed.closes), "the concurrent-connection step reports the vendor's closes");
+    ok(Array.isArray(closed.closes), "the concurrent-connection step reports the feed's closes");
   } finally { v.close(); }
 }
 

@@ -179,7 +179,7 @@ export async function volflowScenario(seed, { time, vendor: mod, flow, store }) 
   const chains = plan.filter((p) => p.ml.kind === "first-500").length;
   const took = marks.flowEnd - marks.flowStart;
   const bound = floor * VOLFLOW.share + VOLFLOW.slackMs + chains * VOLFLOW.chainMs;
-  w.check(took <= bound, `PACE-BOUND: the flow leg's ${attempts} vendor calls take at least ${floor} ms at the pace; it took ${took} ms with the store answering in ${VOLFLOW.ingestMs} ms, past the ${Math.round(bound)} ms the lanes allow when no write sits on them`);
-  w.log(`${all.length} names, ${attempts} vendor calls, flow ${took} ms against a ${floor} ms pace floor, ${chains} 5xx chain(s)`);
+  w.check(took <= bound, `PACE-BOUND: the flow leg's ${attempts} feed calls take at least ${floor} ms at the pace; it took ${took} ms with the store answering in ${VOLFLOW.ingestMs} ms, past the ${Math.round(bound)} ms the lanes allow when no write sits on them`);
+  w.log(`${all.length} names, ${attempts} feed calls, flow ${took} ms against a ${floor} ms pace floor, ${chains} 5xx chain(s)`);
   return { violations: w.violations, checks: w.checks, events: w.events, took, floor, chains };
 }

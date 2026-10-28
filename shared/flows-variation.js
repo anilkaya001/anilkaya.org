@@ -37,7 +37,7 @@ export const VARIATION_LINES = Object.freeze({
 export const VARIATION_VOTES = false;
 
 export const DEALER_ASSUMPTION =
-  "dealer-signed under the vendor's convention (dealers long every call, short every put)";
+  "dealer-signed under the feed's convention (dealers long every call, short every put)";
 
 export const VARIATION_STATEMENTS = Object.freeze({
   firstOrder:
@@ -205,7 +205,7 @@ export function conventionProbe(names, { asOf = null, dteMax = VARIATION_LINES.P
 
 export function putMultipliers(probe) {
   const p = probe && typeof probe === "object" ? probe : null;
-  if (!p) return { ...PUT_TO_DEALER, source: "the vendor's documented convention; no probe ran" };
+  if (!p) return { ...PUT_TO_DEALER, source: "the feed's documented convention; no probe ran" };
   const callOk = p.call === "raw";
   return {
     gamma: PUT_TO_DEALER.gamma,
@@ -282,9 +282,9 @@ export function unitFamily(pairs) {
     minSpot: L.UNIT_MIN_SPOT,
     used: family === "pct$" ? "pct$" : "share",
     source: family === "unresolved"
-      ? "the vendor's documented share unit; the probe could not classify enough names"
-      : family === "share" ? "the vendor's documented share unit, confirmed by the probe"
-      : "the probe found dollars per 1% move, against the vendor's documentation",
+      ? "the feed's documented share unit; the probe could not classify enough names"
+      : family === "share" ? "the feed's documented share unit, confirmed by the probe"
+      : "the probe found dollars per 1% move, against the feed's documentation",
   };
 }
 
@@ -347,7 +347,7 @@ export function vannaScale(samples, { prior = "share" } = {}) {
   const base = { ratio: round(ratio, 4), n, family, used, prior: fallback, votes: { share, pct }, evidence };
   if (n < L.VANNA_MIN_NAMES) {
     return { status: "unmeasured", ...base,
-      reason: `${n} name${n === 1 ? "" : "s"} carried a complete single-expiry chain to check the vendor's vanna against; the check needs ${L.VANNA_MIN_NAMES}` };
+      reason: `${n} name${n === 1 ? "" : "s"} carried a complete single-expiry chain to check the feed's vanna against; the check needs ${L.VANNA_MIN_NAMES}` };
   }
   if (family === "unsettled") {
     const fit = `a mean log error of ${round(errShare, 2)} read in shares against ${round(errPct, 2)} read in dollars per 1% move`;
@@ -355,12 +355,12 @@ export function vannaScale(samples, { prior = "share" } = {}) {
       reason: `the ${votes} name${votes === 1 ? "" : "s"} priced far enough from $100 to tell the units apart fit with ${fit}` +
         (votes < L.VANNA_MIN_NAMES ? `, too few to overturn ${priorSaid} and too clear to ignore`
           : `, a likelihood ratio of ${round(Math.exp(Math.abs(logLr)), 1)} where ${L.UNIT_EVIDENCE} is needed to settle either`) +
-        ", so the vendor's vanna unit is not settled" };
+        ", so the feed's vanna unit is not settled" };
   }
   const agree = Math.abs(ratio - 1) <= L.VANNA_AGREE;
   return {
     status: agree ? "agree" : "disagree", ...base,
-    ...(agree ? {} : { reason: `the vendor's vanna is ${round(ratio, 2)} times the Black-Scholes vanna of the same chain` +
+    ...(agree ? {} : { reason: `the feed's vanna is ${round(ratio, 2)} times the Black-Scholes vanna of the same chain` +
       (used === "pct$" ? " read in dollars per 1% move" : "") + `, outside the ${L.VANNA_AGREE * 100}% band` }),
   };
 }
@@ -617,7 +617,7 @@ export function variation(input, opts = {}) {
   const mult = putMultipliers(probe);
   const kc = opts.kc && typeof opts.kc === "object" ? opts.kc : null;
   const unit = opts.unit && typeof opts.unit === "object" ? opts.unit
-    : { family: "unresolved", used: "share", source: "the vendor's documented share unit; no probe ran" };
+    : { family: "unresolved", used: "share", source: "the feed's documented share unit; no probe ran" };
   const scale = opts.vannaScale && typeof opts.vannaScale === "object" ? opts.vannaScale
     : { status: "unmeasured", ratio: null, n: 0, reason: "no chain check ran for this card" };
   const S = fin(x.spot);
@@ -627,7 +627,7 @@ export function variation(input, opts = {}) {
   let nets, netsSource;
   if (Array.isArray(x.expiries) && x.expiries.length) {
     nets = dealerNets(x.expiries, { asOf: sessionDate, h, multipliers: mult });
-    netsSource = "every expiry the vendor published, before the drawn ladder's cap";
+    netsSource = "every expiry the feed published, before the drawn ladder's cap";
   } else if (x.card) {
     nets = cardNets(x.card, { h, multipliers: mult });
     const f = nets.fallback || {};
@@ -734,7 +734,7 @@ export function variation(input, opts = {}) {
     else silent("vanna", "unavailable", "vanna-absent", "no vanna leg on the expiry ladder");
   } else if (scale.status !== "agree") {
     if (scale.status === "disagree") silent("vanna", "unavailable", "vanna-disagree", scale.reason);
-    else silent("vanna", "unavailable", "vanna-unchecked", "the vendor's vanna scale was not checked against a chain this run" + (scale.reason ? ": " + scale.reason : ""));
+    else silent("vanna", "unavailable", "vanna-unchecked", "the feed's vanna scale was not checked against a chain this run" + (scale.reason ? ": " + scale.reason : ""));
   } else if (nets.vanna === 0) {
     silent("vanna", "quiet", "vanna-zero", "vanna nets to exactly zero across the live expiries");
     v = 0;
@@ -753,8 +753,8 @@ export function variation(input, opts = {}) {
   } else if (!kc || kc.status !== "ok" || !(kc.value > 0)) {
     silent("charm", "unavailable", "kc-unmeasured", "the charm scale was not measured this run" + (kc && kc.reason ? ": " + kc.reason : ""));
   } else if (scale.status !== "agree") {
-    if (scale.status === "disagree") silent("charm", "unavailable", "charm-scale-disagree", "the charm scale is measured against the vendor's vanna, which disagrees with the chain" + (scale.reason ? ": " + scale.reason : ""));
-    else silent("charm", "unavailable", "charm-scale-unchecked", "the charm scale is measured against the vendor's vanna, whose scale was not checked against a chain this run" + (scale.reason ? ": " + scale.reason : ""));
+    if (scale.status === "disagree") silent("charm", "unavailable", "charm-scale-disagree", "the charm scale is measured against the feed's vanna, which disagrees with the chain" + (scale.reason ? ": " + scale.reason : ""));
+    else silent("charm", "unavailable", "charm-scale-unchecked", "the charm scale is measured against the feed's vanna, whose scale was not checked against a chain this run" + (scale.reason ? ": " + scale.reason : ""));
   } else {
     c = vannaDollars(nets.charm) / kc.value * h;
   }
@@ -935,8 +935,8 @@ export const VARIATION_CODES = Object.freeze({
   "no-book": "the open-interest gamma book is not on the card, so no share of variance and no drift in standard deviations",
   "vanna-unnetted": "the put leg's sign convention could not be settled this run, so vanna is not netted",
   "vanna-absent": "no vanna leg on the expiry ladder",
-  "vanna-unchecked": "the vendor's vanna scale was not checked against an option chain this run",
-  "vanna-disagree": "the vendor's vanna disagrees with the Black-Scholes vanna of the same chain by more than a quarter, or the names that can tell its unit apart do not settle one",
+  "vanna-unchecked": "the feed's vanna scale was not checked against an option chain this run",
+  "vanna-disagree": "the feed's vanna disagrees with the Black-Scholes vanna of the same chain by more than a quarter, or the names that can tell its unit apart do not settle one",
   "vanna-zero": "vanna nets to exactly zero across the live expiries",
   "few-iv-changes": "too few daily implied-volatility changes to size a typical vol move",
   "charm-unnetted": "the put leg's charm convention could not be settled this run, so charm is not netted",
@@ -946,8 +946,8 @@ export const VARIATION_CODES = Object.freeze({
   "delta-half-leg": "some expiries carried one delta leg only and are left out of the dealer delta rather than netted against zero",
   "vanna-half-leg": "some expiries carried one vanna leg only and are left out of the dealer vanna rather than netted against zero",
   "charm-half-leg": "some expiries carried one charm leg only and are left out of the dealer charm rather than netted against zero",
-  "charm-scale-unchecked": "the charm scale is measured against the vendor's vanna, whose scale was not checked against an option chain this run",
-  "charm-scale-disagree": "the charm scale is measured against the vendor's vanna, which disagrees with the Black-Scholes vanna of the same chain by more than a quarter, or whose unit the chain check could not settle",
+  "charm-scale-unchecked": "the charm scale is measured against the feed's vanna, whose scale was not checked against an option chain this run",
+  "charm-scale-disagree": "the charm scale is measured against the feed's vanna, which disagrees with the Black-Scholes vanna of the same chain by more than a quarter, or whose unit the chain check could not settle",
   "adv-short": "too few dated sessions with volume to name a typical day",
   "no-drift": "no drift reading",
 });

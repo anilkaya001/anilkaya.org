@@ -346,7 +346,7 @@ try {
       ok(pulsePayload.status === "pending" || typeof pulsePayload.tide === "object",
          "and answers pending or a real pulse, never a half-shaped object");
       eq((await get("/api/flows/pulse")).status, 401,
-         "the pulse refuses an anonymous reader — behind it is a metered vendor " +
+         "the pulse refuses an anonymous reader — behind it is a metered feed " +
          "relationship, exactly like every other flows key");
 
       const leanApi = await get("/api/flows/sector-premium",
@@ -378,7 +378,7 @@ try {
         { headers: { Cookie: "flows_session=" + token } });
       eq(filtered.status, 200,
          "a `?t=` parameter is neither honoured nor an error — it is IGNORED, because the " +
-         "only two things this route could do with it are spend a vendor call per name or " +
+         "only two things this route could do with it are spend a feed call per name or " +
          "filter a blob the caller already has");
       assert.deepEqual(await filtered.json(), newsPayload,
         "and the answer is byte-identical to the unfiltered one, so no reader can come to " +
@@ -501,7 +501,7 @@ try {
         { question: "what changed", subject: "brk.b" }, auth)).json();
       eq(shareClass.subjectApplied, true,
          "a share-class symbol carrying a dot is a name here too, and a hyphenated one " +
-         "likewise: BRK.B and RDS-A are quoted by the vendor and served by /flows/ticker, " +
+         "likewise: BRK.B and RDS-A are quoted by the feed and served by /flows/ticker, " +
          "so a route that refuses them answers market-wide about a page that is not");
       eq(shareClass.subject, "BRK.B",
          "echoed back uppercased and whole, punctuation included");
@@ -562,7 +562,7 @@ try {
          "and refuses a name that is not shaped like a symbol before the store is read");
       const dossier = await get("/api/flows/dossier?t=AAPL", { headers: auth });
       eq(dossier.status, 200,
-         "with no vendor key and no card the dossier still answers 200: every packet says why it is empty");
+         "with no feed key and no card the dossier still answers 200: every packet says why it is empty");
       eq(dossier.headers.get("cache-control"), "no-store", "never cached");
       const dossierBody = await dossier.json();
       eq(dossierBody.tier, "none", "in the same tier the summary gives a name outside the universe");
@@ -572,7 +572,7 @@ try {
          "the live quote is behind the gate too");
       const live = await get("/api/flows/live?t=AAPL", { headers: auth });
       eq(live.status, 200,
-         "and with no vendor key configured in this harness it still answers 200: a live " +
+         "and with no feed key configured in this harness it still answers 200: a live " +
          "read that failed is a silence the page draws, not an error a console should log");
       const liveBody = await live.json();
       eq(liveBody.status, "unavailable", "the silence is UNAVAILABLE");
@@ -1312,7 +1312,7 @@ try {
     const missing = await get("/api/flows/card?t=ZZZZ", { headers: cookie });
     eq(missing.status, 200, "an unbuilt card is not an error");
     deep(await missing.json(), { ticker: "ZZZZ", status: "absent", why: "not-covered" },
-       "it reports absent, not pending: no run is due to write it, and with no vendor key the Worker cannot call it unknown");
+       "it reports absent, not pending: no run is due to write it, and with no feed key the Worker cannot call it unknown");
 
     for (const bad of ["", "../../etc/passwd", "A B", "TOOLONGTICKER", "1ABC", "%2e%2e"]) {
       const res = await get("/api/flows/card?t=" + encodeURIComponent(bad), { headers: cookie });
@@ -1328,7 +1328,7 @@ try {
     const dossier = JSON.stringify({
       v: 1, ticker: "AAPL", scope: "deep", sessionDate: "2026-09-22",
       cone: { status: "ok", iv30: 0.221, tenors: [{ days: 7, iv: 0.221, pct: 0.2191 }] },
-      skew: { status: "unavailable", code: "read-failed", reason: "the vendor call failed after its retries" },
+      skew: { status: "unavailable", code: "read-failed", reason: "the feed call failed after its retries" },
     });
     eq((await putCard("card-x:AAPL", dossier)).status, 200,
        "the volatility dossier ingests under card-x:<TICKER>, beside the card and never inside it");
@@ -1493,15 +1493,15 @@ try {
         ok(gld.u.px === 391.645 && gld.u.prev === 392.88 && gld.u.ivRank === 41.5 && gld.u.iv30 === 0.182 && gld.sessionDate === "2026-09-24",
            "with the screener's own values, in the strip's names and units");
         ok(Number.isInteger(gld.u.qa) && gld.u.qa >= 89 && gld.u.qa < 900,
-           `and the quote's own age, from the vendor's quote_time to the moment the card was built, so a null qa means the vendor sent no stamp and nothing else (${gld.u.qa})`);
-        eq((await (await C("/api/flows/card?t=ZZZZ")).json()).why, "unknown", "a symbol the vendor does not know is unknown");
+           `and the quote's own age, from the feed's quote_time to the moment the card was built, so a null qa means the feed sent no stamp and nothing else (${gld.u.qa})`);
+        eq((await (await C("/api/flows/card?t=ZZZZ")).json()).why, "unknown", "a symbol the feed does not know is unknown");
         const reads = asked.filter((a) => a.startsWith("/api/screener/stocks")).length;
         eq(reads, 2, "one screener read per symbol");
         await (await C("/api/flows/card?t=ZZZZ")).text();
         eq(asked.filter((a) => a.startsWith("/api/screener/stocks")).length, reads, "and a second visit is served from the cached verdict");
         const tape = await C("/api/flows/tape?t=ZZZZ");
         deep(await tape.json(), { ticker: "ZZZZ", status: "absent", why: "unknown" }, "T9: the tape refuses an unknown symbol");
-        eq(asked.filter((a) => !a.startsWith("/api/screener/stocks")).length, 0, "before any vendor call");
+        eq(asked.filter((a) => !a.startsWith("/api/screener/stocks")).length, 0, "before any feed call");
       } finally {
         await classed.stop();
         vendor.close();
@@ -1874,7 +1874,7 @@ try {
         200, "and the nightly meta");
 
       eq(await tick(RTH, "2026-09-23T10:06:00-04:00"), 200, "the market-hours cron fires the RTH tick");
-      eq(vendor.count(/^\/api\/(market|net-flow)\//), 2, "TIER 1 spends exactly two vendor calls");
+      eq(vendor.count(/^\/api\/(market|net-flow)\//), 2, "TIER 1 spends exactly two feed calls");
       const mk = await fetch(L("/api/flows/lk?k=market"), { headers: cookie });
       eq(mk.status, 200, "live:market is served on the live read route");
       const market = await mk.json();
@@ -1935,9 +1935,9 @@ try {
       "and writes exactly those rows five minutes after a read of the whole constants' roster: a roster that changed " +
         "mid-session is not a partial read, because only a name the held row priced and this tick asked for counts");
       faults.add("/api/screener/stocks");
-      eq(await tick(FOCUS, "2026-09-23T10:18:00-04:00"), 200, "a focus tick whose vendor read fails still completes");
+      eq(await tick(FOCUS, "2026-09-23T10:18:00-04:00"), 200, "a focus tick whose feed read fails still completes");
       faults.delete("/api/screener/stocks");
-      eq(screens().length, 3, "after trying the vendor once");
+      eq(screens().length, 3, "after trying the feed once");
       eq((await (await lkFocus()).json()).fresh.readAt, heldFocus.fresh.readAt,
         "A FAILED READ KEEPS THE LAST GOOD VALUE: live:focus still carries the 10:13 read");
       const fromActions = await ingest("live:focus", "POST", LIVE_TOKEN, heldFocus);
@@ -2047,7 +2047,7 @@ try {
       await tick(RTH, "2026-09-24T10:26:00-04:00");
       eq(vendor.count(/^\/api\/(market|net-flow)\//) - beforeHoliday, 4,
         "A TAPE-DERIVED HOLIDAY: the probe fifteen minutes later agrees, the day is marked closed, and the next tick " +
-        "spends no vendor call");
+        "spends no feed call");
 
       await tick(HOUSE, "2026-09-23T17:14:00-04:00");
       eq(github.dispatches.length, 2, "the nightly is not dispatched before 17:15 ET");
@@ -2207,7 +2207,7 @@ try {
       ok(first.prem.status === "ok" && first.prem.n >= 78 && first.gex.status === "pending",
         "the first refresh reads the premium leg (net-prem-ticks and alerts) and leaves gamma pending — one leg per " +
         "invocation keeps a cold isolate inside 10 ms of CPU");
-      eq(first.session, "2026-09-22", "and dates itself from the vendor's rows, not the wall clock");
+      eq(first.session, "2026-09-22", "and dates itself from the feed's rows, not the wall clock");
       const second = await fetch(L("/api/flows/tape?t=AAPL"), { headers: cookie });
       const ahead = hows.includes("stale-refreshing");
       eq(second.headers.get("x-tape"), ahead ? "stale-leased" : "stale-refreshing",
@@ -2230,7 +2230,7 @@ try {
 
       const q1 = await fetch(L("/api/flows/live?t=AAPL"), { headers: cookie });
       const qb = await q1.json();
-      ok(qb.status === "ok" && qb.price === 101.5, "the quote reads the vendor's stock-state");
+      ok(qb.status === "ok" && qb.price === 101.5, "the quote reads the feed's stock-state");
       const phase = phaseAt(Date.now(), { day: "2026-09-24", trading: 0 }).phase;
       eq(q1.headers.get("x-quote-ttl"), String(LIVE_BUDGET.quoteTtlS[phase]),
         `its cache life follows the market phase on the Worker's own clock (${phase}): 5 s in session, 30 s pre and ` +
@@ -2263,7 +2263,7 @@ try {
     }
   }
 
-  console.log(`✓ flows-worker: ${checks} assertions — public login, no-store gating, structural bypass resistance, bidirectional audience isolation, legacy learner tolerance, uniform failures, full sign-in round trip, and the two market-wide keys this wave added served on their own gated routes: the sector option lean beside — never merged into — the sector momentum it shares eleven tickers with, and the news tape whose absent per-ticker form is asserted to stay absent. Plus the retirement of the card dialog: the four board routes serve neither it nor the 151k panel library it was the only caller of, and their own ?t= addresses — pushed into history on every open the modal ever had — are 302'd to /flows/ticker/ with the surface they came from, from a Location that is a pure function of the request URL and reads no payload and no session. Plus the live layer: one writer per key held by credential, table and trigger, live:focus from the Worker's own focus cron in one screener call that a failed read never overwrites, nor a partial one while the fuller row is live, Tier 1 in exactly two vendor calls with its outcome in D1 on a clock table that upgrades itself, read-time overlays that leave the nightly rows byte-identical, the dispatch clock with its in-flight guard and one-shot watchdog, a tape-derived holiday, the tape's single flight, and quote lives that follow the market phase`);
+  console.log(`✓ flows-worker: ${checks} assertions — public login, no-store gating, structural bypass resistance, bidirectional audience isolation, legacy learner tolerance, uniform failures, full sign-in round trip, and the two market-wide keys this wave added served on their own gated routes: the sector option lean beside — never merged into — the sector momentum it shares eleven tickers with, and the news tape whose absent per-ticker form is asserted to stay absent. Plus the retirement of the card dialog: the four board routes serve neither it nor the 151k panel library it was the only caller of, and their own ?t= addresses — pushed into history on every open the modal ever had — are 302'd to /flows/ticker/ with the surface they came from, from a Location that is a pure function of the request URL and reads no payload and no session. Plus the live layer: one writer per key held by credential, table and trigger, live:focus from the Worker's own focus cron in one screener call that a failed read never overwrites, nor a partial one while the fuller row is live, Tier 1 in exactly two feed calls with its outcome in D1 on a clock table that upgrades itself, read-time overlays that leave the nightly rows byte-identical, the dispatch clock with its in-flight guard and one-shot watchdog, a tape-derived holiday, the tape's single flight, and quote lives that follow the market phase`);
 } finally {
   await server.stop();
 }

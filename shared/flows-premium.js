@@ -79,9 +79,9 @@ export function ivConvention(rawValues, { pairs = null } = {}) {
   if (ratios.length >= IV_EVIDENCE_MIN) {
     const r = median(ratios);
     if (r >= IV_PERCENT_RATIO) {
-      return { divisor: 100, basis: `median ${m.toFixed(2)} reads as percent (vendor figures run ${r.toFixed(0)}x the quotes' own)` };
+      return { divisor: 100, basis: `median ${m.toFixed(2)} reads as percent (feed figures run ${r.toFixed(0)}x the quotes' own)` };
     }
-    return { divisor: 1, basis: `median ${m.toFixed(4)} reads as a fraction (vendor figures run ${r.toFixed(2)}x the quotes' own)` };
+    return { divisor: 1, basis: `median ${m.toFixed(4)} reads as a fraction (feed figures run ${r.toFixed(2)}x the quotes' own)` };
   }
 
   if (m > IV_PERCENT_THRESHOLD && m <= IV_PERCENT_CEILING) {

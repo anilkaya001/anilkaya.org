@@ -339,7 +339,7 @@ try {
     const s = await strips(page);
     deep(s.fields, FIELDS, "px rows map back to the live:strips field order the pages already read");
     deep(Object.keys(s.rows).sort(), ["AMD", "NVDA", "SPY"], "one row per ticker");
-    eq(s.rows.NVDA.length, FIELDS.length, "each row is the strip values, without the ticker and the vendor stamp");
+    eq(s.rows.NVDA.length, FIELDS.length, "each row is the strip values, without the ticker and the feed stamp");
     eq(s.rows.NVDA[0], 200, "px first");
     eq(s.rows.NVDA[FIELDS.indexOf("chg")], chgOf(200, 190), "and the change the server computed from the same row's prev");
     eq(s.session, DAY, "the session comes from the frame's fresh entry");
@@ -357,8 +357,8 @@ try {
     R.send(c1, R.delta("px", [quote("NVDA", 201, 190, q0 + 2000), quote("AMD", 1, 99, q0 - 5000), quote("MSFT", 400, 399, q0)]));
     await R.pump();
     const d = await strips(page);
-    eq(d.rows.NVDA[0], 201, "a delta with a newer vendor quote time replaces the row");
-    eq(d.rows.AMD[0], 100, "a delta with an OLDER quote time is ignored: the latest vendor stamp wins, not the latest arrival");
+    eq(d.rows.NVDA[0], 201, "a delta with a newer feed quote time replaces the row");
+    eq(d.rows.AMD[0], 100, "a delta with an OLDER quote time is ignored: the latest feed stamp wins, not the latest arrival");
     eq(d.rows.MSFT[0], 400, "a name the page had not seen is added");
     deep((await page.evaluate(() => window.__ch)).map((c) => [c.snap, c.ids.sort().join()]), [[false, "MSFT,NVDA"]], "and the listener hears only the names that changed, once, after one animation frame");
     R.send(c1, R.delta("px", [quote("NVDA", 201, 190, q0 + 2000, { qa: 9 })]));
@@ -749,7 +749,7 @@ try {
     R.send(c1, R.hello(["px"], { px: [quote("NVDA", 200, 190, R.now - 40000)] }, { lag: 40000 }));
     await R.pump();
     const f = await page.evaluate(() => ({ s: window.FlowsUI.freshness.state(), d: window.FlowsUI.freshness.details(), p: document.getElementById("fxFresh").dataset.state }));
-    ok(f.p !== "live" && f.s !== "live", `A FRAME WHOSE OWN FRESH STATE IS NOT LIVE (the vendor's quote is 40 s old: fresh, vendor-lag) NEVER CLAIMS A LIVE PILL (${f.p}/${f.s})`);
+    ok(f.p !== "live" && f.s !== "live", `A FRAME WHOSE OWN FRESH STATE IS NOT LIVE (the feed's quote is 40 s old: fresh, vendor-lag) NEVER CLAIMS A LIVE PILL (${f.p}/${f.s})`);
     ok(!f.d.facts.some(([k, v]) => k === "Price read" && v), "and sets no price-read time");
     await ctx.close();
   }
@@ -1241,7 +1241,7 @@ try {
 
     vendor.fault = "500";
     await step(25);
-    ok((await status(page)).degraded !== null, `a vendor that fails twenty-five seconds shows as degraded (${JSON.stringify((await status(page)).degraded)})`);
+    ok((await status(page)).degraded !== null, `a feed that fails twenty-five seconds shows as degraded (${JSON.stringify((await status(page)).degraded)})`);
     vendor.fault = null;
     await step(25);
     const st4 = await status(page);
@@ -1307,7 +1307,7 @@ try {
     console.log("MEASURE per kind [frames, mean bytes, mean ms]:", JSON.stringify(Object.fromEntries(kinds.map((k) => { const d = diff(k); return [k, [d[0], Math.round(d[1] / Math.max(1, d[0])), +(d[2] / Math.max(1, d[0])).toFixed(3)]]; }))));
     console.log("MEASURE animation-frame flushes:", m.raf.length, "mean ms", avg(m.raf).toFixed(2), "max", Math.max(0, ...m.raf).toFixed(2), "| DOM mutation records:", m.mut, "per px frame", (m.mut / Math.max(1, px[0])).toFixed(1));
     console.log("MEASURE transitMs (an estimate, relative to the hello):", JSON.stringify((await measure(page)).transitMs));
-    console.log("MEASURE bytes per minute received on the socket (every topic, a vendor that moves every row each poll):", bytes, "in", msgs, "messages");
+    console.log("MEASURE bytes per minute received on the socket (every topic, a feed that moves every row each poll):", bytes, "in", msgs, "messages");
     console.log("MEASURE one snapshot response: px", one, "all five topics", all, "=> poll rung per minute: px only", one * 12, "all five", all * 12, "| stored strips body, 157 names:", rest);
     const pxs = { length: px[0] };
     ok(pxs.length >= 10, "measure: about twelve px frames in a minute");

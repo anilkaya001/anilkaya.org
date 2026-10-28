@@ -144,7 +144,7 @@ export const METRICS = deepFreeze([
   metric("flow.put_premium", {
     unit: "usd", cadence: ["nightly", "live"], range: [0, 5e10], label: "put premium",
     source: { nightly: hist("volume.pp"), live: strips("rows[T].pp") }, status: "warming",
-    reason: "the stored history has net premium only; the vendor options-volume row carries put_premium and the leg does not keep it",
+    reason: "the stored history has net premium only; the feed options-volume row carries put_premium and the leg does not keep it",
     unlock: "hist gains cp and pp columns from the options-volume row, 252 sessions of backfill on the first run",
   }),
   metric("flow.put_premium.z20", {
@@ -265,7 +265,7 @@ export const TEMPLATES = deepFreeze([
   {
     id: "T03", title: "Short-dated OTM aggression", cadence: "live", subject: "c", house: ["h-t03"], control: "fact", catchup: true,
     ast: ast("live", UNIVERSE, [clause("contract.dte", "<=", 21), clause("contract.otm_pct", ">=", 10), clause("contract.premium", ">=", 1000000), clause("contract.vol_oi", ">=", 3)]),
-    note: "Vendor-flagged windows only. States facts and never says who traded.",
+    note: "Feed-flagged windows only. States facts and never says who traded.",
   },
   {
     id: "T04", title: "Hedge demand on my names", cadence: "nightly", subject: "n", house: ["h-t04"], control: "bh",
@@ -625,7 +625,7 @@ export const FORBIDDEN = deepFreeze({
   ],
   sourceTokens: ["uwFetch", "askModels", "cappedAi"],
   fetchAllowedIn: ["scripts/flows-legs/ff-metrics.mjs", "scripts/flows-legs/ff-carry.mjs", "scripts/flows-legs/ff-calibrate.mjs"],
-  rule: "evaluation never calls the vendor and reads only what the pipeline already holds",
+  rule: "evaluation never calls the feed and reads only what the pipeline already holds",
 });
 
 export function canonicalJson(value) {

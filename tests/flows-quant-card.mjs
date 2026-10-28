@@ -83,7 +83,7 @@ function vendorChain({ ticker = "SYN", expiries = ["2026-10-02", "2026-10-16", "
   eq(got.foreign, 1, "an adjusted series (SYN1) is not the ticker's own chain and is counted, not read");
   eq(got.expired, 1, "an expiry at or before the session is dropped and counted");
   ok(got.expiries.every((e) => e.rows.every((r) => typeof r.bid === "number" && typeof r.K === "number")),
-     "vendor strings arrive as numbers");
+     "feed strings arrive as numbers");
   const syms = got.expiries.flatMap((e) => e.rows.map((r) => r.sym));
   eq(syms.length, new Set(syms).size, "a contract repeated across pages is read once");
   ok(got.expiries.every((e) => e.rows.every((r, i, a) => i === 0 || a[i - 1].K <= r.K)), "rows are sorted by strike");
@@ -105,7 +105,7 @@ function vendorChain({ ticker = "SYN", expiries = ["2026-10-02", "2026-10-16", "
     worst = Math.max(worst, Math.abs(p.iv - truth)); counted++;
   }
   ok(counted >= 10 && worst < 0.01, `the NBBO mid inverts to within a vol point of the smile that priced it on ${counted} near quotes (worst ${(worst * 100).toFixed(2)} points)`);
-  ok(q.every((p) => "ivVendor" in p), "and keeps the vendor's figure beside it as a seed, never as the reading");
+  ok(q.every((p) => "ivVendor" in p), "and keeps the feed's figure beside it as a seed, never as the reading");
   const garbage = priced.map((p) => (p.strike >= 128 ? { ...p, bid: 0.01, ask: 0.05, mid: 0.03 } : p));
   const qg = QC.quoteImpliedVols(garbage, { spot: SPOT, rate: R });
   ok(qg.filter((p) => p.strike >= 128).every((p) => p.iv === null), "minimum-tick wing quotes invert to nothing (defect 2)");
@@ -153,7 +153,7 @@ const slices = QC.buildSlices(vchain.expiries, { spot: SPOT, asOfMs: AS_OF_MS, r
   }, 0);
   ok(Math.sign(total(zero.px - 0.3)) !== Math.sign(total(zero.px + 0.3)),
      `total dealer gamma re-evaluated by brute force changes sign across ${zero.px} (F3)`);
-  eq(zero.why, "flip.coverage-unmeasured", "without the vendor's expiry book the coverage is named as unmeasured");
+  eq(zero.why, "flip.coverage-unmeasured", "without the feed's expiry book the coverage is named as unmeasured");
   const covered = QC.zeroGammaOf(slices.built, { spot: SPOT, atr: 2, vendorGross: 1e12 });
   ok(covered.coverage < 0.5 && covered.g === 1 && covered.why === "flip.coverage",
      "and against a book far larger than the fetched contracts the level is graded weak");
@@ -187,7 +187,7 @@ function grossOfBuilt() {
     atrOf: () => 2, expiriesOf: () => vendor, ...(gammaUnit ? { gammaUnit } : {}) }).preps.get("SYN").zero;
   const whole = pass(rows, null, expiryRows);
   ok(whole.coverage > 0.85 && whole.coverage < 1.15 && whole.g === 2 && whole.why === "flip.convention",
-     `UW-F2: a complete chain measures coverage ${whole.coverage} against the vendor's share-gamma book once both are in dollars per 1%, and its flip is capped at grade 2 with flip.convention because the sign rests on the vendor's convention`);
+     `UW-F2: a complete chain measures coverage ${whole.coverage} against the feed's share-gamma book once both are in dollars per 1%, and its flip is capped at grade 2 with flip.convention because the sign rests on the feed's convention`);
   {
     const grades = [];
     const gross = grossOfBuilt();
@@ -197,7 +197,7 @@ function grossOfBuilt() {
     }
     for (const vg of [null, 0, -1, NaN]) {
       const z = QC.zeroGammaOf(slices.built, { spot: SPOT, atr: 2, vendorGross: vg });
-      ok(z.g === 2 && z.coverage === null && z.why === "flip.coverage-unmeasured", `a vendor book of ${vg} leaves the coverage unmeasured and the flip at grade 2, never 3 (g ${z.g}, ${z.why})`);
+      ok(z.g === 2 && z.coverage === null && z.why === "flip.coverage-unmeasured", `a feed book of ${vg} leaves the coverage unmeasured and the flip at grade 2, never 3 (g ${z.g}, ${z.why})`);
     }
     ok(grades.every(([, g]) => g <= 2), `no flip is graded 3 at any coverage (${grades.map((x) => x.join("/")).join(" ")})`);
     ok(grades.some(([c, g, w]) => c >= 0.85 && g === 2 && w === "flip.convention") && grades.some(([c, g, w]) => c >= 0.5 && c < 0.85 && g === 2 && w === "flip.coverage") &&
@@ -209,7 +209,7 @@ function grossOfBuilt() {
      `and a quarter of the contracts measures ${quarter.coverage} and grades the zero-gamma level weak, where dollars divided by shares published ` +
      "27.15 and grade 3 (the coverage control could not fire for any spot above ten)");
   const inDollars = pass(rows.filter((_, i) => i % 4 === 0), "pct$", dollars);
-  near(inDollars.coverage, quarter.coverage, 1e-9, "the same chain against a vendor book already in dollars per 1% (unit pct$) reads the same coverage: the conversion follows the resolved unit");
+  near(inDollars.coverage, quarter.coverage, 1e-9, "the same chain against a feed book already in dollars per 1% (unit pct$) reads the same coverage: the conversion follows the resolved unit");
   ok(QP.vendorGrossPer1pct(1000, 100, "share") === 1e5 && QP.vendorGrossPer1pct(1000, 100, "pct$") === 1000 &&
      QP.vendorGrossPer1pct(1000, null, "share") === null && QP.vendorGrossPer1pct(null, 100, "share") === null && QP.vendorGrossPer1pct(0, 100, "share") === null,
      "and a book with no spot or no gross measures no coverage rather than a wrong one");
@@ -223,7 +223,7 @@ function grossOfBuilt() {
   ok(priced && Math.abs(priced.r - 0.047) < 0.004, `SPX parity recovers the rate its quotes were priced at (${priced && priced.r} against 0.047)`);
   eq(priced.method, "parity:SPX", "and names where it came from");
   const tr = QC.treasuryRate({ data: { data: [{ value: 4.17, date: "2026-09-21" }, { value: 4.3, date: "2026-09-18" }], name: "3month" } });
-  near(tr.r, Math.log(1.0417), 1e-5, "the three-month yield in the vendor's nested envelope is read at its latest date, continuously compounded");
+  near(tr.r, Math.log(1.0417), 1e-5, "the three-month yield in the feed's nested envelope is read at its latest date, continuously compounded");
   eq(QC.chooseRate({}).method, "constant", "with neither the documented constant stands in");
   eq(QC.chooseRate({ parity: priced, treasury: tr }).method, "parity:SPX", "and parity outranks the bill");
   const run = QP.rateFromRuns({ rowsByTicker: new Map(), spotOf: () => null, sessionDate: SESSION, treasuryRaw: [{ value: 4.17, date: "2026-09-21" }] });
@@ -906,7 +906,7 @@ const FACT_INPUT = () => ({
   eq(readSame, readN, `and both builds read every fitted smile to the same bit (${readSame} of ${readN} points)`);
 }
 
-console.log(`✓ flows-quant-card: ${n} assertions — vendor chain rows read once, in fractions and by the ticker's own series; ` +
+console.log(`✓ flows-quant-card: ${n} assertions — feed chain rows read once, in fractions and by the ticker's own series; ` +
   "quote IVs within a vol point of the smile that priced them, minimum-tick wings refused; the book's walls on their own " +
   "side of spot whatever the put sign; a zero-gamma level that brute force confirms; SPX parity and the bill as rate " +
   "sources; a seeded, drift-neutral, five-digit P law with the EWMA fallback; earnings sessions dated for the mask; " +

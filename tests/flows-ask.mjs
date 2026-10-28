@@ -833,7 +833,7 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
      "flag and its arithmetic silences the claim built on it, not the surface");
 
   const atLimit = byId("news/ceiling");
-  ok(atLimit && /vendor's own limit of 100 rows/.test(atLimit.say),
+  ok(atLimit && /feed's own limit of 100 rows/.test(atLimit.say),
      "and a response that really did fill the request keeps the ceiling sentence, " +
      "because that is the fact that separates a population we bounded from one they did");
 
@@ -852,8 +852,8 @@ const byId = (id) => INDEX.facts.find((f) => f.id === id);
 
   const junked = buildFactIndex({ flowalerts: { ...ALERTS, unusable: 5 } });
   const alerts = junked.facts.find((f) => f.id === "flowalerts/coverage");
-  ok(/5 rows the vendor sent that this page could not read/.test(alerts.say),
-     "rows the vendor sent that could not be shaped are named beside the count, not " +
+  ok(/5 rows the feed sent that this page could not read/.test(alerts.say),
+     "rows the feed sent that could not be shaped are named beside the count, not " +
      "folded into it: they are a fault on this page, and '2 of the 2 alerts read' " +
      "reads as a page holding everything that arrived");
   eq(alerts.n.unusableRows, 5, "and pinned like every other figure in the sentence");
@@ -1320,8 +1320,8 @@ import { chromium } from "playwright";
          "THE GUARANTEE NAMES EVERY STORED SOURCE THE DOSSIER CAN HOLD: each entry of the dossier's SOURCES table " +
          "except the live quote, which the answer path never fetches, is named in the sentence; a source added to " +
          "the table without a word here fails this line");
-      ok(!/can call the market-data vendor/.test(said) && !/up to [a-z]+ requests a question/.test(said) && !/already published/.test(said),
-         "and it no longer says the box can call the vendor, nor caps its requests, nor claims everything is already published");
+      ok(!/can call the market-data feed/.test(said) && !/up to [a-z]+ requests a question/.test(said) && !/already published/.test(said),
+         "and it no longer says the box can call the feed, nor caps its requests, nor claims everything is already published");
     }
     ok(!/reads nothing live/i.test(said),
        "and it still does not claim the box reads nothing live: the answer route lays the live keys over the brief");
@@ -1911,8 +1911,8 @@ import { chromium } from "playwright";
   ok(!intraday.facts.some((f) => f.id === "flowalerts/ceiling"),
      "the vendor-ceiling fact is gone once the merge stops carrying the nightly read's vendorTruncated");
   const ceiling = intraday.facts.find((f) => f.id === "flowalerts/read-ceiling");
-  ok(ceiling && /this site's own cap of 60 rows per read/.test(ceiling.say) && !/vendor's maximum/.test(ceiling.say),
-     "an intraday read that came back full names THIS SITE's 60-row cap, never 'the vendor's maximum of " +
+  ok(ceiling && /this site's own cap of 60 rows per read/.test(ceiling.say) && !/feed's maximum/.test(ceiling.say),
+     "an intraday read that came back full names THIS SITE's 60-row cap, never 'the feed's maximum of " +
      "200 rows' the nightly read measured and the intraday merge used to carry forward");
   eq(ceiling.n.readLimitRows, 60, "with the cap pinned for the guard");
   ok(!refreshIntradayFacts(index, { flowalerts: { ...fresh, vendorLimit: null, vendorTruncated: null,

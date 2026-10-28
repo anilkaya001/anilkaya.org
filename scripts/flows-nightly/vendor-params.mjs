@@ -93,7 +93,7 @@ export const MARKET_CROSS_LIMIT = 100;
 export const DEEP_RULE =
   "The " + 50 + " names furthest from neutral across both boards carry a chain " +
   "and a detail card. Every other row is scored and ranked from the same five " +
-  "sources, and has no card: the card costs vendor calls the run cannot spend " +
+  "sources, and has no card: the card costs feed calls the run cannot spend " +
   "on a hundred names.";
 
 export function deepNames(published, limit = DEEP_NAMES) {

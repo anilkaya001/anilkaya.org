@@ -96,21 +96,21 @@ export const FACT_IDS = deepFreeze({
     unit: "vol", tenor: "30-day implied against the trailing 21 sessions", gradeRule: "always 1 when present, because realised volatility looks back", since: ORIGIN,
   },
   "level.callWall": {
-    meaning: "Strike at or above spot with the largest call gamma open interest in the vendor's strike book",
+    meaning: "Strike at or above spot with the largest call gamma open interest in the feed's strike book",
     unit: "px", tenor: null, gradeRule: "3 when a book is held; 0 and withheld otherwise", since: ORIGIN,
   },
   "level.putWall": {
-    meaning: "Strike at or below spot with the largest absolute put gamma open interest in the vendor's strike book",
+    meaning: "Strike at or below spot with the largest absolute put gamma open interest in the feed's strike book",
     unit: "px", tenor: null, gradeRule: "3 when a book is held; 0 and withheld otherwise", since: ORIGIN,
   },
   "level.magnet": {
-    meaning: "Strike with the largest absolute dealer-book gamma, calls plus signed puts, on the vendor's convention (dealers long calls, short puts)",
+    meaning: "Strike with the largest absolute dealer-book gamma, calls plus signed puts, on the feed's convention (dealers long calls, short puts)",
     unit: "px", tenor: null, gradeRule: "3 when the put signs agree; 0 and withheld when they are mixed or no book is held", since: ORIGIN,
   },
   "level.flip": {
-    meaning: "Price at which the dealer gamma profile recomputed from the chain crosses zero, on the vendor's convention (dealers long calls, short puts)",
+    meaning: "Price at which the dealer gamma profile recomputed from the chain crosses zero, on the feed's convention (dealers long calls, short puts)",
     unit: "px", tenor: null,
-    gradeRule: "the profile's coverage grade capped at 2 because the sign convention is the vendor's, and capped at 1 when the sign at spot contradicts the book gamma", since: ORIGIN,
+    gradeRule: "the profile's coverage grade capped at 2 because the sign convention is the feed's, and capped at 1 when the sign at spot contradicts the book gamma", since: ORIGIN,
   },
   "level.flip.count": {
     meaning: "How many times the recomputed dealer gamma profile changes sign across the price grid",
@@ -133,11 +133,11 @@ export const FACT_IDS = deepFreeze({
     unit: "px", tenor: "today's flow", gradeRule: "1 when the panel carries it; 0 and withheld otherwise", since: ORIGIN,
   },
   "gex.book": {
-    meaning: "Dealers' book gamma in dollars per 1% move of the underlying, on the vendor's convention (dealers long calls, short puts)",
+    meaning: "Dealers' book gamma in dollars per 1% move of the underlying, on the feed's convention (dealers long calls, short puts)",
     unit: "usdPer1pct", tenor: null, gradeRule: "2 when a book gamma is held; 0 and withheld otherwise", since: ORIGIN,
   },
   "gex.flow": {
-    meaning: "Net gamma of today's option flow in dollars per 1% move of the underlying, on the vendor's convention",
+    meaning: "Net gamma of today's option flow in dollars per 1% move of the underlying, on the feed's convention",
     unit: "usdPer1pct", tenor: "today's flow", gradeRule: "1 when held; 0 and withheld otherwise", since: ORIGIN,
   },
   "event.days": {

@@ -225,7 +225,7 @@ const SQRT252 = 15.874507866387544;
   const impliedMove = rows.map((r) => ({ t: r.t, m: r.chg / r.im })).sort((a, b) => a.m - b.m).map((x) => x.t);
   ok(impliedMove.join() !== prior.join(), "a build that used implied_move_perc as the unit orders them differently, so the fixture catches it");
   const twin = rows.map((r) => ({ ...r, im: 123 }));
-  deep(M.rankMoves(twin, "down").clean.map((x) => x.m), M.rankMoves(rows, "down").clean.map((x) => x.m), "the vendor's implied move changes nothing");
+  deep(M.rankMoves(twin, "down").clean.map((x) => x.m), M.rankMoves(rows, "down").clean.map((x) => x.m), "the feed's implied move changes nothing");
   deep(M.rankMoves(rows.map((r) => ({ ...r, iv30: 9 })), "down").clean.map((x) => x.m), M.rankMoves(rows, "down").clean.map((x) => x.m), "and neither does the current IV");
   const src = read("shared/flows-moves0.js");
   ok(!/implied_move|\.im\b|\biv30\b(?!p)/.test(src), "the module never reads the implied move or a current IV");

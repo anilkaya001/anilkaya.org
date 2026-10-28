@@ -39,12 +39,12 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
     "the premium desk uses — one spelling of one relation");
   eq(row.k, 150, "and so does the strike");
   eq(row.exp, "2026-09-18", "and the expiry");
-  eq(row.prem, 125000.5, "the vendor's premium survives as a number");
+  eq(row.prem, 125000.5, "the feed's premium survives as a number");
   eq(row.sweep, true, "a sent flag is carried");
-  eq(row.floor, false, "false is carried AS false — the vendor looked and found none");
+  eq(row.floor, false, "false is carried AS false — the feed looked and found none");
   eq(row.single, null,
-    "AND AN ABSENT FLAG IS NULL, NOT FALSE — the vendor not carrying the field " +
-    "is a different fact from the vendor answering no, and collapsing them " +
+    "AND AN ABSENT FLAG IS NULL, NOT FALSE — the feed not carrying the field " +
+    "is a different fact from the feed answering no, and collapsing them " +
     "would print a confident “no” nobody measured");
   eq(row.st, "deep", "the board-funnel stage rides on the row");
   eq(alertRow({ ticker: "ZZZ", total_premium: 1 }, { stageOf }).st, "foreign",
@@ -57,7 +57,7 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
     "THE REST SHAPE: the rule rides alert_rule");
   eq(alertRow({ ...base, rule_name: "RepeatedHitsAscendingFill", rule_id: "5ce5ec11" }).rule,
     "RepeatedHitsAscendingFill",
-    "THE SOCKET SHAPE: the vendor's socket names the rule rule_name, and a rule read only from " +
+    "THE SOCKET SHAPE: the feed's socket names the rule rule_name, and a rule read only from " +
     "alert_rule is a null on every row the day the socket feeds the alerts");
   eq(alertRow({ ...base, rule_name: "Socket", rule_id: "5ce5ec11" }).ruleId, "5ce5ec11",
     "and the rule's id is kept when the socket sends one");
@@ -96,7 +96,7 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
   ], { stageOf });
 
   deep(built.rows.map((r) => r.t), ["AAA", "BBB", "CCC", "EEE", "DDD"],
-    "premium descending with a TOTAL tie-break; rows the vendor sent without a " +
+    "premium descending with a TOTAL tie-break; rows the feed sent without a " +
     "premium rank after every row that has one, by size then name — the first " +
     "draft's precedence bug made this exact ordering random, which is why the " +
     "fixture holds two null-premium rows of different sizes");
@@ -137,7 +137,7 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
   ]);
   eq(built.coverage.sweeps, 1,
     "the sweep count counts true and only true — counting an absent flag either " +
-    "way would manufacture a measurement the vendor never sent");
+    "way would manufacture a measurement the feed never sent");
 }
 
 {
@@ -160,8 +160,8 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
     "— a row without a premium cannot appear in a premium band");
   eq(band.seen, 2, "seen counts the priced rows, not the whole feed");
   eq(band.shed, 0, "nothing shed at this cap");
-  eq(band.basis, "vendor-flagged windows",
-    "and the basis names the vendor's selection so no renderer can relabel it " +
+  eq(band.basis, "feed-flagged windows",
+    "and the basis names the feed's selection so no renderer can relabel it " +
     "as the market's largest");
   eq(band.rows[0].sweep, true, "the sweep flag rides");
   eq(band.rows[0].k, 150, "with the parsed contract");
@@ -179,7 +179,7 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
       BAN.lastIndex = 0;
       const m = BAN.exec(value);
       ok(!m, `${at} says "${m && m[1]}" — a claim this feed cannot support: rows are ` +
-        "vendor-flagged windows, not executions, and carry no identity");
+        "feed-flagged windows, not executions, and carry no identity");
       return;
     }
     if (value && typeof value === "object") {
@@ -187,8 +187,8 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
     }
   };
   scan(ALERTS_NOTES, "notes");
-  ok(/vendor's rules chose to flag/.test(ALERTS_NOTES.selection),
-    "and the selection caveat — the population is the vendor's choice, not the " +
+  ok(/feed's rules chose to flag/.test(ALERTS_NOTES.selection),
+    "and the selection caveat — the population is the feed's choice, not the " +
     "market's ranking — is stated in those words, because it is the headline " +
     "fact about this feed");
 }
@@ -254,15 +254,15 @@ const stageOf = (t) => (t === "AAA" ? "deep" : t === "BBB" ? "gated" : null);
     "THE REST FLOW ALERT SCHEMA DOCUMENTS created_at AND NO start_time, so a row that carries only " +
     "created_at is dated by it rather than left undated");
   eq(createdOnly.spanEnd, createdOnly.spanStart, "with its end at the same instant, not a window it never stated");
-  eq(createdOnly.spanFrom, "created_at", "and it says where the instant came from, so the page does not call it the vendor's span");
+  eq(createdOnly.spanFrom, "created_at", "and it says where the instant came from, so the page does not call it the feed's span");
   eq(alertRow({ ...base, start_time: 1726670212648, created_at: "2023-12-12T16:35:52Z" }).spanFrom, undefined,
     "a row with a real window never carries the created_at marker");
   const startOnly = alertRow({ ...base, start_time: 1726670212648 });
   eq(startOnly.spanStart, "2024-09-18T14:36:52.648Z", "a row with a start and no end keeps its start");
   eq(startOnly.spanEnd, null,
     "AND NO END IS INVENTED FOR IT: spanEnd fell back to spanStart, so the overview titled the cell " +
-    "'Window ran 10:36 to 10:36 ET.' and Unusual 'The vendor's stated span: X to X' for an end the " +
-    "vendor never sent, and the overview's 'the vendor stated no end for it' could never run");
+    "'Window ran 10:36 to 10:36 ET.' and Unusual 'The feed's stated span: X to X' for an end the " +
+    "feed never sent, and the overview's 'the feed stated no end for it' could never run");
   eq(startOnly.spanFrom, undefined, "and it is not dated by created_at either");
   eq(buildFlowAlerts([{ ...base, start_time: 1726670212648 }]).coverage.withSpan, 0,
     "so coverage does not count it as a window");
@@ -335,7 +335,7 @@ const rows2 = byT(merge2);
 
 ok(rows2.has("AAA"),
   "A NAME FLAGGED AT 09:31 AND ABSENT FROM THE 09:46 WINDOW SURVIVES. This is the " +
-  "whole point: the vendor's list rolls, the session's record does not, and the old " +
+  "whole point: the feed's list rolls, the session's record does not, and the old " +
   "wholesale spread deleted this row every fifteen minutes");
 eq(rows2.get("AAA").lastAt, T1,
   "and it survives WITH ITS OWN TIMES — a carried row's last sighting stays the read " +
@@ -349,7 +349,7 @@ eq(rows2.get("BBB").firstAt, T1,
 eq(rows2.get("BBB").lastAt, T2, "while last-seen does");
 eq(rows2.get("BBB").reads, 2, "and the sighting count increments");
 eq(rows2.get("BBB").prem, 650000,
-  "the vendor's own numbers come from the LATEST read — an open window restates its " +
+  "the feed's own numbers come from the LATEST read — an open window restates its " +
   "premium — so only the record's three fields are held back");
 eq(rows2.get("CCC").reads, 1, "a window new to this read enters at one sighting");
 
@@ -413,7 +413,7 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     { at: T2, sessionDate: D28, cap: 5 });
   eq(compounded.record.union, 9,
     "the second read unions against the five rows that SURVIVED the first cut, " +
-    "never against the twelve the vendor actually flagged");
+    "never against the twelve the feed actually flagged");
   eq(compounded.record.kept, 5, "and the ceiling holds again");
   eq(compounded.record.everEntered, 16,
     "BUT THE RUNNING ENTRY COUNT KEEPS MOVING — twelve windows plus four — so the " +
@@ -464,7 +464,7 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     win("DUP", "DUP260918C00010000", T1, 90),
   ]), { at: T1, sessionDate: D28 });
   eq(twice.rows.length, 1, "one window listed twice in one read is one row");
-  eq(twice.rows[0].reads, 1, "and ONE sighting — counting the vendor's repetition as the " +
+  eq(twice.rows[0].reads, 1, "and ONE sighting — counting the feed's repetition as the " +
     "session's would inflate the number the page leads on");
 }
 
@@ -489,7 +489,7 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
 
 {
   const emptyRead = buildFlowAlerts({ data: [] }, { stageOf: () => null });
-  eq(emptyRead.rows.length, 0, "an empty vendor read still shapes to no rows");
+  eq(emptyRead.rows.length, 0, "an empty feed read still shapes to no rows");
   eq(emptyRead.status, "quiet", "and reports quiet");
 
   const wouldBe = mergeAlerts(state2, emptyRead, { at: T4, sessionDate: D28 });
@@ -785,7 +785,7 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
   const stageOf = (t) => (t === "S28A" ? "board:long" : null);
   const read = buildFlowAlerts(nightlyRaw, { stageOf });
   ok(!read.rows.some((r) => r.spanStart === slotAt(0)),
-    "the post-close read no longer holds the 13:15 windows: the vendor's list is rolling");
+    "the post-close read no longer holds the 13:15 windows: the feed's list is rolling");
 
   const night = nightlyAlerts(read, { payload: stored, status: 200 }, { sessionDate: DAY, at: closeAt, stageOf });
   eq(night.mode, "merged",
@@ -850,13 +850,13 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     "and that write carries the merged record rather than the bare read");
 }
 
-console.log(`✓ flows-alerts: ${checks} assertions — a vendor flag that is absent staying ` +
+console.log(`✓ flows-alerts: ${checks} assertions — a feed flag that is absent staying ` +
   `null rather than becoming a confident no, a row measuring nothing dropped and counted, ` +
-  `premium ranking inside the vendor's own selection with a total tie-break the first ` +
+  `premium ranking inside the feed's own selection with a total tie-break the first ` +
   `draft's precedence bug would fail, a published cap with its shed, affirmative-only ` +
   `flag counts, a quiet empty, both wire envelopes shaping byte-identically so the ` +
   `second writer cannot zero the key, notes that need no allow-list, and a SESSION ` +
-  `RECORD in which a name flagged at 09:31 outlives the vendor's rolling window: ` +
+  `RECORD in which a name flagged at 09:31 outlives the feed's rolling window: ` +
   `first-seen that never advances beside a last-seen that does, sightings counted once ` +
   `per read, a reset at the session boundary and at no other age, both ceilings ` +
   `reachable by a fixture and naming which one shed, both of them measured against ` +

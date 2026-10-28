@@ -108,7 +108,7 @@ for (const rel of Object.values(FILES)) {
     scanFails++;
   }
   if (/UW_API_KEY|unusualwhales/i.test(text)) {
-    console.error(`  FAIL ${rel} names the vendor key or host`);
+    console.error(`  FAIL ${rel} names the feed key or host`);
     scanFails++;
   }
 }

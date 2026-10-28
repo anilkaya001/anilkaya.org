@@ -2596,11 +2596,11 @@ Full Playwright browser regression suite.
 
 ### `tests/flows-copy-lint.mjs`
 
-The vendor-term lint: no `at ask`, `at the ask`, `at bid` or `at the bid` in any browser, Worker, pipeline or model-visible string (an empty allowlist), and no quoted `NOW` badge in a browser file; it plants a string of each rule, and the network's side names (`Calls . ask side`, `Puts . bid side`, `Calls . bid side`, `Puts . ask side`) and legend sentence are checked, and no lean surface may carry an Unsided or Unattributed label in `assets/js/flows-net.js`. The vendor's ask side is a fill above the midpoint for contract volume and its alert field is undocumented, so the lean is a convention.
+The vendor-term lint: no `at ask`, `at the ask`, `at bid` or `at the bid` in any browser, Worker, pipeline or model-visible string (an empty allowlist), and no quoted `NOW` badge in a browser file; it plants a string of each rule, and the network's side names (`Calls . ask side`, `Puts . bid side`, `Calls . bid side`, `Puts . ask side`) and legend sentence are checked, and no lean surface may carry an Unsided or Unattributed label in `assets/js/flows-net.js`. The vendor's ask side is a fill above the midpoint for contract volume and its alert field is undocumented, so the lean is a convention. The source rule: no string, multi-line template or rendered page (every page function, as a member and as an owner with every optional module on) names the data source by its trade or its company; copy says the feed or the source, and identifiers, reason codes, hosts and file names pass. Planted strings of each shape (a sentence, a capitalised label, a plural possessive, a sentence-final name, the company name, a multi-line template, a title attribute) must each be caught.
 
 | File | Exports | Suites |
 |---|---|---|
-| `tests/flows-copy-lint.mjs` | `tests/flows-copy-lint.mjs#lintText`, `tests/flows-copy-lint.mjs#unsignedRiskReversal` | flows-copy-lint |
+| `tests/flows-copy-lint.mjs` | `tests/flows-copy-lint.mjs#lintText`, `tests/flows-copy-lint.mjs#sourceProse`, `tests/flows-copy-lint.mjs#sourceTemplates`, `tests/flows-copy-lint.mjs#templateTexts`, `tests/flows-copy-lint.mjs#unsignedRiskReversal` | flows-copy-lint |
 
 ### `tests/flows-desk-client.mjs`, `tests/desk-fixtures.mjs`
 

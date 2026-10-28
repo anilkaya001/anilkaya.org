@@ -149,7 +149,7 @@ function world(rows = {}, behaviour = {}) {
   const src = fs.readFileSync(path.join(ROOT, "server/routes/flows-oracle.js"), "utf8") + fs.readFileSync(path.join(ROOT, "server/store.js"), "utf8").match(/async readMany[\s\S]*?\n    },/)[0];
   ok(!/json_each/.test(src), "no json_each");
   ok(!/\bAI\b|env\.AI|askModels|aiCall/.test(src), "no model call from the route");
-  ok(!/fetch\(/.test(src), "no vendor call from the route");
+  ok(!/fetch\(/.test(src), "no feed call from the route");
   const worker = fs.readFileSync(path.join(ROOT, "worker.js"), "utf8");
   ok(/flowsOracleRows\(\{ store: FLOWS_STORE/.test(worker), "the Worker mounts the family");
   const toml = fs.readFileSync(path.join(ROOT, "wrangler.toml"), "utf8");

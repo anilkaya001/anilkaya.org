@@ -41,7 +41,7 @@ const print = (o = {}) => ({
     eq(tierOf(price, bid, ask), "n", `no usable quote or price (${JSON.stringify([price, bid, ask])}) is tier n`);
   }
   deep([...TIERS], ["A", "a", "m", "b", "B", "n"], "six tiers, strongest ask first");
-  deep(Object.keys(TIER_TAGS), [...TIERS], "each tier has the vendor tag it should agree with");
+  deep(Object.keys(TIER_TAGS), [...TIERS], "each tier has the feed tag it should agree with");
   deep(Object.keys(SIDE_WORDS), [...TIERS], "and the words that describe it");
 }
 
@@ -55,7 +55,7 @@ const print = (o = {}) => ({
 }
 
 {
-  eq(sideTagOf(["ask_side"]), "ask_side", "the vendor's side tag");
+  eq(sideTagOf(["ask_side"]), "ask_side", "the feed's side tag");
   eq(sideTagOf(["index", "bid_side", "china"]), "bid_side", "among the classification tags");
   eq(sideTagOf("mid_side"), "mid_side", "as a string");
   eq(sideTagOf(["ASK_SIDE"]), "ask_side", "case does not matter");
@@ -65,7 +65,7 @@ const print = (o = {}) => ({
   eq(sideTagOf(undefined), null, "absent tags");
   eq(sideTagOf(null), null, "null tags");
   eq(sideTagOf([]), null, "no tags");
-  deep([...SIDE_TAGS], ["ask_side", "bid_side", "mid_side", "no_side"], "the four sides the vendor documents");
+  deep([...SIDE_TAGS], ["ask_side", "bid_side", "mid_side", "no_side"], "the four sides the feed documents");
 }
 
 {
@@ -91,7 +91,7 @@ const print = (o = {}) => ({
   eq(t({ tags: undefined, price: "1.00" }).side, -1, "absent tags fall back to the tier too");
   eq(t({ tags: [], price: "1.05" }).side, 0, "the midpoint has no side");
   const noQuote = t({ nbbo_bid: null, nbbo_ask: null, tags: ["ask_side"] });
-  deep([noQuote.side, noQuote.tier, noQuote.parity, noQuote.basis], [1, "n", "unchecked", "tag"], "a tag with no quote to check it against is taken as the vendor's word, unchecked");
+  deep([noQuote.side, noQuote.tier, noQuote.parity, noQuote.basis], [1, "n", "unchecked", "tag"], "a tag with no quote to check it against is taken as the feed's word, unchecked");
   deep([t({ nbbo_bid: null, tags: [] }).side, t({ nbbo_bid: null, tags: [] }).basis], [0, "none"], "no tag and no quote: no side");
   eq(t({ premium: null }).signed, false, "a print with no premium cannot enter a signed total");
   eq(t({ premium: null }).premium, null, "and its premium stays null, not zero");
@@ -355,4 +355,4 @@ const print = (o = {}) => ({
 }
 
 const ms = Number(process.hrtime.bigint() - t0) / 1e6;
-console.log(`✓ flows-tape-stats: ${checks} assertions — six side tiers from the NBBO against the vendor's side tag with the disagreement counted and left unsigned, a sweep read from the report flag or the upstream code isoi and never from the equity enum, a large print only as ten times a stated floor, multi-leg, canceled, dividend and arbitrage prints kept out of every signed total, and rolling windows whose asked, bid and unclassified premium reconcile to gross within 1e-9, in ${ms.toFixed(0)} ms`);
+console.log(`✓ flows-tape-stats: ${checks} assertions — six side tiers from the NBBO against the feed's side tag with the disagreement counted and left unsigned, a sweep read from the report flag or the upstream code isoi and never from the equity enum, a large print only as ten times a stated floor, multi-leg, canceled, dividend and arbitrage prints kept out of every signed total, and rolling windows whose asked, bid and unclassified premium reconcile to gross within 1e-9, in ${ms.toFixed(0)} ms`);

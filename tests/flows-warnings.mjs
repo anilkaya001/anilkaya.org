@@ -64,7 +64,7 @@ const CLEAN = {
   movers: {
     status: "ok", generatedAt: STAMP, sessionDate: SESSION,
     premium: {
-      byContract: { basis: "vendor-flagged windows", cap: 12, seen: 2, shed: 0,
+      byContract: { basis: "feed-flagged windows", cap: 12, seen: 2, shed: 0,
                     rows: [{ t: "SYN351" }, { t: "SYN192" }] },
     },
   },
@@ -457,7 +457,7 @@ const CHECKS_ON_CLEAN = 13;
   s.alerts.vendorTruncated = true;
   const out = run(s);
   assert.deepEqual(ids(out), ["ceiling:alerts", "ceiling:inherited"],
-    "a read that hit the vendor's limit is reported, and so is the second surface cut from it");
+    "a read that hit the feed's limit is reported, and so is the second surface cut from it");
   checks++;
   const w = byId(out, "ceiling:alerts");
   eq(w.severity, "caution",
@@ -531,7 +531,7 @@ const CHECKS_ON_CLEAN = 13;
      "and how many windows it ranks, named as a ranking rather than as a floor: alertBand " +
      "caps the band and publishes `shed` beside it, so its length is a number we know exactly");
   ok(/largest of what arrived/.test(w.say),
-     "because what the vendor's ceiling costs the band is not its length but its CLAIM — a " +
+     "because what the feed's ceiling costs the band is not its length but its CLAIM — a " +
      "ranking cut from a truncated read is the largest of what arrived, and the panel above " +
      "it calls that the largest of the session");
   assert.deepEqual(w.sources.slice().sort(), ["flowalerts", "movers"],
@@ -553,7 +553,7 @@ const CHECKS_ON_CLEAN = 13;
   s.news.returned = 100;
   s.news.atVendorLimit = true;
   const out = run(s);
-  assert.deepEqual(ids(out), ["ceiling:news"], "a response that ended at the vendor's own page size is reported");
+  assert.deepEqual(ids(out), ["ceiling:news"], "a response that ended at the feed's own page size is reported");
   checks++;
   const w = byId(out, "ceiling:news");
   eq(w.n.returned, 100, "with what came back on the wire");

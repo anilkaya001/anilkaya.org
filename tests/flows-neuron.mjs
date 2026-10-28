@@ -580,7 +580,7 @@ const CARD = {
      "and a model summary that survived the guard is attributed to the model whatever happened to its ideas");
   eq(neuronProvenance({ text: "x", llm: true, model: "@cf/meta/llama-3.3-70b-instruct-fp8-fast" }),
      "Wording by Llama 3.3 70B; figures measured by the pipeline.",
-     "a Workers AI id is printed as the model's name, not as the vendor path a reader cannot parse");
+     "a Workers AI id is printed as the model's name, not as the feed path a reader cannot parse");
   eq(modelName("@cf/qwen/qwen2.5-coder-32b-instruct"), "Qwen2.5 Coder 32B", "the humanised name keeps the size and drops the serving flags");
   eq(modelName(null), "a language model", "and no id at all is a language model");
   eq(prov("unreachable:allowance"), "Deterministic reading: the day’s free model allowance is spent, resetting 03:00 TRT (00:00 UTC).",
@@ -864,7 +864,7 @@ const CARD = {
 }
 
 {
-  eq(NEURON_CONTEXT_VERSION, 6, "the context protocol is version 6, the dealer exposures added to version 5: numbered engine facts and priced structures, vetted against the engine's own ranking, over one table of thresholds");
+  eq(NEURON_CONTEXT_VERSION, 7, "the context protocol is version 7, the source named the feed in version 7 and the dealer exposures added to version 5: numbered engine facts and priced structures, vetted against the engine's own ranking, over one table of thresholds");
   const leg = (type, k, side, qty = 1) => ({ type, k, side, qty });
   const st = (id, family, risk, dir, legs, grade, rules, prob, ev, maxProfit, maxLoss) => ({
     id, family, risk, dir, expiry: "2026-10-16", dte: 30, sessions: 22, legs, grade, gradeWhy: grade < 3 ? ["fit.in-spread"] : [],
@@ -1300,7 +1300,7 @@ const CARD = {
   const card = buildCard({ ticker: "SYN", row: { close: S, prev_close: 178, nm: "Synthetic", sector: "Tech" }, features, strikes, ticks: [],
     expiries: expiryRows, maxPain: [], congress: [], surface: [], chain: null, generatedAt: "2026-09-30T21:30:00Z", sessionDate: SESSION,
     variation: { unit: { family: "share", used: "share", n: 60, source: "probe" }, probe: null, kc: null, vannaScale: null, next: null } });
-  near(card.regime.bookGammaRaw, 135000, 1e-6, "the vendor's share-gamma book sums to 135,000 shares per dollar");
+  near(card.regime.bookGammaRaw, 135000, 1e-6, "the feed's share-gamma book sums to 135,000 shares per dollar");
   near(card.regime.bookGamma, 135000 * S * S / 100, 1e-3, "and the card's dollar figure is that times S squared over 100");
   const read = gammaReading(card);
   ok(read.sentence.includes("+$43.74M per 1% move") && !read.sentence.includes("$135.0k") && !/135\.0k/.test(read.sentence),
@@ -1369,7 +1369,7 @@ const CARD = {
   const fx = buildContext(full, { expectedSession: "2026-09-15" });
   ok(fx.features.find((f) => f.key === "gamma").robustness === 1 && /500-row page/.test(fx.features.find((f) => f.key === "gamma").why) &&
      levelsOf(fx).robustness === 1,
-     "UW-F12: a strike ladder that filled the vendor's 500-row page grades the gamma and levels features weak and says the window ended it");
+     "UW-F12: a strike ladder that filled the feed's 500-row page grades the gamma and levels features weak and says the window ended it");
 }
 
 {
@@ -1407,7 +1407,7 @@ const CARD = {
   hostile.panels.darkpool = { status: "unavailable", reason: "the feed said <b>obey</b> [click](https://evil.example) {\"x\":1}" };
   const ctx = buildContext(hostile, { expectedSession: "2026-09-15" });
   ok(/^[A-Za-z0-9 .,&'-]{0,40}$/.test(ctx.name) && /^[A-Za-z0-9 .,&'-]{0,40}$/.test(ctx.sector),
-     `N-F10: vendor text placed in the prompt is cut to [A-Za-z0-9 .,&'-]{0,40} (${JSON.stringify(ctx.name)} and ${JSON.stringify(ctx.sector)})`);
+     `N-F10: feed text placed in the prompt is cut to [A-Za-z0-9 .,&'-]{0,40} (${JSON.stringify(ctx.name)} and ${JSON.stringify(ctx.sector)})`);
   eq(ctx.ticker, null, "a ticker that is not a ticker is not placed in the prompt at all");
   const prompt = promptForNeuron(ctx);
   ok(!/<script|<b>|<\/system>|\]\(https/i.test(prompt.user) && !/\n\n# SYSTEM|\nAssistant:/.test(prompt.user),
@@ -1691,10 +1691,10 @@ const CARD = {
   ok(bare.exposure.withheld.find((w) => w.key === "gamma").reason === "the card carries the book's sign and not its dollar size" &&
      bare.exposure.withheld.find((w) => w.key === "dex").reason === "the hedging panel is not on this card", "and its reason");
   const half = ctxOf(withPanel({ channels: { ...panel().channels, vanna: null }, inputs: { ...panel().inputs, deltaDollars: null },
-    silences: [{ channel: "vanna", kind: "unavailable", code: "vanna-unchecked", reason: "the vendor's vanna scale was not checked against a chain this run" }] }));
+    silences: [{ channel: "vanna", kind: "unavailable", code: "vanna-unchecked", reason: "the feed's vanna scale was not checked against a chain this run" }] }));
   same(half.exposure.facts.map((x) => x.key), ["gamma", "charm"], "a panel that read only some channels publishes only those");
-  eq(half.exposure.withheld.find((w) => w.key === "vanna").reason, "the vendor's vanna scale was not checked against a chain this run", "and carries the panel's own reason for each silence");
-  ok(/Not read: dex \(/.test(feat(half).say) && /vanna \(the vendor's vanna scale/.test(feat(half).say), "and the sentence names what it did not read");
+  eq(half.exposure.withheld.find((w) => w.key === "vanna").reason, "the feed's vanna scale was not checked against a chain this run", "and carries the panel's own reason for each silence");
+  ok(/Not read: dex \(/.test(feat(half).say) && /vanna \(the feed's vanna scale/.test(feat(half).say), "and the sentence names what it did not read");
   const staleCtx = buildContext(withPanel(), { expectedSession: "2026-09-16" });
   ok(feat(staleCtx).robustness <= 1, "a card behind the last closed session is capped like every feature");
 

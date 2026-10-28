@@ -158,7 +158,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(universeValue(u, "AAA", "si"), 0.086, "short interest keeps its fraction");
   eq(universeValue(u, "AAA", "ed"), 3, "three sessions from Tuesday to Friday's report");
   eq(universeValue(u, "AAA", "chg"), 0.0526, "one-day change in basis points");
-  eq(universeValue(u, "AAA", "iv30p"), 0.38, "iv30p is the previous trading day's 30-day implied volatility (the vendor's iv30d_1d), not today's");
+  eq(universeValue(u, "AAA", "iv30p"), 0.38, "iv30p is the previous trading day's 30-day implied volatility (the feed's iv30d_1d), not today's");
   eq(u.cols.iv30p[1], null, "BBB sent no iv30d_1d, so iv30p is null and the name has no IV-days");
   {
     const shock = buildUniverse([{ ticker: "MOVE", marketcap: "1e10", close: "92", prev_close: "100", sector: "Energy", iv30d: "0.56", iv30d_1d: "0.40" },
@@ -245,16 +245,16 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   }
   deep([universeValue(u, "SYB202", "dex"), universeValue(u, "SYB202", "vanna"), universeValue(u, "SYB202", "charm")], [3.48, 0.0066, -5.3],
     "the three dealer exposures are dollars per 1% over 96,400,000.5 shares x $184.60 = $17,795,440,092.30 of average daily dollar volume: " +
-    "61,884,500,000.50 / that = 3.48, 118,215,271.33 / that = 0.0066, -95,120,000,000.25 / that = -5.3, each keeping the vendor's sign");
+    "61,884,500,000.50 / that = 3.48, 118,215,271.33 / that = 0.0066, -95,120,000,000.25 / that = -5.3, each keeping the feed's sign");
   deep([universeValue(u, "SYB202", "im5"), universeValue(u, "SYB202", "im30")], [0.024, 0.058],
-    "the implied moves are the vendor's fractions of price (implied_move_perc_5 0.024, _30 0.058) and are not rescaled");
+    "the implied moves are the feed's fractions of price (implied_move_perc_5 0.024, _30 0.058) and are not rescaled");
   near(universeValue(u, "SYB202", "gexAdv"), Math.round(412350000.40 / 17795440092.3 * 1e4) / 1e4, 1e-9,
     "and gexAdv divides by the same average daily dollar volume, so the exposures are on one footing");
   {
     const gone = buildUniverse([{ ...row, gex_delta_per_one_percent_move_oi: "", gex_vanna_per_one_percent_move_oi: null,
       gex_charm_per_one_percent_move_oi: "n/a", implied_move_perc_5: "", implied_move_perc_30: "-0.01" }], { sessionDate: row.date });
     deep(["dex", "vanna", "charm", "im5", "im30"].map((k) => universeValue(gone, "SYB202", k)), [null, null, null, null, null],
-      "an empty string (the vendor's own websocket example publishes delta_per_one_percent_move_oi as an empty string), a null, " +
+      "an empty string (the feed's own websocket example publishes delta_per_one_percent_move_oi as an empty string), a null, " +
       "text and a negative implied move all publish as absent, never as a zero");
     const noAdv = buildUniverse([{ ...row, avg30_volume: "0" }], { sessionDate: row.date });
     deep(["dex", "vanna", "charm", "gexAdv"].map((k) => universeValue(noAdv, "SYB202", k)), [null, null, null, null],
@@ -267,8 +267,8 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "while one before the open is counted to its own date");
   eq(universeValue(buildUniverse([{ ...row, er_time: "unknown" }], { sessionDate: row.date }), "SYB202", "ed"), sessionsBetween(row.date, row.next_earnings_date),
     "and one with no stated time to the nearer of its two sessions, so uncertainty never hides an event");
-  eq(row.short_int, "0", "the fixture row reads short_int '0', the vendor's placeholder for no reading");
-  eq(universeValue(u, "SYB202", "si"), null, "so a zero short_int is the vendor's placeholder and publishes as absent, not a measured 0");
+  eq(row.short_int, "0", "the fixture row reads short_int '0', the feed's placeholder for no reading");
+  eq(universeValue(u, "SYB202", "si"), null, "so a zero short_int is the feed's placeholder and publishes as absent, not a measured 0");
   eq(u.counts.si, 0, "and it does not enter the column's count or its percentile");
 
   const tonight = { ...row, next_earnings_date: row.date };
@@ -519,7 +519,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const b = borrowSummary([probe("shorts-data:SYA101")], { sessionDate: S });
   eq(b.fee, 0.0031, "the fee arrives in percent (0.31) and is published as a fraction");
   eq(b.rebate, 0.0342, "the rebate likewise");
-  eq(b.availCensored, true, "10,000,000 available shares reads as the vendor's cap");
+  eq(b.availCensored, true, "10,000,000 available shares reads as the feed's cap");
   eq(b.htb, false, "0.25% is not hard to borrow");
   eq(b.dFee5, null, "one snapshot day has no 5-session change");
   const days = ["2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17", "2026-09-18", "2026-09-21", "2026-09-22"];
@@ -559,7 +559,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     { ...ins, id: "unsigned", amount: 1000, price: "200" },
     { ...buy("X", "2026-09-10"), id: "free", price: "0" },
   ], { sessionDate: S });
-  eq(mixed.otherCodes, 1, "a grant (code A) that slips through the vendor filter is counted and left out");
+  eq(mixed.otherCodes, 1, "a grant (code A) that slips through the feed filter is counted and left out");
   eq(mixed.n, 2, "so only purchases and sales are transactions");
   near(mixed.net90, -200000, 1e-9, "a sale reported with a positive share count still subtracts: the code sets the sign");
   eq(mixed.buys90, null, "a purchase with no price leaves the buy dollars absent, not a measured 0");
@@ -662,7 +662,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   deep(seen, [0, 1], "offset is a page index: 0, then 1");
   eq(h.truncated, false, "a short second page ends the harvest");
   const stuck = await harvestScreener(async () => pages[0], {});
-  eq(stuck.repeated, true, "a vendor that ignores offset is detected on the first repeated page");
+  eq(stuck.repeated, true, "a feed that ignores offset is detected on the first repeated page");
   eq(stuck.rows.length, 500, "and the repeat adds nothing");
   const broken = await harvestScreener(async () => { throw new Error("/api/screener/stocks -> HTTP 500"); }, {});
   eq(broken.errors.length, 1, "a failed read is recorded, so the pipeline falls back to the sweep");
@@ -747,7 +747,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const { regime, catalysts } = assembleRegime(raw, { sessionDate: S, generatedAt: "t", indexRows: index.rows, harvestRows: vendor.augmented, universeRows: vendor.augmented });
   eq(regime.volCurve.vendor.reason, SILENCE.gated, "the VIX curve's 403 is published as a plan gate");
   eq(regime.volCurve.vendor.code, "volatility_scope_required", "with the probe's refusal code");
-  eq(regime.volCurve.vendor.status, "unavailable", "and the vendor arm is unavailable without a call");
+  eq(regime.volCurve.vendor.status, "unavailable", "and the feed arm is unavailable without a call");
   eq(regime.volCurve.vendor.http, null, "with no HTTP status, since nothing was asked");
   eq(regime.volCurve.status, "ok", "and the screener fallback carries the curve");
   eq(regime.zeroDte.status, "ok", "the 0DTE leg reads its four net-flow envelopes");
@@ -906,7 +906,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     enrich: async () => { throw new Error("enrich must not run without a spot"); },
     features: () => ({}), perName: async () => ({}), chain: async () => null, card: () => ({}), publish: async () => {},
   });
-  deep([hidden.skipped, hidden.failed], [["SPY"], []], "a row whose close is hidden is skipped before any vendor call, never built at spot 0");
+  deep([hidden.skipped, hidden.failed], [["SPY"], []], "a row whose close is hidden is skipped before any feed call, never built at spot 0");
   eq(shedToFit({ panels: {} }).dropped.length, 0, "a small card sheds nothing");
 
   const roster = dossierRoster({ index: ["SPY", "QQQ", "IWM"], funds: ["GLD", "SPY", "COPX"] });
@@ -976,7 +976,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(calls.filter((p) => p === HOLDINGS_PATH).length, 1,
      "the regime leg's own holdings read is served from that read — the NDX 10 costs no second call");
   eq(again.data[0].ticker, "NVDA", "with the same body");
-  ok(wrapped.calls === calls, "and the wrapper keeps the vendor's own properties");
+  ok(wrapped.calls === calls, "and the wrapper keeps the feed's own properties");
   const failed = withPrefetched(base, new Map([[HOLDINGS_PATH, { ok: false, error: "/api/etfs/QQQ/holdings -> HTTP 403" }]]));
   const r = await read(failed, HOLDINGS_PATH, {}, { envelope: true });
   ok(!r.ok && r.gated, "a failed prefetch replays as the same failure, gate included, rather than a silent empty");

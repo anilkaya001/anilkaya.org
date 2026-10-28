@@ -221,11 +221,11 @@ try {
   });
   ok(!r.error, "the grid renders an svg");
   eq(r.signed + r.zeros + r.voids, panel.strikes.length * panel.expiries.length, "drawn cells plus voids reconcile against the grid");
-  ok(r.voids >= 1, "the pair the vendor did not return is drawn as an explicit void");
+  ok(r.voids >= 1, "the pair the feed did not return is drawn as an explicit void");
   eq(r.hatches, r.negs, "every short-gamma cell carries the hatch that encodes sign without hue");
   eq(r.clips, panel.clipped, "every cell past the colour cap is marked, and only those");
   ok(new Set(r.shades).size > 3, `magnitude is encoded in opacity, not flattened (${new Set(r.shades).size} levels)`);
-  eq(r.zeros, 1, "the pair the vendor measured at exactly zero is drawn as its own kind of cell");
+  eq(r.zeros, 1, "the pair the feed measured at exactly zero is drawn as its own kind of cell");
   eq(r.zeroSigned, 0, "and carries NO sign class — zero is neither long nor short gamma");
   ok(r.zeroDots >= 1, "with a mark of its own, so it cannot be mistaken for a void");
   {

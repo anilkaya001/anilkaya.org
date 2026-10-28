@@ -162,7 +162,7 @@ for (const t of TICKERS) {
   await rows.find("/api/flows/strategy").handler(rc("/api/flows/strategy?t=NVDA&engine=1"));
   eq(log[1][1], "https://flows-strategy.internal/NVDA", "no expiry reads the context and drops the engine flag");
   const bad = await outcome(() => rows.find("/api/flows/strategy").handler(rc("/api/flows/strategy?t=NVDA&expiry=tomorrow")));
-  eq(bad.threw, { status: 400, code: "invalid_expiry", message: "Expiry must be a real date, YYYY-MM-DD, between 2000 and 2100", headers: undefined, details: undefined }, "a malformed expiry is 400 before any gate or vendor work");
+  eq(bad.threw, { status: 400, code: "invalid_expiry", message: "Expiry must be a real date, YYYY-MM-DD, between 2000 and 2100", headers: undefined, details: undefined }, "a malformed expiry is 400 before any gate or feed work");
   const noTicker = await outcome(() => rows.find("/api/flows/live").handler(rc("/api/flows/live")));
   eq(noTicker.threw.status, 400, "a missing ticker is 400");
 }
@@ -179,7 +179,7 @@ for (const t of TICKERS) {
   };
   for (const expiry of impossible) {
     const { out, log } = await probe({ flowsDeskRows }, expiry);
-    eq([out.threw && out.threw.status, out.threw && out.threw.code, log.length], [400, "invalid_expiry", 0], `${expiry} is 400 invalid_expiry with no gate built, no cache key and no vendor call`);
+    eq([out.threw && out.threw.status, out.threw && out.threw.code, log.length], [400, "invalid_expiry", 0], `${expiry} is 400 invalid_expiry with no gate built, no cache key and no feed call`);
   }
   for (const expiry of real) {
     const { out, log } = await probe({ flowsDeskRows }, expiry);
@@ -188,7 +188,7 @@ for (const t of TICKERS) {
   const regexOnly = await loadMutated("server/routes/flows-desk.js", [["if (rawExpiry !== null && !validExpiry(rawExpiry)) {", "if (rawExpiry !== null && !/^\\d{4}-\\d{2}-\\d{2}$/.test(rawExpiry)) {"]]);
   let caught = 0;
   for (const expiry of impossible) { const { out } = await probe(regexOnly, expiry); if (!out.threw) caught++; }
-  eq(caught, impossible.length, "PLANTED WRONG BUILD: a pattern-only check lets every impossible date through to the vendor, and this block fails it");
+  eq(caught, impossible.length, "PLANTED WRONG BUILD: a pattern-only check lets every impossible date through to the feed, and this block fails it");
 }
 
 {
@@ -211,7 +211,7 @@ for (const t of TICKERS) {
   }
   for (const qs of ["&h=abc", "&h=", "&h=0.0499", "&h=1.0001", "&h=-0.3", "&f=-0.0001", "&f=0.5001", "&f=", "&f=NaN", "&h=0.3&f=9", "&h=1e9"]) {
     const got = await asked({ flowsDeskRows }, "&strategy=sc" + qs);
-    eq([got.out.threw && got.out.threw.status, got.out.threw && got.out.threw.code, got.log.length], [400, "invalid_terms", 0], `${qs} is 400 invalid_terms before any gate, key or vendor call`);
+    eq([got.out.threw && got.out.threw.status, got.out.threw && got.out.threw.code, got.log.length], [400, "invalid_terms", 0], `${qs} is 400 invalid_terms before any gate, key or feed call`);
   }
   for (const strategy of ["cc", "csp", "both"]) {
     const got = await asked({ flowsDeskRows }, `&strategy=${strategy}&h=abc&f=zzz`);
@@ -247,7 +247,7 @@ for (const t of TICKERS) {
     let anon = null;
     try { await r.handle(rc("GET", path), gates); } catch (x) { anon = x; }
     eq([anon && anon.status, anon && anon.code, anon && anon.message], [401, "unauthorized", "Authentication required"], path + ": an anonymous caller is 401");
-    eq(log.length, 0, path + ": and no vendor gate was built for it");
+    eq(log.length, 0, path + ": and no feed gate was built for it");
   }
 }
 
@@ -265,7 +265,7 @@ for (const t of TICKERS) {
   expect(w, /async function serveCachedVendorRead\(/, { min: 1, max: 1, why: "the reader the rows call stays the one Worker-local copy" });
   expect(w, /function vendorGate\(env, session\)/, { min: 1, max: 1, why: "and so does the member and on-demand gate" });
   const src = moduleSource("server/routes/flows-desk.js");
-  ok(!/\buwFetch\b|\bUW_ONDEMAND\b|\bMEMBER_VENDOR\b/.test(src), "the family names no limiter and makes no vendor call itself: both stay behind the injected gate and reader");
+  ok(!/\buwFetch\b|\bUW_ONDEMAND\b|\bMEMBER_VENDOR\b/.test(src), "the family names no limiter and makes no feed call itself: both stay behind the injected gate and reader");
   ok(!/from "\.\.\/\.\.\/worker\.js"|cloudflare:/.test(src), "and imports neither the Worker nor the platform");
 }
 

@@ -368,7 +368,7 @@ for (const [id, transforms, expect] of PLANTS) {
     const text = COPY.fill(s, { date: "2026-10-23", TRT: "21:30", T: "SYX101", n: 3, what: "rows" });
     eq(lintText(text), [], "copy lint: " + text);
     eq(tooLong(text, 14), null, "copy within 14 words: " + text);
-    ok(!/vendor|unusual whales|tape/i.test(text), "copy names no provider and no tape: " + text);
+    ok(!/feed|unusual whales|tape/i.test(text), "copy names no provider and no tape: " + text);
   }
   for (const f of ["shared/flows-flowlab.js", "shared/flows-flowlab-copy.js", "tests/gen-flowlab-fixtures.py"]) {
     ok(!/\btape\b/i.test(fs.readFileSync(path.join(ROOT, f), "utf8").replace(/shared\/flows-tape-stats\.js|flows-tape-stats|tape-stats/g, "")), f + " holds the word tape nowhere");
@@ -385,7 +385,7 @@ for (const [id, transforms, expect] of PLANTS) {
   eq(prov.specSha256, await sha("docs/uw-openapi.yaml"), "and from the committed spec");
   eq(prov.shapesSha256, await sha("scripts/flows-probe-shapes.json"), "and the committed shape manifest");
   ok(/not observed on the wire/.test(prov.source), "the source says the bodies are not observed");
-  ok(/not vendor data/.test(prov.nature), "and that they are not vendor data");
+  ok(/not feed data/.test(prov.nature), "and that they are not feed data");
   const wrangler = fs.readFileSync(path.join(ROOT, "wrangler.toml"), "utf8");
   const assumed = Object.entries(FX.entries).filter(([, e]) => e.shape === "assumed").map(([k]) => k).sort();
   eq(assumed, ["analytics-sliding", "analytics-window"], "the two analytics bodies are assumed shapes");

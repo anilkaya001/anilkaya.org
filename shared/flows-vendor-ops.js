@@ -122,7 +122,7 @@ const TOKEN = /\{([a-z_]+)\}/g;
 
 export function opById(id) {
   const e = BY_ID.get(id);
-  if (!e) throw new Error(`vendor operation ${String(id)} is not in the registry`);
+  if (!e) throw new Error(`feed operation ${String(id)} is not in the registry`);
   return e;
 }
 
@@ -131,7 +131,7 @@ export function pathFor(id, params) {
   const given = params || {};
   return e.path.replace(TOKEN, (_, name) => {
     const v = given[name];
-    if (v === undefined || v === null || v === "") throw new Error(`vendor operation ${id}: ${name} is missing`);
+    if (v === undefined || v === null || v === "") throw new Error(`feed operation ${id}: ${name} is missing`);
     return encodeURIComponent(String(v));
   });
 }

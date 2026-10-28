@@ -177,7 +177,7 @@ const sqlColumns = (db, table) => db.prepare(`PRAGMA table_info(${table})`).all(
   const foc = (h, m, extra) => go(L.ledgerFocusStatement(s.D1, { day: DAY, at: at(h, m), ...win, ok: true, partial: false, failed: false, ...extra }));
   out(9, 31, { calls: 2, meter: { daily: 100, at: at(9, 31) } });
   let r = s.row(DAY);
-  deep([r.t1_calls, r.uw_daily_max, r.uw_daily_at], [2, 100, at(9, 31)], "THE VENDOR METER: a Tier 1 tick adds its calls and records the vendor's daily count with its instant, in the statement it already issues");
+  deep([r.t1_calls, r.uw_daily_max, r.uw_daily_at], [2, 100, at(9, 31)], "THE VENDOR METER: a Tier 1 tick adds its calls and records the feed's daily count with its instant, in the statement it already issues");
   foc(9, 33, { calls: 1, meter: { daily: 140, at: at(9, 33) } });
   r = s.row(DAY);
   deep([r.focus_calls, r.uw_daily_max, r.uw_daily_at], [1, 140, at(9, 33)], "a focus tick adds its call and moves the maximum, which the two ticks share");
@@ -214,7 +214,7 @@ const sqlColumns = (db, table) => db.prepare(`PRAGMA table_info(${table})`).all(
   const r = s.row(DAY);
   deep([r.t2_passes, r.t2_first_at, r.t2_last_at], [3, at(9, 35), at(10, 30)], "TIER 2 PASSES are counted from the heartbeat each pass writes, and an older heartbeat that arrives late is not counted");
   deep([r.t2_gap_ms, r.t2_gap_end], [50 * MIN, at(10, 30)], "the longest gap between passes, from 09:40 to 10:30");
-  deep([r.t2_calls, r.t2_failed], [120, 1], "with the vendor calls asked and failed");
+  deep([r.t2_calls, r.t2_failed], [120, 1], "with the feed calls asked and failed");
   eq(r.t2_first_at - at(9, 30), 5 * MIN, "the first pass's lateness against the open is its own gap: a loop that starts at 14:01 opens with a 271-minute gap");
   const friday = sqliteD1();
   apply(friday, L.ledgerPassStatement(friday.D1, { day: "2026-09-25", at: at(14, 1, "2026-09-25"), calls: 40, failedCalls: 0 }));
@@ -287,7 +287,7 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
   eq(r.ticks, ticks, "THE LEDGER COUNTS EVERY TICK THE WORKER RAN");
   eq(r.t1_gap_ms, 35 * MIN, "and its longest tick gap is the dropped half hour: 10:56 to 11:31 is thirty-five minutes");
   eq(r.t1_gap_end, at(11, 31), "ending where the cron came back");
-  ok(r.t1_ok > 60 && r.t1_fail === 4, `${r.t1_ok} successful writes and the four ticks the vendor refused (13:01, 13:06, 13:11 and 13:16 ET), counted apart (${r.t1_fail})`);
+  ok(r.t1_ok > 60 && r.t1_fail === 4, `${r.t1_ok} successful writes and the four ticks the feed refused (13:01, 13:06, 13:11 and 13:16 ET), counted apart (${r.t1_fail})`);
   ok(r.t1_ok_gap_ms >= 35 * MIN, "the successful-write gap is at least the tick gap");
   const clock = s.db.prepare("SELECT tier1_at, tier1_ok_at FROM flows_clock WHERE id = 1").get();
   ok(clock.tier1_at === at(17, 56) && clock.tier1_ok_at > 0, "the clock row is still written exactly as before");
@@ -358,7 +358,7 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
   seed(failing, [{ id: "live:alerts", readAt: T - 50 * MIN, cadenceS: 900, source: "actions" }]);
   await W.rthTick(rthEnv(failing), T, { fetchVendor: dead, log: quiet });
   r = failing.row(DAY);
-  deep([r.t1_fail, r.stale_ticks, r.stale_key], [1, 1, "live:alerts"], "and a tick whose vendor read failed still records what the Worker saw");
+  deep([r.t1_fail, r.stale_ticks, r.stale_key], [1, 1, "live:alerts"], "and a tick whose feed read failed still records what the Worker saw");
 }
 
 {
@@ -367,7 +367,7 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
   let reading = { at: T, daily: 5000, minuteRemaining: 1000000, minuteResetMs: null, tokenLimit: null };
   const meter = () => reading;
   const out = await W.rthTick(rthEnv(s), T, { fetchVendor: tier1Vendor(T), log: quiet, meter });
-  ok(out.tier1.written, "a Tier 1 tick that reads the vendor writes");
+  ok(out.tier1.written, "a Tier 1 tick that reads the feed writes");
   let r = s.row(DAY);
   deep([r.t1_calls, r.uw_daily_max, r.uw_daily_at], [2, 5000, T], "THE TICK RECORDS ITS TWO VENDOR CALLS AND THE VENDOR'S DAILY COUNT in the ledger statement it already issued");
   const clock = s.db.prepare("SELECT uw_daily, uw_daily_at FROM flows_clock WHERE id = 1").get();
@@ -388,7 +388,7 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
   const quiet2 = sqliteD1();
   await W.rthTick(rthEnv(quiet2), T, { fetchVendor: tier1Vendor(T), log: quiet });
   r = quiet2.row(DAY);
-  deep([r.t1_calls, r.uw_daily_max, quiet2.db.prepare("SELECT uw_daily FROM flows_clock WHERE id = 1").get().uw_daily], [2, null, null], "a vendor that sent no counter header leaves the reading null, never zero, and the calls still count");
+  deep([r.t1_calls, r.uw_daily_max, quiet2.db.prepare("SELECT uw_daily FROM flows_clock WHERE id = 1").get().uw_daily], [2, null, null], "a feed that sent no counter header leaves the reading null, never zero, and the calls still count");
   const failing = sqliteD1();
   await W.rthTick(rthEnv(failing), T, { fetchVendor: dead, log: quiet, meter: () => null });
   deep([failing.row(DAY).t1_calls, failing.row(DAY).t1_fail], [2, 1], "a tick whose reads all failed still counts the calls it made");
@@ -396,7 +396,7 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
   const focused = await W.focusTick(rthEnv(f), at(9, 33), { fetchVendor: focusVendor(at(9, 33)), log: quiet, meter: () => ({ at: at(9, 33), daily: 6100, minuteRemaining: null, minuteResetMs: null, tokenLimit: null }) });
   ok(focused.written === true, "the focus tick writes");
   r = f.row(DAY);
-  deep([r.focus_calls, r.uw_daily_max, r.uw_daily_at], [1, 6100, at(9, 33)], "A FOCUS TICK COUNTS ITS ONE CALL and records the vendor's count with its instant");
+  deep([r.focus_calls, r.uw_daily_max, r.uw_daily_at], [1, 6100, at(9, 33)], "A FOCUS TICK COUNTS ITS ONE CALL and records the feed's count with its instant");
 }
 
 {
@@ -423,7 +423,7 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
      dueTrips[2].sqls.some((q) => /INSERT INTO flows_ledger/.test(q)) && dueTrips[2].sqls.some((q) => /INSERT INTO flows_clock/.test(q)),
     "and the write batch carries the ledger's outcome beside the live row and the clock patch");
   eq(seen[2].trips.length, 2, "a tick that is not due costs two trips");
-  ok(due.tier1.written && !notDue.tier1, "and only the due one read the vendor");
+  ok(due.tier1.written && !notDue.tier1, "and only the due one read the feed");
 }
 
 {
@@ -464,9 +464,9 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
   const r = s.row(DAY);
   deep([r.focus_ok, r.focus_partial, r.focus_fail], [2, 1, 0], "AND THE LEDGER COUNTS THE PARTIAL, which no health gate could see before: the held row was kept and nothing else recorded it");
   deep([r.focus_gap_ms, r.focus_ok_at], [10 * MIN, at(9, 43)], "with the gap between the writes on either side of it");
-  ok(names.length > 0 && asked.length === 3, "one vendor call a tick, as before");
+  ok(names.length > 0 && asked.length === 3, "one feed call a tick, as before");
   const failing = await W.focusTick(env, at(9, 48), { fetchVendor: async () => { throw new Error("HTTP 500"); }, log: quiet });
-  eq(failing.written, false, "a vendor error writes nothing");
+  eq(failing.written, false, "a feed error writes nothing");
   eq(s.row(DAY).focus_fail, 1, "and is a failure");
   const before = s.trips.length;
   await W.focusTick(env, at(9, 53), { fetchVendor: focusVendor(at(9, 53)), log: quiet });
@@ -490,7 +490,7 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
     eq(s.trips.length - from, 1, "in one trip, the ledger inside its batch (a pass adds no round trip)");
   }
   const r = s.row(DAY);
-  deep([r.t2_passes, r.t2_gap_ms, r.t2_calls, r.t2_failed], [3, 55 * MIN, 120, 2], "EVERY TIER 2 PASS lands in the ledger through the heartbeat write: passes, the longest gap and the vendor calls");
+  deep([r.t2_passes, r.t2_gap_ms, r.t2_calls, r.t2_failed], [3, 55 * MIN, 120, 2], "EVERY TIER 2 PASS lands in the ledger through the heartbeat write: passes, the longest gap and the feed calls");
   const replay = await W.ingestLive(env, "live:heartbeat", "POST", beat(at(9, 40)), at(10, 36), { json });
   eq(replay.stored, "older-than-held", "an older heartbeat is refused by the live row");
   eq(s.row(DAY).t2_passes, 3, "and is not a pass");
@@ -576,7 +576,7 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
   };
   const H = check({});
   deep(H.failures, [], "A HEALTHY LEDGER PASSES: five-minute gaps everywhere, 83 passes, a nightly that landed the evening before");
-  ok(H.notes.some((n) => /^ledger 2026-09-24: 108 tick\(s\); Tier 1 80 ok \/ 0 failed, longest silence 5 min; focus 80 ok \/ 1 partial \/ 0 failed, longest silence 5 min; Tier 2 83 pass\(es\) from 09:31 ET, longest gap 6 min, 3 of 3300 vendor call\(s\) failed; worst lapse none$/.test(n)),
+  ok(H.notes.some((n) => /^ledger 2026-09-24: 108 tick\(s\); Tier 1 80 ok \/ 0 failed, longest silence 5 min; focus 80 ok \/ 1 partial \/ 0 failed, longest silence 5 min; Tier 2 83 pass\(es\) from 09:31 ET, longest gap 6 min, 3 of 3300 feed call\(s\) failed; worst lapse none$/.test(n)),
     "and the gate prints the whole day in one line, so the owner sees the baseline every night");
   const bare = healthChecks(good(null));
   ok(bare.failures.length === 0 && bare.notes.includes("the Worker's clock carries no session ledger (a Worker older than this check)"),
@@ -596,7 +596,7 @@ const focusVendor = (t, drop = 0) => async (_p, params) => {
     `naming the interval and the line it crossed (${t26[0].slice(0, 160)})`);
   const okGap = check({ tier1: { ...row().tier1, gapMs: 5 * MIN, okGapMs: gapFor(40), okGapEndAt: iso(T(11, 31)), fail: 7 } }).failures;
   ok(okGap.length === 1 && /^HEALTH: Tier 1 went 40 min without writing live:market \(10:51 ET to 11:31 ET\) although the cron kept ticking \(7 tick\(s\) failed\)/.test(okGap[0]),
-    "a cron that kept ticking while the vendor read failed is told apart, with the failed count");
+    "a cron that kept ticking while the feed read failed is told apart, with the failed count");
   const focusGap = check({ focus: { ...row().focus, gapMs: gapFor(26), gapEndAt: iso(T(12, 3)) } }).failures;
   ok(focusGap.length === 1 && /^HEALTH: the focus cron went 26 min without writing live:focus \(11:37 ET to 12:03 ET\), past its 25 min stale line \(1 tick\(s\) were partial, 0 failed;/.test(focusGap[0]),
     "THE FOCUS CRON'S GAP is judged on the same line");

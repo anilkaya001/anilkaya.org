@@ -128,7 +128,7 @@ for (let ms = Date.parse(C.CALENDAR_FIRST + "T00:00:00Z"); ms <= Date.parse(C.CA
     eq(imp(r.date, "bmo").day, pre.day, "bmo is a premarket report");
     eq(imp(r.date, "amc").day, post.day, "amc is an after-close report");
     eq(imp(r.date, null).certain, r.unknown.length === 1, "a missing time is unknown");
-    eq(imp(r.date, "intraday").certain, r.unknown.length === 1, "so is a word the vendor does not use");
+    eq(imp(r.date, "intraday").certain, r.unknown.length === 1, "so is a word the feed does not use");
   }
   eq(imp("2025-11-26", "postmarket").day, "2025-11-28", "a report after the close on the Wednesday before Thanksgiving lands on the Friday, an early close that is still a session");
   eq(imp("2026-04-02", "postmarket").day, "2026-04-06", "a report after the close on the Thursday before Good Friday lands on the Monday");

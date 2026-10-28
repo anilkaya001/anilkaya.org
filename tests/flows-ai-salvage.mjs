@@ -12,7 +12,7 @@ const eq = (a, b, m) => { assert.equal(a, b, m); checks++; };
 const same = (a, b, m) => { assert.deepEqual(a, b, m); checks++; };
 
 const log = (line) => console.log('  ' + line);
-const clause = " on the vendor's convention (dealers long calls, short puts)";
+const clause = " on the feed's convention (dealers long calls, short puts)";
 const BASES = Object.fromEntries(ARCHETYPES.map((n) => [n, archetype(n)]));
 
 const MOMENTUM = BASES.momentum;
@@ -24,7 +24,7 @@ const GOOD = {
   now: { text: "The last price is $127.40, +1.27% from the previous close, with RSI at 72.0 of 100 and the close +9.40% against its 50-day average. Net option premium today is +$9.40M and the next earnings report is dated 2026-10-07, 4 sessions after the last close.", cites: ["price.last", "price.change", "price.rsi", "price.sma50", "flow.strip.net", "events.next", "events.sessions"] },
   drivers: [
     { text: "Earnings are close: the report is 4 sessions away and the move priced for it, 7.00%, is above the 5.20% median move after past reports.", cites: ["events.sessions", "events.impliedMove", "earnings.react.medianMove"] },
-    { text: "News flow is heavy: 8 headlines in the last 24 hours, 2 of them marked major by the vendor, and Reuters reports that the company lifts guidance.", cites: ["news.count24h", "news.major24h", "news.h1"] },
+    { text: "News flow is heavy: 8 headlines in the last 24 hours, 2 of them marked major by the feed, and Reuters reports that the company lifts guidance.", cites: ["news.count24h", "news.major24h", "news.h1"] },
     { text: "Dealers are pinned near a level: the implied dealer state is pinned" + clause + ", with the gamma flip at $124.00.", cites: ["options.state", "options.engine.level.flip"] },
     { text: "Option flow leans to calls: bullish against bearish premium is +0.62.", cites: ["flow.strip.lean"] },
   ],

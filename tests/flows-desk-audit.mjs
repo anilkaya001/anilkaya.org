@@ -74,7 +74,7 @@ const worker = (await import("../worker.js?desk-audit=1")).default;
     const state = { data: { close: "183.40", market_time: "regular", tape_time: "2026-08-25T18:06:00Z", ...(prev === undefined ? {} : { prev_close: prev }) } };
     const chain = await route(worker, `/api/flows/chain?t=${T}&refresh=1`, world(state), { UW_NOW: NOW });
     const ctx = await route(worker, `/api/flows/strategy?t=${T}&refresh=1`, world(state), { UW_NOW: NOW });
-    eq([chain.res.status, chain.body.prevClose], [200, want], `chain route, previous close ${label}: ${want === null ? "no figure (null), never the spot" : "the vendor's own"}`);
+    eq([chain.res.status, chain.body.prevClose], [200, want], `chain route, previous close ${label}: ${want === null ? "no figure (null), never the spot" : "the feed's own"}`);
     eq([ctx.res.status, ctx.body.prevClose], [200, want], `strategy context, previous close ${label}: the same`);
   }
 
@@ -126,7 +126,7 @@ const worker = (await import("../worker.js?desk-audit=1")).default;
   const evening = await run("afterhours", "2026-08-25", "2026-08-25T18:10:00Z");
   eq([evening.crosses, evening.earnings.precedesSale], [[true], false], "an after-close report tonight is ahead of a sale made now");
   const stale = await run("premarket", "2026-08-20", "2026-08-25T18:10:00Z");
-  eq([stale.crosses, stale.earnings.past, stale.earnings.precedesSale], [[null], true, true], "a vendor date already past stays undetermined, flagged past");
+  eq([stale.crosses, stale.earnings.past, stale.earnings.precedesSale], [[null], true, true], "a feed date already past stays undetermined, flagged past");
 }
 
 {
@@ -200,4 +200,4 @@ const worker = (await import("../worker.js?desk-audit=1")).default;
   eq(unfilled, [], "and every {placeholder} in a sentence is supplied where the sentence is used, so none prints as a brace");
 }
 
-console.log(`✓ flows-desk-audit: ${checks} assertions — the chain and strategy routes against stubbed vendor bodies: no previous close is a null and never the spot, the strategy engine prices off the regular close after hours with one bars read only when the state is not a regular print, and a report that precedes every possible sale is undetermined and says so`);
+console.log(`✓ flows-desk-audit: ${checks} assertions — the chain and strategy routes against stubbed feed bodies: no previous close is a null and never the spot, the strategy engine prices off the regular close after hours with one bars read only when the state is not a regular print, and a report that precedes every possible sale is undetermined and says so`);

@@ -32,7 +32,7 @@
   });
   var SILENCE = Object.freeze({
     cap: "Break-even needs a priced quote.", quote: "No two-sided quote.", ev: "The engine could not price this position.", "thin-norm": "Too little history for this name.",
-    unit: "The vendor states no unit.", failed: "The read failed.", absent: "Not written yet.", pending: "Still being read.", expired: "Too old to show.", off: "Switched off."
+    unit: "The feed states no unit.", failed: "The read failed.", absent: "Not written yet.", pending: "Still being read.", expired: "Too old to show.", off: "Switched off."
   });
   var CLEAR_TEXT = "Nothing stands out. Options are priced about where the model would price them.";
   var INFO_TEXT = "Cheap means the market charges less than the model's fair price; rich, more. The model's price comes from the engine's fitted smile and its own model of returns, not from a quote.";

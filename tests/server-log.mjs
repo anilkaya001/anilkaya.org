@@ -165,10 +165,10 @@ function sqliteD1() {
   const env = { DB: D1, UW_API_KEY: "k" };
   const t = capture();
   const at = easternInstant(day, 10 * 60);
-  await W.rthTick(env, at, { fetchVendor: async () => { throw new Error("vendor down"); }, log: t.sink });
-  const unanswered = t.lines.find((l) => l.event === "live:market not written: no vendor feed answered");
+  await W.rthTick(env, at, { fetchVendor: async () => { throw new Error("feed down"); }, log: t.sink });
+  const unanswered = t.lines.find((l) => l.event === "live:market not written: no feed feed answered");
   ok(!!unanswered, "a Tier 1 read no feed answered logs through the leaf");
-  SHAPE(unanswered, "live:market not written: no vendor feed answered", ["statuses"]);
+  SHAPE(unanswered, "live:market not written: no feed feed answered", ["statuses"]);
   eq(unanswered.error, null, "with no error: the feeds failed one by one, not the tick");
 
   const m = capture();

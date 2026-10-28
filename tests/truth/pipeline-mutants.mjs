@@ -20,7 +20,7 @@ function plant(id, title, target, transforms, detector, row = "B2") {
   PIPELINE_MUTANTS.push(Object.freeze({ id, title, target, row, transforms, detector }));
 }
 
-plant("client-no-deadline", "the nightly's vendor client sets no per-call deadline", VENDOR,
+plant("client-no-deadline", "the nightly's feed client sets no per-call deadline", VENDOR,
   [["return long ? NIGHTLY_VENDOR.longTimeoutMs : NIGHTLY_VENDOR.timeoutMs;", "return 0;"]], "clientDetector");
 plant("client-chain-page-gets-the-short-deadline", "an option-contracts page and the two-year bars are held to the 30 s deadline, not the 45 s", VENDOR,
   [['const long = op === "option-contracts" || (op === "ohlc-1d" && params && params.timeframe === "2Y");', "const long = false;"]], "clientDetector");
@@ -49,9 +49,9 @@ plant("card-healthy-card-gets-an-empty-failure-list", "every card carries a read
   [["if (!list.length || !card || !card.panels) return card;", "if (!card || !card.panels) return card;"]], "cardDetector");
 plant("card-darkpool-failure-marks-the-wrong-panel", "a failed darkpool read is attached to the open-interest panel", CARD,
   [['darkpool: Object.freeze(["darkpool"]),', 'darkpool: Object.freeze(["oiDeltas"]),']], "cardDetector");
-plant("card-failure-reason-drops-the-status", "the failure sentence no longer says which HTTP status the vendor answered", CARD,
+plant("card-failure-reason-drops-the-status", "the failure sentence no longer says which HTTP status the feed answered", CARD,
   [["`answered HTTP ${status}`", "`answered ${status}`"]], "cardDetector");
-plant("card-timeout-reads-as-unreachable", "the failure sentence calls a timeout an unreachable vendor", CARD,
+plant("card-timeout-reads-as-unreachable", "the failure sentence calls a timeout an unreachable feed", CARD,
   [['failure && failure.kind === "timeout" ? "timed out"', 'failure && failure.kind === "timeout" ? "could not be reached"']], "cardDetector");
 
 plant("coverage-stale-comparison-reversed", "a card from a later session than expected is stale and an older one is current", COVERAGE,
@@ -126,7 +126,7 @@ plant("store-flush-never-falls-back", "a held key whose merged write keeps being
 
 plant("deepen-cap-ignored", "the rotation is held to the hard cap, not to the cap it was given", DEEPEN,
   [["cap: Math.min(Math.max(0, Math.floor(cap)), budget.hardCap),", "cap: budget.hardCap,"]], "deepenDetector");
-plant("deepen-day-line-ignored", "the rotation is sized without the day's vendor line", DEEPEN,
+plant("deepen-day-line-ignored", "the rotation is sized without the day's feed line", DEEPEN,
   [["const byCalls = Math.floor((day * budget.daySharePct - spentCalls) / budget.callsPerName);", "const byCalls = budget.hardCap;"]], "deepenDetector");
 plant("deepen-deadline-ignored", "the rotation is sized without the run's time", DEEPEN,
   [["const byTime = Math.floor((deadlineMs * budget.timeSharePct - Math.max(0, elapsedMs) - remainingBaselineMs) / budget.msPerName);", "const byTime = budget.hardCap;"]], "deepenDetector");

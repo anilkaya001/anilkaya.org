@@ -269,7 +269,7 @@ const VP = { width: 1440, height: 820 };
   for (const t of f.ticks) ok(t.hit[2] - t.hit[0] >= 13.5 && t.hit[3] - t.hit[1] >= 20, `the ${t.e} hit target is at least 14 by 20 px (${t.hit.map(Math.round)})`);
   eq(f.ticks.filter((t) => t.tab === "0").length, 1, "one roving tab stop among the expiry ticks");
   ok(!f.legend.includes("Q ±") && f.legend.includes("±1 SD") && f.legend.includes("25Δ"), `the legend names the band and the 25-delta markers (${f.legend})`);
-  ok(f.desc.includes("Strike rail for the Aug 31 expiry") && f.desc.includes("25-delta put sits at") && f.desc.includes("on the vendor's convention (dealers long calls, short puts)"), "the chart's description reads the rail");
+  ok(f.desc.includes("Strike rail for the Aug 31 expiry") && f.desc.includes("25-delta put sits at") && f.desc.includes("on the feed's convention (dealers long calls, short puts)"), "the chart's description reads the rail");
   eq(f.sw <= f.vw, true, "no horizontal overflow at 1440");
   eq(page.__errors, [], "no page error");
 

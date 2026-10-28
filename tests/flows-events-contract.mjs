@@ -442,7 +442,7 @@ const gateDteFrom = (origin) => (date) =>
   near(row.vt, 0.05, "the aggressed-contract tilt");
   near(row.sut, 1.25, "the volume-surprise log ratio");
   near(row.ot, -0.011, "the open-interest tilt");
-  near(row.pcr, 0.77, "and the vendor's put/call ratio, rounded to two");
+  near(row.pcr, 0.77, "and the feed's put/call ratio, rounded to two");
 
   const quiet = eventRow(nameAt("QUIET", "2026-09-04").row,
     tiltOf({ premiumTilt: null, netTilt: undefined, volTilt: "", surpriseTilt: null,
@@ -459,9 +459,9 @@ const gateDteFrom = (origin) => (date) =>
     tiltOf({ iv30: 0.40, impliedMovePerc: 0.09 }), { gateOrigin: GATE_ORIGIN });
   ok(priced.ev !== null && priced.im !== null, "both horizons are measured on this row");
   near(priced.evp, Number((priced.im / priced.ev).toFixed(2)),
-    "the event premium is the vendor's quote over the benchmark, exactly");
+    "the event premium is the feed's quote over the benchmark, exactly");
   ok(priced.evp > 1,
-     `and on a 40% name reporting in ${priced.sdte} sessions the vendor's quote is ` +
+     `and on a 40% name reporting in ${priced.sdte} sessions the feed's quote is ` +
      `${priced.evp}x the constant-vol benchmark — which is the whole reason the ` +
      "benchmark may not be labelled a market quote");
   ok(Math.abs(priced.evp - (priced.im + priced.ev) / 2) > 0.01,
@@ -470,7 +470,7 @@ const gateDteFrom = (origin) => (date) =>
 
   eq(eventRow(nameAt("NOIM", "2026-09-04").row, tiltOf({ impliedMovePerc: null }),
     { gateOrigin: GATE_ORIGIN }).evp, null,
-    "with no vendor quote there is no premium to state, and none is stated");
+    "with no feed quote there is no premium to state, and none is stated");
   eq(eventRow(nameAt("NOIV", "2026-09-04").row, tiltOf({ iv30: null }),
     { gateOrigin: GATE_ORIGIN }).evp, null,
     "and with no benchmark to divide by, likewise — never an infinity and never a 1.0");
@@ -483,12 +483,12 @@ const gateDteFrom = (origin) => (date) =>
   }
   ok(/unit-free/.test(built.flow.units),
      "and states that the group shares a unit, which is why it may share an axis");
-  ok(/no vendor call/.test(EVENTS_NOTES.flow),
+  ok(/no feed call/.test(EVENTS_NOTES.flow),
      "the flow note says what it cost");
   ok(/CONSTANT-VOL/.test(EVENTS_NOTES.priced) && /variance accrues/.test(EVENTS_NOTES.priced),
      "the priced note now names the assumption a scheduled report violates");
-  ok(/below the vendor/.test(EVENTS_NOTES.priced),
-     "and states which side of the vendor's quote the benchmark is expected to sit");
+  ok(/below the feed/.test(EVENTS_NOTES.priced),
+     "and states which side of the feed's quote the benchmark is expected to sit");
   ok(/ratio of two published numbers/.test(EVENTS_NOTES.eventPremium),
      "the event-premium note names its construction");
   ok(/ENDS/.test(EVENTS_NOTES.cap) && /never attributed to the window/.test(EVENTS_NOTES.cap),
@@ -1247,11 +1247,11 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
       ok(!/\b(AM|PM|ET)\b/.test(r.text), `[${width}] with no Eastern clock on the page`);
       deep(errors, [], `[${width}] the week renders with no ex-dividend producer and without throwing`);
       deep(r.lanes, ["Macro", "Earnings", "FDA"],
-        `[${width}] a week with no ex-dividend rows draws no ex-dividend lane: no run reads the vendor's dividends ` +
+        `[${width}] a week with no ex-dividend rows draws no ex-dividend lane: no run reads the feed's dividends ` +
         "route on this plan, and a permanently unavailable lane dragged the whole module onto the unavailable glyph");
       eq(r.divCells, 0, `[${width}] and no empty cell per day stands in for it`);
       ok(r.weekState !== "unavailable", `[${width}] so the module is not marked unavailable for a lane with no producer (${r.weekState})`);
-      eq(r.macroRows, 2, `[${width}] the vendor's doubled prints are drawn once each in the Macro list`);
+      eq(r.macroRows, 2, `[${width}] the feed's doubled prints are drawn once each in the Macro list`);
       eq(r.weekMacro, 2, `[${width}] and once each in the week`);
       eq(r.forecast, "\u22120.3%", `[${width}] and a negative raw forecast keeps the true minus sign`);
       ok(r.over <= 1, `[${width}] and nothing overflows (${r.over}px)`);
@@ -1281,11 +1281,11 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
       }));
       eq(rows.length, 3, `[${width}] three prints are listed`);
       eq(rows[0][0].text, "—", `[${width}] a print with no consensus shows the em dash`);
-      ok(/no consensus/i.test(rows[0][0].title || "") && /no consensus/i.test(rows[0][0].aria || ""), `[${width}] AND SAYS WHY: the vendor calendar carries no consensus for it (${JSON.stringify(rows[0][0])})`);
+      ok(/no consensus/i.test(rows[0][0].title || "") && /no consensus/i.test(rows[0][0].aria || ""), `[${width}] AND SAYS WHY: the feed calendar carries no consensus for it (${JSON.stringify(rows[0][0])})`);
       eq(rows[0][1].text, "199K", `[${width}] a raw integer prior of 199000 is grouped as 199K`);
-      eq(rows[0][1].title, "199000", `[${width}] with the vendor's own text kept in the title`);
+      eq(rows[0][1].title, "199000", `[${width}] with the feed's own text kept in the title`);
       deep([rows[1][0].text, rows[1][1].text], ["1.25M", "1.30M"], `[${width}] and millions read 1.25M and 1.30M, not 1250000 and 1300000`);
-      deep([rows[2][0].text, rows[2][1].text], ["0.4%", "−12.5K"], `[${width}] a percent stays as the vendor wrote it and a negative integer keeps the true minus`);
+      deep([rows[2][0].text, rows[2][1].text], ["0.4%", "−12.5K"], `[${width}] a percent stays as the feed wrote it and a negative integer keeps the true minus`);
       deep(errors, [], `[${width}] no page error`);
       await page.close();
     }

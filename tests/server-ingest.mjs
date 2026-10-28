@@ -464,7 +464,7 @@ try {
       await send(BASE, "?key=card:" + ticker, "DELETE");
     }
     const headline = await send(BASE, "?key=news", "POST", JSON.stringify({ rows: [{ headline: "SYS100 launch", tickers: ["SYK"] }] }));
-    eq(headline.status, 200, "a headline that says SYS100 is not a whole JSON string, so a vendor sentence cannot trip the guard");
+    eq(headline.status, 200, "a headline that says SYS100 is not a whole JSON string, so a feed sentence cannot trip the guard");
     const mentioned = await send(BASE, "?key=news", "POST", JSON.stringify({ rows: [{ headline: "fixture: true is how we mark it" }], fixture: false }));
     eq(mentioned.status, 200, "and neither does fixture:false");
     eq(JSON.stringify(dump(d).payload.filter(([id]) => /SY[A-Z]\d{3}|GONE/.test(id) || /"SY[A-Z]\d{3}"/.test(id))), "[]", "no fixture row is in the store after all of it");
@@ -507,7 +507,7 @@ try {
     }
   }
   eq(upgradeTables(FLOWS_REGISTRY), ["flows_payload", "flows_clock", "flows_ledger"], "flows_payload, flows_clock and flows_ledger are probed for added columns today");
-  eq(LEDGER_ADDED_COLUMNS.map(([name]) => name), ["t1_calls", "focus_calls", "uw_daily_max", "uw_daily_at"], "the ledger's list holds the four columns of the vendor meter (migration 0022)");
+  eq(LEDGER_ADDED_COLUMNS.map(([name]) => name), ["t1_calls", "focus_calls", "uw_daily_max", "uw_daily_at"], "the ledger's list holds the four columns of the feed meter (migration 0022)");
   ok(Object.isFrozen(LEDGER_ADDED_COLUMNS), "frozen");
 
   const throws = (fn, re, msg) => { assert.throws(fn, re, msg); checks++; };

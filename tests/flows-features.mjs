@@ -1157,7 +1157,7 @@ const near = (a, b, tol, msg) => {
     "while a leg the endpoint does not carry is absent — the presence test is " +
     "not vacuously true");
   ok(!legPresent([{ call_vanna: null }, { call_vanna: "" }], callVannaLeg),
-    "AND NULL IS NOT PRESENCE. A vendor that stopped publishing a leg sends " +
+    "AND NULL IS NOT PRESENCE. A feed that stopped publishing a leg sends " +
     "nulls, and a leg read as present-but-zero would draw a flat line that a " +
     "reader takes for a measured empty book");
 
@@ -1174,7 +1174,7 @@ const near = (a, b, tol, msg) => {
   eq(vanna.rows[0].dte, 5, "counting days from the session it was asked for");
 
   ok(Number(VENDOR[0].put_gex) < 0,
-    "put gamma arrives DEALER-SIGNED: rows generated from Black-Scholes under the vendor's " +
+    "put gamma arrives DEALER-SIGNED: rows generated from Black-Scholes under the feed's " +
     "convention carry it negated");
   ok(delta.rows.every((r) => r.put < 0),
     "put delta arrives with the HOLDER's sign, negative on every expiry, as it is on 1,940 of " +
@@ -1200,7 +1200,7 @@ const near = (a, b, tol, msg) => {
   eq(delta.dealerRule, "call \u2212 put", "and names the rule it applied");
 
   ok(/share-delta/.test(GREEK_UNITS.delta) && /holder-signed/.test(GREEK_UNITS.delta),
-    "delta is share-delta, holder-signed, as the vendor defines it — not dollar-delta");
+    "delta is share-delta, holder-signed, as the feed defines it — not dollar-delta");
   ok(!/per DAY/.test(charm.unit) && !/VOL POINT/.test(vanna.unit),
     "and no per-day or per-vol-point unit is claimed until the scale is measured each run");
   ok(vanna.unit !== charm.unit && vanna.unit === GREEK_UNITS.vanna,
@@ -1234,7 +1234,7 @@ const near = (a, b, tol, msg) => {
   ], { name: "vanna", callLeg: callVannaLeg, putLeg: putVannaLeg });
   eq(halfPresent.rows.length, 2,
     "AN EXPIRY CARRYING NEITHER LEG IS DROPPED, not published at zero — the " +
-    "vendor said nothing about it and a zero row is a claim that it measured empty");
+    "feed said nothing about it and a zero row is a claim that it measured empty");
   eq(halfPresent.rows[1].expiry, "2026-03-20", "and the drop is of the right row");
   eq(halfPresent.rows[1].put, null,
     "the surviving half-present row keeps its real leg and nulls the other");
@@ -1242,7 +1242,7 @@ const near = (a, b, tol, msg) => {
     "AND AN UNSENT dte IS NULL, not 0. Coerced, it read 'expires today' — the " +
     "most consequential possible wrong answer on a term structure, since the " +
     "front expiry is the one a reader acts on");
-  eq(halfPresent.rows[0].dte, 3, "while a dte the vendor did send is carried");
+  eq(halfPresent.rows[0].dte, 3, "while a dte the feed did send is carried");
   eq(greekTermStructure([], { name: "vanna", callLeg: callVannaLeg, putLeg: putVannaLeg }).status,
     "absent", "an empty response has no legs at all");
 
@@ -1305,4 +1305,4 @@ const near = (a, b, tol, msg) => {
   eq(gammaReading(card).from, null, "Neuron reads no gamma label, where it read a long '+$0 per 1% move'");
 }
 
-console.log(`✓ flows-features: ${checks} assertions — robust stats, a fixed score unit, materiality-gated gamma flips, multiplicative quality gating, dead-column weighting, realized vol, reachable conviction, and the four second-order exposure legs one vendor call already pays for — with the put-leg conventions generated from Black-Scholes rather than read off the vendor's placeholder (put gamma dealer-signed, put delta, vanna and charm holder-signed, every expiry's dealer net published), the gamma label read from the book's net rather than the running sum below spot, and the fused hot path proven ELEMENTWISE IDENTICAL to the eight-sort form it replaces across every degenerate column that reaches a different branch`);
+console.log(`✓ flows-features: ${checks} assertions — robust stats, a fixed score unit, materiality-gated gamma flips, multiplicative quality gating, dead-column weighting, realized vol, reachable conviction, and the four second-order exposure legs one feed call already pays for — with the put-leg conventions generated from Black-Scholes rather than read off the feed's placeholder (put gamma dealer-signed, put delta, vanna and charm holder-signed, every expiry's dealer net published), the gamma label read from the book's net rather than the running sum below spot, and the fused hot path proven ELEMENTWISE IDENTICAL to the eight-sort form it replaces across every degenerate column that reaches a different branch`);

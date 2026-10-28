@@ -270,9 +270,9 @@ async function exerciseStore(root) {
     taint.touch("fakeChain");
     await attempt("a tainted run to a loopback ingest", "card:SYN001", { v: 2 }, null);
     taint.clearTaint();
-    note(store.targetRefusal({ FLOWS_UW_BASE_URL: "http://127.0.0.1:9", FLOWS_INGEST_URL: "https://anilkaya.org/api/flows/ingest" }) !== null, "a loopback vendor with the production ingest is refused");
+    note(store.targetRefusal({ FLOWS_UW_BASE_URL: "http://127.0.0.1:9", FLOWS_INGEST_URL: "https://anilkaya.org/api/flows/ingest" }) !== null, "a loopback feed with the production ingest is refused");
     note(store.targetRefusal({ FLOWS_UW_BASE_URL: "http://127.0.0.1:9" }) !== null, "and with the ingest unset, which defaults to production");
-    note(store.targetRefusal({ FLOWS_UW_BASE_URL: "https://evil.example", FLOWS_INGEST_URL: "https://anilkaya.org/api/flows/ingest" }) !== null, "and an invalid vendor base");
+    note(store.targetRefusal({ FLOWS_UW_BASE_URL: "https://evil.example", FLOWS_INGEST_URL: "https://anilkaya.org/api/flows/ingest" }) !== null, "and an invalid feed base");
     note(store.targetRefusal({ FLOWS_UW_BASE_URL: "http://127.0.0.1:9", FLOWS_INGEST_URL: "http://127.0.0.1:8" }) === null, "while a loopback pair is allowed");
     note(store.targetRefusal({ FLOWS_UW_BASE_URL: "http://api.test", FLOWS_INGEST_URL: "https://ingest.test/x" }) === null, "and a .test pair");
     note(store.targetRefusal({}) === null && store.targetRefusal({ FLOWS_UW_BASE_URL: "https://api.unusualwhales.com" }) === null, "and the production pair");
@@ -324,7 +324,7 @@ async function exercisePreflight(root) {
   try {
     const base = { UW_API_KEY: "test", FLOWS_INGEST_TOKEN: "test", FLOWS_LIVE_TOKEN: "test", FLOWS_UW_BASE_URL: `http://127.0.0.1:${vendor.address().port}`, FLOWS_ALLOW_INTRADAY: "1" };
     const nightly = await run(root, "scripts/flows-pipeline.mjs", [], { ...base, FLOWS_INGEST_URL: "https://ingest.example/api/flows/ingest" });
-    if (nightly.status !== 1 || !/never publishes/.test(nightly.out) || seen.length) bad.push(`the nightly against a fake vendor and a real ingest must exit 1 before any vendor request (exit ${nightly.status}, ${seen.length} requests)`);
+    if (nightly.status !== 1 || !/never publishes/.test(nightly.out) || seen.length) bad.push(`the nightly against a fake feed and a real ingest must exit 1 before any feed request (exit ${nightly.status}, ${seen.length} requests)`);
     const unset = await run(root, "scripts/flows-pipeline.mjs", [], { ...base, FLOWS_INGEST_URL: "" });
     if (unset.status !== 1 || !/never publishes/.test(unset.out) || seen.length) bad.push(`and with the ingest unset (production by default) (exit ${unset.status}, ${seen.length} requests)`);
     const live = await run(root, "scripts/flows-pipeline.mjs", ["--live"], { ...base, FLOWS_INGEST_URL: "https://ingest.example/api/flows/ingest" });
@@ -362,7 +362,7 @@ async function exerciseStages(root) {
   eq(await exerciseStore(stagesRoot), [], "THE PIPELINE PUBLISH GUARD: every refusal happens before the network, and every clean or loopback publish still posts");
   eq(await exerciseStamp(stagesRoot), [], "THE DRY-RUN MARKER: every object payload a dry run writes says fixture:true, and an array is left alone");
   eq(await exerciseStages(stagesRoot), [], "A FIXTURE LEAK ABORTS THE RUN even from an isolated stage");
-  eq(await exercisePreflight(stagesRoot), [], "THE CONFIGURATION PREFLIGHT: a fake vendor with the production ingest exits 1 before the first vendor request");
+  eq(await exercisePreflight(stagesRoot), [], "THE CONFIGURATION PREFLIGHT: a fake feed with the production ingest exits 1 before the first feed request");
 
   const S = "scripts/flows-nightly/store.mjs";
   const planted = {
@@ -372,7 +372,7 @@ async function exerciseStages(root) {
     "the refusal only logged": [[S, "throw fixtureLeakError(leak, `publish ${key}`);", "console.warn(String(leak));"]],
     "the whole check removed": [[S, "const leak = publishRefusal(key, body);\n  if (leak) {\n    process.exitCode = 1;\n    throw fixtureLeakError(leak, `publish ${key}`);\n  }\n", ""]],
     "the check after the network": [[S, "const leak = publishRefusal(key, body);\n  if (leak) {\n    process.exitCode = 1;\n    throw fixtureLeakError(leak, `publish ${key}`);\n  }\n", ""], [S, "  landedKeys.add(key);\n  console.log(`  published", "  const leak = publishRefusal(key, body);\n  if (leak) throw fixtureLeakError(leak, `publish ${key}`);\n  landedKeys.add(key);\n  console.log(`  published"]],
-    "the preflight waiving every vendor base": [[S, 'if (vendor.status !== "redirect" && vendor.status !== "invalid") return null;', "return null;"]],
+    "the preflight waiving every feed base": [[S, 'if (vendor.status !== "redirect" && vendor.status !== "invalid") return null;', "return null;"]],
     "the preflight waiving an unset ingest": [[S, 'return new URL(env.FLOWS_INGEST_URL || "https://anilkaya.org/api/flows/ingest").hostname;', 'return new URL(env.FLOWS_INGEST_URL || "http://127.0.0.1/api/flows/ingest").hostname;']],
   };
   for (const [name, edits] of Object.entries(planted)) {

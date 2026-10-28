@@ -163,7 +163,7 @@ for (const [w, h] of [[1440, 820], [1024, 768]]) {
   eq(bad, [], `${w}: EVERY CHIP, BAND AND READOUT IS IDENTIFIED AND EQUALS THE INDEPENDENT SUMS`);
   const lg = await legendOf(page);
   ok(/Chip base and band colour/.test(lg) && /Band width/.test(lg) && /Dashed chip/.test(lg) && /Figure/.test(lg) && /convention/.test(lg), `${w}: the legend names the colour, band width, Other and figure encodings and the lean convention`);
-  ok(!/\bat (the )?(ask|bid)\b/i.test(lg), `${w}: no vendor term in the legend`);
+  ok(!/\bat (the )?(ask|bid)\b/i.test(lg), `${w}: no feed term in the legend`);
   const heads = await page.evaluate(() => [...document.querySelectorAll("#mkNet .nm-cap")].map((t) => t.textContent));
   eq(heads.length, 4, `${w}: four captions`);
   ok(heads.every((t) => /\$[\d.]+[KMB]/.test(t)), `${w}: every caption carries the same total`);
@@ -316,7 +316,7 @@ for (const [name, edits] of MUTANTS) ok(await mutantFails(name, edits), `PLANTED
 
 near(EXP.flagged, ALERTS.rows.reduce((a, r) => a + r.prem, 0), "the independent flagged total is the sum of the windows' premium");
 ok(EXP.total < EXP.flagged, "and the sided total is the part of it with a stated side");
-ok(!/\bat (the )?(ask|bid)\b/i.test(SRC), "no vendor term in the module's source");
+ok(!/\bat (the )?(ask|bid)\b/i.test(SRC), "no feed term in the module's source");
 
 await browser.close();
 console.log(`flows-net-map-render: ${checks} checks, every chip, band and readout of the Market flow network identified against independent sums at 1440, 1024 and 390 px, its table twin and legend, and ${MUTANTS.length} planted wrong builds`);

@@ -533,7 +533,7 @@
       size();
       SC = layout(M, W, H, { phone: W < 640 });
       canvas.setAttribute("aria-label", describe());
-      note.textContent = "Open at the back, last read at the front. A sphere is one vendor-flagged window at its minute in its name's sector lane; area is its premium (the largest, " + money(M.pMax) + "). Green: a call on the ask side or a put on the bid side, bullish by convention, when the vendor sided at least half its premium and at least 65% of that sat on one side; red the reverse; blue when the split is missing, mixed or mostly left between the quotes. A blue sphere still adds its sided dollars to the lane figures in the tables, which split every window's dollars. The lane floor is the sector's net option tide at that minute" + (M.tideWhy ? " (" + M.tideWhy + ")" : "") + ". Times are TRT." + (M.dropped ? " " + M.dropped + " rows without a time or a premium are not drawn." : "");
+      note.textContent = "Open at the back, last read at the front. A sphere is one feed-flagged window at its minute in its name's sector lane; area is its premium (the largest, " + money(M.pMax) + "). Green: a call on the ask side or a put on the bid side, bullish by convention, when the feed sided at least half its premium and at least 65% of that sat on one side; red the reverse; blue when the split is missing, mixed or mostly left between the quotes. A blue sphere still adds its sided dollars to the lane figures in the tables, which split every window's dollars. The lane floor is the sector's net option tide at that minute" + (M.tideWhy ? " (" + M.tideWhy + ")" : "") + ". Times are TRT." + (M.dropped ? " " + M.dropped + " rows without a time or a premium are not drawn." : "");
       paint();
       placeHits();
       paintRead();

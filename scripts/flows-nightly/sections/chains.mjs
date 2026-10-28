@@ -327,7 +327,7 @@ export async function runChains(ctx) {
           : "") +
         (paging.oneBased
           ? `; on ${paging.oneBased} name(s) page=1 returned the first page again, so the ` +
-            "vendor was read as counting pages from one there (the spec says zero)"
+            "feed was read as counting pages from one there (the spec says zero)"
           : ""));
     }
     console.log(
@@ -404,7 +404,7 @@ export async function runChains(ctx) {
 
   variationRun.vannaScale = vannaScale(vannaSamples, { prior: variationRun.unit.used });
   console.log(`  variation: vanna scale ${variationRun.vannaScale.status}` +
-    (variationRun.vannaScale.ratio === null ? "" : `, vendor over Black-Scholes ${variationRun.vannaScale.ratio}`) +
+    (variationRun.vannaScale.ratio === null ? "" : `, feed over Black-Scholes ${variationRun.vannaScale.ratio}`) +
     ` across ${variationRun.vannaScale.n} name(s) with a complete single-expiry chain` +
     `, read in ${variationRun.vannaScale.used === "pct$" ? "dollars per 1% move" : "shares"} (unit ${variationRun.vannaScale.family}: ` +
     `${variationRun.vannaScale.votes.share} share, ${variationRun.vannaScale.votes.pct} dollars-per-1% among names priced far enough from $100 to tell them apart; ` +
@@ -576,7 +576,7 @@ export async function runChains(ctx) {
     console.log("  " + pooledOiBasis.line +
       (DRY_RUN
         ? " On synthetic rows this is two unrelated fixture formulas disagreeing," +
-          " and is not evidence about the vendor."
+          " and is not evidence about the feed."
         : ""));
 
     try {
@@ -640,7 +640,7 @@ export async function runChains(ctx) {
       console.log(
         `  flow-alerts: ${alerts.rows.length} alert(s) kept of ${alerts.seen}` +
         (alertRowCount >= ALERT_VENDOR_LIMIT
-          ? ` — WHICH IS THE VENDOR'S MAXIMUM (${ALERT_VENDOR_LIMIT}), so the true ` +
+          ? ` — WHICH IS THE FEED'S MAXIMUM (${ALERT_VENDOR_LIMIT}), so the true ` +
             "population is unknown and at least that large; this route's limit " +
             "cannot be raised, and today's count is a ceiling rather than a measurement"
           : "") +

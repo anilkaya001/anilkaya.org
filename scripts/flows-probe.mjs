@@ -982,7 +982,7 @@ export async function runProbe(options, deps = {}) {
   const key = options.key || "";
   const baseInfo = vendorBaseInfo(options.base);
   if (baseInfo.status === "invalid") {
-    throw new UsageError("the vendor base is neither the vendor's origin, a loopback address nor a .test host, so no call is made");
+    throw new UsageError("the feed base is neither the feed's origin, a loopback address nor a .test host, so no call is made");
   }
   const base = baseInfo.base;
   const tickers = options.tickers || [...DEFAULT_TICKERS];
@@ -1001,9 +1001,9 @@ export async function runProbe(options, deps = {}) {
     `${selected.length} probes${options.dryRun ? "  dry run" : ""}`);
   emit("   key:type  str# = a number sent as a string  ? = absent from some sampled rows  " +
     "(n/m) = filled in n of m rows  spec = names the OpenAPI spec documents for the operation");
-  emit("   names, types, fill counts and documented enum tokens only: no vendor value is printed");
+  emit("   names, types, fill counts and documented enum tokens only: no feed value is printed");
   emit("   calls counts this run; x-uw-daily-req-count counts every caller of the key: the Worker, the pipeline, " +
-    "the live leg and any agent session with UW_API_KEY set through the vendor MCP server in .mcp.json");
+    "the live leg and any agent session with UW_API_KEY set through the feed MCP server in .mcp.json");
 
   const results = [];
   const ctx = { fetchImpl, key, pace: makePacer(MIN_GAP_MS, { now, sleep }), now, sleep };

@@ -86,7 +86,7 @@ const NEW_YORK = { currency: "USD", symbol: "^GSPC", gmtoffset: -14400, exchange
   const far = parseIndexQuote(index("sp500"), chart({
     meta: { currency: "USD", regularMarketPrice: 120, chartPreviousClose: 100, previousClose: 104 }, close: [100, 101, 102, 103, 105],
   }));
-  eq(far.prevClose, 104, "and when the last bar is not the quote's the vendor's previousClose is used, never chartPreviousClose");
+  eq(far.prevClose, 104, "and when the last bar is not the quote's the feed's previousClose is used, never chartPreviousClose");
   const none = parseIndexQuote(index("sp500"), chart({
     meta: { currency: "USD", regularMarketPrice: 120, chartPreviousClose: 100 }, close: [105],
   }));

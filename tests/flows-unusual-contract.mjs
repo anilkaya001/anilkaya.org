@@ -60,7 +60,7 @@ const one = (row, opts) => build(row, opts)[0];
        "special-cased null would be a guard a reader has to trust");
   }
   eq(build(drop(SEED, "open_interest")).length, 0,
-     "an ABSENT open_interest is excluded on the same footing: a contract the vendor did " +
+     "an ABSENT open_interest is excluded on the same footing: a contract the feed did " +
      "not report on is not a contract with no open interest");
 
   for (const [label, vol] of [["zero", 0], ["null", null], ["empty string", ""]]) {
@@ -296,7 +296,7 @@ const rebuild = (em) => {
   eq(ranked.ranked, 1, "one of them is rankable");
   eq(ranked.unranked, 1,
      "and the other is COUNTED in `unranked` rather than dropped silently — a name the " +
-     "vendor never averaged is a gap in coverage, and the payload states its size");
+     "feed never averaged is a gap in coverage, and the payload states its size");
   eq(ranked.shown, 1, "only the rankable name is shown");
   deep(ranked.rows.map((r) => r.t), [emA.t],
      "and the unmeasured name is absent from the ordering entirely, not sorted in at the " +
@@ -493,8 +493,8 @@ const rebuild = (em) => {
 
   const tagged = describeOiBasis(OWN, { dryRun: true });
   ok(tagged.line.startsWith("[dry-run] "), "a dry run tags its own line");
-  ok(/not evidence about the vendor/.test(tagged.line),
-     "and says outright that a synthetic exceedance is not evidence about the vendor");
+  ok(/not evidence about the feed/.test(tagged.line),
+     "and says outright that a synthetic exceedance is not evidence about the feed");
   ok(!describeOiBasis(OWN).line.startsWith("[dry-run] "),
      "while a live run carries no tag");
 
@@ -875,7 +875,7 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
     const files = [...walk("shared"), ...walk("server"), ...walk("scripts/flows-nightly"), ...walk("scripts/flows-legs"), "worker.js"];
     const named = files.filter((f) => /\b(?:askPrem|bidPrem|total_ask_side_prem|total_bid_side_prem)\b/.test(fs.readFileSync(path.join(ROOT, f), "utf8"))).sort();
     deep(named, ["scripts/flows-legs/flow-fake.mjs", "scripts/flows-legs/live-fake.mjs", "scripts/flows-nightly/fixtures.mjs", "shared/flows-alerts.js", "shared/flows-ledger-book.js", "shared/flows-live.js", "shared/flows-positioning.js", "shared/flows-sides.js", "shared/flows-tape-stats.js", "shared/flows-vendor-ops.js"],
-         "NO SHARED MODULE, SERVER FILE OR NIGHTLY LEG BUT THESE READS THE VENDOR'S ASK-SIDE AND BID-SIDE FIELDS: a new reader must be added here on review and use askShareRead, not divide by the premium itself (the ticker's alert card and the dossier did, and printed 30% for a name the Unusual page read at 75% of what the vendor sided)");
+         "NO SHARED MODULE, SERVER FILE OR NIGHTLY LEG BUT THESE READS THE VENDOR'S ASK-SIDE AND BID-SIDE FIELDS: a new reader must be added here on review and use askShareRead, not divide by the premium itself (the ticker's alert card and the dossier did, and printed 30% for a name the Unusual page read at 75% of what the feed sided)");
     for (const f of ["shared/flows-positioning.js", "shared/flows-dossier.js"]) {
       ok(/askShareRead/.test(fs.readFileSync(path.join(ROOT, f), "utf8")), `${f} takes the alert ask share from askShareRead`);
     }
@@ -885,7 +885,7 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
      "the core carries the one definition, its printed form and the label the known-answer table names");
   ok(/\baskSplit: \(r\) =>/.test(ui),
      "and the dollar split a page that draws ask, bid and neither premium needs, under the same rule, so such a page " +
-     "reads the core instead of the two vendor fields");
+     "reads the core instead of the two feed fields");
   for (const files of [["flows-unusual.js", "flows-unusual-below.js"], ["flows-overview.js"]]) {
     const src = files.map((f) => fs.readFileSync(path.join(JS, f), "utf8")).join("\n");
     ok((src.match(/F\.askShare\(/g) || []).length >= 2 && /F\.askSaid\(/.test(src) && /F\.askLabel/.test(src),
@@ -897,7 +897,7 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
   ok(ASK_SHARE.cases.length >= 20 && ASK_SHARE.cases.some((c) => c.side === "thin") && ASK_SHARE.cases.some((c) => c.classified === 0) &&
      ASK_SHARE.cases.some((c) => /past the premium/.test(c.name)) && ASK_SHARE.cases.some((c) => Array.isArray(c.rows)),
      "and the known-answer table carries a thinly sided window, an unsided one, an over-sum one and pooled windows, " +
-     "which neither fake vendor produces");
+     "which neither fake feed produces");
 }
 
 {
@@ -913,11 +913,11 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
 
   const one = built([vendor()]);
   deep(one.rows[0], { t: "AAA", k: 100, expiry: "2026-09-18", cp: "C", vol: 1000, oi: 500, vor: 2, pm: 1250000, lift: 0.75, cls: [400, 50, 100, 10, 0] },
-    "a vendor row becomes one compact row: strike from the symbol, vor from volume over open interest, the executed premium in whole dollars, " +
+    "a feed row becomes one compact row: strike from the symbol, vor from volume over open interest, the executed premium in whole dollars, " +
     "the offer share of the classified legs, and the five class volumes in the published order");
   deep(ACTIVITY_CLASSES, ["sweep", "floor", "multileg", "stockMultileg", "cross"], "the class order is a published contract");
   deep(ACTIVITY_FIELDS, ["sweep_volume", "floor_volume", "multileg_volume", "stock_multi_leg_volume", "cross_volume"],
-    "and reads the vendor's five volume fields in that order");
+    "and reads the feed's five volume fields in that order");
 
   const refuse = built([
     vendor({ option_symbol: "not a symbol" }), vendor({ volume: 0 }), vendor({ volume: null }), null,
@@ -954,7 +954,7 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
   eq(ranked.perName, ACTIVITY_PER_NAME, "at the published allowance");
   eq(rankActivity(built(many).rows, { cap: 2 }).capBound, "rows", "a row cap that bites is reported as the row cap");
   eq(rankActivity(built(many.slice(4)).rows).capBound, "eligible", "neither cap biting is reported as neither");
-  ok(ACTIVITY_ROWS <= 30 && ACTIVITY_LIMIT === 200, "the screen is read at the vendor's maximum page and 30 rows are published");
+  ok(ACTIVITY_ROWS <= 30 && ACTIVITY_LIMIT === 200, "the screen is read at the feed's maximum page and 30 rows are published");
 
   const contractsRows = [
     { t: "AAA", k: 100, expiry: "2026-09-18", cp: "C", vol: 1000, oi: 500 },
@@ -981,7 +981,7 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
   deep([okBlock.status, okBlock.asOf, okBlock.returned, okBlock.kept, okBlock.matched, okBlock.of, okBlock.capBound], ["ok", SESSION, 1, 1, 1, 3, false],
     "the published block carries its as-of day, what was read and kept, and how many ranked rows it matched");
   eq(activityBlock({ status: "ok", sessionDate: SESSION, built: { ...one, seen: ACTIVITY_LIMIT }, ranked: rankActivity(one.rows), matched: mm }).capBound, true,
-    "a full page from the vendor is reported as possibly cut short");
+    "a full page from the feed is reported as possibly cut short");
   deep(activityBlock({ status: "unavailable", code: "refused", sessionDate: SESSION }).rows, [], "an unavailable block carries no rows");
   eq(activityBlock({ status: "off", code: "off", sessionDate: SESSION }).code, "off", "and an off block says it is off");
   eq(activityBasis(), [ACTIVITY_NOTES.unit, ACTIVITY_NOTES.date, ACTIVITY_NOTES.classes, ACTIVITY_NOTES.population].join(" "),
@@ -991,13 +991,13 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
   const calls = [];
   const uw = (path, params) => { calls.push({ path, params }); return Promise.resolve([vendor()]); };
   const read = await readActivity({ uw, sessionDate: SESSION, contractRows: [], enabled: true, now: () => "t0" });
-  eq(read.calls, 1, "the dated read is exactly one vendor call");
+  eq(read.calls, 1, "the dated read is exactly one feed call");
   deep(calls[0], { path: "/api/option-activity/unusual", params: { date: SESSION, limit: 200, order: "premium", order_direction: "desc" } },
-    "to the dated screen, for the session, at the vendor's page maximum, largest premium first");
+    "to the dated screen, for the session, at the feed's page maximum, largest premium first");
   deep(activityRequest(SESSION), { path: ACTIVITY_PATH, params: calls[0].params }, "and activityRequest is that request");
   eq(read.block.status, "ok", "with an ok block");
   eq(read.block.readAt, "t0", "stamped with when it was read");
-  for (const [message, want] of [["vendor HTTP 403 forbidden", "refused"], ["HTTP 422", "refused"], ["HTTP 429", "read-failed"], ["HTTP 500", "read-failed"], ["socket hang up", "read-failed"]]) {
+  for (const [message, want] of [["feed HTTP 403 forbidden", "refused"], ["HTTP 422", "refused"], ["HTTP 429", "read-failed"], ["HTTP 500", "read-failed"], ["socket hang up", "read-failed"]]) {
     const r = await readActivity({ uw: () => Promise.reject(new Error(message)), sessionDate: SESSION, contractRows: [], enabled: true });
     deep([r.block.status, r.block.code, r.calls], ["unavailable", want, 1], `a failed read (${message}) is unavailable as ${want}, one call spent, nothing thrown`);
   }
@@ -1208,11 +1208,11 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
     ok(first.widthAttr !== "100%", `and the width is a pixel count (${first.widthAttr}), never a per cent`);
 
     eq(first.feedBoth, 1,
-       "exactly one counter-feed row is marked as also flagged by the vendor — a mark " +
+       "exactly one counter-feed row is marked as also flagged by the feed — a mark " +
        "that fired on every row, or on none, would pass a laxer assertion than this");
     ok(first.feedBothMark, "and the mark is drawn on the row, not only carried in its data");
     ok(/RepeatedHits/.test(first.feedBothTitle),
-       "with the vendor's own rule named on the row rather than left to a legend");
+       "with the feed's own rule named on the row rather than left to a legend");
     ok(/premium/.test(first.feedBothTitle),
        "and the window's premium beside it, so the mark carries the reading and not just " +
        "the fact of a match");
@@ -1246,7 +1246,7 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
        `and the note states both drawn counts against both published ones — got: ${puts.note}`);
     ok(/published and hidden, not absent from the read/.test(puts.note),
        "SO A NARROWED LIST IS NEVER MISTAKEN FOR A THIN MARKET, which is the whole " +
-       "risk a filter introduces to a page that reports what a vendor did not send");
+       "risk a filter introduces to a page that reports what a feed did not send");
     eq(puts.overflow, 0, "and the filtered page still does not overflow at 320px");
 
     await press(page, "All");
@@ -1261,7 +1261,7 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
     const restored = await lists(page);
     eq(restored.on, 2, "releasing it restores every window");
     deep(await page.evaluate(() => [...document.querySelectorAll("#uaNames .fu-nrow:not(.fu-head) .fu-tk b")].map((b) => b.textContent)), ["AAA", "ZZZ"],
-       "and the flagged names come back in the vendor's own premium order, largest first");
+       "and the flagged names come back in the feed's own premium order, largest first");
     const spoken = await page.evaluate(() => new Promise((resolve) => {
       const chart = document.querySelector("#uaTimeline .ui-chart");
       const live = document.getElementById("fxLive");
@@ -1311,19 +1311,19 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
     const alertRow = { t: "AAPL", cp: "C", k: 200, exp: "2026-09-18", px: 1.2 };
 
     const capped = await ceilingNote({ v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: [alertRow], vendorLimit: 200, vendorTruncated: true });
-    ok(/vendor's own ceiling/.test(capped.text), `a truncated read says whose ceiling it hit — got: ${capped.text}`);
+    ok(/feed's own ceiling/.test(capped.text), `a truncated read says whose ceiling it hit — got: ${capped.text}`);
     ok(/200/.test(capped.text), "and names the limit, because a ceiling without its height is not a measurement");
     ok(/ceiling rather than a market/.test(capped.text),
        "and says what that does to the count: comparing it with another session compares two ceilings");
     ok(/ceiling rather than a market/.test(capped.pop || ""), "and the timeline's own disclosure carries the same sentence");
 
     const fitted = await ceilingNote({ v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: [alertRow], vendorLimit: 200, vendorTruncated: false });
-    ok(/under the vendor's ceiling/.test(fitted.text), `a read that fitted says so rather than staying silent — got: ${fitted.text}`);
+    ok(/under the feed's ceiling/.test(fitted.text), `a read that fitted says so rather than staying silent — got: ${fitted.text}`);
     ok(!/ceiling rather than a market/.test(fitted.text), "and does NOT carry the truncation caveat, which would make every read look capped");
 
     const unstated = await ceilingNote({ v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: [alertRow] });
     ok(/was not recorded/.test(unstated.text), `a payload predating the fields says the ceiling was not recorded — got: ${unstated.text}`);
-    ok(!/under the vendor's ceiling/.test(unstated.text),
+    ok(!/under the feed's ceiling/.test(unstated.text),
        "and specifically does NOT claim the read came in under it: `!undefined` is true, so the naive test would have " +
        "stated a measurement this run never made");
     ok(/may be a ceiling rather than a market/.test(unstated.text),
@@ -1471,7 +1471,7 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
     const alertsBroken = await read(null, { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", rows: null });
     eq(alertsBroken.alertMark, "withheld", "a payload that arrived and carries no rows array is WITHHELD — published bytes the page could not read");
     const alertsQuiet = await read(null, { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", refreshed: "nightly", seen: 0, shed: 0, cap: 50, rows: [] });
-    eq(alertsQuiet.alertMark, "quiet", "and a read the vendor's rules flagged nothing in is QUIET, not broken");
+    eq(alertsQuiet.alertMark, "quiet", "and a read the feed's rules flagged nothing in is QUIET, not broken");
     const alertsQuietFiltered = await read(null, null, null, "Calls");
     eq(alertsQuietFiltered.alertMark, "quiet", "AND PRESSING A FILTER DOES NOT ERASE THE ALERTS SIDE'S SILENCE EITHER");
 
@@ -1503,7 +1503,7 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
     ok(!/\b02:00\b/.test(String(NY.alertsPop)), "and specifically not the local wall clock");
     eq((String(NY.alertsPop).match(/Read\d/g) || []).length, 1,
        "and it is stated ONCE: two Read lines on one panel invite the reading that they are two reads");
-    ok(/vendor's own stated span/.test(String(NY.alertsPop)), "keeping the fact owed the reader, which is the unit those spans are in");
+    ok(/feed's own stated span/.test(String(NY.alertsPop)), "keeping the fact owed the reader, which is the unit those spans are in");
 
     const shedNone = await read(null, { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", seen: 4, shed: 0, cap: 50, rows: [{ t: "AAPL", cp: "C", k: 200, exp: "2026-09-18", prem: 1000 }] });
     const shedUnknown = await read(null, { v: 2, status: "ok", readAt: "2026-09-01T06:00:00Z", seen: 4, cap: 50, rows: [{ t: "AAPL", cp: "C", k: 200, exp: "2026-09-18", prem: 1000 }] });
@@ -1531,7 +1531,7 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
     }));
     await askless.close();
     const solid = marks.bubbles.filter((b) => !b.dash), open = marks.bubbles.filter((b) => b.dash);
-    ok(solid.length === 1 && Number(solid[0].fill) > 0.8, `a window the vendor put wholly at the ask is drawn solid (${JSON.stringify(marks.bubbles)})`);
+    ok(solid.length === 1 && Number(solid[0].fill) > 0.8, `a window the feed put wholly at the ask is drawn solid (${JSON.stringify(marks.bubbles)})`);
     ok(open.length === 2 && open.every((b) => Number(b.fill) === 0),
        "AND A WINDOW WITH NO SIDE STATED IS NOT DRAWN AS A LOW ASK SHARE: an open dashed outline, both for the window " +
        "with neither side and for the one that states the ask but not the bid, because the share is the ask over the " +
@@ -1539,7 +1539,7 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
     ok(marks.keys.includes("Side not stated"), `with a key of its own, only when such a window is drawn (${marks.keys.join(", ")})`);
     deep(marks.keys.slice(2, 5), ["Mostly ask side", "Mostly bid side", "Mixed or thinly sided"],
        "and the keys name both sides now: the share is conditional on the premium sided at ask or bid, so a ring is " +
-       "premium the vendor put at the bid, which the old ask-over-premium fill could not say");
+       "premium the feed put at the bid, which the old ask-over-premium fill could not say");
 
     const rowsOf = (cases) => cases.map((c, i) => ({ ...c.rows, t: "K" + String.fromCharCode(65 + Math.floor(i / 26)) + String.fromCharCode(65 + (i % 26)),
       cp: "C", k: 100, exp: "2026-09-18", spanStart: "2026-09-01T" + String(14 + Math.floor(i / 6)).padStart(2, "0") + ":" + String((i % 6) * 10).padStart(2, "0") + ":00Z" }));
@@ -1793,4 +1793,4 @@ console.log(`✓ flows-unusual: ${checks} assertions — a ranking key finite be
   `prose with four named exceptions and no weakened regex, one parse of every contract ` +
   `symbol per chain counted through a getter rather than asserted from memory, the board's ` +
   `own stage threaded to the feed and OMITTED rather than nulled when absent, and — in a ` +
-  `browser at 320px — two payloads joined on the four-tuple they share with a mark that fires on exactly the one contract both selections chose and a timeline that lights exactly its one window when the join is pressed, a filter group both feeds honour whose note keeps a narrowed list from reading as a thin market, a timeline drawn one viewBox unit to one CSS pixel whose keyboard reads the first window in time order, a filter note that says which feed could not be read rather than counting it as zero, and the silences kept apart: a payload with no contracts block marked unavailable and carrying no digit, rows that could not be read marked withheld and unreadable, a missing name panel that is not a quiet market, a chain that cleared nothing marked as the reading it is, the alerts key's pending, withheld and quiet states each with its own glyph, one read instant stated once in TRT, an uncounted row-cap shed that says so instead of printing a zero, a denominator that prints as a floor when the read hit the vendor's own ceiling, a reassurance that does not outlive the feed it reassures about, filters that never erase a module's silence, and a fetch that never answered marking every module unavailable rather than any of them going quiet`);
+  `browser at 320px — two payloads joined on the four-tuple they share with a mark that fires on exactly the one contract both selections chose and a timeline that lights exactly its one window when the join is pressed, a filter group both feeds honour whose note keeps a narrowed list from reading as a thin market, a timeline drawn one viewBox unit to one CSS pixel whose keyboard reads the first window in time order, a filter note that says which feed could not be read rather than counting it as zero, and the silences kept apart: a payload with no contracts block marked unavailable and carrying no digit, rows that could not be read marked withheld and unreadable, a missing name panel that is not a quiet market, a chain that cleared nothing marked as the reading it is, the alerts key's pending, withheld and quiet states each with its own glyph, one read instant stated once in TRT, an uncounted row-cap shed that says so instead of printing a zero, a denominator that prints as a floor when the read hit the feed's own ceiling, a reassurance that does not outlive the feed it reassures about, filters that never erase a module's silence, and a fetch that never answered marking every module unavailable rather than any of them going quiet`);

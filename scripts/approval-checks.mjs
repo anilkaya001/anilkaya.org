@@ -24,7 +24,7 @@ export const FRAME_INFO_JS = `(() => {
 export function textProblems(info) {
   const out = [];
   const everything = [info.text, ...info.aria, ...info.titles, ...info.alts, ...info.og, info.docTitle].join("\n");
-  if (/\bat\s+(ask|bid)\b/i.test(everything)) out.push(`the words "${"at"} ask" or "${"at"} bid" appear: the vendor's term is ask side and bid side`);
+  if (/\bat\s+(ask|bid)\b/i.test(everything)) out.push(`the words "${"at"} ask" or "${"at"} bid" appear: the feed's term is ask side and bid side`);
   if (/\bNOW\b/.test(everything)) out.push("a \"NOW\" badge appears: the word for the Screen is Screen");
   for (const h of info.headings) if (/\bFDR\b/.test(h.text)) out.push(`FDR in a heading (${h.tag}): ${h.text}`);
   if (/\bFDR\b/.test(info.docTitle)) out.push("FDR in the document title");

@@ -334,7 +334,7 @@ try {
     });
     eq(side && side.meter, false, "A FLAGGED WINDOW THE VENDOR DID NOT SIDE DRAWS NO METER TRACK, which would read as a zero");
     eq(side && side.text, "none sided", "it says none sided in the meter's place, the word the Unusual page uses");
-    eq(side && side.title, "Ask-side share of the premium the vendor sided: none sided", "under the meter's own label");
+    eq(side && side.title, "Ask-side share of the premium the feed sided: none sided", "under the meter's own label");
 
     await page.waitForFunction(() => document.querySelectorAll("#ccEvents .ui-row").length >= 6, null, { timeout: 15000 });
     const ev = await page.evaluate(() => [...document.querySelectorAll("#ccEvents .ui-row")].slice(0, 6).map((r) => r.textContent));

@@ -285,7 +285,7 @@
       sw.setAttribute("aria-disabled", String(keyAbsent || block));
       swNote.textContent = block ? TEXT.restartHint : keyAbsent ? TEXT.keyAbsent : S.mode === "server" ? "Your list is saved to your account." : "Your list is saved only in this browser.";
       disclose.replaceChildren(...(S.mode === "server"
-        ? ["Your list is stored encrypted on our server.", "We never send your list to our data vendor or any AI model.", "Deleted data stays in the database restore history for up to 30 days.", "Your export history is kept for 90 days for export limits."]
+        ? ["Your list is stored encrypted on our server.", "We never send your list to our data feed or any AI model.", "Deleted data stays in the database restore history for up to 30 days.", "Your export history is kept for 90 days for export limits."]
         : ["Your list is stored only in this browser on this device.", "Clearing this site's data in your browser deletes it."]).map((t) => h("li", null, t)));
       copy.disabled = S.names.length === 0;
     };

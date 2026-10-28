@@ -113,11 +113,11 @@ export function createWatch({ readOnce, latestClock, env = process.env, fetchImp
       const still = " While each successor's first pass hangs too, this issue stays open; the first watch tick of a loop whose " +
         "pass finishes closes it.";
       const cause = why === "pass-idle"
-        ? "Every vendor call carries a 20 s deadline and settles inside it, so a vendor that is slow or timing out never does " +
+        ? "Every feed call carries a 20 s deadline and settles inside it, so a feed that is slow or timing out never does " +
           "this: something without a deadline stalled (an ingest request, the credential request or the runner)." + still
         : why === "pass-deadline"
-          ? "The pass was still settling calls at its ceiling. Only a pass in which nearly every vendor call times out comes " +
-            "close to it, so the run's `vendor request(s) timed out` count says which: near the pass's call count, the vendor " +
+          ? "The pass was still settling calls at its ceiling. Only a pass in which nearly every feed call times out comes " +
+            "close to it, so the run's `feed request(s) timed out` count says which: near the pass's call count, the feed " +
             "stalled; small, the pass was looping." + still
           : "The watch's own reads or GitHub calls stalled; the next loop's first watch tick closes this issue.";
       await witness.raiseNow("chain", {

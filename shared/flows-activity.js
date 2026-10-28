@@ -120,7 +120,7 @@ export function activityBlock({ status, code = null, sessionDate = null, readAt 
 
 export const ACTIVITY_NOTES = Object.freeze({
   unit: "Sweep-coded volume, floor-coded volume, multi-leg volume, stock multi-leg volume and cross volume, in contracts, from " +
-    "the vendor's dated screen. Each is the part of a contract's volume that carried that exchange condition code. The classes " +
+    "the feed's dated screen. Each is the part of a contract's volume that carried that exchange condition code. The classes " +
     "can overlap and are never summed.",
   date: "The screen is asked for the session by date and every row's last fill is checked to fall on that Eastern day; a row " +
     "from another day is dropped and counted. Unlike the chain counter beside it, this unit has an as-of day.",

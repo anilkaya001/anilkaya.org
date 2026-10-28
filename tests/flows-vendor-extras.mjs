@@ -58,7 +58,7 @@ const NEW_OPS = ["dividends", "splits", "interpolated-iv", "etf-exposure"];
   for (const id of X.GROUPS.dx) {
     const src = DW.SOURCES.find((s) => s.id === id);
     ok(src, `${id}: the Worker has a source of the same id`);
-    same(LEG_SOURCES[id].params("EXMP", {}), src.params("EXMP"), `${id}: the nightly asks the vendor exactly what the Worker asks, so the stored extract is the extract it would store`);
+    same(LEG_SOURCES[id].params("EXMP", {}), src.params("EXMP"), `${id}: the nightly asks the feed exactly what the Worker asks, so the stored extract is the extract it would store`);
     eq(LEG_SOURCES[id].path("EXMP"), src.path("EXMP"), `${id}: and on the same path`);
   }
 }
@@ -88,7 +88,7 @@ const TODAY = "2026-10-20";
 const FIX = JSON.parse(fs.readFileSync(path.join(ROOT, "tests/fixtures-vendor-extras.json"), "utf8"));
 
 {
-  ok(/synthetic/.test(FIX.provenance.nature) && /not vendor data/.test(FIX.provenance.nature) && /not observed on the wire/.test(FIX.provenance.nature), "the fixtures say they are synthetic, spec-derived and not observed on the wire");
+  ok(/synthetic/.test(FIX.provenance.nature) && /not feed data/.test(FIX.provenance.nature) && /not observed on the wire/.test(FIX.provenance.nature), "the fixtures say they are synthetic, spec-derived and not observed on the wire");
   eq(FIX.provenance.generator, "tests/gen-extras-fixtures.py", "and name their generator");
   eq(FIX.provenance.specSha256, createHash("sha256").update(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.yaml"))).digest("hex"), "THE FIXTURES WERE BUILT TO THIS SPEC: docs/uw-openapi.yaml still hashes to the value the generator recorded; if it moved, run python3 tests/gen-extras-fixtures.py and read the diff");
   const names = (value, into) => {
@@ -655,10 +655,10 @@ for (const [title, transforms, expected] of planted) {
   const quietNight = X.extrasStanding({ ivp: { attempted: 10, bad: 0, rate: 0, state: "report" } }, { clean: { ivp: 5 } });
   eq(quietNight.clean.ivp, 5, "a night under fifty reads neither adds to the count nor resets it");
   const gate = healthChecks({ sessionDate: "2026-10-20", night: { extras: { calls: 1, due: 1, deferred: 0, health: shaped, eligible: ["dividends"] } } });
-  ok(gate.failures.some((f) => /vendor extras came back in a shape/.test(f)), "the nightly gate carries the extras failure");
-  ok(healthCodes(gate.failures.filter((f) => /vendor extras/.test(f))).length >= 1 && HEALTH_CODES.some(([c]) => c === "extras-shape"), "the failure has a registered health code");
+  ok(gate.failures.some((f) => /feed extras came back in a shape/.test(f)), "the nightly gate carries the extras failure");
+  ok(healthCodes(gate.failures.filter((f) => /feed extras/.test(f))).length >= 1 && HEALTH_CODES.some(([c]) => c === "extras-shape"), "the failure has a registered health code");
   const healthPlanted = [
-    ["a gate that drops the extras failure", await loadMutated("scripts/flows-legs/health.mjs", [["  failures.push(...extras.failures);\n  warnings.push(...extras.warnings);", "  warnings.push(...extras.warnings);"]], { salt: checks + 10 }), (m) => m.healthChecks({ sessionDate: "2026-10-20", night: { extras: { calls: 1, due: 1, deferred: 0, health: shaped, eligible: ["dividends"] } } }).failures.some((f) => /vendor extras/.test(f)) === false],
+    ["a gate that drops the extras failure", await loadMutated("scripts/flows-legs/health.mjs", [["  failures.push(...extras.failures);\n  warnings.push(...extras.warnings);", "  warnings.push(...extras.warnings);"]], { salt: checks + 10 }), (m) => m.healthChecks({ sessionDate: "2026-10-20", night: { extras: { calls: 1, due: 1, deferred: 0, health: shaped, eligible: ["dividends"] } } }).failures.some((f) => /feed extras/.test(f)) === false],
     ["an extras check that fails a part with no baseline", await loadMutated("scripts/flows-legs/health.mjs", [["const bad = failing.filter(([id]) => eligible.has(id));", "const bad = failing;"]], { salt: checks + 12 }), (m) => m.extrasChecks({ health: { ivp: { attempted: 80, bad: 40, rate: 0.5, state: "fail" } }, eligible: [] }).failures.length > 0],
     ["a standing that never matures a part", await loadMutated("shared/flows-vendor-extras.js", [["before >= lines.matureNights && !wasFailing", "false"]], { salt: checks + 13 }), (m) => m.extrasStanding({ ivp: { attempted: 80, bad: 40, rate: 0.5, state: "fail" } }, { clean: { ivp: 9 } }).eligible.length === 0],
     ["a standing that fails the same part every night", await loadMutated("shared/flows-vendor-extras.js", [["before >= lines.matureNights && !wasFailing", "before >= lines.matureNights"]], { salt: checks + 14 }), (m) => m.extrasStanding({ ivp: { attempted: 80, bad: 40, rate: 0.5, state: "fail" } }, { clean: { ivp: 9 }, health: { ivp: { state: "fail" } } }).eligible.length > 0],
@@ -718,4 +718,4 @@ for (const [title, transforms, expected] of planted) {
   ok(!d.packets.events.withheld.some((w) => w.k === "dividend"), "PLANTED WRONG BUILD, a packet that is silent about a part the card shed: it says nothing, which the real packet does not");
 }
 
-console.log(`✓ flows-vendor-extras: ${checks} assertions — four operations the spec documents and no code read, registered with the fields the code reads, a used probe each and a weekly entitlement question for the trade-stance route; reducers that name their failures, keep dates as dates and withhold every amount, factor and weight whose unit the schema does not state; the early-assignment window with its four boundaries and the holiday skip; per-part ages, versions and stubs; a 40-night simulation of the slow cap on 700 and 856 names that converges in the stated nights and never reads a part after its maximum age; carry-forward that keeps a good part through a failed read; the nightly leg against a scripted vendor (cold, warm, past the deadline, refused, limited, failed, unshaped, prior unreadable); sections shed as stubs before any volatility or flow section; the Worker taking a nightly part as a cache hit for its own refresh age and never over a newer cache row; the packets' dividend, split, ETF and implied-volatility-percentile facts; the governor's numbers; and ${planted.length + 14} planted wrong builds each of which the suite fails`);
+console.log(`✓ flows-vendor-extras: ${checks} assertions — four operations the spec documents and no code read, registered with the fields the code reads, a used probe each and a weekly entitlement question for the trade-stance route; reducers that name their failures, keep dates as dates and withhold every amount, factor and weight whose unit the schema does not state; the early-assignment window with its four boundaries and the holiday skip; per-part ages, versions and stubs; a 40-night simulation of the slow cap on 700 and 856 names that converges in the stated nights and never reads a part after its maximum age; carry-forward that keeps a good part through a failed read; the nightly leg against a scripted feed (cold, warm, past the deadline, refused, limited, failed, unshaped, prior unreadable); sections shed as stubs before any volatility or flow section; the Worker taking a nightly part as a cache hit for its own refresh age and never over a newer cache row; the packets' dividend, split, ETF and implied-volatility-percentile facts; the governor's numbers; and ${planted.length + 14} planted wrong builds each of which the suite fails`);

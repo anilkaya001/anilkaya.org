@@ -143,10 +143,10 @@ function checkDossier(d, label, ticker = T) {
 {
   const sha = createHash("sha256").update(readFileSync(root("docs/uw-openapi.yaml"))).digest("hex");
   eq(VENDOR.provenance.specSha256, sha, "THE FIXTURES WERE BUILT FROM THIS SPEC: docs/uw-openapi.yaml still hashes to the value the generator recorded; if the spec moved, run python3 tests/gen-dossier-fixtures.py and read the diff");
-  ok(/synthetic/.test(VENDOR.provenance.nature) && /not vendor data/.test(VENDOR.provenance.nature), "and say what they are: synthetic bodies for a fictional ticker, not vendor data");
+  ok(/synthetic/.test(VENDOR.provenance.nature) && /not feed data/.test(VENDOR.provenance.nature), "and say what they are: synthetic bodies for a fictional ticker, not feed data");
   eq(VENDOR.ticker, "EXMP", "the fictional ticker the spec's own examples use");
   const routes = Object.values(D.VENDOR_ROUTES);
-  eq(new Set(routes).size, routes.length, "thirteen distinct vendor routes");
+  eq(new Set(routes).size, routes.length, "thirteen distinct feed routes");
   for (const op of routes) ok(Object.hasOwn(VENDOR.documented, op), op + " is a documented operation in the fixture set");
 }
 
@@ -186,7 +186,7 @@ function checkDossier(d, label, ticker = T) {
   earningsHistory(recorded(F.vendorBody("earnings").data, earn), { sessionDate: SESSION });
   const earnDocumented = new Set(VENDOR.documented[D.VENDOR_ROUTES.earnings]);
   same([...earn].filter((k) => !earnDocumented.has(k) && !/^\d+$/.test(k) && !["length", "map", "filter", "slice", "sort", "find", "some", "every", "reduce", "toJSON"].includes(k)), [],
-    "the nightly's earningsHistory, reused for the vendor's earnings route, reads only documented names");
+    "the nightly's earningsHistory, reused for the feed's earnings route, reads only documented names");
   for (const k of V.DOSSIER_READS[D.VENDOR_ROUTES.earnings]) ok(earn.has(k), "earningsHistory reads " + k);
   eq(probeList.gated["/api/companies/{ticker}/profile"], undefined, "the Advanced+ profile route answered 200 in the 2026-10-04 weekly probe (37223455933), so it is no longer expected-gated");
   eq(probeList.gated["/api/companies/{ticker}/earnings-estimates"], undefined, "and neither are the forward estimates");
@@ -223,7 +223,7 @@ function checkDossier(d, label, ticker = T) {
   eq(est.rows[0].d, "2026-09-30", "estimates: ordered by date");
   const an = V.reduceAnalysts(F.vendorBody("analysts"), T);
   eq(an.rows.length, 11, "analysts: every row for the ticker");
-  eq(V.reduceAnalysts(F.vendorBody("analysts"), "OTHR").ok, false, "analysts: rows for another ticker are not this ticker's, even when the vendor sent them");
+  eq(V.reduceAnalysts(F.vendorBody("analysts"), "OTHR").ok, false, "analysts: rows for another ticker are not this ticker's, even when the feed sent them");
   const odd = F.vendorBody("analysts");
   odd.data[0].action = "pumped";
   odd.data[0].recommendation = "moon";
@@ -364,9 +364,9 @@ function checkDossier(d, label, ticker = T) {
   eq(d.coverage.ok + d.coverage.partial, 12, "full: all twelve packets carry data when every source answered");
   ok(d.packets.identity.facts.some((f) => f.k === "mcap" && f.unit === "usd" && f.v === 84200000000), "identity: market cap in dollars, from the documented marketcap");
   ok(d.packets.identity.text[0].kind === "description" && d.packets.identity.text[0].untrusted === true, "identity: the description is untrusted text");
-  eq(d.packets.identity.asOf, null, "identity: the vendor stamps no time on this record, so no asOf and no age are invented");
+  eq(d.packets.identity.asOf, null, "identity: the feed stamps no time on this record, so no asOf and no age are invented");
   eq(d.packets.price.klass, "quote", "price: the live quote is the basis");
-  eq(d.packets.price.asOf, "2026-10-02T14:29:40.000Z", "price: asOf is the vendor's tape time, not the read time");
+  eq(d.packets.price.asOf, "2026-10-02T14:29:40.000Z", "price: asOf is the feed's tape time, not the read time");
   eq(d.packets.price.ageS, 20, "price: age is the read clock against that tape time");
   ok(d.packets.price.facts.find((f) => f.k === "r21").v === 0.063 && d.packets.price.facts.find((f) => f.k === "r252").grade === 2, "price: the card's 21-session return and a 252-session return derived from its close series at grade 2");
   ok(d.packets.price.facts.find((f) => f.k === "hi52").v === 171.9, "price: the 52-week high from the profile");
@@ -387,9 +387,9 @@ function checkDossier(d, label, ticker = T) {
   ok(d.packets.fundamentals.withheld.some((w) => w.k === "dividendYield" && /^unit:/.test(w.reason)), "fundamentals: dividend yield withheld because the schema states no unit");
   ok(d.packets.positioning.facts.some((f) => f.k === "short.pctFloat" && Math.abs(f.v - 9800000 / 466000000) < 1e-6), "positioning: short interest over float is shares over float, both documented integers");
   ok(d.packets.positioning.facts.some((f) => f.k === "congress.total" && f.v === 3), "positioning: Congress counts come from the card's panel");
-  ok(d.packets.flow.facts.some((f) => f.k === "strip.net") && d.packets.flow.facts.some((f) => f.k === "alerts.largest") && d.packets.flow.facts.some((f) => f.k === "dark.level1"), "flow: the live strip, the flagged alerts and the vendor's dark-pool price levels");
+  ok(d.packets.flow.facts.some((f) => f.k === "strip.net") && d.packets.flow.facts.some((f) => f.k === "alerts.largest") && d.packets.flow.facts.some((f) => f.k === "dark.level1"), "flow: the live strip, the flagged alerts and the feed's dark-pool price levels");
   const askFact = d.packets.flow.facts.find((f) => f.k === "alerts.askShare");
-  ok(askFact && /\bask side\b/.test(askFact.label) && /undocumented/.test(askFact.note) && !/\bat (the )?(ask|bid)\b/i.test(askFact.label + " " + askFact.note), "flow: the ask share is named in the vendor's term, ask side, and its note says the alert field is undocumented");
+  ok(askFact && /\bask side\b/.test(askFact.label) && /undocumented/.test(askFact.note) && !/\bat (the )?(ask|bid)\b/i.test(askFact.label + " " + askFact.note), "flow: the ask share is named in the feed's term, ask side, and its note says the alert field is undocumented");
   {
     const rowsT = F.alertsPayload().rows.filter((r) => r.t === T && typeof r.prem === "number" && r.prem > 0);
     const both = rowsT.filter((r) => typeof r.askPrem === "number" && r.askPrem >= 0 && typeof r.bidPrem === "number" && r.bidPrem >= 0);
@@ -397,12 +397,12 @@ function checkDossier(d, label, ticker = T) {
     const a = both.reduce((s, r) => s + r.askPrem * scale(r), 0), b = both.reduce((s, r) => s + r.bidPrem * scale(r), 0);
     const total = rowsT.reduce((s, r) => s + r.prem, 0);
     const sidedFact = d.packets.flow.facts.find((f) => f.k === "alerts.sidedShare");
-    ok(both.length > 0 && sidedFact && Math.abs(sidedFact.v - (a + b) / total) < 1e-6, "flow: the sided share of the premium is the vendor's ask plus bid dollars over the premium (" + (sidedFact && sidedFact.v) + " against " + (a + b) / total + ")");
-    if ((a + b) / total >= 0.5) ok(askFact && Math.abs(askFact.v - a / (a + b)) < 1e-6, "flow: the ask share is the ask over what the vendor sided, the site's one rule, not the ask over the premium (" + (askFact && askFact.v) + " against " + a / (a + b) + ")");
+    ok(both.length > 0 && sidedFact && Math.abs(sidedFact.v - (a + b) / total) < 1e-6, "flow: the sided share of the premium is the feed's ask plus bid dollars over the premium (" + (sidedFact && sidedFact.v) + " against " + (a + b) / total + ")");
+    if ((a + b) / total >= 0.5) ok(askFact && Math.abs(askFact.v - a / (a + b)) < 1e-6, "flow: the ask share is the ask over what the feed sided, the site's one rule, not the ask over the premium (" + (askFact && askFact.v) + " against " + a / (a + b) + ")");
     else ok(askFact === undefined, "flow: and with under half the premium sided there is no ask share to state");
     for (const [name, transforms] of [
       ["ask over the whole premium", [["sidedRead.share, \"fraction\"", "sum(rows.filter((r) => isNum(r.askPrem)).map((r) => r.askPrem)) / Math.max(1, sum(rows.map((r) => r.prem))), \"fraction\""]]],
-      ["coverage not published", [['rec.fact("alerts.sidedShare", "Share of that premium the vendor sided", sidedRead.classified, "fraction", { grade: 2, note: "the part of the premium the vendor attributed to the ask or the bid side; the rest was left between the quotes or never split" });', ""]]],
+      ["coverage not published", [['rec.fact("alerts.sidedShare", "Share of that premium the feed sided", sidedRead.classified, "fraction", { grade: 2, note: "the part of the premium the feed attributed to the ask or the bid side; the rest was left between the quotes or never split" });', ""]]],
     ]) {
       const mod = await loadMutated("shared/flows-dossier.js", transforms);
       const dm = mod.buildDossier(inputs({}));
@@ -432,7 +432,7 @@ function checkDossier(d, label, ticker = T) {
   ok(empty.order.every((k) => empty.packets[k].facts.length === 0 && empty.packets[k].withheld.length > 0), "empty: every packet says what is missing");
   const nothing = D.buildDossier({});
   checkDossier(nothing, "no input at all", "");
-  eq(D.buildDossier({ ticker: T, now: NOW, held: null, vendor: null }).coverage.withheld, 12, "null held and vendor are treated as empty");
+  eq(D.buildDossier({ ticker: T, now: NOW, held: null, vendor: null }).coverage.withheld, 12, "null held and feed are treated as empty");
 
   const pending = reduceAll({ analysts: { pending: true, reason: "timeout" }, profile: { pending: true, reason: "timeout" }, financials: { pending: true, reason: "budget" }, ownership: { ok: false, reason: "limited", pending: true } });
   const p = D.buildDossier({ ticker: T, now: NOW, expectedSession: SESSION, held: heldAll(), vendor: pending });
@@ -452,7 +452,7 @@ function checkDossier(d, label, ticker = T) {
 
   const failed = reduceAll({ financials: { ok: false, reason: "failed" }, breakdown: { ok: false, reason: "large" }, profile: { ok: false, reason: "failed" } });
   const fl = D.buildDossier({ ticker: T, now: NOW, expectedSession: SESSION, held: heldAll(), vendor: failed });
-  eq(fl.packets.fundamentals.status, "unavailable", "failed: a vendor failure with nothing else to read is unavailable, not pending");
+  eq(fl.packets.fundamentals.status, "unavailable", "failed: a feed failure with nothing else to read is unavailable, not pending");
   ok(fl.packets.fundamentals.withheld.some((w) => /^large:/.test(w.reason)), "failed: and an over-ceiling body says it was not read");
 
   const thin = D.buildDossier({ ticker: T, now: NOW, expectedSession: SESSION, held: heldAll(), vendor: { ...reduceAll(), info: { ok: true, name: null, sector: null, mcap: null, adv30: null, beta: null, hasOptions: null, hasDividend: null, desc: null, issueType: null, next: null, announce: null, hasHistory: null } } });
@@ -476,7 +476,7 @@ function checkDossier(d, label, ticker = T) {
   ok(!two.packets.price.facts.some((f) => ["r5", "rsi", "adx", "rv20"].includes(f.k)), "wrong session, expired: no nightly-derived price fact survives");
   ok(two.packets.price.facts.some((f) => f.k === "last"), "but the live quote still prices the name");
   ok(two.packets.positioning.withheld.some((w) => /expired/.test(w.reason)), "wrong session, expired: card-x short and insider parts are withheld as expired");
-  ok(two.packets.positioning.facts.some((f) => f.k.startsWith("inst.")), "and the vendor's institutional read still stands");
+  ok(two.packets.positioning.facts.some((f) => f.k.startsWith("inst.")), "and the feed's institutional read still stands");
 }
 
 {
@@ -500,8 +500,8 @@ function checkDossier(d, label, ticker = T) {
   ok(withScreen.packets.options.facts.some((f) => f.k.startsWith("screen.")), "a name with no card: the options packet carries the screen reading's facts");
   ok(withScreen.packets.options.facts.filter((f) => f.k.startsWith("screen.")).every((f) => f.grade <= 1), "and every one of them is graded 0 or 1 as the screen grades them");
   eq(withScreen.packets.options.facts.find((f) => f.k === "tier").v, "screen", "and says its tier");
-  ok(withScreen.packets.positioning.facts.some((f) => f.k === "short.shares"), "positioning falls back to the vendor's short-interest read when no card-x is held");
-  ok(withScreen.packets.positioning.facts.some((f) => f.k === "insider.buyShares"), "and to the vendor's insider flow");
+  ok(withScreen.packets.positioning.facts.some((f) => f.k === "short.shares"), "positioning falls back to the feed's short-interest read when no card-x is held");
+  ok(withScreen.packets.positioning.facts.some((f) => f.k === "insider.buyShares"), "and to the feed's insider flow");
   const none = D.buildDossier(inputs({ card: null, cardX: null, universe: null, held: { neuron: { status: "absent", tier: "none", code: "not-covered", why: "not in the universe", sessionDate: null, generatedAt: null }, universe: null, events: null, regime: null, market: null, sectorEtf: null, strip: null, tape: null, alerts: null } }));
   checkDossier(none, "tier none");
   ok(/^none/.test(none.packets.options.withheld[0].reason), "tier none: the options packet is withheld and says none, the same word /api/flows/summary uses");
@@ -705,12 +705,12 @@ function checkDossier(d, label, ticker = T) {
   const moved = V.quoteExtract({ status: "ok", price: px * 0.999, prevClose: px, changePct: -0.001, tapeTime: "2026-10-05 11:39:00+00:00" });
   const pre = D.buildDossier(inputs({ vendor: reduceAll({ quote: moved }) }));
   eq(pre.packets.price.facts.find((f) => f.k === "last").label, "Last price", "a quote that has moved off the close keeps its own price and change");
-  eq(pre.packets.price.facts.find((f) => f.k === "change").v, -0.001, "with the vendor's change");
+  eq(pre.packets.price.facts.find((f) => f.k === "change").v, -0.001, "with the feed's change");
   const flat = V.quoteExtract({ status: "ok", price: px + 1, prevClose: px + 1, changePct: 0, tapeTime: "2026-10-02 20:00:00+00:00" });
   const other = D.buildDossier(inputs({ vendor: reduceAll({ quote: flat }) }));
-  eq(other.packets.price.facts.find((f) => f.k === "last").label, "Last price", "an equal price and previous close that is not the nightly close is left as the vendor gave it");
+  eq(other.packets.price.facts.find((f) => f.k === "last").label, "Last price", "an equal price and previous close that is not the nightly close is left as the feed gave it");
 }
 
-console.log(`✓ flows-dossier: ${checks} assertions — twelve typed packets built from the documented fields of thirteen vendor routes and the nightly's own payloads, every field the code reads proven against the spec by a recording proxy and carried in the weekly probe's strict list, ` +
+console.log(`✓ flows-dossier: ${checks} assertions — twelve typed packets built from the documented fields of thirteen feed routes and the nightly's own payloads, every field the code reads proven against the spec by a recording proxy and carried in the weekly probe's strict list, ` +
   `a sanitiser that refuses or cleans instruction-shaped, markup, URL, bidi and role-marker text in headlines, descriptions, firm and holder names, a prompt renderer that quotes it inside delimiters and sheds by priority to a token budget, ` +
   `a fingerprint stable under price and age noise and sensitive to every fact a reading rests on, and dossierFacts in the entry shape Ask already indexes`);

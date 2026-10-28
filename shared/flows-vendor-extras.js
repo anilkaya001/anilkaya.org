@@ -292,7 +292,7 @@ const priorTradingDay = (day) => {
 export const EXERCISE_WORDS = Object.freeze({
   declared: "Ex-dividend before expiry: early assignment is possible if the call is in the money.",
   expected: "A dividend may go ex-dividend before this expiry; none is declared yet (inferred from the payer's usual schedule).",
-  none: "No ex-dividend date is declared before this expiry; the vendor's list can be incomplete.",
+  none: "No ex-dividend date is declared before this expiry; the feed's list can be incomplete.",
   unknown: "Ex-dividend dates are not held for this name.",
 });
 

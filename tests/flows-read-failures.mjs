@@ -54,8 +54,8 @@ const BASE = {
   applyReadFailures(card, [{ route: "spot-exposures-expiry-strike", status: 500 }, { route: "darkpool", status: 404 }]);
   eq(card.panels.surface.status, "ok", "an ok panel is never overwritten by a failure record");
   eq(card.panels.darkpool.code, "failed", "a quiet panel whose read failed is failed");
-  eq(failedRead({ route: "x", status: 404 }), "the vendor's x read answered HTTP 404 on this run, so this is a failed read and not an empty one", "the sentence");
-  eq(failedRead({ route: "x" }), "the vendor's x read could not be reached on this run, so this is a failed read and not an empty one", "and for a read that never landed");
+  eq(failedRead({ route: "x", status: 404 }), "the feed's x read answered HTTP 404 on this run, so this is a failed read and not an empty one", "the sentence");
+  eq(failedRead({ route: "x" }), "the feed's x read could not be reached on this run, so this is a failed read and not an empty one", "and for a read that never landed");
   const many = { panels: {} };
   applyReadFailures(many, Array.from({ length: 40 }, (_, i) => ({ route: "r" + i, status: 500 })));
   eq(many.readFailures.length, READ_FAILURES_MAX, "the list is capped");
@@ -164,7 +164,7 @@ const BASE = {
     "the card section's per-name reads swallow nothing: every one records its failure");
   ok((src.match(/\.catch\(soft\("/g) || []).length >= 14, "the card, dossier and enrichment reads all record theirs");
   ok(/readFailures: lost,/.test(src) && /readFailures: reads\.readFailures/.test(src), "and hand them to buildCard");
-  ok(/\.\.\.\(stats\.calls > 0 \? \{ vendor: summarize\(wire\.snapshot\(\)\) \} : \{\}\)/.test(src), "meta carries the wire summary only when the run called the vendor");
+  ok(/\.\.\.\(stats\.calls > 0 \? \{ feed: summarize\(wire\.snapshot\(\)\) \} : \{\}\)/.test(src), "meta carries the wire summary only when the run called the feed");
 }
 
 const write = (body) => {
@@ -223,7 +223,7 @@ const write = (body) => {
   eq(r.snapshot.ops.darkpool.classes, { timeout: 2 }, "the two timed-out tries");
   eq(r.snapshot.ops["oi-change"].classes, { "5xx": 5 }, "the five refused tries");
   eq(r.snapshot.ops["ohlc-1d"].classes, { "2xx": 1 }, "and the healthy read");
-  eq(r.snapshot.ops["ohlc-1d"].bytes, 14, "with the length the vendor declared");
+  eq(r.snapshot.ops["ohlc-1d"].bytes, 14, "with the length the feed declared");
   eq(r.limit, [300, 300, 300, 300], "an override applies to the nightly too");
   eq(JSON.parse(await run({ LIMITS: "1", FLOWS_UW_TIMEOUT_MS: "" })).limit, [30000, 45000, 45000, 30000],
     "the default is 30 s, 45 s for a chain page and the two-year bars");

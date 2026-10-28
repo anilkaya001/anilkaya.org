@@ -175,7 +175,7 @@ export async function runLive({
     const rows = rowsOf(body);
     pages.push({ body, full: rows.length >= LIVE_BUDGET.alertLimit });
     if (i === 0 && body && !failed(body)) {
-      note(`flow-alerts cursor: sent newer_than=${alertPlan.newerThan}; vendor echoed newer_than=` +
+      note(`flow-alerts cursor: sent newer_than=${alertPlan.newerThan}; feed echoed newer_than=` +
         `${body.newer_than ?? "absent"} older_than=${body.older_than ?? "absent"}; ${rows.length} row(s)`);
     }
     if (rows.length < LIVE_BUDGET.alertLimit || failed(body)) break;
@@ -247,10 +247,10 @@ export async function runLive({
     const others = priorBase && priorBase.other.length ? `; not used: ${priorBase.other.map(([k, d]) => k + " " + d).join(", ")}` : "";
     note(!priorBase ? "day change: no dated prior session to read a base from"
       : !fill ? `day change: no base offered, ${gaps}`
-        : fill.declined ? `day change: the ${fill.date} close disagrees with the vendor's prev_close on ` +
+        : fill.declined ? `day change: the ${fill.date} close disagrees with the feed's prev_close on ` +
           `${fill.agree[1] - fill.agree[0]}/${fill.agree[1]}, nothing filled, ${gaps}${others}`
           : `day change: ${fill.n} null prev_close filled from the ${fill.date} close (${Object.entries(fill.from)
-            .map(([k, n]) => k + " " + n).join(", ") || "none"}), vendor agrees ${fill.agree[0]}/${fill.agree[1]}, ${gaps}${others}`);
+            .map(([k, n]) => k + " " + n).join(", ") || "none"}), feed agrees ${fill.agree[0]}/${fill.agree[1]}, ${gaps}${others}`);
   }
   const stripAnswered = strips.status !== "unavailable";
   await put("live:strips", strips, { answered: stripAnswered });
@@ -320,11 +320,11 @@ export function liveRunVerdict(loop) {
   const dead = (p) => !!p.threw || !(p.answered > 0) || !(p.landed > 0);
   const why = [];
   if (ran.length && ran.every(dead)) {
-    why.push(`every one of ${ran.length} pass(es) answered no vendor call or landed no key`);
+    why.push(`every one of ${ran.length} pass(es) answered no feed call or landed no key`);
   }
   if (loop && loop.exit === "hung") {
     const what = loop.why === "tick-deadline" ? "a watch tick" : "a pass";
-    const how = loop.why === "pass-idle" ? "settled no vendor or ingest call within its idle limit" : "did not finish within its deadline";
+    const how = loop.why === "pass-idle" ? "settled no feed or ingest call within its idle limit" : "did not finish within its deadline";
     why.push(loop.chained && loop.chained.sent
       ? `${what} ${how}, so the loop exited and re-dispatched (${loop.chained.why}) to free the ` +
         "concurrency group for its successor"
@@ -532,7 +532,7 @@ async function keepLoop({ startedAt, refresh, current, currentRead, pass, chain,
       if (done && done.hung === HUNG) {
         const idle = done.kind === "idle";
         const ms = idle ? passIdleMs : passDeadlineMs;
-        const said = idle ? `settled no vendor or ingest call for ${ms / 1000} s` : `did not finish within ${ms / 1000} s`;
+        const said = idle ? `settled no feed or ingest call for ${ms / 1000} s` : `did not finish within ${ms / 1000} s`;
         passes.push({ errored: true, hung: true, threw: said });
         return hung(idle ? "pass-idle" : "pass-deadline", `pass ${index + 1}`, ms, clock, said);
       }
@@ -540,7 +540,7 @@ async function keepLoop({ startedAt, refresh, current, currentRead, pass, chain,
     } else if (here.wait) {
       waits++;
       log(`live loop: Tier 1 has closed ${here.phase.day} before ` +
-        `${Math.floor(VERDICT.provisionalUntilMin / 60)}:00 ET, when a late vendor can still reopen it — no pass, ` +
+        `${Math.floor(VERDICT.provisionalUntilMin / 60)}:00 ET, when a late feed can still reopen it — no pass, ` +
         "waiting for the next slot");
     }
     let beat = {};
@@ -632,7 +632,7 @@ export async function runLiveLoop({ pass, chain, now = () => Date.now(), sleep =
           "if the tide moves again — no pass, waiting for the next slot"
         : `live loop: Tier 1 has closed ${here.phase.day} before ` +
           `${Math.floor(VERDICT.unscheduledUntilMin / 60)}:${String(VERDICT.unscheduledUntilMin % 60).padStart(2, "0")} ET, when a ` +
-          "late vendor can still reopen it — no pass, waiting for the next slot");
+          "late feed can still reopen it — no pass, waiting for the next slot");
     }
     await refresh();
     const next = nextSlot(now(), slotMs);

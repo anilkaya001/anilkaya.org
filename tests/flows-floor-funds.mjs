@@ -331,7 +331,7 @@ const asked = (cases) => {
   ok(/^FLOWS_FLOOR_FUNDS = "on"$/m.test(toml), "wrangler.toml ships the switch on");
   const ops = fs.readFileSync(path.join(ROOT, "server/ops.js"), "utf8");
   ok(ops.includes('"FLOWS_FLOOR_FUNDS"'), "and the Status page lists it");
-  ok(!/vendor|\btape\b|unusual whales/i.test(PAGE.replace(/\/\/.*$/gm, "")), "THE SERVED FLOOR NEVER NAMES THE PROVIDER, ITS VENDOR OR THE TAPE");
+  ok(!/feed|\btape\b|unusual whales/i.test(PAGE.replace(/\/\/.*$/gm, "")), "THE SERVED FLOOR NEVER NAMES THE PROVIDER, ITS VENDOR OR THE TAPE");
 }
 
 console.log(`flows-floor-funds: ${checks} checks passed`);

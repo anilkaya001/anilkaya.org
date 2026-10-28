@@ -24,7 +24,7 @@ const BODY = {
   partial: "3 of 5 sources answered.",
   pending: "Waiting for the first reading.",
   stale: "Last updated 41 minutes ago.",
-  withheld: "Withheld: the vendor does not state the unit.",
+  withheld: "Withheld: the feed does not state the unit.",
   unavailable: 'The source did not answer. <button class="ds-btn" type="button">Retry</button>',
   signedOut: 'Sign in to read this module. <a class="ds-btn" href="#in">Sign in</a>',
   quota: "Today's reads are used. Resets at 00:00 UTC.",

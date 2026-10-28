@@ -256,7 +256,7 @@ function sentenceVectors(M, R) {
   R.ok(old.sentence.includes("(≥ 3.00σ)") && old.wireSentence.includes("3.00σ"), "H12 an old hit renders the threshold it fired on");
   R.ok(adjusted.sentence.includes("(≥ 4.00σ)") && adjusted.wireSentence.includes("4.00σ"), "H12 the adjusted wire renders its own");
   const win = N.renderHit(ev({ subject: "c:SYA101:SYA101260918C00100000", occ: "SYA101260918C00100000", clauses: [{ m: "contract.premium", label: "window premium", unit: "usd", subject: "window", op: ">=", x: 1000000, value: 1240000, ok: true }] }));
-  R.eq(win.sentence, "SYA101 SYA101260918C00100000 window premium appeared $1.24M (≥ $1.00M) · flagged by the data vendor · 16:42 TRT · open+12m", "a flagged window hit");
+  R.eq(win.sentence, "SYA101 SYA101260918C00100000 window premium appeared $1.24M (≥ $1.00M) · flagged by the data feed · 16:42 TRT · open+12m", "a flagged window hit");
   const floored = N.renderHit(ev({ clauses: [{ m: "flow.net_premium.z20", label: "net premium z", unit: "sigma", subject: "ticker", op: ">=", x: 3, value: 50, ok: true, floored: true, n: 20, window: 20 }] }));
   R.eq([floored.rows[0].floored, floored.rows[0].baseline], [true, "20/20 sessions"], "H2 the table says the denominator was floored");
   const none = N.renderHit(ev({ firedAt: undefined }));

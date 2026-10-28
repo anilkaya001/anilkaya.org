@@ -26,19 +26,19 @@ export const PULSE_CAPS = Object.freeze({
 
 export const PULSE_NOTES = Object.freeze({
   tide:
-    "The vendor's own net premium series, carried without cumulation, " +
+    "The feed's own net premium series, carried without cumulation, " +
     "differencing or smoothing. A rising line is premium flow, never a " +
     "forecast of price.",
   totals:
-    "The call/put split is the vendor's attribution. No ratio here says " +
+    "The call/put split is the feed's attribution. No ratio here says " +
     "who initiated anything.",
   oiChange:
-    "The vendor's selection and ordering, under a rule it does not " +
-    "publish — so this ranks inside what the vendor chose to surface, not " +
+    "The feed's selection and ordering, under a rule it does not " +
+    "publish — so this ranks inside what the feed chose to surface, not " +
     "the chain universe. Open-interest change compares two clearing " +
     "snapshots, so it is a day late by construction, never today's trading.",
   netImpact:
-    "Sign is the vendor's attribution against the quote. Its definition " +
+    "Sign is the feed's attribution against the quote. Its definition " +
     "of impact is not reproducible from this payload.",
   insiders:
     "Filings arrive with statutory delay: the latest row is the most " +
@@ -52,7 +52,7 @@ export const PULSE_NOTES = Object.freeze({
   refusals:
     "No feed here supports intent or identity: nothing says who was " +
     "active or which side initiated. The tide and impact rankings use the " +
-    "vendor's unpublished definitions, so absence from a list is not " +
+    "feed's unpublished definitions, so absence from a list is not " +
     "evidence of quiet.",
 });
 

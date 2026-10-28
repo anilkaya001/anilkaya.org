@@ -413,8 +413,8 @@ export function shapeMarketLive(raws, { at, session, writer = "worker", check = 
       ncp: "USD, net call premium, ask side minus bid side, cumulative over the session",
       npp: "USD, net put premium, ask side minus bid side, cumulative (positive = puts bought)",
       net: "USD, ncp - npp (positive = bullish premium), cumulative",
-      nv: "contracts, vendor net volume, cumulative",
-      t: "ISO-8601 UTC of the sampled vendor row (the last row with values inside each 5-minute bucket)",
+      nv: "contracts, feed net volume, cumulative",
+      t: "ISO-8601 UTC of the sampled feed row (the last row with values inside each 5-minute bucket)",
       chg: "ratio, last / prev_close - 1", lean: "ratio in [-1, 1], (bull - bear) / (bull + bear)",
     },
     tide, sectors,
@@ -588,8 +588,8 @@ export const STRIP_FIELDS = Object.freeze([
   ["vol", "stock_volume", "shares"],
   ["cp", "call_premium", "USD, total call premium"], ["pp", "put_premium", "USD, total put premium"],
   ["cvBid", "call_volume_bid_side", "contracts"], ["pvBid", "put_volume_bid_side", "contracts"],
-  ["iv30p", "iv30d_1d", "fraction, the previous trading day's 30-day implied volatility (the vendor's iv30d_1d)"],
-  ["qa", null, "seconds, the read instant minus the vendor's quote_time; null when the row has no stamp or one after the read"],
+  ["iv30p", "iv30d_1d", "fraction, the previous trading day's 30-day implied volatility (the feed's iv30d_1d)"],
+  ["qa", null, "seconds, the read instant minus the feed's quote_time; null when the row has no stamp or one after the read"],
 ].map((x) => Object.freeze(x)));
 
 const STRIP_DP = Object.freeze({ px: 4, prev: 4, chg: 6, lean: 6, iv30: 4, iv30p: 4, ivRank: 2, im: 4, pcr: 4, rvol: 4 });
@@ -706,8 +706,8 @@ export function shapeStrips(raw, { at, session, names = [], writer, key = "live:
     v: 1, key, session,
     fields: STRIP_FIELDS.map(([n]) => n),
     units: Object.fromEntries(STRIP_FIELDS.map(([n, , u]) => [n, u])),
-    basis: "vendor screener, one call for every name; a null prev_close is filled from the last dated nightly close " +
-      "(prevFill); a row the vendor dated before the session is held out (off, missing) and stands as an all-null row",
+    basis: "feed screener, one call for every name; a null prev_close is filled from the last dated nightly close " +
+      "(prevFill); a row the feed dated before the session is held out (off, missing) and stands as an all-null row",
   };
   const atMs = typeof at === "number" ? at : timeMs(at);
   const freshOf = (vendorAt) => freshEnvelope({ readAt: at, vendorAt, source: LIVE_KEYS[key].writer,
@@ -890,9 +890,9 @@ export function shapeVol(indexRaw, { at, session, writer } = {}) {
       iv: "fraction (annualised implied volatility at the tenor)",
       slope: "ratio, v90 / v30 - 1 (positive = upward-sloping curve, contango)",
       front: "ratio, v7 / v30 - 1 (positive = inverted front)", ivRank: "0-100",
-      steep: "ratio, vendor steepness_180_30 = volatility_180 / volatility_30 (1 = flat)",
-      rv: "fraction, vendor realized_volatility (20-session close-to-close, annualised)",
-      vrp: "vol points, vendor variance_risk_premium: EX-POST, a past date's implied vol less the realized vol " +
+      steep: "ratio, feed steepness_180_30 = volatility_180 / volatility_30 (1 = flat)",
+      rv: "fraction, feed realized_volatility (20-session close-to-close, annualised)",
+      vrp: "vol points, feed variance_risk_premium: EX-POST, a past date's implied vol less the realized vol " +
         "that followed it; not an ex-ante premium",
     },
     vix: { status: "unavailable", reason: SILENCE.plan },
@@ -932,7 +932,7 @@ export function shapeMovers(strips, { at, session, writer, n = 8 } = {}) {
     v: 1, key: "live:movers", session,
     fresh: freshEnvelope({ readAt: at, source: "actions", cadenceS: LIVE_KEYS["live:movers"].cadenceS, session, writer }),
     basis: "the names in live:strips (focus, board and watch), ranked by the session change against the prior close " +
-      "(the vendor's, else the last dated nightly close); a name with neither is unranked; not the whole market",
+      "(the feed's, else the last dated nightly close); a name with neither is unranked; not the whole market",
     units: { chg: "ratio", px: "USD", rvol: "ratio", net: "USD, ncp - npp" },
   };
   if (!strips || strips.status !== "ok") {
@@ -1031,7 +1031,7 @@ export function mergeGex(prev, reads, { at, session, writer, rotation, keepMs = 
       gOi: "USD of dealer gamma per 1% move, open-interest book (put legs arrive negative; net = call + put)",
       gVol: "USD per 1% move, today's volume book", gDir: "USD per 1% move, directionalised book",
       px: "USD", t: "ISO-8601 UTC, 5-minute buckets inside the regular session",
-      lagS: "seconds, this name's read instant minus the vendor's newest row for it; a carried name keeps the lag of its own read",
+      lagS: "seconds, this name's read instant minus the feed's newest row for it; a carried name keeps the lag of its own read",
     },
     rotation: rotation || null,
     reset: same ? null : (prev ? "session-boundary" : "cold"),
@@ -1145,7 +1145,7 @@ export function shapeAlertsHead(alerts, { writer, cap = LIVE_BUDGET.alertsHeadRo
     v: 1, key: "live:alerts:head", session: f.session,
     fresh: freshEnvelope({ readAt: f.readAt, vendorAt: f.vendorAt, source: spec_.writer, cadenceS: spec_.cadenceS,
       session: f.session, writer }),
-    basis: "vendor-flagged windows, largest premium first",
+    basis: "feed-flagged windows, largest premium first",
     status: rows.length ? "ok" : "quiet",
     cap, seen: usable.length, shed: usable.length - rows.length,
     premium: usable.reduce((sum, r) => sum + r.prem, 0),

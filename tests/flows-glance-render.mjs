@@ -251,7 +251,7 @@ const Q_FALLBACK = 0.042 * Math.sqrt(Math.PI / 2);
   eq(d.today, 1, "only the last score bar is emphasised");
   eq(d.marks, 0, "without a reading there are no numbered marks");
   eq(d.claims, 0, "and no layer carries a claim");
-  ok(d.desc.includes("on the vendor's convention (dealers long calls, short puts)") && /plus or minus/.test(d.desc), "the description names the dealer convention and both moves");
+  ok(d.desc.includes("on the feed's convention (dealers long calls, short puts)") && /plus or minus/.test(d.desc), "the description names the dealer convention and both moves");
   ok(/closing at/.test(d.desc) && /Call wall/.test(d.desc) && /Put wall/.test(d.desc) && /Flip/.test(d.desc) && /Max pain/.test(d.desc) && /report/.test(d.desc), "and the close, the walls, the flip, max pain and the report");
   ok(d.role === "img" && d.tab === 0 && d.name.length > 30, "the chart is one named tab stop");
   ok(d.gv.includes("$") && d.gv.includes("per 1%"), `the gamma header prints the book figure (${d.gv})`);

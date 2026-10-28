@@ -105,7 +105,7 @@ const browser = await launch();
   const v = await m.page.evaluate(() => window.FlowsUI.ledgerLive.strip());
   eq(v.verdict.state, "server", "the strip names the server copy");
   ok(/^as of \d\d:\d\d:\d\d TRT$/.test(v.chips[0].value), "with the time of its copy: " + v.chips[0].value);
-  eq(v.chips[2].value, "— rail off", "and no vendor lag it cannot measure");
+  eq(v.chips[2].value, "— rail off", "and no feed lag it cannot measure");
   eq(m.errors.filter((e) => !/404/.test(e)), [], "and nothing but the rail's own refused snapshot request is logged");
   eq(await m.page.getAttribute("#sf", "data-state"), "ok", "the page shows the server's ledger");
   await m.ctx.close();
@@ -246,7 +246,7 @@ const browser = await launch();
     await m.page.click("#sfLive button");
     await m.page.waitForSelector("#fxPop:popover-open", { timeout: 3000 });
     const facts = await m.page.$$eval("#fxPopB dt", (a) => a.map((x) => x.textContent));
-    ok(facts.includes("Vendor to hub") && facts.includes("Hub to screen") && facts.includes("Recompute") && facts.includes("Sector tide"), `${w}x${h}: the strip opens the latency facts: ${facts.join(", ")}`);
+    ok(facts.includes("Feed to hub") && facts.includes("Hub to screen") && facts.includes("Recompute") && facts.includes("Sector tide"), `${w}x${h}: the strip opens the latency facts: ${facts.join(", ")}`);
     await m.page.keyboard.press("Escape");
     await m.ctx.close();
   }

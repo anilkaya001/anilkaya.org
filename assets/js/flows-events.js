@@ -94,7 +94,7 @@
     if (b === undefined || b === null) return { state: "pending", reason: "The " + what + " is not on this payload yet. It is published by the nightly run that ships with this page; until then it is pending, not empty." };
     if (typeof b !== "object") return { state: "withheld", reason: "The " + what + " on this payload could not be read." };
     if (b.status === "ok" || b.status === "thin") return { state: "ok" };
-    if (b.status === "quiet") return { state: "quiet", reason: "Read, and the vendor returned nothing that applies." };
+    if (b.status === "quiet") return { state: "quiet", reason: "Read, and the feed returned nothing that applies." };
     return { state: "unavailable", reason: "The " + what + " was not measured" + (b.reason ? " (" + String(b.reason).replace(/_/g, " ") + (n(b.http) ? ", HTTP " + b.http : "") + ")" : "") + "." };
   };
 
@@ -128,9 +128,9 @@
     const dg = digestOf(r.t);
     const e = cx && cx.earnings && cx.earnings.impliedNext ? n(cx.earnings.impliedNext.em) : dg ? n(dg.em) : null;
     const c = cal ? n(cal.em) : null;
-    if (c !== null) return { v: Math.abs(c), src: "the vendor's expected earnings move" };
-    if (e !== null) return { v: Math.abs(e), src: "the vendor's expected earnings move" };
-    if (n(r.im) !== null) return { v: Math.abs(n(r.im)), src: "the vendor's implied move to its next expiry" };
+    if (c !== null) return { v: Math.abs(c), src: "the feed's expected earnings move" };
+    if (e !== null) return { v: Math.abs(e), src: "the feed's expected earnings move" };
+    if (n(r.im) !== null) return { v: Math.abs(n(r.im)), src: "the feed's implied move to its next expiry" };
     return null;
   };
 
@@ -208,7 +208,7 @@
       const col = h("section", { class: "fe-col", "aria-label": weekday(d) + " " + F.day(d) });
       col.append(h("div", { class: "fe-dh" }, h("b", null, weekday(d)), h("span", null, F.day(d)), d === mark ? h("i", { class: "fe-next" }, d === nowDay ? "Today" : "Next") : null));
       const mac = macroSt.state === "ok" ? (payload.macro.rows || []).filter((m) => m && m.day === d).sort((a, b) => String(a.at).localeCompare(String(b.at))) : [];
-      col.append(h("div", { class: "fe-cell fe-c-macro", "data-lane": "Macro" }, mac.length ? mac.map(macroPill) : macroSt.state === "ok" ? h("span", { class: "fe-none", title: "No scheduled economic print for this day in the vendor calendar" }, "No print") : null));
+      col.append(h("div", { class: "fe-cell fe-c-macro", "data-lane": "Macro" }, mac.length ? mac.map(macroPill) : macroSt.state === "ok" ? h("span", { class: "fe-none", title: "No scheduled economic print for this day in the feed calendar" }, "No print") : null));
       const earn = rows.filter((r) => r && r.d === d).map((r) => ({ r, c: cal.get(r.t) || null }))
         .sort((a, b) => laneRank(a.r) - laneRank(b.r) || (n(b.c && b.c.mcap) ?? -1) - (n(a.c && a.c.mcap) ?? -1) || String(a.r.t).localeCompare(String(b.r.t)));
       const cell = h("div", { class: "fe-cell fe-c-earn", "data-lane": "Earnings" });
@@ -226,7 +226,7 @@
       }
       col.append(cell);
       const fd = fdaSt.state === "ok" ? (payload.fda.rows || []).filter((f) => f && f.tgt && f.tgt.p === "day" && f.tgt.from === d) : [];
-      col.append(h("div", { class: "fe-cell fe-c-fda", "data-lane": "FDA" }, fd.length ? fd.map(fdaPill) : fdaSt.state === "ok" ? h("span", { class: "fe-none", title: "No FDA date falls on this day in the vendor calendar" }, "No date") : null));
+      col.append(h("div", { class: "fe-cell fe-c-fda", "data-lane": "FDA" }, fd.length ? fd.map(fdaPill) : fdaSt.state === "ok" ? h("span", { class: "fe-none", title: "No FDA date falls on this day in the feed calendar" }, "No date") : null));
       if (divSt) col.append(h("div", { class: "fe-cell fe-c-div", "data-lane": "Ex-div" }, divRows.filter((c) => c.date === d).map((c) => h("a", { class: "fe-pill", href: tickerHref(c.t) }, h("b", null, String(c.t || DASH))))));
       grid.append(col);
     });
@@ -310,8 +310,8 @@
       sections: [
         { title: "The gate", lines: [notes.gate, "Every name reporting inside the gate was removed before the board was scored, so the board holds no opinion on any of them. Board names never report inside it by construction; they appear in the Earnings list once their report lies beyond it."] },
         { title: "Two clocks", lines: [notes.clocks, clashes ? clashes + " rows publish more sessions than calendar days: the two counts were measured from different origins, and the difference between them is not safe to read on those rows." : null] },
-        { title: "Before the open or after the close", lines: [payload.announce && payload.announce.reason ? String(payload.announce.reason) : null, "A sun marks a report before the open and a moon one after the close, where the vendor's earnings calendar states it."] },
-        S.divLane !== false ? null : { title: "Ex-dividends", lines: ["Ex-dividend dates need the vendor's dividends route, which this plan does not include. Until a run reads them the week carries no lane for them, rather than an empty one that would read as a week without dividends."] },
+        { title: "Before the open or after the close", lines: [payload.announce && payload.announce.reason ? String(payload.announce.reason) : null, "A sun marks a report before the open and a moon one after the close, where the feed's earnings calendar states it."] },
+        S.divLane !== false ? null : { title: "Ex-dividends", lines: ["Ex-dividend dates need the feed's dividends route, which this plan does not include. Until a run reads them the week carries no lane for them, rather than an empty one that would read as a week without dividends."] },
       ],
     };
   }
@@ -412,7 +412,7 @@
         ["Hit", payload.historyRule ? "share of long one-day straddles that paid" : null],
       ],
       sections: [
-        { title: "The implied move", lines: ["The vendor's expected earnings move where its calendar states one, otherwise the vendor's implied move to its next expiry, which is a different horizon.", notes.vendorMove] },
+        { title: "The implied move", lines: ["The feed's expected earnings move where its calendar states one, otherwise the feed's implied move to its next expiry, which is a different horizon.", notes.vendorMove] },
         { title: "The priced move", lines: [notes.priced, "A name with no sessions left prints 0s: a horizon of zero, not a zero move. One with no implied volatility is not measured, and one whose move was not published is not zero."] },
         { title: "Past reports", lines: [payload.historyRule ? String(payload.historyRule) : "The past-report history is not on this payload yet."] },
         { title: "Coverage", lines: [notes.coverage] },
@@ -424,7 +424,7 @@
     const st = blockState(payload.macro, "economic calendar");
     if (st.state !== "ok") { silence(host.macro, st, "Macro", 200); return; }
     const rows = (payload.macro.rows || []).filter(Boolean);
-    if (!rows.length) { silence(host.macro, { state: "quiet", reason: "No economic print is scheduled after the session's close in what the vendor returned." }, "Macro", 200); return; }
+    if (!rows.length) { silence(host.macro, { state: "quiet", reason: "No economic print is scheduled after the session's close in what the feed returned." }, "Macro", 200); return; }
     setModuleState(host.macro, { state: "ok" }, "Macro");
     const items = rows.map((m) => {
       const tag = TAGS[m.tag] || null;
@@ -432,8 +432,8 @@
         h("span", { class: "fe-edate" }, h("b", null, m.day ? weekday(m.day) : DASH), h("small", null, trtTime(m.at, false) || F.day(m.day))),
         h("span", { class: "fe-mname" }, h("i", { class: "fe-dot", style: { "--c": UI.cssVar(tag ? tag[1] : "--label-4") } }),
           h("b", null, tag ? tag[0] : String(m.event || DASH).replace(/\s*\((MoM|YoY|QoQ)\)/, "")), tag ? h("small", null, String(m.event || "")) : null),
-        cell(m.forecastRaw, "No consensus forecast in the vendor calendar", { class: "fu-v fu-strong" }),
-        cell(m.prevRaw, "No prior reading in the vendor calendar", V));
+        cell(m.forecastRaw, "No consensus forecast in the feed calendar", { class: "fu-v fu-strong" }),
+        cell(m.prevRaw, "No prior reading in the feed calendar", V));
     });
     host.macro.replaceChildren(
       h("div", { class: "fe-mrow fu-head", ...HIDE }, h("span", null, "When"), h("span", null, "Print"), h("span", V, "Forecast"), h("span", V, "Prior")),
@@ -678,7 +678,7 @@
     const known = ["gate", "clocks", "priced", "vendorMove", "coverage", "announce"];
     return {
       title: "Events",
-      facts: [["Built", builtAt(payload)], ["Payload", n(payload.v) === null ? null : "v" + payload.v], ["Vendor calls", "zero: every field here was already on the wire"]],
+      facts: [["Built", builtAt(payload)], ["Payload", n(payload.v) === null ? null : "v" + payload.v], ["Feed calls", "zero: every field here was already on the wire"]],
       sections: S.fail ? [{ title: "Method", lines: [S.fail === "unreadable"
         ? "The basis travels inside the same payload as the numbers, so it did not parse either. Nothing on this page has been explained by the pipeline."
         : S.fail === "failed" ? "The basis travels inside the same payload as the numbers, so it could not be fetched either. Nothing on this page has been explained by the pipeline." : null] }]
@@ -741,7 +741,7 @@
     }
     UI.freshness({ sessionDate: payload.sessionDate, generatedAt: payload.generatedAt, updatedAt: payload.__updatedAt, source: "events" });
     if (payload.status === "pending") {
-      failEverywhere("pending", "The pipeline has not published this key yet. This calendar is built by the weekday after-close run out of screener rows it already holds — it costs no vendor call — and it appears with the first run after this page shipped.");
+      failEverywhere("pending", "The pipeline has not published this key yet. This calendar is built by the weekday after-close run out of screener rows it already holds — it costs no feed call — and it appears with the first run after this page shipped.");
       return;
     }
     stale(payload, payload.__updatedAt);

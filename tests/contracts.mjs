@@ -1007,7 +1007,7 @@ assert(read("wrangler.toml").includes('html_handling = "auto-trailing-slash"'), 
     `found limit ${simple[1]}, period ${simple[2]}, ASK_FLOOD_PERIOD_S ${period}`);
   const vendorBlock = blocks.find((b) => /^name\s*=\s*"MEMBER_VENDOR"\s*$/m.test(b));
   assert(vendorBlock, "wrangler.toml must declare the [[ratelimits]] binding MEMBER_VENDOR: memberAllowed fails open " +
-    "when env.MEMBER_VENDOR is absent, so a renamed or dropped binding would let one member spend the shared vendor budget silently");
+    "when env.MEMBER_VENDOR is absent, so a renamed or dropped binding would let one member spend the shared feed budget silently");
   const vendorSimple = /^simple\s*=\s*\{\s*limit\s*=\s*(\d+)\s*,\s*period\s*=\s*(\d+)\s*\}\s*$/m.exec(vendorBlock) || [];
   const vendorPeriod = (/^const MEMBER_VENDOR_PERIOD_S = (\d+);$/m.exec(read("worker.js")) || [])[1];
   assert(vendorSimple[1] === "60" && vendorSimple[2] === "60" && vendorPeriod === vendorSimple[2],
@@ -1041,7 +1041,7 @@ assert(read("wrangler.toml").includes('html_handling = "auto-trailing-slash"'), 
     ["shared/flows-rt.js", /channels: Object\.freeze\(\["price:<T>"/],
   ].filter(([file, pattern]) => pattern.test(read(file))).map(([file]) => file);
   assert(credentialInUrl.length === 2,
-    "the traces anchor no longer matches: the vendor socket probe put the key in the socket URL's query and " +
+    "the traces anchor no longer matches: the feed socket probe put the key in the socket URL's query and " +
     "RT_UPSTREAM named the socket channels a Worker upstream would open the same way; if neither holds any more, " +
     "retire this block with that reason rather than loosening it, found " + JSON.stringify(credentialInUrl));
   const tables = read("wrangler.toml").split(/^(?=\[)/m).map((chunk) => ({
@@ -1055,7 +1055,7 @@ assert(read("wrangler.toml").includes('html_handling = "auto-trailing-slash"'), 
   assert(traces && /^enabled\s*=\s*false\s*$/m.test(traces.body),
     "wrangler.toml must declare [observability.traces] enabled = false explicitly: Cloudflare has announced that " +
     "observability.enabled = true will switch on automatic tracing by default, and a fetch span records url.full " +
-    "and url.query, so the vendor key in a socket URL's query would be written into the account's trace store the " +
+    "and url.query, so the feed key in a socket URL's query would be written into the account's trace store the " +
     "day the default lands; an explicit false holds the choice whatever the default becomes");
   assert(!/^(head_sampling_rate|persist)\s*=/m.test(traces.body),
     "[observability.traces] carries only the off switch: a sampling rate or persist beside it would read as half-enabled");
@@ -1251,7 +1251,7 @@ const SERVED_ASSET_DIRS = ["assets/css/", "assets/js/", "assets/data/", "assets/
   for (const dir of ["docs/", "server/", "shared/", "scripts/", "tests/", "migrations/"]) {
     assert(!served.some((file) => file.startsWith(dir)), `${dir} must not be in the static bundle`);
   }
-  assert(!served.includes("docs/uw-openapi.yaml"), "the 1 MB vendor specification must not be uploaded or served");
+  assert(!served.includes("docs/uw-openapi.yaml"), "the 1 MB feed specification must not be uploaded or served");
   for (const token of SERVED_ASSET_TOKENS) assert(served.includes(token), `${token} must be served`);
   assert(served.some((file) => file.startsWith("assets/data/projects/")), "assets/data/projects is served by design");
 }

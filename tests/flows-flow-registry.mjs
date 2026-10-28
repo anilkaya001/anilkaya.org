@@ -60,7 +60,7 @@ eq(reg.targets, { version: TARGETS_VERSION, hash: targetsHash() }, "pinned to th
 eq(reg.protocol, PROTOCOL, "the protocol is the five rules");
 eq(reg.multiplicity.size, 30, "Benjamini-Hochberg runs across the thirty");
 eq(reg.multiplicity.primary.test, "S1.next", "and Holm covers S1 at the next close");
-eq(reg.signals.filter((s) => s.kind === "benchmark").map((s) => s.id), ["S7", "S8"], "the vendor's sweep rule and unusual preset are benchmarks");
+eq(reg.signals.filter((s) => s.kind === "benchmark").map((s) => s.id), ["S7", "S8"], "the feed's sweep rule and unusual preset are benchmarks");
 eq(reg.signals.filter((s) => s.direction === "signed").map((s) => s.id), [...SIGNED_SIGNALS], "two signals carry a sign");
 
 for (const t of reg.tests) {

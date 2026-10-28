@@ -280,7 +280,7 @@ try {
     ok(/Buying power reduction/i.test(refuse) && /Refused/.test(refuse),
        "buying power reduction is named and marked Refused");
     ok(/broker/i.test(refuse) && /28,755/.test(refuse),
-       "and the reason is given in full: it is a broker's number, and the vendor's specification does not contain the concept anywhere in its 28,755 lines");
+       "and the reason is given in full: it is a broker's number, and the feed's specification does not contain the concept anywhere in its 28,755 lines");
     ok(/Reg-T/.test(refuse) && /labelled as such/.test(refuse),
        "and the capital figure the engine does publish is named for what it is, the Reg-T minimum or the maximum loss");
     ok(/Conditional value at risk/i.test(refuse) && /distribution/i.test(refuse) && /real-world law/i.test(refuse),
@@ -291,7 +291,7 @@ try {
     ok(/model-free/i.test(refuse) && /intrinsic value/.test(refuse),
        "the expiry line is identified as the one reading that needs nothing: intrinsic value, no volatility");
     ok(/fitted smile/.test(refuse) && /Black-76/.test(refuse) && /parity/.test(refuse),
-       "the today line names its engine — Black-76 on the fitted smile against a parity forward — replacing the Taylor expansion in vendor greeks that the page used to draw");
+       "the today line names its engine — Black-76 on the fitted smile against a parity forward — replacing the Taylor expansion in feed greeks that the page used to draw");
     ok(/dividend is implied by the book rather than assumed/.test(refuse) && /rate is the card/.test(refuse),
        "and it names where the two parameters the old page refused to invent now come from: the dividend from put-call parity, the rate from the card");
     ok(/least accurate/.test(refuse) && /extrapolated/.test(refuse),
@@ -328,7 +328,7 @@ try {
     const contractCalls = upstreamCalls.filter((u) => u.includes("/option-contracts"));
     ok(contractCalls.length > 0, "the expiry read reached the provider");
     ok(contractCalls.every((u) => u.includes("expiry=" + NEAR)),
-       "every contract request names ONE expiry — the vendor's own documented query parameter, and what makes a 12,000-contract book reachable a slice at a time");
+       "every contract request names ONE expiry — the feed's own documented query parameter, and what makes a 12,000-contract book reachable a slice at a time");
     ok(contractCalls.some((u) => /option_type=call/.test(u)) && contractCalls.some((u) => /option_type=put/.test(u)),
        "and splits calls from puts, which halves the population each 500-row page has to hold");
     ok(contractCalls.every((u) => !/maybe_otm_only|exclude_zero_oi_chains/.test(u)),
@@ -343,7 +343,7 @@ try {
     eq(chips[0].on, "true", `the first read is the expiry nearest the structure's window, ${NEAR_DTE} days here`);
     ok(!upstreamCalls.some((u) => /\/stock\/AAA\/expiry-breakdown\?.*date=/.test(u)) &&
        !upstreamCalls.some((u) => /\/stock\/AAA\/greek-exposure\/expiry/.test(u)),
-       "the breakdown is read under the vendor's live field name `expires`, so no dated retry or fallback is spent");
+       "the breakdown is read under the feed's live field name `expires`, so no dated retry or fallback is spent");
 
     const ex = await openInfo("About expiries");
     ok(ex.includes(`5 of 6 contracts read at ${NEAR_LABEL} carry a two-sided quote`),
@@ -379,7 +379,7 @@ try {
 
     const d = await slot("Delta");
     ok(!d.silent && /^[+−]\d/.test(d.value),
-       `the position delta comes from the smile, not from the vendor's per-contract greek (${d.value}); a contract the vendor sent no greeks for no longer silences it`);
+       `the position delta comes from the smile, not from the feed's per-contract greek (${d.value}); a contract the feed sent no greeks for no longer silences it`);
     const popQ = await page.$eval('.tl-pop-r[data-law="q"] .tl-pop-v', (n) => (n.querySelector("[data-value]") || n).dataset.value || n.textContent);
     ok(/^\d+\.\d%$/.test(popQ), `and a chance of profit at expiry under the smile's own density, to a tenth of a point (${popQ})`);
 
@@ -435,7 +435,7 @@ try {
        "in the same structure objects the card publishes, so the page reads one shape wherever it came from");
     ok(e && e.lawFrom === null && e.pLaw === null, "and with no card published for the name, no real-world law is invented for it");
     const plain = await (await fetch(server.baseURL + "/api/flows/strategy?t=AAA&expiry=" + NEAR, { headers: cookie })).json();
-    ok(!("engine" in plain), "without engine=1 the payload is the vendor read it always was");
+    ok(!("engine" in plain), "without engine=1 the payload is the feed read it always was");
   }
 
   {
@@ -443,7 +443,7 @@ try {
     const read = async (t) => (await fetch(server.baseURL + "/api/flows/strategy?t=" + t, { headers: cookie })).json();
     const enveloped = await read("AAA");
     ok(enveloped.spotSource === "stock-state" && enveloped.spot === 102 && enveloped.tapeTime !== null && enveloped.marketTime === "regular",
-       "the context reads the vendor's real {data:{...}} stock-state envelope as the live print it holds, with its tape time and session");
+       "the context reads the feed's real {data:{...}} stock-state envelope as the live print it holds, with its tape time and session");
     eq(enveloped.asOf, SESSION_DAY, "and dates the session by the print's New York day");
     eq(enveloped.basis.status, "unchecked", "there is no chain in a context read, so its basis says it was not checked");
     eq(enveloped.basis.printSource, "stock-state", "and says what the print is");
@@ -515,11 +515,11 @@ try {
   {
     await go(`?t=AAA&expiry=${NEAR}&basis=mid&legs=AAA${NY}C00100000@1,AAA${NY}C00120000@1`);
     eq((await slot("Cost")).value, "$550.00",
-       "the money arithmetic is unaffected by a contract the vendor sent no greeks or IV for: the expiry payoff needs no greek at all");
+       "the money arithmetic is unaffected by a contract the feed sent no greeks or IV for: the expiry payoff needs no greek at all");
     eq((await slot("Max loss")).value, MINUS + "$550.00", "and the maximum loss still renders as a number");
     const legIv = await page.$$eval("#sgLegsM .tl-leg", (rows) => rows.map((r) => r.textContent));
     ok(legIv.length === 2 && legIv.every((t) => /IV\s*\d/.test(t)),
-       "and both legs carry an implied volatility read off the fitted smile, so the one the vendor left blank is no longer a hole");
+       "and both legs carry an implied volatility read off the fitted smile, so the one the feed left blank is no longer a hole");
 
     await go(`?t=AAA&expiry=${NEAR}&basis=mid&legs=AAA${NY}C00100000@1,AAA${NY}P00080000@1`);
     for (const name of ["Cost", "Max loss", "Delta"]) {
@@ -680,7 +680,7 @@ try {
     ok(/The call side of this expiry is CUT OFF/.test(note),
        "a truncated side is named as truncated: the reader's strike is simply not there and nothing else says a strike is missing");
     ok(/500 contracts/.test(note) && /reads 2 of them per side/.test(note),
-       "and the disclosure states the vendor's page limit and how many pages this route reads");
+       "and the disclosure states the feed's page limit and how many pages this route reads");
     ok(!/Both sides/.test(note), "and it is PER SIDE: three puts came back complete");
     await closeInfo();
   }

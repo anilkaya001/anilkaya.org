@@ -145,7 +145,7 @@
     return series && typeof series === "object" ? series : null;
   };
   const BASIS = {
-    px: "frame against the vendor's stamp", gx: "frame against the vendor's stamp", mk: "frame against the vendor's stamp",
+    px: "frame against the feed's stamp", gx: "frame against the feed's stamp", mk: "frame against the feed's stamp",
     fl: "behind the item's own time", nw: "behind the item's own time",
   };
   const TOPIC_NAME = { px: "Prices", fl: "Flagged alerts", gx: "Dealer gamma", mk: "Market tide", nw: "News" };
@@ -190,11 +190,11 @@
         ["Mode", sw.FLOWS_RT_MODE ? String(sw.FLOWS_RT_MODE) : DASH],
         ["Audience", sw.FLOWS_RT_AUDIENCE ? String(sw.FLOWS_RT_AUDIENCE) : DASH],
         ["Upstream", up.kind ? String(up.kind) + (sock ? (sock.connected ? ", socket connected" : sock.connecting ? ", socket connecting" : ", socket not connected") : "") : DASH],
-        ["Vendor key counter", vendor && num(vendor.daily) !== null ? whole(vendor.daily) + " calls today, read " + trt(vendor.at, now, true) : DASH + " the rail has made no vendor call with a counter header in this isolate"],
+        ["Feed key counter", vendor && num(vendor.daily) !== null ? whole(vendor.daily) + " calls today, read " + trt(vendor.at, now, true) : DASH + " the rail has made no feed call with a counter header in this isolate"],
         ["Phase", s.phase ? s.phase.phase + (s.phase.trading ? ", trading day" : ", not a trading day") : DASH],
         ["Started", s.startedAt ? trt(s.startedAt, now) : DASH],
         ["Sockets", whole(sockets.n) + " of " + whole(sockets.max) + " (" + whole(sockets.userCap) + " a member)"],
-        ["Vendor calls, this minute", whole(calls.minuteTotal) + " of " + whole(calls.perMinute) + " a minute"],
+        ["Feed calls, this minute", whole(calls.minuteTotal) + " of " + whole(calls.perMinute) + " a minute"],
         ["Degraded", deg ? "since " + trt(deg.since, now) + ", " + String(deg.reason) + ", " + (deg.k || []).join(" ") : "no"],
       ]),
       table("Rail topics", ["Topic", "Via", "Demanded", "Last frame", "Lag p50", "Lag p95", "Samples", "Measured as", "Calls, minute", "Calls, hour", "Failures", "Freshness"], rows),
@@ -218,7 +218,7 @@
         ["Session", m.sessionDate ? String(m.sessionDate) : DASH],
         ["Universe", whole(m.universe) + " names"],
         ["Cards", cardsLine(m)],
-        ["Vendor calls", whole(m.apiCalls)],
+        ["Feed calls", whole(m.apiCalls)],
         ["Health", hl ? count(hl.failures, "failure") + ", " + count(hl.warnings, "warning") : DASH],
       ]),
       hl && Array.isArray(hl.first) && hl.first.length ? h("ul", { class: "st-lines" }, ...hl.first.map((t) => h("li", null, String(t)))) : null,
@@ -307,7 +307,7 @@
     }
     const via = viaWord(body.upstream && body.upstream.topics && body.upstream.topics[k] ? body.upstream.topics[k].via : null);
     tileSet(id, [t.fresh && t.fresh.state ? t.fresh.state : "pending", t.fresh && t.fresh.state ? null : "not read"],
-      span(lag.p50), "p50 " + (EVENT[k] ? "behind the item's own time" : "behind the vendor's stamp") + (via ? ", via " + via : "") + ", " + count(lag.n, "sample"));
+      span(lag.p50), "p50 " + (EVENT[k] ? "behind the item's own time" : "behind the feed's stamp") + (via ? ", via " + via : "") + ", " + count(lag.n, "sample"));
   }
 
   const sumKnown = (list) => (list.every((x) => num(x) !== null) ? list.reduce((a, b) => a + num(b), 0) : null);
@@ -323,7 +323,7 @@
   };
   const vendorTurn = (now) => {
     const w = vendorWindow();
-    return "the vendor's day " + (!w ? "is assumed to turn at 03:00 TRT" : w.basis === "stated" ? "turns at " + trt(w.end, now) + ", as its dashboard states (read " + w.readOn + ")" : "is assumed to turn at " + trt(w.end, now));
+    return "the feed's day " + (!w ? "is assumed to turn at 03:00 TRT" : w.basis === "stated" ? "turns at " + trt(w.end, now) + ", as its dashboard states (read " + w.readOn + ")" : "is assumed to turn at " + trt(w.end, now));
   };
 
   function paintTiles(now) {
@@ -334,14 +334,14 @@
     const own = ops && ops.vendor ? ops.vendor.own : null;
     if (reading && reading.today) {
       tileSet("stTileUw", ["fresh", "counted"], whole(reading.daily),
-        "calls on the vendor key today, every caller included, read " + trt(reading.at, now, true) + "; " + vendorTurn(now));
+        "calls on the feed key today, every caller included, read " + trt(reading.at, now, true) + "; " + vendorTurn(now));
     } else {
       const ownSum = own ? sumKnown([own.tier1, own.focus, own.tier2]) : null;
       const reason = !S.D.ops ? "no read yet" : !S.D.ops.ok ? "the ops view was not read: " + S.D.ops.reason
-        : reading ? "the last vendor counter was read " + trt(reading.at, now) + ", before today"
-          : "no Tier 1 or focus tick has recorded the vendor's counter header yet";
+        : reading ? "the last feed counter was read " + trt(reading.at, now) + ", before today"
+          : "no Tier 1 or focus tick has recorded the feed's counter header yet";
       tileSet("stTileUw", ["pending", "not read"], ownSum === null ? DASH : "own " + whole(ownSum),
-        "vendor count not read: " + reason + (ownSum === null ? "" : "; own count is Tier 1, focus and Tier 2 only"));
+        "feed count not read: " + reason + (ownSum === null ? "" : "; own count is Tier 1, focus and Tier 2 only"));
     }
     const cap = capOf();
     const a = S.D.ai && S.D.ai.ok && S.D.ai.body ? S.D.ai.body.spend : null;
@@ -379,7 +379,7 @@
       nightlyState = meta.health && num(meta.health.failures) > 0 ? chip("stale", "failures") : chip("live", "landed");
       nightlyLines.push("Landed " + trt(meta.generatedAt, now) + ", " + ago(Date.parse(meta.generatedAt), now));
       nightlyLines.push("Run time " + (stages.length ? span(ms) : DASH + " (no stage ledger)") + (stages.length ? ", CPU " + (cpu === null ? DASH + " (not recorded)" : span(cpu)) : ""));
-      nightlyLines.push("Vendor calls " + whole(meta.apiCalls));
+      nightlyLines.push("Feed calls " + whole(meta.apiCalls));
       if (full && meta.callStats && typeof meta.callStats === "object") {
         const cs = meta.callStats;
         nightlyLines.push("Retries " + whole(cs.retries) + ", rate limited " + whole(cs.rateLimited) + ", failed " + whole(cs.failures) + ", timed out " + whole(cs.timedOut));
@@ -403,7 +403,7 @@
       lines.push("Last verdict " + (why || DASH));
       if (day) {
         lines.push(day.day + ": " + count(day.tier1.ok, "write") + ", " + whole(day.tier1.fail) + " failed, longest gap between writes " + span(day.tier1.okGapMs));
-        if (full) lines.push("Vendor calls counted " + (day.tier1.calls === null ? DASH + " (column not yet written)" : whole(day.tier1.calls)));
+        if (full) lines.push("Feed calls counted " + (day.tier1.calls === null ? DASH + " (column not yet written)" : whole(day.tier1.calls)));
       } else lines.push("Ledger: " + DASH + " no day recorded yet");
       cards.push(card("Tier 1", st, lines));
       const fo = day ? day.focus : null;
@@ -412,7 +412,7 @@
         fl.push(day.day + ": " + whole(fo.ok) + " written, " + whole(fo.partial) + " partial, " + whole(fo.fail) + " failed");
         fl.push(fo.okAt ? "Last write " + trt(fo.okAt, now) : "Last write: " + DASH + " none today");
         fl.push("Longest gap " + span(fo.gapMs));
-        if (full) fl.push("Vendor calls counted " + (fo.calls === null ? DASH + " (column not yet written)" : whole(fo.calls)));
+        if (full) fl.push("Feed calls counted " + (fo.calls === null ? DASH + " (column not yet written)" : whole(fo.calls)));
       } else fl.push("Ledger: " + DASH + " no day recorded yet");
       cards.push(card("Focus", !fo ? chip("pending", "no day") : fo.fail > 0 && fo.ok === 0 ? chip("unavailable", "failed") : fo.ok > 0 ? chip("live", "writing") : chip("pending", "none yet"), fl));
     }
@@ -457,11 +457,11 @@
   const SWITCH_EFFECT = {
     FLOWS_RT_MODE: "on runs the real-time rail; anything else is off and its routes answer 404",
     FLOWS_RT_AUDIENCE: "members lets every signed-in member open the rail; anything else is owner only",
-    FLOWS_RT_UPSTREAM: "socket joins the vendor's socket for prices and alerts; anything else polls REST",
+    FLOWS_RT_UPSTREAM: "socket joins the feed's socket for prices and alerts; anything else polls REST",
     FLOWS_RT_SOCKET_HOURS: "session keeps the socket open from pre-market to after-hours; anything else holds it to regular hours",
     FLOWS_READ_MODE: "off makes every per-name reading the deterministic one, with no model call",
     FLOWS_LIVE_MODE: "off stops the Tier 1 and focus ticks; any other value runs them",
-    FLOWS_PREMARKET_NEWS: "on runs the pre-market news pass, one vendor call every half hour before the open",
+    FLOWS_PREMARKET_NEWS: "on runs the pre-market news pass, one feed call every half hour before the open",
     FLOWS_READY: "on serves the readiness route; anything else is a 404",
     FLOWS_HEALTH: "on serves the public health route; anything else is a 404",
     FLOWS_SCENES: "on shows the skyline and relations scenes to members; owner shows them to owners only",
@@ -551,7 +551,7 @@
     });
     fill(host,
       line((s.running ? "Running" : "Idle, no viewer") + " · upstream " + (up.kind ? String(up.kind) : DASH) + " · sockets " + whole(sockets.n) + " of " + whole(sockets.max) +
-        " · vendor calls " + whole(calls.minuteTotal) + " of " + whole(calls.perMinute) + " this minute"),
+        " · feed calls " + whole(calls.minuteTotal) + " of " + whole(calls.perMinute) + " this minute"),
       s.degraded ? line("Degraded since " + trt(s.degraded.since, now) + ": " + String(s.degraded.reason)) : null,
       rows.length ? mini("Rail topics", ["Topic", "p50", "p95", "State"], rows, "topics") : line(DASH + " the rail reported no topics"),
       silent.size ? line(DASH + " " + [...silent].map(([why, names]) => names.join(", ") + ": " + why).join("; ") + ".") : null,
@@ -610,7 +610,7 @@
     const wait = next.length ? Math.max(0, Math.ceil((Math.min(...next) - now) / 1000)) : null;
     const total = asked.length;
     host.meta.textContent = (S.lastRound ? "Read at " + clockSec(S.lastRound) : "Not read yet") + (wait === null ? "" : " · next read in " + wait + " s") +
-      " · the page reads " + total + " existing routes and calls no vendor and no model";
+      " · the page reads " + total + " existing routes and calls no feed and no model";
     host.note.textContent = failed ? failed + " of " + total + " sources could not be read." : "All " + total + " sources read.";
   }
 

@@ -17,7 +17,7 @@
     return el;
   };
   const FEEDS = ["px", "fl", "gx", "mk", "nw"];
-  const VENDOR_SOCKET_NOTE = "Flagged alerts on the vendor's own socket ran 5.9 s p50 and 7.1 s p95 on 2026-10-05.";
+  const VENDOR_SOCKET_NOTE = "Flagged alerts on the feed's own socket ran 5.9 s p50 and 7.1 s p95 on 2026-10-05.";
 
   function rangeBar(lag, win, name) {
     const W = 220;
@@ -57,7 +57,7 @@
     const rtt = t.rttMs && typeof t.rttMs === "object" ? t.rttMs : null;
     rows.push(["Poll round trip", via === "socket" ? "socket: no poll" : rtt && num(rtt.p50) !== null ? "p50 " + span(rtt.p50) + ", p95 " + span(rtt.p95) : DASH + " no poll in this epoch"]);
     rows.push(["Live share of watched time", watched === null ? DASH + " not watched in this epoch"
-      : share(time.liveMs, watched) + " of " + span(watched) + " (vendor lag " + share(time.vendorLagMs, watched) + ", ours " + share(time.oursMs, watched) + ")"]);
+      : share(time.liveMs, watched) + " of " + span(watched) + " (feed lag " + share(time.vendorLagMs, watched) + ", ours " + share(time.oursMs, watched) + ")"]);
     rows.push(["Line", win ? "live window " + span(win.liveMs) + ", stale at " + span(win.staleMs) : DASH + " the rail sent no window"]);
     return h("article", { class: "lt-card", "data-topic": k },
       h("div", { class: "lt-card-h" }, h("h3", null, TOPIC_NAME[k]), stateChip(t.fresh && t.fresh.state)),
@@ -81,7 +81,7 @@
         h("article", { class: "lt-card", "data-topic": "prints" },
           h("div", { class: "lt-card-h" }, h("h3", null, "Option prints"), chip("withheld", "no feed")),
           h("p", { class: "lt-fig lt-none" }, DASH + " The rail carries no feed of single option prints; it is not built."))),
-      h("p", { class: "st-foot" }, "Behind the vendor's own stamp. The vendor's pipeline before it stamps a row is upstream of these figures. " + VENDOR_SOCKET_NOTE));
+      h("p", { class: "st-foot" }, "Behind the feed's own stamp. The feed's pipeline before it stamps a row is upstream of these figures. " + VENDOR_SOCKET_NOTE));
     const el = $("stFeedsAsof");
     if (el) el.textContent = rail.finished ? "read " + clockSec(rail.finished) : "";
   }
@@ -176,7 +176,7 @@
     rows.push(["Option prints", DASH, DASH, DASH, chip("withheld", "no feed")]);
     fill(host,
       mini("Feed latency", ["Feed", "p50", "p95", "Live line", "State"], rows, "feeds"),
-      line(body.running ? "Behind the vendor's stamp; alerts and news behind the item's own time." : DASH + " rail idle: nothing is polled, so no latency is held. Figures return when a viewer connects."));
+      line(body.running ? "Behind the feed's stamp; alerts and news behind the item's own time." : DASH + " rail idle: nothing is polled, so no latency is held. Figures return when a viewer connects."));
   }
 
   function sumStored(now) {
@@ -190,7 +190,7 @@
     const late = live.filter((l) => l.present === false || l.state === "stale").length;
     fill(host,
       line(late ? late + " of " + live.length + " keys are stale or missing; worst first." : "All " + live.length + " keys are inside their lines."),
-      mini("Stored feeds, worst first", ["Key", "Age", "Behind vendor", "State"], ordered.map((l) => (l.present === false
+      mini("Stored feeds, worst first", ["Key", "Age", "Behind the feed", "State"], ordered.map((l) => (l.present === false
         ? [l.key, DASH, DASH, chip("pending", "no row")]
         : [l.key, span((l.ageS ?? NaN) * 1000), l.behindS === null ? "unstamped" : span(l.behindS * 1000), stateChip(l.state)])), "keys"));
   }
@@ -206,7 +206,7 @@
     fill(host,
       mini("Timing", ["Source", "Reading"], [
         ["Tier 2 pass", t2 ? t2.lines[1] || t2.lines[0] : DASH],
-        ["Vendor socket", !rail || !rail.ok ? DASH + " rail not read" : sock ? (sock.connected ? "connected" : sock.connecting ? "connecting" : "not connected") + ", " + count(sock.messages, "message") : "REST polling, no socket"],
+        ["Feed socket", !rail || !rail.ok ? DASH + " rail not read" : sock ? (sock.connected ? "connected" : sock.connecting ? "connecting" : "not connected") + ", " + count(sock.messages, "message") : "REST polling, no socket"],
         ["This page's reads", trips.length ? "median " + span(median(trips.map((x) => x.ms))) + " over " + trips.length : DASH + " none finished"],
         ["Worker clock vs browser", off === null ? DASH + " not carried" : (off >= 0 ? "+" : "−") + span(Math.abs(off))],
       ]));
@@ -222,8 +222,8 @@
       ? [l.key, DASH, DASH, DASH, DASH, DASH, DASH, "no row"]
       : [l.key, (l.writer || DASH) + (l.source ? " (" + l.source + ")" : ""), trt(l.readAt, now, true), span((l.ageS ?? NaN) * 1000),
         l.behindS === null ? "unstamped" : span(l.behindS * 1000), span(l.liveS * 1000), span(l.staleS * 1000), l.state + (l.reason ? ", " + l.reason : "")]));
-    fill(host, table("Stored feeds", ["Key", "Writer", "Read at", "Age now", "Behind the vendor at read", "Live line", "Stale line", "State"], rows, true),
-      h("p", { class: "st-foot" }, "Behind the vendor at read is the read instant minus the vendor's own stamp inside the row; a row the vendor did not stamp is unstamped."));
+    fill(host, table("Stored feeds", ["Key", "Writer", "Read at", "Age now", "Behind the feed at read", "Live line", "Stale line", "State"], rows, true),
+      h("p", { class: "st-foot" }, "Behind the feed at read is the read instant minus the feed's own stamp inside the row; a row the feed did not stamp is unstamped."));
   }
 
   function paintTiming(now) {
@@ -239,7 +239,7 @@
     const up = (rail.body && rail.body.upstream) || {};
     const sock = up.socket && typeof up.socket === "object" ? up.socket : null;
     if (!sock) {
-      fill(host, h("p", { class: "st-miss" }, DASH + " The rail polls the vendor over REST" + (up.kind ? " (upstream " + up.kind + ")" : "") + "; no vendor socket is configured, so there is nothing to report."));
+      fill(host, h("p", { class: "st-miss" }, DASH + " The rail polls the feed over REST" + (up.kind ? " (upstream " + up.kind + ")" : "") + "; no feed socket is configured, so there is nothing to report."));
       return;
     }
     if (memo.finished !== rail.finished) {

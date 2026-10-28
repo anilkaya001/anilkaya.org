@@ -38,20 +38,20 @@ export const STOCK_NOTES = Object.freeze({
     "venue. A large print says size moved; it does not say which way " +
     "anyone was positioned.",
   oiDeltas:
-    "The vendor's largest contract-level open-interest changes in this " +
+    "The feed's largest contract-level open-interest changes in this " +
     "name. An open-interest change compares two clearing snapshots, so it " +
     "is a settled fact a day late by construction — never today's trading — " +
-    "and the vendor's selection rule for which contracts surface here is " +
+    "and the feed's selection rule for which contracts surface here is " +
     "not published.",
   volContext:
     "The implied-volatility term structure is read from this name's own " +
-    "listed expiries, with the vendor's implied move beside each; the rank " +
+    "listed expiries, with the feed's implied move beside each; the rank " +
     "series places today's implied volatility against its own past year. " +
     "All of it is derived from quotes, and none of it is a forecast: an " +
     "implied move is what the chain charges, not what will happen.",
   refusals:
     "No feed here says who was active, which side initiated, or why. " +
-    "Selections labelled the vendor's use unpublished rules, so absence " +
+    "Selections labelled the feed's use unpublished rules, so absence " +
     "from a list is not evidence of quiet.",
 });
 

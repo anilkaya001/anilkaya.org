@@ -288,7 +288,7 @@ function factorWorld({ n = 30, T = 3000, rho = 0.45, seed = 11, vol = 0.30 }) {
 
   fetched.length = 0;
   const second = await run({ prior: payload });
-  eq(fetched.length, 0, "WEEKLY NOT NIGHTLY: the next night reads the cache and calls the vendor for nothing");
+  eq(fetched.length, 0, "WEEKLY NOT NIGHTLY: the next night reads the cache and calls the feed for nothing");
   eq(second.row.state.calls, 10, "and the count carries");
   const staleSession = dates[79];
   const stalePrior = structuredClone(payload);
@@ -311,7 +311,7 @@ function factorWorld({ n = 30, T = 3000, rho = 0.45, seed = 11, vol = 0.30 }) {
   eq(fetched.length, 10, "a new ISO week starts a new budget");
   fetched.length = 0;
   const none = await run({ fetchBars: async () => { throw new Error("HTTP 429"); }, barsFor: async (t) => held.get(t) || null });
-  eq(none.state, "published", "a vendor that refuses leaves the leg publishing what it can");
+  eq(none.state, "published", "a feed that refuses leaves the leg publishing what it can");
   const noIdx = await run({ indexIv: null });
   eq(noIdx.row.implied.why, "index-iv", "no index volatility is a named gap, not a skipped publish");
   const brk = [dates[70]];

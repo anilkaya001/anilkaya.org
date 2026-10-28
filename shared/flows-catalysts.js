@@ -121,7 +121,7 @@ export function earningsHistory(rows, {
       ratio: "r_i = |post_earnings_move_1d| / expected_move_perc, median over the last events",
       beat: "share of events with r_i > 1",
       drift: "median of sign(m1d) * (m1w - m1d): positive means the day-one move kept going",
-      straddle: "hit = share of events whose vendor long_straddle value is > 0; mean in the vendor's unit (unverified)",
+      straddle: "hit = share of events whose feed long_straddle value is > 0; mean in the feed's unit (unverified)",
       masking: "a move is withheld when its window ends after the session, so a later re-run cannot see the future",
     },
   };

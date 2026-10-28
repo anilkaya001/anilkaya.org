@@ -8,7 +8,7 @@ import { LIVE_VENDOR, NIGHTLY_VENDOR, RATE } from "./vendor-params.mjs";
 const BASE_INFO = vendorBaseInfo(process.env.FLOWS_UW_BASE_URL);
 
 if (BASE_INFO.status === "invalid") {
-  throw new Error("FLOWS_UW_BASE_URL is neither the vendor's origin, a loopback address nor a .test host, so no vendor call is made");
+  throw new Error("FLOWS_UW_BASE_URL is neither the feed's origin, a loopback address nor a .test host, so no feed call is made");
 }
 
 const BASE = BASE_INFO.base;
@@ -193,7 +193,7 @@ export function describeFloorVerdict(meter) {
   }
   if (rate > POOL_REFUSAL_EASE) {
     return head +
-      "The floor is roughly where the vendor wants it. Neither raising nor lowering the " +
+      "The floor is roughly where the feed wants it. Neither raising nor lowering the " +
       "ceiling is supported by this run.";
   }
   return head +

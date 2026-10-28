@@ -396,7 +396,7 @@
       return { share, classified, side: share === null || w(classified) < 50 ? "thin" : w(share) >= 65 ? "ask" : w(share) <= 35 ? "bid" : "mixed" };
     },
     askSaid: (x) => (!x || x.classified === null ? DASH : x.share === null ? "none sided" : F.pct(x.share, 0) + " ask side " + MID + " " + F.pct(x.classified, 0) + " sided"),
-    askLabel: "Ask-side share of the premium the vendor sided",
+    askLabel: "Ask-side share of the premium the feed sided",
   };
   const shortUsd = (n, signed) => formatScaled(n, shortDp, "$", signed);
   const exactUsd = (n, signed) => formatFixed(n, { dp: Math.abs(n) < 1000 ? 2 : 0, prefix: "$", plus: signed, group: true });
@@ -942,7 +942,7 @@
     const slow = m.open ? all.filter((e) => e.state !== "live" && e.f.klass !== "nightly" && (e.f.liveUntil != null || /^rt/.test(e.f.klass || ""))).sort((a, b) => b.primary - a.primary) : [];
     const unlive = slow.length ? "Not live: " + slow.map((e) => {
       const w = LIVE_S[e.f.klass] || (e.f.liveUntil != null && e.f.readAt != null ? Math.round((e.f.liveUntil - e.f.readAt) / 1000) : 0);
-      return named(e.k) + (e.f.reason === "vendor-lag" ? " behind the vendor" : e.f.readAt != null ? " last read " + span(Math.max(0, (t0 + (e.f.skewMs || 0) - e.f.readAt) / 1000)) + " ago" : " not live") + (w ? " (live within " + w + " s)" : "");
+      return named(e.k) + (e.f.reason === "vendor-lag" ? " behind the feed" : e.f.readAt != null ? " last read " + span(Math.max(0, (t0 + (e.f.skewMs || 0) - e.f.readAt) / 1000)) + " ago" : " not live") + (w ? " (live within " + w + " s)" : "");
     }).join("; ") + ". " : "";
     const age = state === "fresh" && m.open && !all.some((e) => e.primary) ? readAge() : null;
     const quiet = age !== null ? "Nothing on this page is a live stream, so it does not claim Live; the newest price was read " + span(age) + " ago. " : "";

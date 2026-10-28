@@ -648,7 +648,7 @@ plant("a test artifact pattern off the lane prefix", (w, r) => { w.TEST_ARTIFACT
 plant("a document pattern keyed by the lane letter", (w, r) => { w.TEST_ARTIFACTS = w.TEST_ARTIFACTS.map((t) => t.replace("docs/ff/<prefix>*.md", "docs/ff/<l>-*.md")); r.tracked = [...r.tracked, "docs/ff/ff-e-notes.md"]; }, "unowned_ff_file");
 plant("an unowned test in the FF namespace", (w, r) => { r.tracked = [...r.tracked, "tests/ff-x-rogue.mjs"]; }, "unowned_ff_file");
 plant("a missing Phase 0 file", (w, r) => { r.tracked = r.tracked.filter((f) => f !== "docs/ff/inventory.md"); }, "phase0_missing");
-plant("a lane file that imports the vendor client", (w, r) => { r.ffSources = [{ path: "server/ff-eval.js", text: 'import { uwFetch } from "../shared/flows-vendor-core.js";\n' }]; }, "forbidden_import");
+plant("a lane file that imports the feed client", (w, r) => { r.ffSources = [{ path: "server/ff-eval.js", text: 'import { uwFetch } from "../shared/flows-vendor-core.js";\n' }]; }, "forbidden_import");
 plant("a lane file that calls fetch", (w, r) => { r.ffSources = [{ path: "shared/ff-engine.js", text: "const r = await fetch(url);\n" }]; }, "forbidden_fetch");
 plant("a lane file that touches the model binding", (w, r) => { r.ffSources = [{ path: "server/ff-preview.js", text: "const x = env.AI;\n" }]; }, "forbidden_token");
 plant("a lane file that reads the model binding by key", (w, r) => { r.ffSources = [{ path: "server/ff-preview.js", text: "const x = env[\"AI\"];\n" }]; }, "forbidden_token");

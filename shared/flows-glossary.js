@@ -16,7 +16,7 @@ export const GLOSSARY = Object.freeze([
     "The session's price change for every eligible name in the screened universe, in half-point bins.",
   ] },
   { key: "ask-share", term: "Ask share", ...UNUSUAL, lines: [
-    "Of the premium the vendor attributed to the ask side or the bid side, the share on the ask side.",
+    "Of the premium the feed attributed to the ask side or the bid side, the share on the ask side.",
   ] },
   { key: "beyond-2", term: "Beyond 2", ...MOVES, lines: [
     "Beyond 2 counts names more than 2 IV-days from flat, up or down.",
@@ -38,7 +38,7 @@ export const GLOSSARY = Object.freeze([
     "The feed has no party field, no current positions and no per-filer split by stock, so none is shown or inferred.",
   ] },
   { key: "flagged-premium", term: "Flagged premium", ...UNUSUAL, lines: [
-    "The vendor's total premium across every flagged window in the record.",
+    "The feed's total premium across every flagged window in the record.",
   ] },
   { key: "how-often", term: "How often", ...MOVES, lines: [
     "How often counts days in the last year beyond that many typical days. It is never a model probability.",
@@ -73,7 +73,7 @@ export const GLOSSARY = Object.freeze([
     "The share of the window inside the name’s median filing lag, drawn as the ring on a tile. Trades that recent are typically not filed yet, and no dollars are guessed for them.",
   ] },
   { key: "sweep-share", term: "Sweep share", ...UNUSUAL, lines: [
-    "Premium on windows the vendor flagged as sweeps, over the windows that carry the flag at all.",
+    "Premium on windows the feed flagged as sweeps, over the windows that carry the flag at all.",
   ] },
   { key: "typical-day", term: "Typical day", ...MOVES, lines: [
     "A typical day is a robust one-day scale from the last 252 sessions.",
@@ -85,20 +85,20 @@ export const GLOSSARY = Object.freeze([
     "The blue bar is the move the option market prices for the report; the gray bar is the median absolute one-day move over the name's past reports. A blue bar longer than the gray one is a report priced richer than this name usually moves.",
   ] },
   { key: "flagged-windows", term: "Flagged windows", ...HOME, lines: [
-    "Option windows the vendor's own rules flagged in this read.",
+    "Option windows the feed's own rules flagged in this read.",
   ] },
   { key: "implied-move", term: "Implied move", ...EVENTS, lines: [
-    "The vendor's expected earnings move where its calendar states one, otherwise the vendor's implied move to its next expiry, which is a different horizon.",
+    "The feed's expected earnings move where its calendar states one, otherwise the feed's implied move to its next expiry, which is a different horizon.",
   ] },
   { key: "put-call", term: "Put/call volume", ...HOME, lines: [
-    "Put contracts traded per call contract across the whole options market, on the vendor's daily totals.",
+    "Put contracts traded per call contract across the whole options market, on the feed's daily totals.",
   ] },
   { key: "reaction", term: "Reaction", ...EVENTS, lines: [
     "The last session's reporters: each bar is the realized one-day move over the move the options implied, less one.",
     "Above the line a name moved more than it was priced to; below, less.",
   ] },
   { key: "report-timing", term: "Before the open or after the close", ...EVENTS, lines: [
-    "A sun marks a report before the open and a moon one after the close, where the vendor's earnings calendar states it.",
+    "A sun marks a report before the open and a moon one after the close, where the feed's earnings calendar states it.",
   ] },
   { key: "conviction", term: "Conviction", ...TICKER, lines: [
     "How far the families agree, how much of the card was measured, and how long the flow persisted.",
@@ -141,7 +141,7 @@ export const GLOSSARY = Object.freeze([
     "Volume to open interest is today's contracts over contracts open at the start.",
   ] },
   { key: "net-impact", term: "Net impact", ...MARKET_BELOW, lines: [
-    "The names the vendor ranks by net premium impact, split by sign.",
+    "The names the feed ranks by net premium impact, split by sign.",
   ] },
   { key: "open-interest", term: "Open interest", ...MARKET_BELOW, lines: [
     "Contracts whose open interest grew most between the two clearing snapshots.",
@@ -159,12 +159,12 @@ export const GLOSSARY = Object.freeze([
     "Net call premium minus net put premium is the net; a put line below zero is puts sold.",
   ] },
   { key: "volatility", term: "Volatility", ...MARKET_BELOW, lines: [
-    "The index ETFs' fixed-tenor implied volatility stands in for the VIX curve, which the vendor plan does not serve.",
+    "The index ETFs' fixed-tenor implied volatility stands in for the VIX curve, which the feed plan does not serve.",
     "Contango (a rising curve) is the calm shape; an inverted front is stress.",
     "Implied correlation is the index variance left after the members' own variances, over what perfect correlation would add; dispersion is the members' weighted 30-day IV less the index's, in volatility points.",
   ] },
   { key: "volatility-radar", term: "Volatility radar", ...MARKET_BELOW, lines: [
-    "The vendor's anomaly screen ranks names whose options are rich or cheap against their own history; its sentiment screen ranks bullish and bearish positioning.",
+    "The feed's anomaly screen ranks names whose options are rich or cheap against their own history; its sentiment screen ranks bullish and bearish positioning.",
   ] },
 ]);
 

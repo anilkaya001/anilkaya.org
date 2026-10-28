@@ -282,7 +282,7 @@ export async function runClose(ctx) {
     `, learned floor ${Math.round(delayFloorMs)}ms` +
     (delayFloorMs > RATE.minDelayMs ? "" : ", never raised") + ")",
   );
-  console.log("Record the achieved rate: the vendor documents no limit, so this is how the real one gets discovered.");
+  console.log("Record the achieved rate: the feed documents no limit, so this is how the real one gets discovered.");
 
   {
     const shape = {
@@ -310,7 +310,7 @@ export async function runClose(ctx) {
   if (!stats.calls) {
 
     console.log(
-      "wall clock: no vendor call was made, so queueing, wire time and backoff were not " +
+      "wall clock: no feed call was made, so queueing, wire time and backoff were not " +
       "measured this run — these are absent readings rather than zero ones, and nothing " +
       "about the floor can be concluded from them.");
   } else {
@@ -327,7 +327,7 @@ export async function runClose(ctx) {
   }
   if (stats.networkMs > 0 && permits.stats().peakInFlight <= 1) {
     console.log(
-      "  peak in flight was 1, so no round trip ever overlapped another: the vendor answers " +
+      "  peak in flight was 1, so no round trip ever overlapped another: the feed answers " +
       "faster than the floor issues permits. That is the expected shape at a high floor and it " +
       "means the saving here is the serial delay+network stacking, not concurrency.");
   }

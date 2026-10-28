@@ -28,7 +28,7 @@
   const SHOW = 5;
 
   const NO_CARD_SAID =
-    "No detail card: the chain and the card cost vendor calls the run spends " +
+    "No detail card: the chain and the card cost feed calls the run spends " +
     "only on the names furthest from neutral. This row is scored and ranked " +
     "from the same five sources as every other.";
 
@@ -470,7 +470,7 @@
         info: () => ({
           title: "Put/call volume",
           lead: pcSilence ? silenceSaid(pcSilence, "the put/call ratio")
-            : "Put contracts traded per call contract across the whole options market, on the vendor's daily totals.",
+            : "Put contracts traded per call contract across the whole options market, on the feed's daily totals.",
           facts: [["Today", pc.now === null ? DASH : pc.now.toFixed(3)], ["Session", pc.date],
             ["z against the year", pc.z === null ? (pc.zWhy || "not published yet") : F.signed(pc.z, 2) + " sd"],
             ["Mean", pc.mean === null ? null : pc.mean.toFixed(3)], ["Sessions", pc.n === null ? null : String(pc.n)]],
@@ -482,8 +482,8 @@
         g: UI.iconChip("unusual", "--s-orange"),
         info: () => ({
           title: "Flagged windows",
-          lead: flSilence ? silenceSaid(flSilence, "the flagged-window count") : "Option windows the vendor's own rules flagged in this read." +
-            (atLimit ? " The read hit the vendor's ceiling, so the count is a floor and never a census." : ""),
+          lead: flSilence ? silenceSaid(flSilence, "the flagged-window count") : "Option windows the feed's own rules flagged in this read." +
+            (atLimit ? " The read hit the feed's ceiling, so the count is a floor and never a census." : ""),
           facts: [["Seen", seen === null ? DASH : (atLimit ? "≥" : "") + seen], ["Carried", alertRows === null ? DASH : String(alertRows)], sessionFact(aDay)],
         }),
       }),
@@ -802,7 +802,7 @@
     if (silent(into, payload, "flow alerts feed")) return;
     const rows = rowsOf(payload);
     if (!rows.length) {
-      hush(into, "empty", "The vendor's rules flagged nothing in this read.", "flagged windows");
+      hush(into, "empty", "The feed's rules flagged nothing in this read.", "flagged windows");
       return;
     }
     const drawn = rows.slice(0, LIST_MAX);
@@ -835,10 +835,10 @@
     into.append(UI.list(list, { visible: SHOW, label }),
       UI.legend([["--label-1", "", "Mostly ask side"], ["--side-bid", "", "Mostly bid side"], ["--label-3", "", "Mixed or thinly sided"]]));
     const detail = table(label, [
-      ["Time · TRT", false, "When the vendor's flagged window opened, in T\u00fcrkiye time."],
+      ["Time · TRT", false, "When the feed's flagged window opened, in T\u00fcrkiye time."],
       ["Name", false], ["Contract", false], ["Premium", true],
-      ["Side", true, F.askLabel + ", and the share of premium sided at all. For contract volume the vendor defines the ask side as a fill above the midpoint; it does not document the alert field, and it is never proof of a buyer."],
-      ["Rule", false, "The vendor's name for the screen that flagged the window."],
+      ["Side", true, F.askLabel + ", and the share of premium sided at all. For contract volume the feed defines the ask side as a fill above the midpoint; it does not document the alert field, and it is never proof of a buyer."],
+      ["Rule", false, "The feed's name for the screen that flagged the window."],
     ], drawn.map((row) => {
       const at = F.time(row.spanStart, false) === DASH ? null : F.time(row.spanStart, false);
       const to = F.time(row.spanEnd, false) === DASH ? null : F.time(row.spanEnd, false);
@@ -846,10 +846,10 @@
         cells: [
           [at === null ? DASH : at, "c-num cc-dim", at === null ? null
             : row.spanFrom === "created_at" ? "Alert created " + at + " TRT; no window stated."
-              : to === null ? "Window opened " + at + " TRT; the vendor stated no end for it." : "Window ran " + at + " to " + to + " TRT."],
+              : to === null ? "Window opened " + at + " TRT; the feed stated no end for it." : "Window ran " + at + " to " + to + " TRT."],
           [row.t || DASH, "cc-t"], [contract(row), "cc-date"], [usd(row.prem), "c-num"],
           [F.askSaid(F.askShare(row)), "c-num"],
-          [row.rule || DASH, "cc-dim", row.rule ? "Flagged by the vendor's " + String(row.rule).replace(/([a-z\d])([A-Z])/g, "$1 $2").toLowerCase() + " rule, under the vendor's own name for it." : null],
+          [row.rule || DASH, "cc-dim", row.rule ? "Flagged by the feed's " + String(row.rule).replace(/([a-z\d])([A-Z])/g, "$1 $2").toLowerCase() + " rule, under the feed's own name for it." : null],
         ],
       };
     }));
@@ -936,7 +936,7 @@
 
     if (payload.status === "quiet") {
       hush(into, "empty",
-        "The sector feed was read and the vendor returned no rows at all, so not one of the " +
+        "The sector feed was read and the feed returned no rows at all, so not one of the " +
         "eleven baskets could be placed. That is a measurement of the feed, not of the market.", "sector lean");
       return;
     }
@@ -1279,7 +1279,7 @@
     if (pill) { pill.replaceChildren(); delete FOCUS.pills[pill.id]; }
     if (!f) hush(into, "unreadable", "The focus payload could not be read. Refresh to try again.", what, 160);
     else if (f.status === "pending" || !groups.length) hush(into, "pending", "The focus names publish with the nightly run.", what, 160);
-    else hush(into, "unavailable", cap1(typeof f.reason === "string" && f.reason ? f.reason : "the vendor returned none of these names") + ".", what, 160);
+    else hush(into, "unavailable", cap1(typeof f.reason === "string" && f.reason ? f.reason : "the feed returned none of these names") + ".", what, 160);
     return null;
   }
 

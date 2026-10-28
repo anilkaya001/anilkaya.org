@@ -47,7 +47,7 @@ const MIN = 60 * 1000;
   ok(/FLOWS_LIVE_KEEP: "1"/.test(live) && /FLOWS_LIVE_LOOP: "1"/.test(live),
     "and the read step keeps the loop alive between sessions, so the 32 cron lines are only a backup");
   ok(!/secrets\.(?!UW_API_KEY|FLOWS_INGEST_URL)/.test(live) && !/GITHUB_DISPATCH_TOKEN|FLOWS_INGEST_TOKEN/.test(live),
-    "with no secret beyond the vendor key and the ingest URL: the nightly is started with the job's own token");
+    "with no secret beyond the feed key and the ingest URL: the nightly is started with the job's own token");
   ok(/drill:\n {8}description: "[^"]+"\n {8}type: boolean\n {8}default: false/.test(live) &&
      /group: \$\{\{ inputs\.drill && 'flows-live-drill' \|\| 'flows-live' \}\}\n {2}cancel-in-progress: false/.test(live) &&
      /FLOWS_LIVE_DRILL: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.drill && '1' \|\| '' \}\}/.test(live),
@@ -905,13 +905,13 @@ const MIN = 60 * 1000;
   clearTimeout(giveUp);
   ok(hung !== "hung" && hung.loop.exit === "budget", "and a read that never answers is given up on when the deadline falls, so the tick ends and the loop goes on");
 
-  eq(LIVE_LOOP.passIdleMs, 90 * 1000, "A PASS IS ABANDONED when no vendor or ingest call has settled for 90 s");
+  eq(LIVE_LOOP.passIdleMs, 90 * 1000, "A PASS IS ABANDONED when no feed or ingest call has settled for 90 s");
   eq(LIVE_LOOP.passDeadlineMs, 10 * MIN, "or when it is still running after 10 minutes");
   eq(LIVE_LOOP.tickDeadlineMs, 2 * MIN, "and a watch tick when it is still running after 2 minutes");
   const settleGap = LIVE_VENDOR.timeoutMs + RATE.maxDelayMs;
   ok(LIVE_LOOP.passIdleMs >= 3 * settleGap,
-    `the idle limit is at least three times the longest a running pass goes without a settled vendor call (${settleGap / 1000} s: ` +
-      "a 20 s try after up to 5 s of controller spacing), so a slow or timing-out vendor never trips it");
+    `the idle limit is at least three times the longest a running pass goes without a settled feed call (${settleGap / 1000} s: ` +
+      "a 20 s try after up to 5 s of controller spacing), so a slow or timing-out feed never trips it");
   const handover = LIVE_LOOP.chainRetryMs.reduce((a, b) => a + b, 0) + (LIVE_LOOP.chainRetryMs.length + 1) * LIVE_LOOP.githubTimeoutMs;
   const report = 2 * LIVE_LOOP.githubTimeoutMs;
   ok(LIVE_LOOP.passIdleMs + handover + report <= 4 * MIN,
@@ -976,7 +976,7 @@ const MIN = 60 * 1000;
      /dispatched its successor \(HTTP 204\), and exited red/.test(chainIssues(never.world)[0].body) &&
      /still settling calls at its ceiling/.test(chainIssues(never.world)[0].body) &&
      never.run.loop.watch.breached.includes("chain") && /witness confirmed a lapse in chain/.test(hungVerdict.why),
-  "and a hung pass whose successor was dispatched raises it too, so a vendor that stalls every pass is an open issue and not only a red run");
+  "and a hung pass whose successor was dispatched raises it too, so a feed that stalls every pass is an open issue and not only a red run");
   const outage = fakeWorld({ day: S, start: at(S, 11, 0) });
   const runs = [];
   for (let i = 0; i < 3; i++) {
@@ -1051,14 +1051,14 @@ const MIN = 60 * 1000;
     } });
   const fadeVerdict = liveRunVerdict(faded.run.loop);
   ok(faded.run !== "hung" && faded.run.loop.exit === "hung" && faded.run.loop.why === "pass-idle" && faded.wallMs < 2000 &&
-     faded.run.loop.passes[1].hung === true && /settled no vendor or ingest call for 0\.15 s/.test(faded.run.loop.passes[1].threw) &&
-     faded.run.notes.some((l) => /pass 2 settled no vendor or ingest call for 0\.15 s/.test(l)) && faded.dispatched.length === 1,
+     faded.run.loop.passes[1].hung === true && /settled no feed or ingest call for 0\.15 s/.test(faded.run.loop.passes[1].threw) &&
+     faded.run.notes.some((l) => /pass 2 settled no feed or ingest call for 0\.15 s/.test(l)) && faded.dispatched.length === 1,
   `A PASS THAT STOPS SETTLING CALLS is abandoned one idle limit after its last settled call (${faded.wallMs} ms of wall time for five calls 40 ms apart ` +
     "and a 150 ms limit), one dispatch, and the log says so");
-  ok(fadeVerdict.failed && /a pass settled no vendor or ingest call within its idle limit/.test(fadeVerdict.why) &&
-     chainIssues(faded.world).length === 1 && /Pass 2 of the live loop settled no vendor or ingest call for 0\.15 s/.test(chainIssues(faded.world)[0].body) &&
+  ok(fadeVerdict.failed && /a pass settled no feed or ingest call within its idle limit/.test(fadeVerdict.why) &&
+     chainIssues(faded.world).length === 1 && /Pass 2 of the live loop settled no feed or ingest call for 0\.15 s/.test(chainIssues(faded.world)[0].body) &&
      /something without a deadline stalled/.test(chainIssues(faded.world)[0].body),
-  "and the verdict and the chain issue name the idle stall and say a slow vendor never causes it");
+  "and the verdict and the chain issue name the idle stall and say a slow feed never causes it");
   ok(fadeNotes.length === 1 && fadeNotes[0].why === "pass-idle" && fadeOrder[0] === "onHung" && fadeOrder.filter((x) => x === "chain").length === 1,
     "THE ABANDONMENT HOOK runs once, before the dispatch, so the pass's timed-out count is read when the pass is given up, not after the hand-over and the report");
   const busy = createProgress();
@@ -1074,10 +1074,10 @@ const MIN = 60 * 1000;
   "and a pass that keeps settling calls but never ends is abandoned at the ceiling");
   const throwing = await stuckPass({ passes: async ({ index }, world) => {
     world.advance(20000);
-    if (index === 1) throw new Error("vendor down");
+    if (index === 1) throw new Error("feed down");
     return { skipped: null, answered: 10, landed: 5 };
   } });
-  ok(throwing.run.loop.exit === "budget" && throwing.run.loop.passes[1].threw === "vendor down" && !throwing.run.loop.passes[1].hung,
+  ok(throwing.run.loop.exit === "budget" && throwing.run.loop.passes[1].threw === "feed down" && !throwing.run.loop.passes[1].hung,
     "and a pass that throws inside the deadline still costs a slot, not the loop");
   const stuckTick = await (async () => {
     const world = fakeWorld({ day: S, start: at(S, 11, 0) });
@@ -1127,9 +1127,9 @@ const MIN = 60 * 1000;
   const pipelineSrc = nightlySource();
   ok(/settle\(loop\);\n  if \(loop\.exit === "hung"\) process\.exit\(process\.exitCode \|\| 1\);\n  return loop;/.test(pipelineSrc),
     "and the command line exits non-zero at once on a hung loop, because the abandoned pass may still hold a socket that would keep Node alive");
-  ok(/readClock, watch, progress: wireProgress\.lastAt,\n    onHung: \(\{ why \}\) => \{\n      if \(why === "tick-deadline"\) return;\n      console\.warn\(`live: \$\{stats\.timedOut - timedOutAtPass\} vendor request\(s\) timed out/.test(pipelineSrc) &&
+  ok(/readClock, watch, progress: wireProgress\.lastAt,\n    onHung: \(\{ why \}\) => \{\n      if \(why === "tick-deadline"\) return;\n      console\.warn\(`live: \$\{stats\.timedOut - timedOutAtPass\} feed request\(s\) timed out/.test(pipelineSrc) &&
      /in the abandoned pass before it was given up/.test(pipelineSrc) && !/if \(loop\.exit === "hung" && loop\.why === "pass-deadline"\)/.test(pipelineSrc),
-  "THE COMMAND LINE hands the loop the vendor and ingest clients' progress and counts the abandoned pass's timeouts at the moment it is given up");
+  "THE COMMAND LINE hands the loop the feed and ingest clients' progress and counts the abandoned pass's timeouts at the moment it is given up");
   ok(/\)\.finally\(\(\) => wireProgress\.settled\(\)\);\n    const refusal = response\.status === 403/.test(pipelineSrc) &&
      /body: wire,\n    },\n  \)\.finally\(\(\) => wireProgress\.settled\(\)\);/.test(pipelineSrc) &&
      /wireProgress\.quiet\(quotaWait\);\n    await sleep\(quotaWait\);/.test(pipelineSrc) && /wireProgress\.quiet\(wait\);\n    await sleep\(wait\);/.test(pipelineSrc),
@@ -1510,7 +1510,7 @@ const MIN = 60 * 1000;
   eq(hangs.filter((u) => u.startsWith("/hang")).length, 2, "one try and one retry after a timeout, then the error goes up: a dead endpoint costs two deadlines, not five");
   deep(liveRun.timeouts.slice(0, 2), [300, 300], "each try carries its own deadline");
   ok(liveRun.settledAfterHang >= 550 && liveRun.settledAfterHang <= liveRun.hangMs + 50,
-    `AND EACH TIMED-OUT TRY SETTLES THE LOOP'S PROGRESS CLOCK (last settle ${liveRun.settledAfterHang} ms in, the second timeout), so a vendor that never answers is not a stall`);
+    `AND EACH TIMED-OUT TRY SETTLES THE LOOP'S PROGRESS CLOCK (last settle ${liveRun.settledAfterHang} ms in, the second timeout), so a feed that never answers is not a stall`);
   ok(liveRun.quietAheadMs > 400 && liveRun.limited === 1,
     `and a 429's Retry-After wait is announced to it (the clock ran ${liveRun.quietAheadMs} ms ahead of the time, inside a one-second wait), then the call is answered`);
   const defaults = JSON.parse(await run(true, { FLOWS_UW_TIMEOUT_MS: "", SKIP_HANG: "1" }));
@@ -1542,7 +1542,7 @@ const MIN = 60 * 1000;
   ok(/const keep = process\.env\.FLOWS_LIVE_KEEP === "1";/.test(src) && /chainWithRetry\(\(\) => chainDispatch\(\{ env: process\.env, at \}\)\)/.test(src) &&
      /createWatch\(\{ readOnce: readStoredOnce, latestClock: \(\) => clockBody, env: process\.env \}\)/.test(src),
   "AND THE WATCH is built only when the workflow asks to keep the loop alive, from the same single-try read the clock uses");
-  ok(/vendor request\(s\) timed out after/.test(src), "with the count of timed-out requests on the pass's log line");
+  ok(/feed request\(s\) timed out after/.test(src), "with the count of timed-out requests on the pass's log line");
 }
 
 {
@@ -1584,7 +1584,7 @@ const MIN = 60 * 1000;
   await new Promise((resolve) => relay.listen(0, "127.0.0.1", resolve));
   const good = await runCli(`http://127.0.0.1:${relay.address().port}`);
   ok(good.status === 0 && /the alert channel works/.test(good.out) && served.record.created.length === 1 && served.record.closed.length === 1,
-    `AND FROM THE COMMAND LINE, with no vendor key and no ingest credential, the drill runs against a GitHub API (exit ${good.status})`);
+    `AND FROM THE COMMAND LINE, with no feed key and no ingest credential, the drill runs against a GitHub API (exit ${good.status})`);
   const refusing = fakeGithub({ writeStatus: 403 });
   relay.removeAllListeners("request");
   relay.on("request", async (req, res) => {
@@ -1599,7 +1599,7 @@ const MIN = 60 * 1000;
   relay.close();
   const src = nightlySource();
   ok(/if \(process\.env\.FLOWS_LIVE_DRILL === "1" && !DRY_RUN\) return runWitnessDrill\(\);\n  console\.log\(DRY_RUN/.test(src),
-    "the drill is decided before the vendor key and the live credential are demanded, and never in a dry run");
+    "the drill is decided before the feed key and the live credential are demanded, and never in a dry run");
 }
 
 console.log(`✓ flows-starts: ${checks} assertions — the live workflow's grants, the nightly dispatched at 17:30 ET with the job's own token ` +
@@ -1607,4 +1607,4 @@ console.log(`✓ flows-starts: ${checks} assertions — the live workflow's gran
   `Tier 2 and nightly lines at 25 minutes, 45 minutes and 21:00 ET with their debounce, three-tick recovery, reopen, dedupe, author check, ` +
   `reminder and duplicate cleanup; the issue reporter against a fake GitHub; the loop kept alive through the night, the weekend and the hop, ` +
   `and its cron starters through the concurrency group; the off-session standby (one running, one pending, newest wins) and its crash rule; ` +
-  `${DRY_SCENARIOS.length} dry days; the vendor client's 20 s deadline`);
+  `${DRY_SCENARIOS.length} dry days; the feed client's 20 s deadline`);

@@ -67,7 +67,7 @@ export const PANEL_LINES = Object.freeze({
 
 export const NOT_BUILT = Object.freeze([
   "Open interest: not built. Flows are not split into opening and closing.",
-  "Individual trades: not built. Figures are window totals from the vendor.",
+  "Individual trades: not built. Figures are window totals from the feed.",
   "Earlier sessions: not built. Nothing is compared with past days.",
   "Beta: not built. Figures are not market-adjusted.",
   "Dividends: not built. Deltas assume no dividend.",
@@ -78,7 +78,7 @@ export const NOT_BUILT_LINE = "Not built yet: open interest, beta adjustment, di
 export const DELTA_NOTES = Object.freeze([
   "Contracts per side are estimated from premium at the window's average price.",
   "Deltas use Black-Scholes at 4%, no dividends and window-end volatility.",
-  "Delta uses the vendor's stock price for each window. Its time within the window is unstated.",
+  "Delta uses the feed's stock price for each window. Its time within the window is unstated.",
   "The band covers side-unknown contracts and windows without a delta.",
   "The band is proven for held windows, under these conventions.",
   "It takes the estimated contract counts and modelled deltas as given.",
@@ -109,8 +109,8 @@ export const INFO = Object.freeze([
   "The tick shows takers' share of premium with a stated side. It assumes unknown premium splits the same way.",
   "Sides come from matching trades to quotes, which can misplace a trade.",
   "The last poll turns late after two missed polls. It shows no reply, not stopped data, once five minutes pass.",
-  "The checks test that figures agree with each other. They do not test the vendor's data.",
-  "Outside rows are the sector tide less held windows. They also hold trades the vendor never flagged.",
+  "The checks test that figures agree with each other. They do not test the feed's data.",
+  "Outside rows are the sector tide less held windows. They also hold trades the feed never flagged.",
   "All times are TRT.",
 ]);
 
@@ -169,7 +169,7 @@ export const CHECKS = Object.freeze({
   }),
 });
 
-export const CHECKS_HEAD = Object.freeze({ label: "Internal checks", hover: "They test that the figures agree, not that the vendor's data is right." });
+export const CHECKS_HEAD = Object.freeze({ label: "Internal checks", hover: "They test that the figures agree, not that the feed's data is right." });
 
 export const WITHHELD = Object.freeze({
   ledger: (hash) => `Ledger checks failed; figures withheld; logged as ${hash}.`,

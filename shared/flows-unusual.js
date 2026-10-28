@@ -273,7 +273,7 @@ export function describeOiBasis(rows, { minVolume = UA_MIN_VOLUME, dryRun = fals
         `top-contracts panel publishes these counts and prints them beside the column ` +
         `they judge, so a reader of the page sees what this line sees.` +
         (dryRun ? " On synthetic rows this number is two unrelated fixture formulas" +
-          " disagreeing, and is not evidence about the vendor." : "") };
+          " disagreeing, and is not evidence about the feed." : "") };
   }
   return { seen, exceeded: 0, exceedShare: 0, verdict: "inconclusive",
     line: `${tag}oi basis: 0 of ${seen} contracts showed an open-interest change ` +
@@ -321,7 +321,7 @@ export function poolOiBasis(readings, {
 }
 
 export const UNUSUAL_NOTES = Object.freeze({
-  unit: "A contract counter, not a trade. The vendor reports one row per listed " +
+  unit: "A contract counter, not a trade. The feed reports one row per listed " +
     "strike with a volume total, an open interest and a quote — no size, no " +
     "timestamp, no execution price, no sweep flag. Nothing here says who traded, " +
     "or why.",
@@ -335,17 +335,17 @@ export const UNUSUAL_NOTES = Object.freeze({
     "deep in-the-money lines on top; ranking by raw volume would rank by how big " +
     "the name is. Both are defensible; this is a choice.",
   lift: "lift = ask_volume / (ask_volume + bid_volume). The reported legs need not " +
-    "sum to the volume total — this is a share of what the vendor classified, not " +
+    "sum to the volume total — this is a share of what the feed classified, not " +
     "of what traded. Absent on either leg it is withheld, never printed as balanced.",
   notional: "nlo = volume × bid × 100, nhi = volume × ask × 100. The quote is the " +
     "one standing when the chain was read; the counter carries no date and may " +
     "cover a different span entirely. This is a scale for the money involved, not " +
     "a bound on it, and it is not a bound in either direction.",
-  iv: "Implied volatility as the vendor quoted it on this name's own chain, " +
+  iv: "Implied volatility as the feed quoted it on this name's own chain, " +
     "divided by the convention that chain's median implies. Two rows from two " +
     "names may sit on two conventions, so this column reads down a name and not " +
     "across the table. Each name's divisor and basis are in coverage.",
-  oi: "Open interest as the vendor reported it on this response, undated. " +
+  oi: "Open interest as the feed reported it on this response, undated. " +
     "Positive open-interest change means contracts stuck between two settlements; " +
     "it does not say on which side.",
   zeroOi: "The chain request excludes strikes with no open interest, so a strike " +
@@ -354,7 +354,7 @@ export const UNUSUAL_NOTES = Object.freeze({
   names: "The contract feed can only cover names whose option chain was read — " +
     "a few dozen. The name panel is built from the screener rows held for every " +
     "eligible name, which is why it exists: ten times that coverage or more, " +
-    "for the same zero vendor calls.",
+    "for the same zero feed calls.",
   refusals: "No delta, no probability, no expected value, no fair premium: each " +
     "needs a risk-free rate and a dividend yield, which this desk does not invent. " +
     "No “bullish bet” or “bearish bet”: a call taken at the offer is " +

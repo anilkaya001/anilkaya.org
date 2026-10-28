@@ -88,7 +88,7 @@ async function core(page, asked) {
   expect(!/\b(UTC|EDT|EST|GMT)\b|\bET\b/.test(all), "no other time zone is named");
   expect(new RegExp("All " + uniq(asked).length + " sources read\\.").test(note), "the source count is the number of routes asked (" + uniq(asked).length + "): " + note);
   expect(/14,900 of 30,000/.test(tiles), "the neuron tile is measured against the enforced cap: " + tiles.slice(0, 300));
-  expect(!/Vendor calls\s+\d+ of 0\b/.test(rail), "an absent figure is never a zero");
+  expect(!/Feed calls\s+\d+ of 0\b/.test(rail), "an absent figure is never a zero");
   return problems;
 }
 
@@ -97,7 +97,7 @@ try {
   for (const view of Object.keys(ROUTES)) {
     const { page, asked, errors } = await open(browser, { view });
     eq(uniq(asked), ROUTES[view], "THE " + view.toUpperCase() + " TAB reads its existing owner routes and no other");
-    ok(asked.every((p) => ALLOWED.test(p)), view + ": none of them is a vendor or a model route");
+    ok(asked.every((p) => ALLOWED.test(p)), view + ": none of them is a feed or a model route");
     eq(errors, [], view + ": no page error");
     await page.close();
   }
@@ -126,7 +126,7 @@ try {
     ok(/Tier 1\s+writing\s+Last tick 21:40 TRT, 1 min ago/.test(eng), "Tier 1");
     ok(/Tier 2\s+passing\s+Last pass finished 21:37 TRT/.test(eng), "Tier 2");
     const rail = await text(page, "#hRail");
-    ok(/Running · upstream composite · sockets 3 of 40 · vendor calls 26 of 240 this minute/.test(rail), "rail summary: " + rail.slice(0, 300));
+    ok(/Running · upstream composite · sockets 3 of 40 · feed calls 26 of 240 this minute/.test(rail), "rail summary: " + rail.slice(0, 300));
     ok(/Prices\s+1\.8 s\s+4\.9 s\s+live/.test(rail) && /Flagged alerts\s+2\.3 s\s+7\.4 s/.test(rail), "rail topics with p50, p95 and state");
     const night = await text(page, "#hNight");
     ok(/Written 03:30 TRT \(18\.2 h ago\) · session 2026-10-09/.test(night) && /670 names · cards 500 built \(64 boards and focus, 435 rotation, 1 cross-section\), 2 failed, 8 skipped/.test(night), "nightly summary counts every card the run built, not the boards' alone: " + night.slice(0, 300));
@@ -134,7 +134,7 @@ try {
     ok(/universe\s+4\.2 s\s+ok/.test(night), "slowest stages first");
     const sw = await text(page, "#hSw");
     ok(/5 of 19 switches are on/.test(sw) && /Read-only/.test(sw) && /FLOWS_RT_UPSTREAM\s+socket/.test(sw), "switches are read-only and list those not on: " + sw.slice(0, 240));
-    ok(/vendor calls 21,400|21,400/.test(await text(page, "#stTiles")) && /14,900 of 30,000/.test(await text(page, "#stTiles")), "the tiles carry the vendor and model figures");
+    ok(/feed calls 21,400|21,400/.test(await text(page, "#stTiles")) && /14,900 of 30,000/.test(await text(page, "#stTiles")), "the tiles carry the feed and model figures");
     for (const id of ["hEng", "hRail", "hNight", "hSw"]) ok(/read 21:41:07 TRT/.test(await text(page, "#" + id + "Asof")), id + " states when it was read, in TRT");
     ok(/Readiness: Ready\. US session open\./.test(await text(page, "#stReady")), "the readiness line");
     ok(await page.evaluate(() => document.getElementById("stWhy").hidden), "no blockers, no blockers button");
@@ -148,7 +148,7 @@ try {
     await page.keyboard.press("Enter");
     await page.waitForFunction(() => document.getElementById("hRailDlg").open);
     const dlg = await text(page, "#hRailDlg");
-    ok(/Vendor key counter\s+21,400 calls today, read 21:41:03 TRT/.test(dlg), "the rail detail keeps the vendor counter with its TRT time: " + dlg.slice(0, 400));
+    ok(/Feed key counter\s+21,400 calls today, read 21:41:03 TRT/.test(dlg), "the rail detail keeps the feed counter with its TRT time: " + dlg.slice(0, 400));
     ok(/Upstream\s+composite, socket connected/.test(dlg) && /Started\s+18:41 TRT/.test(dlg), "and the socket upstream and the start in TRT");
     ok(/Prices\s+socket/.test(dlg) && /Market tide\s+REST/.test(dlg) && /behind the item's own time/.test(dlg), "each topic names its transport and what its lag is measured against");
     ok(!/^(px|fl|gx|mk|nw)\b|\b(px|fl|gx|mk|nw):|\brest\b/m.test(dlg), "by its name, never its internal code, and REST in capitals: " + dlg.slice(0, 600));
@@ -169,14 +169,14 @@ try {
     await page.click("#hNightCard .st-more");
     await page.waitForFunction(() => document.getElementById("hNightDlg").open);
     const night = await text(page, "#hNightDlg");
-    ok(/roster\s+failed\s+900 ms\s+3\s+0\s+vendor 5xx/.test(night), "the full stage ledger keeps every stage with its reason: " + night.slice(0, 400));
+    ok(/roster\s+failed\s+900 ms\s+3\s+0\s+feed 5xx/.test(night), "the full stage ledger keeps every stage with its reason: " + night.slice(0, 400));
     await page.close();
   }
 
   {
     const { page } = await open(browser, { view: "capacity" });
     const cv = await text(page, "#cVendor");
-    ok(/Whole key today\s+21,400 of 60,000 calls · 36%/.test(cv) && /Rail, this minute\s+26 of 240 calls · 11%/.test(cv), "vendor calls against the advisory day line and the rail's minute: " + cv.slice(0, 400));
+    ok(/Whole key today\s+21,400 of 60,000 calls · 36%/.test(cv) && /Rail, this minute\s+26 of 240 calls · 11%/.test(cv), "feed calls against the advisory day line and the rail's minute: " + cv.slice(0, 400));
     ok(/Cap: 60,000 per day/.test(cv), "the cap line carries its plan and source");
     {
       const wide = await open(browser, { view: "capacity", width: 1920, height: 1080 });
@@ -206,7 +206,7 @@ try {
     await page.waitForFunction(() => document.getElementById("cVendorDlg").open);
     const cons = await text(page, "#cVendorDlg");
     ok(/option-contracts\s+9,800\s+41%\s+12/.test(cons) && /stock-state\s+1,500\s+6\.2%\s+25/.test(cons), "the call mix detail lists each operation with its share and failures: " + cons.slice(0, 900));
-    ok(/Nightly run\s+4,100/.test(cons) && /Tier 1 \(Worker\)\s+366/.test(cons) && /Everything else on the key\s+15,889/.test(cons), "vendor calls by consumer, the remainder worked from the vendor's count: " + cons.slice(0, 500));
+    ok(/Nightly run\s+4,100/.test(cons) && /Tier 1 \(Worker\)\s+366/.test(cons) && /Everything else on the key\s+15,889/.test(cons), "feed calls by consumer, the remainder worked from the feed's count: " + cons.slice(0, 500));
     await page.keyboard.press("Escape");
     await page.click("#cPlatCard .st-more");
     await page.waitForFunction(() => document.getElementById("cPlatDlg").open);
@@ -219,11 +219,11 @@ try {
     const { page } = await open(browser, { view: "latency" });
     const feeds = await text(page, "#lFeeds");
     ok(/Prices\s+1\.8 s\s+4\.9 s\s+15\.0 s\s+live/.test(feeds) && /Flagged alerts\s+2\.3 s\s+7\.4 s/.test(feeds), "feed latency, alerts read the item lag: " + feeds.slice(0, 300));
-    ok(/Behind the vendor's stamp; alerts and news behind the item's own time\./.test(feeds), "and what each is measured against");
+    ok(/Behind the feed's stamp; alerts and news behind the item's own time\./.test(feeds), "and what each is measured against");
     const stored = await text(page, "#lStored");
     ok(/All 12 keys are inside their lines|keys are stale or missing/.test(stored) && /live:(heartbeat|funds)/.test(stored), "stored feeds, worst first: " + stored.slice(0, 300));
     const timing = await text(page, "#lTime");
-    ok(/Tier 2 pass\s+Took 1 min, 44 calls, 1 failed/.test(timing) && /Vendor socket\s+connected, 412,000 messages/.test(timing), "timing summary: " + timing.slice(0, 300));
+    ok(/Tier 2 pass\s+Took 1 min, 44 calls, 1 failed/.test(timing) && /Feed socket\s+connected, 412,000 messages/.test(timing), "timing summary: " + timing.slice(0, 300));
     ok(/Worker clock vs browser\s+[+\u2212]\d+ ms/.test(timing), "the clock offset is an estimate in ms");
     await page.waitForFunction(() => !!document.querySelector("#stSession svg"), null, { timeout: 15000 }).catch(() => null);
     ok(await page.evaluate(() => !!document.querySelector("#stSession svg")), "the Tier 2 chart is drawn");
@@ -270,7 +270,7 @@ try {
     ok(/Of which\s+64 boards and focus, 435 rotation, 1 cross-section/.test(nc), "and splits them by where they came from");
     const kd = await text(page, "#kDeep");
     ok(/Names with a deep read\s+612 of 856 \(71%\)/.test(kd) && /Oldest deep read\s+2026-10-05/.test(kd) && /Tonight, planned and read\s+530 planned, 530 read/.test(kd), "rotation card: " + kd.slice(0, 400));
-    ok(/Vendor calls, this run\s+24,100/.test(kd) && /Vendor calls, the key today\s+31,200 of 60,000 \(52%\), read 19:51 TRT/.test(kd), "rotation calls against the day line, dated: " + kd.slice(0, 500));
+    ok(/Feed calls, this run\s+24,100/.test(kd) && /Feed calls, the key today\s+31,200 of 60,000 \(52%\), read 19:51 TRT/.test(kd), "rotation calls against the day line, dated: " + kd.slice(0, 500));
     await page.click("#kDeepCard .st-more");
     await page.waitForFunction(() => document.getElementById("kDeepDlg").open);
     ok(/Ledger session\s+2026-10-09/.test(await text(page, "#kDeepDlg")), "the detail keeps every figure");
@@ -312,7 +312,7 @@ try {
 
   {
     const { page } = await open(browser, { width: 390, height: 844, view: "capacity" });
-    eq(await page.evaluate(() => [...document.querySelectorAll("#stSub [role=tab]")].map((b) => b.textContent)), ["Vendor", "Model", "Platform", "Limits"], "the phone's switch names the four cards");
+    eq(await page.evaluate(() => [...document.querySelectorAll("#stSub [role=tab]")].map((b) => b.textContent)), ["Feed", "Model", "Platform", "Limits"], "the phone's switch names the four cards");
     eq((await screen(page)).visible, ["cVendorCard"], "the first card shows");
     await page.locator("#stSub [role=tab]").nth(1).click();
     await page.waitForFunction(() => document.getElementById("cAiCard").classList.contains("is-on"));
@@ -339,24 +339,24 @@ try {
     ok(/Whole key today\s+21,400 of 100,000,000 calls · 0\.0%/.test(cv), "THE RECORDED ADVANCED PLAN: the whole key is set against the 100M day its dashboard states: " + cv.slice(0, 400));
     ok(/Cap: 100,000,000 per day; sources in Details/.test(cv), "and the card's cap line is the plan's day line, its sources in Details: " + cv.slice(0, 600));
     const tiles = await text(page, "#stTiles");
-    ok(/the vendor's day turns at 13 Oct, 03:00 TRT, as its dashboard states \(read 2026-10-19\)/.test(tiles), "THE VENDOR'S DAY TURNS WHEN THE DASHBOARD SAYS, printed in TRT: " + tiles.replace(/\n/g, "|"));
+    ok(/the feed's day turns at 13 Oct, 03:00 TRT, as its dashboard states \(read 2026-10-19\)/.test(tiles), "THE VENDOR'S DAY TURNS WHEN THE DASHBOARD SAYS, printed in TRT: " + tiles.replace(/\n/g, "|"));
     await page.click("#cLimitsCard .st-more");
     await page.waitForFunction(() => document.getElementById("cLimitsDlg").open);
     await page.locator("#cLimitsDlg details summary").first().click();
     const plan = await text(page, "#cLimitsDlg");
     ok(/uw\.min\s+calls\s+500\s+minute\s+advanced\s+observed\s+uw\.dashboard\s+advisory from uw\.working/.test(plan), "the unread minute line is the 500 working line and says where it comes from: " + plan.slice(Math.max(0, plan.indexOf("uw.min") - 40), plan.indexOf("uw.min") + 200));
-    ok(/Vendor plan\s+advanced(?! \(not recorded)/.test(plan), "and the vendor plan is recorded");
+    ok(/Feed plan\s+advanced(?! \(not recorded)/.test(plan), "and the feed plan is recorded");
     await page.keyboard.press("Escape");
     await page.click("#cPlatCard .st-more");
     await page.waitForFunction(() => document.getElementById("cPlatDlg").open);
     const platDlg = await text(page, "#cPlatDlg");
-    ok(/The vendor's day turns at 13 Oct, 03:00 TRT, as its dashboard states \(read 2026-10-19\)\./.test(platDlg), "the meter's source line says the same");
-    ok(/Cap: 100,000,000 per day \(advanced plan, the plan's figure; the vendor's dashboard, observed on the key\)/.test(platDlg), "and in Details the cap names the plan and the dashboard readback, in words: " + platDlg.slice(0, 900));
+    ok(/The feed's day turns at 13 Oct, 03:00 TRT, as its dashboard states \(read 2026-10-19\)\./.test(platDlg), "the meter's source line says the same");
+    ok(/Cap: 100,000,000 per day \(advanced plan, the plan's figure; the feed's dashboard, observed on the key\)/.test(platDlg), "and in Details the cap names the plan and the dashboard readback, in words: " + platDlg.slice(0, 900));
     await page.keyboard.press("Escape");
     await page.click("#cVendorCard .st-more");
     await page.waitForFunction(() => document.getElementById("cVendorDlg").open);
     const cons = await text(page, "#cVendorDlg");
-    ok(/Everything else on the key\s+\u2014\s+the engines' counts are for the vendor day before this one/.test(cons), "ENGINE COUNTS FROM ANOTHER VENDOR DAY ARE NEVER SUBTRACTED from this one's counter: " + cons.slice(0, 600));
+    ok(/Everything else on the key\s+\u2014\s+the engines' counts are for the feed day before this one/.test(cons), "ENGINE COUNTS FROM ANOTHER VENDOR DAY ARE NEVER SUBTRACTED from this one's counter: " + cons.slice(0, 600));
     await page.close();
   }
 
@@ -368,7 +368,7 @@ try {
     map["/api/flows/ops"] = { body: old };
     const { page } = await open(browser, { view: "capacity", map });
     const tiles = await text(page, "#stTiles");
-    ok(/VENDOR CALLS TODAY[\s\S]*the last vendor counter was read 21:40 TRT, before today/.test(tiles), "A READING FROM AN EARLIER VENDOR WINDOW IS NOT TODAY'S, even on the same UTC day: " + tiles.replace(/\n/g, "|"));
+    ok(/VENDOR CALLS TODAY[\s\S]*the last feed counter was read 21:40 TRT, before today/.test(tiles), "A READING FROM AN EARLIER VENDOR WINDOW IS NOT TODAY'S, even on the same UTC day: " + tiles.replace(/\n/g, "|"));
     const cv = await text(page, "#cVendor");
     ok(/Whole key today\s+\u2014 of 60,000/.test(cv), "and it is never set against the day line: " + cv.slice(0, 300));
     await page.close();
@@ -383,7 +383,7 @@ try {
     map["/api/flows/ops"] = { body: bare };
     const { page } = await open(browser, { view: "capacity", map });
     const tiles = await text(page, "#stTiles");
-    ok(/21,400[\s\S]*the vendor's day is assumed to turn at 03:00 TRT/.test(tiles), "an ops body from before the window was stated keeps the old reading and says the boundary is assumed: " + tiles.replace(/\n/g, "|"));
+    ok(/21,400[\s\S]*the feed's day is assumed to turn at 03:00 TRT/.test(tiles), "an ops body from before the window was stated keeps the old reading and says the boundary is assumed: " + tiles.replace(/\n/g, "|"));
     await page.close();
   }
 
@@ -409,14 +409,14 @@ try {
     const { page, errors } = await open(browser, { map });
     const tiles = await text(page, "#stTiles");
     ok(/PRICES[\s\S]*\u2014[\s\S]*rail idle: no one is watching/.test(tiles), "an idle rail is a dash with its reason, not a zero: " + tiles.replace(/\n/g, "|"));
-    ok(/VENDOR CALLS TODAY[\s\S]*\u2014[\s\S]*no Tier 1 or focus tick has recorded the vendor's counter header yet/.test(tiles), "no vendor counter is a dash and says why");
+    ok(/VENDOR CALLS TODAY[\s\S]*\u2014[\s\S]*no Tier 1 or focus tick has recorded the feed's counter header yet/.test(tiles), "no feed counter is a dash and says why");
     const rail = await text(page, "#hRail");
-    ok(/Idle, no viewer/.test(rail) && /vendor calls \u2014 of \u2014 this minute/.test(rail), "absent counters are dashes, not 0 of 0: " + rail.slice(0, 200));
+    ok(/Idle, no viewer/.test(rail) && /feed calls \u2014 of \u2014 this minute/.test(rail), "absent counters are dashes, not 0 of 0: " + rail.slice(0, 200));
     ok(/An idle rail polls nothing/.test(rail), "and the idle rail says why there are no figures");
     await page.locator("#stTabs [role=tab]").nth(1).click();
     await page.waitForFunction(() => /Whole key today/.test(document.getElementById("cVendor").innerText));
     const cv = await text(page, "#cVendor");
-    ok(/Whole key today\s+\u2014 of 60,000/.test(cv) && /no Tier 1 or focus tick has recorded/.test(cv), "the vendor bar is a dash with its reason: " + cv.slice(0, 300));
+    ok(/Whole key today\s+\u2014 of 60,000/.test(cv) && /no Tier 1 or focus tick has recorded/.test(cv), "the feed bar is a dash with its reason: " + cv.slice(0, 300));
     eq(errors, [], "no page error");
     await page.close();
   }
@@ -614,7 +614,7 @@ try {
     }
     const nightMutants = [
       ["cards built read from the boards' count alone", (t, f) => (f === "flows-status-coverage.js" ? t.replace("const built = cards.total;", "const built = num(meta.cardsBuilt);") : t), "#kNight", /Cards built\s+500 \(75% of the universe\)/, "coverage"],
-      ["the run's key count labelled as today's", (t, f) => (f === "flows-status-coverage.js" ? t.replace('const keyLabel = runToday ? "Vendor calls, the key today" : "Vendor calls, the key on the run\'s day";', 'const keyLabel = "Vendor calls, the key today";') : t), "#kDeep", /the key on the run's day\s+31,200/, "coverage", true],
+      ["the run's key count labelled as today's", (t, f) => (f === "flows-status-coverage.js" ? t.replace('const keyLabel = runToday ? "Feed calls, the key today" : "Feed calls, the key on the run\'s day";', 'const keyLabel = "Feed calls, the key today";') : t), "#kDeep", /the key on the run's day\s+31,200/, "coverage", true],
       ["the session chart kept at a strip", (t, f) => (f === "flows-status-latency.js" ? t.replace("const height = Math.max(64, Math.min(360, room));", "const height = 88;") : t), "#stSession", null, "latency"],
     ];
     for (const [name, mutate, sel, want, view, yesterday] of nightMutants) {
@@ -634,7 +634,7 @@ try {
       map["/api/flows/ops?part=coverage"] = { body: opsFor({ coverage: COVERAGE_ROWS.map((r) => (r.id === "deepen" ? { ...r, updated_at: NOW - 30 * 36e5 } : r)) }, { part: "coverage" }) };
       const { page } = await open(browser, { view: "coverage", map });
       const kd = await text(page, "#kDeep");
-      ok(/Vendor calls, the key on the run's day\s+31,200 of 60,000 \(52%\), read 11 Oct, 15:41 TRT/.test(kd), "A RUN FROM AN EARLIER DAY IS NOT CALLED TODAY'S: the key's count is labelled with the run's day and dated: " + kd.slice(0, 500));
+      ok(/Feed calls, the key on the run's day\s+31,200 of 60,000 \(52%\), read 11 Oct, 15:41 TRT/.test(kd), "A RUN FROM AN EARLIER DAY IS NOT CALLED TODAY'S: the key's count is labelled with the run's day and dated: " + kd.slice(0, 500));
       await page.close();
     }
     {
@@ -657,7 +657,7 @@ try {
     const nulls = world();
     nulls["/api/rt/status"] = { body: { running: true, calls: {}, sockets: {}, topics: {}, upstream: {} } };
     const { page } = await open(browser, { map: nulls, mutate: (t, f) => (f === "flows-status.js" ? t.replace("const whole = (v) => (num(v) === null ? DASH :", 'const whole = (v) => (num(v) === null ? "0" :') : t) });
-    ok(/vendor calls 0 of 0/.test(await text(page, "#hRail")), "the zero-printing mutant shows the 0 of 0 the clean build never shows");
+    ok(/feed calls 0 of 0/.test(await text(page, "#hRail")), "the zero-printing mutant shows the 0 of 0 the clean build never shows");
     await page.close();
   }
 } finally {

@@ -53,7 +53,7 @@ const rtFlat = (o) => JSON.stringify(Object.keys(o).sort());
   for (const k of TOPICS) ok(Object.isFrozen(RT.RT_TOPICS[k]) && FRESH_CLASSES[RT.RT_TOPICS[k].klass], `${k} is a frozen topic with a freshness class`);
   deep(TOPICS.map((k) => RT.RT_TOPICS[k].cadenceMs), [5000, 5000, 15000, 20000, 30000], "px 5 s, fl 5 s, gx 15 s a focus name, mk 20 s, nw 30 s in the regular session");
   deep(TOPICS.map((k) => RT.RT_TOPICS[k].klass), ["rt", "rt", "rtSlow", "rtSlow", "rtNews"], "classes follow the cadence");
-  deep(RT.RT_ROW_FIELDS.px, ["t", "qt", ...STRIP_FIELDS.map(([n]) => n)], "px rows are the strip row behind a ticker and a vendor quote time");
+  deep(RT.RT_ROW_FIELDS.px, ["t", "qt", ...STRIP_FIELDS.map(([n]) => n)], "px rows are the strip row behind a ticker and a feed quote time");
   eq(RT.RT_ROW_FIELDS.px.length, 30, "thirty columns");
   deep(RT.RT_ROW_FIELDS.gx, ["t", "at", "px", "gOi", "gVol", "gDir", "flow", "lagS"], "gx rows");
   for (const k of TOPICS.filter((t) => t !== "gx")) {
@@ -120,14 +120,14 @@ const rtFlat = (o) => JSON.stringify(Object.keys(o).sort());
   const E = (vendorAgeS, k = "px", stamped = true) => RT.streamEntry({
     k, readAt: now, vendorAt: stamped ? now - vendorAgeS * 1000 : null, session: DAY, now, updatedAt: now,
   });
-  eq(E(3).state, "live", "px: a vendor stamp 3 s behind the read is live");
+  eq(E(3).state, "live", "px: a feed stamp 3 s behind the read is live");
   eq(E(15).state, "live", "15 s is the line");
   const lag = E(30);
-  deep([lag.state, lag.reason, lag.liveUntil], ["fresh", "vendor-lag", null], "30 s of vendor lag is fresh, reason vendor-lag, with no live window left to extrapolate");
+  deep([lag.state, lag.reason, lag.liveUntil], ["fresh", "vendor-lag", null], "30 s of feed lag is fresh, reason vendor-lag, with no live window left to extrapolate");
   const dead = E(100);
   deep([dead.state, dead.reason], ["stale", "vendor-lag"], "100 s is stale: past the stale line the age of the data decides");
   const un = E(0, "px", false);
-  deep([un.state, un.reason, un.liveUntil], ["fresh", "vendor-unstamped", null], "a frame with no vendor stamp cannot claim live");
+  deep([un.state, un.reason, un.liveUntil], ["fresh", "vendor-unstamped", null], "a frame with no feed stamp cannot claim live");
   const ahead = RT.streamEntry({ k: "px", readAt: now, vendorAt: now + 120000, session: DAY, now, updatedAt: now });
   deep([ahead.state, ahead.reason], ["fresh", "vendor-skew"], "a stamp two minutes in the future is skew, not freshness");
   eq(E(60, "gx").state, "live", "gx: a minute bar is allowed its bar width on top of the live line");
@@ -269,10 +269,10 @@ const SESSION_NOW = at(10, 0);
   for (const row of out.rows) {
     deep(row.slice(2), shaped.rows[row[0]], `px ${row[0]}: the row behind the ticker and quote time is the live:strips row, value for value`);
     const src = raw.data.find((r) => r.ticker === row[0]);
-    eq(row[1], src.quote_time, `px ${row[0]}: the second column is the vendor's quote time`);
+    eq(row[1], src.quote_time, `px ${row[0]}: the second column is the feed's quote time`);
   }
   deep(RT.RT_ROW_FIELDS.px.slice(2), shaped.fields, "and the columns are the live:strips fields in order");
-  eq(out.vendorAt, shaped.fresh.vendorAt ? timeMs(shaped.fresh.vendorAt) : null, "px: the frame's vendor instant is the strips' own");
+  eq(out.vendorAt, shaped.fresh.vendorAt ? timeMs(shaped.fresh.vendorAt) : null, "px: the frame's feed instant is the strips' own");
   deep(RT.snapshotPx(st).map((r) => r[0]), names.slice().sort(), "px: a snapshot is every held row, by ticker");
 
   const again = RT.applyPx(st, raw, { at: SESSION_NOW + 5000, session: DAY, names });
@@ -285,7 +285,7 @@ const SESSION_NOW = at(10, 0);
   const older = JSON.parse(JSON.stringify(raw));
   older.data[0].close = "1.0000";
   const stale = RT.applyPx(st, older, { at: SESSION_NOW + 6000, session: DAY, names });
-  eq(stale.rows.length, 0, "latest wins by vendor time: an older quote after a newer one is ignored");
+  eq(stale.rows.length, 0, "latest wins by feed time: an older quote after a newer one is ignored");
   eq(RT.snapshotPx(st).find((r) => r[0] === moved.data[0].ticker)[2], Number(moved.data[0].close), "and the held row is the newer");
   RT.setPxNames(st, names.slice(0, 3));
   eq(RT.snapshotPx(st).length, 3, "a name that leaves the roster leaves the map");
@@ -300,7 +300,7 @@ const SESSION_NOW = at(10, 0);
   const gOut = RT.applyGex(g, "NVDA", spot.body, { at: SESSION_NOW, session: DAY });
   const series = shapeGexSeries(spot.body, { session: DAY, now: SESSION_NOW });
   deep(gOut.rows[0].slice(2, 6), [series.last.px, series.last.gOi, series.last.gVol, series.last.gDir], "gx: the row is shapeGexSeries().last");
-  eq(gOut.rows[0][1], timeMs(series.last.at), "gx: stamped with the vendor's bar");
+  eq(gOut.rows[0][1], timeMs(series.last.at), "gx: stamped with the feed's bar");
   eq(gOut.rows[0][6], series.flowFilled ? 1 : 0, "gx: flow flag");
   const merged = mergeGex(null, { NVDA: series }, { at: SESSION_NOW, session: DAY, writer: "flows-live", rotation: gexRotation({ ranked: ["NVDA"], deep: [], tick: 0 }) });
   const stored = merged.names.NVDA.last;
@@ -311,7 +311,7 @@ const SESSION_NOW = at(10, 0);
   deep([quiet.rows.length, quiet.meta.status], [0, "quiet"], "gx: an empty answer is quiet, said in meta, held row untouched");
   eq(RT.snapshotGex(g).length, 1, "and the held row stands");
   const early = RT.applyGex(g, "AAPL", spot.body, { at: at(8, 0), session: DAY });
-  eq(early.meta.status, "quiet", "gx: pre-open the series is quiet with the vendor's own reason");
+  eq(early.meta.status, "quiet", "gx: pre-open the series is quiet with the feed's own reason");
 
   const tide = await vendor.handle("/api/market/market-tide");
   const sectors = await vendor.handle("/api/market/sector-etfs");
@@ -344,8 +344,8 @@ const SESSION_NOW = at(10, 0);
   const byKey = new Map(built.rows.map((r) => [key(r), r]));
   eq(out.rows.length, built.rows.length, "fl: as many rows as the live:alerts shaper keeps");
   for (const r of out.rows) deep(strip(r), byKey.get(key(r)), `fl ${r.id}: the row is the live:alerts row, field for field`);
-  deep(out.rows.map((r) => r.ts), out.rows.map((r) => r.ts).slice().sort((a, b) => a - b), "fl: rows ascend by vendor time so a client appends");
-  ok(out.rows.every((r) => typeof r.id === "string" && Number.isFinite(r.ts)), "fl: every row carries the vendor's alert id and an epoch ts");
+  deep(out.rows.map((r) => r.ts), out.rows.map((r) => r.ts).slice().sort((a, b) => a - b), "fl: rows ascend by feed time so a client appends");
+  ok(out.rows.every((r) => typeof r.id === "string" && Number.isFinite(r.ts)), "fl: every row carries the feed's alert id and an epoch ts");
   const live = mergeLiveAlerts(null, [{ body: raw, full: false }], { at: SESSION_NOW, session: DAY, stageOf: stage, writer: "flows-live" });
   eq(out.meta.cursor, live.cursor, "fl: the cursor is mergeLiveAlerts' cursor");
   eq(out.meta.cursor, alertsCursor(raw.data), "and alertsCursor's");
@@ -487,7 +487,7 @@ const upstreamOf = (vendor, { clock, key = "uw-key", random = () => 0.5, perMinu
   eq(u.calls.length, 6, "adapter: and nothing is polled twice while the window's next dues are still ahead");
   const by = (re) => u.calls.filter((c) => re.test(c.url.pathname));
   const pxc = by(/screener/)[0];
-  eq(pxc.url.origin, "http://uw.test", "adapter: the vendor base is UW_BASE");
+  eq(pxc.url.origin, "http://uw.test", "adapter: the feed base is UW_BASE");
   eq(pxc.url.searchParams.get("ticker"), "SPY,QQQ,IWM", "adapter: px asks the roster in one call");
   eq(pxc.url.searchParams.get("limit"), "500", "with limit 500, as Tier 1's focus read does");
   eq(pxc.init.headers.Authorization, "Bearer uw-key", "adapter: bearer auth");
@@ -504,7 +504,7 @@ const upstreamOf = (vendor, { clock, key = "uw-key", random = () => 0.5, perMinu
   const mkFrame = u.frames.find((f) => f.k === "mk");
   ok(mkFrame.items.some((r) => r.id === "tide") && mkFrame.items.filter((r) => r.etf).length >= 11, "adapter: the market frame carries the tide row and the sector rows, already shaped");
   deep(Object.keys(mkFrame).filter((x) => x !== "ms").sort(), RT.RT_UPSTREAM_API.frame.slice().sort(), "adapter: every frame it delivers has exactly the neutral frame's keys, plus the duration");
-  ok(u.frames.every((f) => Array.isArray(f.items) && f.answered === true && f.raw === undefined && f.raws === undefined), "adapter: no raw vendor body leaves the adapter");
+  ok(u.frames.every((f) => Array.isArray(f.items) && f.answered === true && f.raw === undefined && f.raws === undefined), "adapter: no raw feed body leaves the adapter");
   ok(u.frames.every((f) => f.readAt >= SESSION_NOW && Number.isInteger(f.ms)), "adapter: frames carry the receive instant and the duration");
   const before = u.calls.length;
   t += 1000; await u.up.tick(t);
@@ -555,14 +555,14 @@ const upstreamOf = (vendor, { clock, key = "uw-key", random = () => 0.5, perMinu
 {
   const H = (o) => new Headers(o);
   deep(vendorMeter(H({ "x-uw-daily-req-count": "21400", "x-uw-req-per-minute-remaining": "1000000", "x-uw-req-per-minute-reset": "60000", "x-uw-token-req-limit": "100000000" }), 5000),
-    { at: 5000, daily: 21400, minuteRemaining: 1000000, minuteResetMs: 60000, tokenLimit: 100000000 }, "meter: the four headers the vendor sends are read as whole numbers with the instant of the read");
+    { at: 5000, daily: 21400, minuteRemaining: 1000000, minuteResetMs: 60000, tokenLimit: 100000000 }, "meter: the four headers the feed sends are read as whole numbers with the instant of the read");
   deep(vendorMeter(H({ "x-uw-daily-req-count": "173" }), 7), { at: 7, daily: 173, minuteRemaining: null, minuteResetMs: null, tokenLimit: null }, "meter: a header that is absent is null, not zero");
   eq(vendorMeter(H({}), 7), null, "meter: no header at all is no reading");
   eq(vendorMeter(H({ "x-uw-daily-req-count": "abc", "x-uw-req-per-minute-reset": "-4", "x-uw-token-req-limit": "1.5", "x-uw-req-per-minute-remaining": "99999999999999999999" }), 7), null, "meter: garbage, a negative, a fraction and an unsafe integer are refused");
   eq(vendorMeter(H({ "x-uw-daily-req-count": " 42 " }), 7).daily, 42, "meter: surrounding space is trimmed");
   eq(vendorMeter(null, 7), null, "meter: no headers object is no reading");
   eq(vendorMeter(H({ "x-uw-daily-req-count": "1" }), NaN), null, "meter: and no instant is no reading");
-  deep(Object.values(VENDOR_METER_HEADERS), ["x-uw-daily-req-count", "x-uw-req-per-minute-remaining", "x-uw-req-per-minute-reset", "x-uw-token-req-limit"], "meter: the header names are the vendor's");
+  deep(Object.values(VENDOR_METER_HEADERS), ["x-uw-daily-req-count", "x-uw-req-per-minute-remaining", "x-uw-req-per-minute-reset", "x-uw-token-req-limit"], "meter: the header names are the feed's");
   const a = { at: 1, daily: 1 };
   const b = { at: 2, daily: 2 };
   deep([newerMeter(a, b), newerMeter(b, a), newerMeter(null, a), newerMeter(a, null), newerMeter(null, null)], [b, b, a, a, null], "meter: the later reading wins and a missing one never replaces one held");
@@ -584,7 +584,7 @@ const upstreamOf = (vendor, { clock, key = "uw-key", random = () => 0.5, perMinu
   const plain = upstreamOf(createFakeVendor({ session: DAY, clock: () => t }), { clock: () => t });
   plain.up.start({ ...plainPlan(), topics: new Set(["px"]) }, plain.handlers);
   await plain.up.tick(t);
-  eq(plain.up.state().vendor, null, "meter: a vendor that sends no header leaves the reading null");
+  eq(plain.up.state().vendor, null, "meter: a feed that sends no header leaves the reading null");
   plain.up.stop();
 }
 
@@ -600,7 +600,7 @@ const upstreamOf = (vendor, { clock, key = "uw-key", random = () => 0.5, perMinu
   ok(pausedUntil >= t + 5000 * 0.8 && pausedUntil <= t + 5000 * 1.2, `adapter: the first pause is five seconds, jittered (${pausedUntil - t} ms)`);
   const n = u.calls.length;
   t += 2000; await u.up.tick(t);
-  eq(u.calls.length, n, "adapter: while paused no topic calls the vendor");
+  eq(u.calls.length, n, "adapter: while paused no topic calls the feed");
   ok(u.up.paused(t), "adapter: and says it is paused");
   t = pausedUntil + 1; await u.up.tick(t);
   ok(u.calls.length > n, "adapter: it calls again when the pause ends");
@@ -632,7 +632,7 @@ const upstreamOf = (vendor, { clock, key = "uw-key", random = () => 0.5, perMinu
     dues.push(f.up.state().topics.px.due - t);
     t = f.up.state().topics.px.due;
   }
-  deep(dues, [10000, 15000, 15000, 15000, 15000, 15000], "adapter: failures back off 10 s, then 15 s and no longer, so a recovered vendor is noticed inside the degrade line");
+  deep(dues, [10000, 15000, 15000, 15000, 15000, 15000], "adapter: failures back off 10 s, then 15 s and no longer, so a recovered feed is noticed inside the degrade line");
   ok(f.errors.every((e) => e.code === "http_5xx" && e.status === 500), "adapter: 5xx errors carry their status");
   f.up.stop();
 
@@ -655,7 +655,7 @@ const upstreamOf = (vendor, { clock, key = "uw-key", random = () => 0.5, perMinu
   const tight = upstreamOf(createFakeVendor({ session: DAY, clock: () => t }), { clock: () => t, perMinute: 3 });
   tight.up.start(plainPlan(), tight.handlers);
   for (let i = 0; i < 4; i++) { await tight.up.tick(t); t += 1100; }
-  ok(tight.calls.length <= 3, `adapter: the local budget caps vendor calls (${tight.calls.length} of 3 allowed)`);
+  ok(tight.calls.length <= 3, `adapter: the local budget caps feed calls (${tight.calls.length} of 3 allowed)`);
   ok(tight.errors.some((e) => e.code === "budget"), "adapter: and a refused poll is reported as budget");
   tight.up.stop();
 
@@ -724,7 +724,7 @@ const seqOk = (ws) => {
 {
   const r = rig();
   await r.run(30);
-  eq(r.vendor.calls.length, 0, "demand: with no socket and no snapshot request, thirty seconds of ticks make zero vendor calls");
+  eq(r.vendor.calls.length, 0, "demand: with no socket and no snapshot request, thirty seconds of ticks make zero feed calls");
   eq(await r.hub.tick(), null, "demand: and the tick says there is nothing to schedule");
   eq(r.hub.running, false, "demand: the hub is not running");
 
@@ -769,7 +769,7 @@ const seqOk = (ws) => {
   eq(await r.hub.tick(), null, "the next tick stops the hub");
   r.state.t += 30000;
   await r.run(30);
-  eq(r.vendor.calls.length, before, "demand: after the last socket closes the vendor is not called again");
+  eq(r.vendor.calls.length, before, "demand: after the last socket closes the feed is not called again");
   eq(r.hub.running, false, "stopped");
   eq(r.hub.topics.fl.state.ring.length, 0, "and memory is released");
 }
@@ -801,7 +801,7 @@ const seqOk = (ws) => {
   deep(again.frames.map((f) => f.k), ["px", "mk", "fl", "gx", "nw"], "snap: five topics in the order asked");
   ok(again.frames.every((f) => f.fresh.state === (f.k === "gx" ? "pending" : "live")), "snap: four warm topics are live and gx, with no focus to read, is pending");
   await r.run(5);
-  eq(r.vendor.count(/spot-exposures/), 0, "snap: and a gx snapshot without a focus never calls the vendor");
+  eq(r.vendor.count(/spot-exposures/), 0, "snap: and a gx snapshot without a focus never calls the feed");
   const calls = r.vendor.calls.length;
   await r.run(50);
   ok(r.vendor.calls.length > calls, "snap: polling continues inside the 60-second linger");
@@ -841,7 +841,7 @@ const seqOk = (ws) => {
   const r = rig({ start: sat });
   const { ws } = r.join();
   await r.run(65);
-  eq(r.vendor.calls.length, 0, "closed: a Saturday makes no vendor call");
+  eq(r.vendor.calls.length, 0, "closed: a Saturday makes no feed call");
   const closed = ctlOf(ws, "closed");
   eq(closed.length, 1, "closed: the socket is told once, on connect, and never again while the reason stands");
   deep([closed[0].meta.reason, closed[0].meta.phase], ["weekend", "closed"], "closed: reason weekend");
@@ -861,7 +861,7 @@ const seqOk = (ws) => {
   const night = rig({ start: at(20, 0, DAY) + 1000 });
   const n = night.join();
   await night.run(5);
-  eq(night.vendor.calls.length, 0, "closed: 20:00:01 ET makes no vendor call");
+  eq(night.vendor.calls.length, 0, "closed: 20:00:01 ET makes no feed call");
   eq(ctlOf(n.ws, "closed")[0].meta.reason, "overnight", "closed: reason overnight");
 
   const hol = rig({ start: at(10, 0), roster: async () => ({ clock: { day: DAY, trading: 0, earlyClose: null, closedDays: [] }, boards: {}, focus: null }) });
@@ -875,7 +875,7 @@ const seqOk = (ws) => {
   await pre.run(8);
   ok(pre.vendor.calls.length > 0, "extended hours: 08:00 ET polls");
   const px = dataOf(p.ws, "px").slice(-1)[0];
-  deep([px.fresh.state, px.fresh.klass], ["live", "rt"], "extended hours: a fresh vendor stamp makes a pre-market frame live");
+  deep([px.fresh.state, px.fresh.klass], ["live", "rt"], "extended hours: a fresh feed stamp makes a pre-market frame live");
   const post = rig({ start: at(19, 55) });
   post.join();
   await post.run(8);
@@ -891,7 +891,7 @@ const seqOk = (ws) => {
   const lagged = rig({ vendorOver: (v) => { v.lagMs = 40000; } });
   const a = lagged.join();
   await lagged.run(8);
-  deep([stamp(a).fresh.state, stamp(a).fresh.reason, stamp(a).fresh.liveUntil], ["fresh", "vendor-lag", null], "lag guard: a vendor 40 s behind makes the frame fresh with vendor-lag, though the hub read it a moment ago");
+  deep([stamp(a).fresh.state, stamp(a).fresh.reason, stamp(a).fresh.liveUntil], ["fresh", "vendor-lag", null], "lag guard: a feed 40 s behind makes the frame fresh with vendor-lag, though the hub read it a moment ago");
   const dead = rig({ vendorOver: (v) => { v.lagMs = 120000; } });
   const b = dead.join();
   await dead.run(8);
@@ -899,11 +899,11 @@ const seqOk = (ws) => {
   const blank = rig({ vendorOver: (v) => { v.quoteStamps = false; } });
   const c = blank.join();
   await blank.run(8);
-  deep([stamp(c).fresh.state, stamp(c).fresh.reason], ["fresh", "vendor-unstamped"], "lag guard: a vendor that stamps nothing cannot be called live");
+  deep([stamp(c).fresh.state, stamp(c).fresh.reason], ["fresh", "vendor-unstamped"], "lag guard: a feed that stamps nothing cannot be called live");
   const good = rig();
   const d = good.join();
   await good.run(8);
-  eq(stamp(d).fresh.state, "live", "lag guard: a vendor within 15 s is live");
+  eq(stamp(d).fresh.state, "live", "lag guard: a feed within 15 s is live");
   const lagS = good.hub.status().topics.px.rowLagMs;
   ok(lagS.n > 0 && lagS.p50 >= 0 && lagS.p95 <= 3000, `status: row lag p50 ${lagS.p50} ms, p95 ${lagS.p95} ms over ${lagS.n} rows`);
 }
@@ -915,7 +915,7 @@ const seqOk = (ws) => {
   r.vendor.fault = "500";
   await r.run(30);
   const deg = ctlOf(a.ws, "degraded");
-  eq(deg.length >= 1, true, "degraded: a dead vendor is announced");
+  eq(deg.length >= 1, true, "degraded: a dead feed is announced");
   eq(deg[0].meta.reason, "http_5xx", "degraded: with its reason");
   ok(deg[0].meta.k.includes("px"), "degraded: and the topics that are down");
   eq(deg.length, 1, "degraded: once per episode, not once per tick or per topic that joins it");
@@ -926,7 +926,7 @@ const seqOk = (ws) => {
   const epBefore = r.hub.ep;
   await r.run(20);
   const rs = ctlOf(a.ws, "resync");
-  ok(rs.length >= 1 && rs.some((f) => f.meta.reason === "recovered"), "recovery: a resync ctl follows the vendor's return");
+  ok(rs.length >= 1 && rs.some((f) => f.meta.reason === "recovered"), "recovery: a resync ctl follows the feed's return");
   eq(r.hub.ep, epBefore, "recovery: the epoch is unchanged, because the hub never restarted");
   const snaps = dataOf(a.ws, "px").filter((f) => f.snap && f.sq > sqBefore);
   ok(snaps.length >= 1, "recovery: and a fresh snapshot follows with a higher sq");
@@ -942,13 +942,13 @@ const seqOk = (ws) => {
   ok(d429[0].meta.retryAt, "429: with the instant the hub will try again");
   const calls = lim.vendor.calls.length;
   await lim.run(10);
-  eq(lim.vendor.calls.length, calls, "429: no vendor call during the pause");
+  eq(lim.vendor.calls.length, calls, "429: no feed call during the pause");
   eq(lim.hub.budget.used(lim.state.t) <= 6, true, "429: the pause cost a handful of calls, not a storm");
   lim.vendor.fault = null;
   lim.vendor.retryAfterS = null;
   await lim.run(60);
   eq(ctlOf(b.ws, "degraded").length, 1, "429: one degraded frame for the whole episode, not one per tick or per topic");
-  ok(ctlOf(b.ws, "resync").some((f) => f.meta.reason === "recovered"), "429: and a resync once the vendor answers again");
+  ok(ctlOf(b.ws, "resync").some((f) => f.meta.reason === "recovered"), "429: and a resync once the feed answers again");
   eq(lim.hub.degraded, null, "429: the episode ends");
   const scaled = rig({ scale: 0.2 });
   eq(scaled.hub.budget.perMinute, 1200, "the call budget is per real minute: a test that runs cadences five times faster is allowed five times the calls");
@@ -1020,13 +1020,13 @@ const seqOk = (ws) => {
   const m = r.hub.budget.minute(r.state.t);
   deep([m.gx, m.fl, m.mk, m.nw], [0, 0, 0, 0], `demand: a px-only socket with a focus ticker, for 60 s, calls no gx, fl, mk or nw (${JSON.stringify(m)})`);
   ok(m.px >= 11 && m.px <= 13, `demand: and px about every 5 s (${m.px} calls)`);
-  deep(Array.from(new Set(r.vendor.calls.map((c) => c.path))), ["/api/screener/stocks"], "demand: the only vendor route read is the screener");
+  deep(Array.from(new Set(r.vendor.calls.map((c) => c.path))), ["/api/screener/stocks"], "demand: the only feed route read is the screener");
   ok(r.vendor.paramsOf(/screener/).every((p) => p.ticker.split(",").includes("NVDA")), "demand: and the focus ticker still joins the px read");
   const st = r.hub.status();
   deep(Object.keys(st.topics), TOPICS.slice(), "status: still lists all five topics");
   deep(TOPICS.map((k) => [st.topics[k].window.klass, st.topics[k].window.liveMs, st.topics[k].window.staleMs]),
     TOPICS.map((k) => [RT.RT_TOPICS[k].klass, (FRESH_CLASSES[RT.RT_TOPICS[k].klass].liveS + RT.RT_TOPICS[k].barS) * 1000, (FRESH_CLASSES[RT.RT_TOPICS[k].klass].staleS + RT.RT_TOPICS[k].barS) * 1000]),
-    "status: each topic carries its own live and stale windows, the class's line plus the vendor's bar (prices and alerts 15 s and 60 s, gamma 90 s and 180 s, market tide 330 s and 420 s, news 75 s and 300 s)");
+    "status: each topic carries its own live and stale windows, the class's line plus the feed's bar (prices and alerts 15 s and 60 s, gamma 90 s and 180 s, market tide 330 s and 420 s, news 75 s and 300 s)");
   deep(TOPICS.map((k) => st.topics[k].demanded), [true, false, false, false, false], "status: and says which are demanded");
   deep(Array.from(r.hub.plan.topics), ["px"], "demand: the plan's topics are the union of what sockets ask");
   r.hub.lastBroadcastAt = 0;
@@ -1077,7 +1077,7 @@ const seqOk = (ws) => {
   ok(a.ws.sent.slice(n).some((f) => f.k === "ctl" && f.t === "resync" && f.meta.reason === "recovered"), "drop: with the recovered control frame the client clears its banner on");
   deep([r.hub.topics.fl.fails, r.hub.topics.fl.lastError, r.hub.upstream.state().topics.fl.fails], [0, null, 0], "drop: its failures and last error are forgotten");
   await r.run(30);
-  eq(r.hub.degraded, null, "drop: and the vendor still failing fl cannot bring it back");
+  eq(r.hub.degraded, null, "drop: and the feed still failing fl cannot bring it back");
   eq(r.vendor.count(/flow-alerts/), flCalls, "drop: because fl is no longer polled");
   eq(ctlOf(a.ws, "degraded").length, 1, "drop: one degraded frame in all");
   r.hub.lastBroadcastAt = 0;
@@ -1214,14 +1214,14 @@ const seqOk = (ws) => {
   ok(RT.rtAdmits(RT.rtSwitches({}), "anilkaya") && !RT.rtAdmits(RT.rtSwitches({}), FIXTURE_MEMBER), "owner audience admits the owner and refuses a member");
   ok(RT.rtAdmits(RT.rtSwitches({ FLOWS_RT_AUDIENCE: "members" }), FIXTURE_MEMBER), "members audience admits a member");
   ok(!RT.rtIsOwner(RT.rtSwitches({ FLOWS_RT_AUDIENCE: "members" }), FIXTURE_MEMBER), "but never makes a member the owner");
-  eq(hubConfig({ UW_BASE: "http://x.test", UW_NOW: "2026-09-30T14:00:00Z", FLOWS_RT_SCALE: "0.2" }).scale, 0.2, "test scale: honoured only while UW_BASE redirects the vendor");
+  eq(hubConfig({ UW_BASE: "http://x.test", UW_NOW: "2026-09-30T14:00:00Z", FLOWS_RT_SCALE: "0.2" }).scale, 0.2, "test scale: honoured only while UW_BASE redirects the feed");
   eq(hubConfig({ UW_NOW: "2026-09-30T14:00:00Z", FLOWS_RT_SCALE: "0.2" }).scale, 1, "and ignored in production");
   ok(Number.isNaN(hubConfig({ UW_NOW: "2026-09-30T14:00:00Z" }).pinned), "a pinned clock is ignored in production too");
   const pinned = rtClock({ UW_BASE: "http://x.test", UW_NOW: "2026-09-30T14:00:00Z" });
   const p0 = pinned();
   await new Promise((res) => setTimeout(res, 30));
   ok(pinned() - p0 >= 20 && pinned() - p0 < 400, "a pinned clock advances with real time");
-  eq(hubConfig({ UW_BASE: "http://x.test" }).base, "http://x.test", "UW_BASE redirects the vendor");
+  eq(hubConfig({ UW_BASE: "http://x.test" }).base, "http://x.test", "UW_BASE redirects the feed");
   eq(hubConfig({}).base, "https://api.unusualwhales.com", "and the default is production");
   eq(hubConfig({ FLOWS_RT_CALLS_PER_MIN: "5000" }).callsPerMinute, 1200, "the call budget is clamped");
   eq(hubConfig({}).callsPerMinute, 240, "240 calls a minute by default");
@@ -1518,7 +1518,7 @@ const seqOk = (ws) => {
   eq(st.upstream.kind, "rest", "status: the upstream kind");
   eq(st.killSwitches.FLOWS_RT_MODE, "on", "status: the kill switches are readable");
   deep(st.sockets.byUser, { anilkaya: 1 }, "status: sockets by user");
-  ok(st.topics.px.lagMs.n > 0 && st.topics.gx.lagMs.n > 0 && st.topics.mk.lagMs.n > 0, "status: vendor lag is sampled per topic");
+  ok(st.topics.px.lagMs.n > 0 && st.topics.gx.lagMs.n > 0 && st.topics.mk.lagMs.n > 0, "status: feed lag is sampled per topic");
   ok(st.topics.px.lastFrameAgeMs <= 5000, "status: last-frame age");
   ok(Object.values(st.topics).every((t) => t.sq === r.hub.counter.peek(Object.keys(st.topics).find((k) => st.topics[k] === t))), "status: per-topic sequence");
   eq(st.topics.px.lastError, null, "status: no error, no lastError");
@@ -1698,7 +1698,7 @@ const seqOk = (ws) => {
 {
   deep(Object.fromEntries(TOPICS.map((k) => [k, RT.RT_UPSTREAM[k].channels])), {
     px: ["price:<T>"], fl: ["flow-alerts"], gx: ["gex:<T>"], mk: ["market_tide", "net_flow:<T>"], nw: ["news"],
-  }, "seam: one table maps each topic to the vendor channels a socket upstream would join");
+  }, "seam: one table maps each topic to the feed channels a socket upstream would join");
   deep(Object.fromEntries(TOPICS.map((k) => [k, RT.RT_UPSTREAM[k].scope])), { px: "ticker", fl: "global", gx: "ticker", mk: "global", nw: "global" }, "seam: and says which are per-ticker");
   ok(Object.isFrozen(RT.RT_UPSTREAM) && TOPICS.every((k) => Object.isFrozen(RT.RT_UPSTREAM[k]) && typeof RT.RT_UPSTREAM[k].rest === "function"), "seam: frozen, each with its REST request builder beside its channels");
   deep(RT.RT_UPSTREAM.px.rest({ names: ["A", "B"] }).map((c) => [c.path, c.params.ticker, c.params.limit]), [["/api/screener/stocks", "A,B", 500]], "seam: px REST request");
@@ -1710,7 +1710,7 @@ const seqOk = (ws) => {
   deep(["kind", "start", "stop", "tick", "paused", "state"].filter((m) => !(m in rest)), [], "seam: the REST adapter implements every method of the interface");
 
   const live = Object.keys(RT.RT_REST_SHAPE);
-  deep(live, TOPICS, "seam: a REST shaper per topic turns a vendor body into the neutral frame");
+  deep(live, TOPICS, "seam: a REST shaper per topic turns a feed body into the neutral frame");
 
   const src = read("shared/flows-rt-hub.js");
   const hubBody = src.slice(src.indexOf("export class RtHub"), src.indexOf("export function createHub"));
@@ -1954,14 +1954,14 @@ const seqOk = (ws) => {
   within(rth.px, 11.5, 12.5, "calls: Home in the regular session polls px every 5 s, 12 a minute");
   within(rth.mk, 2.5, 3.5, "calls: and mk every 20 s, 3 polls a minute");
   within(rth.nw, 1.8, 2.2, "calls: and news every 30 s, 2 a minute");
-  within(rth.total, 19, 21, "calls: Home in the regular session costs 20 vendor calls a minute, down from 26");
+  within(rth.total, 19, 21, "calls: Home in the regular session costs 20 feed calls a minute, down from 26");
   for (const [h, m, label] of [[8, 0, "pre"], [17, 0, "post"]]) {
     const ext = await perMinute(h, m, home);
     eq(ext.phase, label, `calls: ${h}:00 ET is the ${label}-market phase`);
     within(ext.px, 6.2, 7.2, `calls: Home in the ${label}-market polls px every 9 s, 6.7 a minute`);
     within(ext.mk, 2.5, 3.5, `calls: and mk every 20 s in the ${label}-market`);
     within(ext.nw, 0.8, 1.2, `calls: and news every 60 s in the ${label}-market`);
-    within(ext.total, 13, 14.5, `calls: Home in the ${label}-market costs 13.7 vendor calls a minute`);
+    within(ext.total, 13, 14.5, `calls: Home in the ${label}-market costs 13.7 feed calls a minute`);
     for (const k of home) {
       const lapses = ext.states.filter((e) => blamedOnCadence(k, e)).length;
       eq(lapses, 0, `flicker: ${k} is live on every second of five minutes in the ${label}-market, so the slower cadence never shows between polls`);
@@ -1999,7 +1999,7 @@ const seqOk = (ws) => {
     const calls0 = r.vendor.calls.length;
     const gaps = await drive(r, 60);
     const polls = (re) => r.vendor.calls.slice(calls0).filter((c) => re.test(c.path)).length;
-    console.log(`rt alarms with ${label}: ${gaps.length} in 60 fake seconds, gaps ${Math.min(...gaps)}-${Math.max(...gaps)} ms, vendor calls px ${polls(/screener/)} mk ${polls(/market-tide/)} nw ${polls(/news/)} fl ${polls(/flow-alerts/)} gx ${polls(/spot-exposures/)}`);
+    console.log(`rt alarms with ${label}: ${gaps.length} in 60 fake seconds, gaps ${Math.min(...gaps)}-${Math.max(...gaps)} ms, feed calls px ${polls(/screener/)} mk ${polls(/market-tide/)} nw ${polls(/news/)} fl ${polls(/flow-alerts/)} gx ${polls(/spot-exposures/)}`);
     ok(gaps.length <= 20, `alarms: ${label} costs at most 20 alarms in a fake minute (${gaps.length})`);
     ok(Math.max(...gaps) <= RT.RT_LIMITS.alarmMaxMs, `alarms: ${label}: no gap above ${RT.RT_LIMITS.alarmMaxMs} ms (${Math.max(...gaps)})`);
     ok(Math.min(...gaps) >= RT.RT_LIMITS.alarmMinMs, `alarms: ${label}: no gap below ${RT.RT_LIMITS.alarmMinMs} ms (${Math.min(...gaps)})`);
@@ -2025,7 +2025,7 @@ const seqOk = (ws) => {
   await drive(limited, 6);
   const sheltered = limited.vendor.calls.length;
   const waits = await drive(limited, 30);
-  ok(Math.max(...waits) <= RT.RT_LIMITS.alarmMaxMs, `alarms: a vendor pause never stretches the alarm past the ceiling (${Math.max(...waits)} ms)`);
+  ok(Math.max(...waits) <= RT.RT_LIMITS.alarmMaxMs, `alarms: a feed pause never stretches the alarm past the ceiling (${Math.max(...waits)} ms)`);
   ok(waits.length <= 8, `alarms: and a paused hub wakes only for its heartbeat and sweep (${waits.length} alarms in 30 s)`);
   ok(limited.vendor.calls.length - sheltered <= 2, `alarms: with no call made while the pause stands (${limited.vendor.calls.length - sheltered})`);
 
@@ -2034,7 +2034,7 @@ const seqOk = (ws) => {
   closed.join();
   const shut = await drive(closed, 120);
   ok(Math.max(...shut) < 10000, `alarms: a closed hub with a socket still wakes inside the 10 s the object needs to stay resident (${Math.max(...shut)} ms)`);
-  eq(closed.vendor.calls.length, 0, "alarms: and makes no vendor call");
+  eq(closed.vendor.calls.length, 0, "alarms: and makes no feed call");
 }
 
 {
@@ -2093,7 +2093,7 @@ const seqOk = (ws) => {
       ok(inMinute <= 20, `alarm: at most 20 setAlarm in a fake minute with px, mk and nw demanded (${inMinute})`);
       ok(Math.max(...dues) < 10000 && Math.max(...dues) <= RT.RT_LIMITS.alarmMaxMs + 5, `alarm: no gap near the 10 s hibernation line while demanded (${Math.max(...dues)} ms)`);
       eq(m.store.gets, 1, "alarm: a minute of alarms made no further getAlarm");
-      ok(dataOf(ws, "px").length >= 10 && dataOf(ws, "mk").length >= 3, "alarm: and the frames still flow at the vendor's cadence");
+      ok(dataOf(ws, "px").length >= 10 && dataOf(ws, "mk").length >= 3, "alarm: and the frames still flow at the feed's cadence");
       ws.readyState = 3;
       m.pulse.hub.lastSnapAt = -Infinity;
       m.pulse.release();
@@ -2183,7 +2183,7 @@ const seqOk = (ws) => {
   eq(leaks(JSON.stringify(R.deep({ message: "x".repeat(40) + KEY + FORMS(SESSION)[2] }))), null, "redaction: and a second secret in a base64 spelling goes with the first");
   const secrets = RT.rtSecretsOf({ UW_API_KEY: KEY, SESSION_SECRET: SESSION, GOOGLE_CLIENT_SECRET: "short", FLOWS_INGEST_TOKEN: 5, OTHER: "x".repeat(20) });
   deep(secrets, [KEY, SESSION], "redaction: the Worker secrets the object can see are collected by name, and only usable strings");
-  deep(hubConfig({ UW_API_KEY: KEY, SESSION_SECRET: SESSION }).secrets, [KEY, SESSION], "redaction: and the hub's configuration carries them without the vendor key's name");
+  deep(hubConfig({ UW_API_KEY: KEY, SESSION_SECRET: SESSION }).secrets, [KEY, SESSION], "redaction: and the hub's configuration carries them without the feed key's name");
 
   const grab = () => {
     const lines = [];
@@ -2254,7 +2254,7 @@ const seqOk = (ws) => {
       sockets.push(ws);
       hub.admit(ws, { u: "anilkaya", exp: Date.now() + 3600e3, topics: TOPICS, f: "NVDA" });
       for (let i = 0; i < 60; i++) { await hub.tick(); state.t += 1000; }
-      ok(n >= 10, `redaction: the REST adapter made ${n} calls against a vendor that refused, errored, returned HTML and threw the key in its messages`);
+      ok(n >= 10, `redaction: the REST adapter made ${n} calls against a feed that refused, errored, returned HTML and threw the key in its messages`);
       const st = hub.status();
       eq(leaks([JSON.stringify(st), cap.lines.join("\n"), JSON.stringify(ws.sent)].join("\n")), null,
          "redaction: no status body, log line or frame to a socket carries any part of the key");
@@ -2322,7 +2322,7 @@ const seqOk = (ws) => {
     }
     const toml = read("wrangler.toml");
     const socketTopics = Object.entries(RT.RT_UPSTREAM).filter(([, v]) => v.channels.length > 0).map(([k]) => k);
-    ok(socketTopics.length === 5, "redaction: every topic names vendor socket channels, so the credential rules apply to the object that will open them");
+    ok(socketTopics.length === 5, "redaction: every topic names feed socket channels, so the credential rules apply to the object that will open them");
     ok(/\[observability\.traces\]\nenabled = false\n/.test(toml), "redaction: and traces are switched off in wrangler.toml, where a span would record the socket URL's query");
   }
 }
@@ -2343,7 +2343,7 @@ const seqOk = (ws) => {
     ["http://a.b.test:9000", "http://a.b.test:9000", "redirect"],
   ];
   for (const [raw, base, status] of allowed) {
-    deep(vendorBaseInfo(raw), { base, status }, `vendor base: ${raw} is ${status}`);
+    deep(vendorBaseInfo(raw), { base, status }, `feed base: ${raw} is ${status}`);
   }
   const refused = [
     "https://evil.example", "http://evil.example", "https://api.unusualwhales.com.evil.example", "http://api.unusualwhales.com",
@@ -2354,16 +2354,16 @@ const seqOk = (ws) => {
     "http://uw.TEST.evil.example", "http://xn--uw.test.evil", "https://api.unusualwhales.com/api", "http://" + "a".repeat(250) + ".test", 12, {}, [], true,
   ];
   for (const raw of refused) {
-    deep(vendorBaseInfo(raw), { base: PROD, status: "invalid" }, `vendor base: ${JSON.stringify(raw).slice(0, 60)} is ignored and reported invalid`);
+    deep(vendorBaseInfo(raw), { base: PROD, status: "invalid" }, `feed base: ${JSON.stringify(raw).slice(0, 60)} is ignored and reported invalid`);
   }
-  for (const raw of [undefined, null, ""]) deep(vendorBaseInfo(raw), { base: PROD, status: "unset" }, `vendor base: ${JSON.stringify(raw)} is unset`);
+  for (const raw of [undefined, null, ""]) deep(vendorBaseInfo(raw), { base: PROD, status: "unset" }, `feed base: ${JSON.stringify(raw)} is unset`);
   eq(vendorBase({ UW_BASE: "https://evil.example" }), PROD, "vendorBase: a refused base is the default");
   eq(vendorBase({}), VENDOR_BASE_DEFAULT, "vendorBase: no env var is the default");
   eq(vendorBase(undefined), VENDOR_BASE_DEFAULT, "vendorBase: no env is the default");
   ok(vendorRedirected({ UW_BASE: "http://uw.test" }) && !vendorRedirected({ UW_BASE: PROD }) && !vendorRedirected({ UW_BASE: "https://evil.example" }) && !vendorRedirected({}),
     "vendorRedirected: only a loopback or .test base redirects");
   const evil = hubConfig({ UW_BASE: "https://evil.example", UW_API_KEY: "k", UW_NOW: "2026-09-30T14:00:00Z", FLOWS_RT_SCALE: "0.2" });
-  eq(evil.base, PROD, "hub: a hostile UW_BASE leaves the vendor at production");
+  eq(evil.base, PROD, "hub: a hostile UW_BASE leaves the feed at production");
   eq(evil.redirected, false, "hub: and does not count as a redirect");
   eq(evil.scale, 1, "hub: so it does not unlock the test scale");
   ok(Number.isNaN(evil.pinned), "hub: nor the pinned clock");
@@ -2435,7 +2435,7 @@ const seqOk = (ws) => {
   await delayed.run(40);
   const rtt = delayed.hub.status().topics.px.rttMs;
   ok(rtt.n >= 6, `slo: px records one round trip per poll (${rtt.n})`);
-  deep([rtt.p50, rtt.p95, rtt.max], [120, 120, 120], "slo: rttMs is the time from the poll's start to its read, 120 ms from a vendor that costs 120 ms");
+  deep([rtt.p50, rtt.p95, rtt.max], [120, 120, 120], "slo: rttMs is the time from the poll's start to its read, 120 ms from a feed that costs 120 ms");
   deep(delayed.hub.status().topics.fl.rttMs, { n: 0, p50: null, p95: null, max: null }, "slo: an undemanded topic has no round trips");
   deep([delayed.hub.status().topics.px.itemLagMs, delayed.hub.status().topics.gx.itemLagMs, delayed.hub.status().topics.mk.itemLagMs], [null, null, null], "slo: item lag is reported for fl and nw only");
 
@@ -2454,10 +2454,10 @@ const seqOk = (ws) => {
     ok(sums(t.time) < 1e-6, `slo: ${k} live + vendor-lag + ours equals demanded exactly`);
     ok(t.time.liveMs >= 0 && t.time.vendorLagMs >= 0 && t.time.oursMs >= 0, `slo: ${k} counters are never negative`);
   }
-  for (const k of ["px", "fl", "gx", "nw"]) ok(st.topics[k].time.liveMs / st.topics[k].time.demandedMs >= 0.85, `slo: ${k} on a healthy vendor is live for ${(100 * st.topics[k].time.liveMs / st.topics[k].time.demandedMs).toFixed(0)}% of its demanded time`);
-  eq(st.topics.px.time.vendorLagMs, 0, "slo: and none of it is charged to the vendor");
+  for (const k of ["px", "fl", "gx", "nw"]) ok(st.topics[k].time.liveMs / st.topics[k].time.demandedMs >= 0.85, `slo: ${k} on a healthy feed is live for ${(100 * st.topics[k].time.liveMs / st.topics[k].time.demandedMs).toFixed(0)}% of its demanded time`);
+  eq(st.topics.px.time.vendorLagMs, 0, "slo: and none of it is charged to the feed");
   eq(st.topics.mk.time.oursMs, 0, "slo: mk is never charged to us on a healthy run, though the fake tide's bar stamp runs behind the read part of the time");
-  ok(st.topics.mk.time.vendorLagMs > 0, "slo: it is charged to the vendor's stamp instead");
+  ok(st.topics.mk.time.vendorLagMs > 0, "slo: it is charged to the feed's stamp instead");
   ok(st.topics.fl.itemLagMs.n >= 8 && st.topics.fl.itemLagMs.p50 >= 0 && st.topics.fl.itemLagMs.p95 <= 1600, `slo: fl alert lag against the alert's own created_at: ${JSON.stringify(st.topics.fl.itemLagMs)}`);
   ok(st.topics.nw.itemLagMs.n >= 1 && st.topics.nw.itemLagMs.max <= 30000, `slo: nw headline lag against its created_at: ${JSON.stringify(st.topics.nw.itemLagMs)}`);
   eq(st.unobservedMs, 0, "slo: nothing went unobserved");
@@ -2467,7 +2467,7 @@ const seqOk = (ws) => {
   behind.join("anilkaya", { topics: ["px"] });
   await behind.run(60);
   const bt = behind.hub.status().topics.px.time;
-  ok(bt.vendorLagMs >= 0.8 * bt.demandedMs, `slo: a vendor 40 s behind is charged to the vendor (${bt.vendorLagMs} of ${bt.demandedMs} ms)`);
+  ok(bt.vendorLagMs >= 0.8 * bt.demandedMs, `slo: a feed 40 s behind is charged to the feed (${bt.vendorLagMs} of ${bt.demandedMs} ms)`);
   ok(bt.liveMs === 0 && bt.oursMs <= 0.1 * bt.demandedMs, `slo: and not to us (live ${bt.liveMs}, ours ${bt.oursMs})`);
   ok(sums(bt) < 1e-6, "slo: the three still sum to demanded");
 
@@ -2478,8 +2478,8 @@ const seqOk = (ws) => {
   down.vendor.fault = "500";
   await down.run(40);
   const after = down.hub.status().topics.px.time;
-  ok(after.oursMs - before.oursMs >= 20000, `slo: a dead vendor connection costs us ${after.oursMs - before.oursMs} ms of not-live time (the vendor sent no stale stamp, the poll failed)`);
-  eq(after.vendorLagMs, 0, "slo: and none of it is vendor lag");
+  ok(after.oursMs - before.oursMs >= 20000, `slo: a dead feed connection costs us ${after.oursMs - before.oursMs} ms of not-live time (the feed sent no stale stamp, the poll failed)`);
+  eq(after.vendorLagMs, 0, "slo: and none of it is feed lag");
   ok(sums(after) < 1e-6, "slo: sum holds under failure");
 
   const ep0 = healthy.hub.ep;
@@ -2537,7 +2537,7 @@ const SKEY = "sock-key-9f8e7d6c5b4a3921";
 {
   eq(SOCK.socketUrl("https://api.unusualwhales.com", "K1"), "wss://api.unusualwhales.com/socket?token=K1", "socket: the production origin becomes wss with the token as the one query parameter");
   eq(SOCK.socketUrl("http://127.0.0.1:8787/x?y=1#z", "a b"), "ws://127.0.0.1:8787/socket?token=a+b", "socket: a loopback origin becomes ws, any path, query and fragment dropped, the token encoded");
-  eq(SOCK.socketUrl(VENDOR_BASE_DEFAULT, "k"), "wss://api.unusualwhales.com/socket?token=k", "socket: and the default vendor base maps the same way");
+  eq(SOCK.socketUrl(VENDOR_BASE_DEFAULT, "k"), "wss://api.unusualwhales.com/socket?token=k", "socket: and the default feed base maps the same way");
   deep(["", null, undefined, 7].map((k) => SOCK.socketUrl("https://x.test", k)), [null, null, null, null], "socket: no key, no URL");
   deep(["ftp://x.test", "not a url", null, 5].map((b) => SOCK.socketUrl(b, "k")), [null, null, null, null], "socket: and no URL for a base that is not http or https");
 
@@ -2565,7 +2565,7 @@ const SKEY = "sock-key-9f8e7d6c5b4a3921";
       }
     }
     ok(joined > 500, `socket: 400 fuzzed plans joined ${joined} channels and every one was price:<T>, gex:<T>, flow-alerts or news`);
-    ok(RT.RT_UPSTREAM.px.channels.every((c) => c === "price:<T>"), "socket: the topic table lists price:<T> alone for px, so no vendor firehose can be read off it");
+    ok(RT.RT_UPSTREAM.px.channels.every((c) => c === "price:<T>"), "socket: the topic table lists price:<T> alone for px, so no feed firehose can be read off it");
   }
   deep(SOCK.wantChannels({ topics: new Set(["px"]), focus: ["NVDA", "bad ticker", "x"], gex: ["NVDA"] }).map((w) => w.channel), ["price:NVDA"], "socket: only the topics demanded, only valid tickers");
   deep(SOCK.wantChannels({ topics: new Set(), focus: names, gex: names }), [], "socket: nothing demanded, nothing joined");
@@ -2634,8 +2634,8 @@ const SKEY = "sock-key-9f8e7d6c5b4a3921";
   const viaGexRest = RT.shapeGx({ data: [{ ...gex, start_time: gex.timestamp }] }, { name: "NVDA", at: at(10, 0), session: DAY });
   const viaGexSocket = SOCK.shapeSocketFrame("gx", new Map([["NVDA", gex]]), { at: at(10, 0), session: DAY });
   deep(viaGexSocket.items, viaGexRest.items, "shape gx: a gex tick is the row the REST spot-exposures read gives for the same numbers");
-  eq(viaGexSocket.items[0][3], -262444980, "shape gx: the gamma figures are numbers, with the vendor's sign, to the whole dollar as on the REST path");
-  eq(viaGexSocket.vendorAt, gex.timestamp, "shape gx: the vendor stamp is the tick's own timestamp");
+  eq(viaGexSocket.items[0][3], -262444980, "shape gx: the gamma figures are numbers, with the feed's sign, to the whole dollar as on the REST path");
+  eq(viaGexSocket.vendorAt, gex.timestamp, "shape gx: the feed stamp is the tick's own timestamp");
   deep(SOCK.shapeSocketFrame("gx", new Map([["NVDA", socketGex("NVDA", at(7, 0))]]), { at: at(10, 0), session: DAY }).items, [], "shape gx: a tick outside the regular session is no row, as on the REST path");
 
   const stamp = new Date(SESSION_NOW - 5000).toISOString().slice(0, 19) + "Z";
@@ -2653,7 +2653,7 @@ const SKEY = "sock-key-9f8e7d6c5b4a3921";
   deep([RT.rtSwitches({ FLOWS_RT_SOCKET_HOURS: "session" }).socketHours, RT.rtSwitches({ FLOWS_RT_SOCKET_HOURS: "always" }).socketHours], ["session", "rth"], "switches: session widens the window, anything else is the regular session");
   const on = { FLOWS_RT_MODE: "on", FLOWS_RT_UPSTREAM: "socket", UW_API_KEY: SKEY };
   deep([hubConfig(on).upstream, hubConfig(on).upstreamAsked], ["socket", "socket"], "config: the switch on is the socket upstream under the shipped owner default");
-  deep([hubConfig({ ...on, FLOWS_RT_AUDIENCE: "members" }).upstream, hubConfig({ ...on, FLOWS_RT_AUDIENCE: "members" }).upstreamAsked], ["socket", "socket"], "config: under the members audience the switch still selects the socket, one vendor connection whoever watches");
+  deep([hubConfig({ ...on, FLOWS_RT_AUDIENCE: "members" }).upstream, hubConfig({ ...on, FLOWS_RT_AUDIENCE: "members" }).upstreamAsked], ["socket", "socket"], "config: under the members audience the switch still selects the socket, one feed connection whoever watches");
   deep([hubConfig({ ...on, FLOWS_RT_AUDIENCE: "public" }).upstream, hubConfig({ FLOWS_RT_MODE: "on" }).upstream, hubConfig({ FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "members", FLOWS_RT_UPSTREAM: "rest" }).upstream], ["socket", "rest", "rest"], "config: no switch, or rest, is REST under either audience");
   const shipped = Object.fromEntries([...readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8").split("[vars]")[1].matchAll(/^(FLOWS_RT_[A-Z_]+) = "([^"]*)"$/gm)].map((m) => [m[1], m[2]]));
   deep([shipped.FLOWS_RT_UPSTREAM, shipped.FLOWS_RT_SOCKET_HOURS], ["socket", "session"], "shipped: wrangler.toml turns the socket upstream on with the pre-market to post-market window");
@@ -2730,12 +2730,12 @@ const rowsOfK = (ws, k) => wsFrames(ws, k).flatMap((f) => f.rows);
   eq(ws.sent[0].meta.upstream, "socket", "upstream: the hello names it");
   await r.run(6);
   eq(r.fake.connectCalls, 1, "connect: one outbound socket for the whole hub");
-  eq(r.fake.urls[0], `ws://uw.test/socket?token=${SKEY}`, "connect: to the vendor's socket path, the token as the query parameter");
+  eq(r.fake.urls[0], `ws://uw.test/socket?token=${SKEY}`, "connect: to the feed's socket path, the token as the query parameter");
   deep(r.fake.joined(), ["flow-alerts", "gex:NVDA", "news", "price:NVDA"], "join: the two global event channels and the focus name's two channels, nothing else");
   ok(!r.fake.joins.some((c) => ["price", "gex", "stock_screener", "market_tide", "net_flow:NVDA", "option_trades"].includes(c)), "join: no firehose, no screener, and the market tide stays on REST");
   const st = r.hub.status().upstream;
   deep([st.kind, st.socket.connected, st.socket.joined, st.socket.acked, st.host], ["socket", true, 4, 4, "uw.test"], "status: the socket is connected with four channels joined and acknowledged, named by host");
-  ok(!JSON.stringify(r.hub.status()).includes(SKEY) && !JSON.stringify(r.logs).includes(SKEY), "status: the vendor key is in neither the status body nor the log");
+  ok(!JSON.stringify(r.hub.status()).includes(SKEY) && !JSON.stringify(r.logs).includes(SKEY), "status: the feed key is in neither the status body nor the log");
   eq(r.hub.status().calls.minuteTotal === r.hub.budget.used(r.state.t), true, "budget: the REST call counter is the budget's own");
 
   const restPx = rowsOfK(ws, "px").filter((x) => x[0] === "NVDA").at(-1);
@@ -2774,7 +2774,7 @@ const rowsOfK = (ws, k) => wsFrames(ws, k).flatMap((f) => f.rows);
   await r.run(0.5);
   const gxRow = wsFrames(ws, "gx").slice(gx0).flatMap((f) => f.rows).find((x) => x[0] === "NVDA" && x[2] === 321.5);
   ok(gxRow, "gx: a gex tick reaches the client as a gx row");
-  deep(gxRow.slice(3, 6), [-111, 222, -3], "gx: with the vendor's figures and signs");
+  deep(gxRow.slice(3, 6), [-111, 222, -3], "gx: with the feed's figures and signs");
   eq(wsFrames(ws, "gx").slice(gx0).at(-1).meta.via, "socket", "gx: marked as socket");
 }
 
@@ -2830,7 +2830,7 @@ const rowsOfK = (ws, k) => wsFrames(ws, k).flatMap((f) => f.rows);
   r.join("anilkaya", { f: "NVDA" });
   await r.run(20);
   const st = r.hub.status().upstream;
-  eq(st.socket.refused["flow-alerts"], "not permitted", "refused: a channel the vendor refuses is named in the status with its reason");
+  eq(st.socket.refused["flow-alerts"], "not permitted", "refused: a channel the feed refuses is named in the status with its reason");
   deep([st.topics.fl.via, st.socket.connected], ["rest", true], "refused: that topic stays on REST while the rest of the socket works");
   ok(r.vendor.count(/flow-alerts/) >= 3, `refused: REST reads the alerts every cadence (${r.vendor.count(/flow-alerts/)} calls in 20 s)`);
 
@@ -2838,7 +2838,7 @@ const rowsOfK = (ws, k) => wsFrames(ws, k).flatMap((f) => f.rows);
   none.join("anilkaya", { f: "NVDA" });
   await none.run(6);
   const ns = none.hub.status().upstream.socket;
-  deep([ns.connected, ns.lastError && ns.lastError.code], [false, "refused"], "refused: when the vendor refuses every channel the connection is closed, with the reason recorded");
+  deep([ns.connected, ns.lastError && ns.lastError.code], [false, "refused"], "refused: when the feed refuses every channel the connection is closed, with the reason recorded");
   const calls = none.fake.connectCalls;
   await none.run(60);
   eq(none.fake.connectCalls, calls, "refused: and is not retried for five minutes");
@@ -3058,4 +3058,4 @@ const rowsOfK = (ws, k) => wsFrames(ws, k).flatMap((f) => f.rows);
   expect(hub, /createCompositeUpstream\(\{ rest: restUp, socket, held,/, { min: 1, max: 1, why: "createHub builds the composite only for the socket upstream" });
 }
 
-console.log(`✓ flows-rt: ${checks} assertions — the real-time rail's pure half: a frozen envelope and topic table whose rows equal the stored live-key shapers' rows value for value, per-topic sequences with a gap detector (and the false gaps a shared counter breeds), latest-wins and append-dedupe merges bounded by construction, three freshness classes with a lag guard, a 240-call budget, a REST adapter proven against a stub vendor (deadline, 429 pause with Retry-After and jitter, backoff, no overlap, no key), and a hub driven on a fake clock through demand, closed sessions, degrade and recovery, hibernation and the kill switches, and the vendor socket upstream behind FLOWS_RT_UPSTREAM: the URL and channels it joins (per-ticker only, never a firehose), socket payloads shaped into the REST rows, REST covering a silent or refused channel and resuming on silence, dedupe across the two sources, backoff and reconnection, the close on the first tick with no demand and outside the window, the socket under either audience and no joinable firehose over 400 fuzzed plans, a burst shed rather than queued, a message handler inside 0.05 ms, and the token redacted on every path`);
+console.log(`✓ flows-rt: ${checks} assertions — the real-time rail's pure half: a frozen envelope and topic table whose rows equal the stored live-key shapers' rows value for value, per-topic sequences with a gap detector (and the false gaps a shared counter breeds), latest-wins and append-dedupe merges bounded by construction, three freshness classes with a lag guard, a 240-call budget, a REST adapter proven against a stub feed (deadline, 429 pause with Retry-After and jitter, backoff, no overlap, no key), and a hub driven on a fake clock through demand, closed sessions, degrade and recovery, hibernation and the kill switches, and the feed socket upstream behind FLOWS_RT_UPSTREAM: the URL and channels it joins (per-ticker only, never a firehose), socket payloads shaped into the REST rows, REST covering a silent or refused channel and resuming on silence, dedupe across the two sources, backoff and reconnection, the close on the first tick with no demand and outside the window, the socket under either audience and no joinable firehose over 400 fuzzed plans, a burst shed rather than queued, a message handler inside 0.05 ms, and the token redacted on every path`);

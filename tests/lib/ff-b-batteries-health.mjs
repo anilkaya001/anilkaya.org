@@ -88,10 +88,10 @@ export async function endToEnd(c, build) {
 
   {
     const api = build();
-    seedBase(api, { live: { session: "2026-10-27", finishedAt: NOW - 60000, error: "vendor timeout" } });
+    seedBase(api, { live: { session: "2026-10-27", finishedAt: NOW - 60000, error: "feed timeout" } });
     const r = await health(api);
     c.eq([r.body.state, r.body.reason, r.body.line, r.body.evaluator.live.error], ["degraded", "evaluator_error", "Degraded · evaluator error", true], "health: a recorded evaluator error is degraded");
-    c.ok(!r.text.includes("vendor timeout"), "health: and the error text is not shown to a member");
+    c.ok(!r.text.includes("feed timeout"), "health: and the error text is not shown to a member");
   }
 
   {

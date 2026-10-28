@@ -25,7 +25,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const bands = capBands({ min: 1e9, max: 4e12, ratio: 1.3 });
   ok(bands.length > 25,
      `the ladder is ${bands.length} bands, not the six it replaces — and the band count IS ` +
-     "the pagination, because the vendor caps every band at ~50 rows and offers no page parameter");
+     "the pagination, because the feed caps every band at ~50 rows and offers no page parameter");
 
   for (let i = 1; i < bands.length; i++) {
     eq(bands[i][0], bands[i - 1][1],
@@ -82,7 +82,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   const twice = selectCoverage([...tied].reverse(), { count: 2, guaranteed: [] }).map((p) => p.row.ticker);
   assert.deepEqual(once, ["AAA", "BBB"], "ties break on ticker, ascending"); checks++;
   assert.deepEqual(once, twice,
-    "and the pool does not depend on the order the vendor happened to return rows in"); checks++;
+    "and the pool does not depend on the order the feed happened to return rows in"); checks++;
 
   const noCap = selectCoverage(
     [{ ticker: "GOOD", marketcap: 2e9 }, { ticker: "NOCAP" }, { ticker: "JUNK", marketcap: "x" }],
@@ -95,7 +95,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
     { count: 1, guaranteed: [] });
   eq(zeroVsAbsent.length, 1, "the cap is respected");
   eq(zeroVsAbsent[0].row.ticker, "ZERO",
-     "a cap the vendor MEASURED as zero outranks one it never reported — absent is not a value");
+     "a cap the feed MEASURED as zero outranks one it never reported — absent is not a value");
 
   eq(selectCoverage(null).length, 0, "no universe yields no pool rather than a throw");
   ok(selectCoverage([{ marketcap: 1e9 }], { guaranteed: [] }).length === 0,
@@ -139,7 +139,7 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   ok(deepNames({ long: [{ t: "NS" }, { t: "HAS", s: 1 }] }, 1)[0].t === "HAS",
      "and it sorts BELOW a scored row — an unscored name is not the furthest from neutral");
   ok(DEEP_NAMES > 0 && DEEP_NAMES <= 60,
-     `the deep budget (${DEEP_NAMES}) is bounded: it is multiplied by three vendor calls a name`);
+     `the deep budget (${DEEP_NAMES}) is bounded: it is multiplied by three feed calls a name`);
 }
 
 {
@@ -253,9 +253,9 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
   assert.deepEqual(Object.keys(shaped).slice(0, FOCUS_FIELDS.length), [...FOCUS_FIELDS], "a focus row carries exactly the focus fields, in order"); checks++;
   ok(FOCUS_FIELDS.every((f) => STRIP_FIELDS.some(([n]) => n === f)), "every focus field is a strip field, so live and nightly rows share names and units");
   eq(shaped.net, 60, "net is ncp - npp, as on the live strip");
-  eq(shaped.bull, null, "an absent vendor value is null, never zero");
-  eq(shaped.bear, null, "including one the vendor never sent");
-  ok(shaped.name.length <= 40 && shaped.type === "ETF", "the name is trimmed to forty characters and the vendor type travels");
+  eq(shaped.bull, null, "an absent feed value is null, never zero");
+  eq(shaped.bear, null, "including one the feed never sent");
+  ok(shaped.name.length <= 40 && shaped.type === "ETF", "the name is trimmed to forty characters and the feed type travels");
 
   const closes = focusCloses({ closes: Array.from({ length: 42 }, (_, i) => 100 + i), closeDates: Array.from({ length: 42 }, (_, i) => i === 41 ? "2026-09-24" : "2026-08-" + String(i % 28 + 1).padStart(2, "0")) }, "2026-09-24");
   eq(closes.length, 22, "closes are the last 22 sessions");
@@ -374,4 +374,4 @@ const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
      "and the roster a run writes is the ledger the next run reads: retired keys are gone, held keys carry their date");
 }
 
-console.log(`✓ flows-universe: ${checks} assertions — a gapless geometric band ladder that is the vendor's only pagination, a size cohort chosen independently of the flow it scores, an index guarantee that can only add names, a pool that does not depend on vendor row order, and the |score| ranking that decides which names are worth three more calls; plus the NDX 10 and the Nasdaq-100 membership read from the QQQ holdings with share classes collapsed and a named fallback, the focus roster and its payload shape, and the retire rule and roster ledger that keep stale cards from outliving their names`);
+console.log(`✓ flows-universe: ${checks} assertions — a gapless geometric band ladder that is the feed's only pagination, a size cohort chosen independently of the flow it scores, an index guarantee that can only add names, a pool that does not depend on feed row order, and the |score| ranking that decides which names are worth three more calls; plus the NDX 10 and the Nasdaq-100 membership read from the QQQ holdings with share classes collapsed and a named fallback, the focus roster and its payload shape, and the retire rule and roster ledger that keep stale cards from outliving their names`);

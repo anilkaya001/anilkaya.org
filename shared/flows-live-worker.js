@@ -507,7 +507,7 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
         } else if (!anyAnswered(marketFeeds(payload))) {
           why = "no-feed-answered";
           out.tier1 = { written: false, why, bytes: text.length, statuses };
-          emitFailure(log, "error", "live:market not written: no vendor feed answered", { statuses });
+          emitFailure(log, "error", "live:market not written: no feed feed answered", { statuses });
         } else if (text.length > spec.maxBytes) {
           why = "over-cap";
           out.tier1 = { written: false, why, bytes: text.length, statuses };

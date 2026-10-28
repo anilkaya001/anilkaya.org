@@ -34,7 +34,7 @@
     boardRank: "Board rank", entered: "New to a side", incumbents: "Incumbents", count: "Names", flagged: "Flagged windows",
     pcrVolumeRatio: "Put/call volume", pcrPremiumRatio: "Put/call premium", iv30dMedianRatio: "IV30 median",
     ivRankMedianRatio: "IV rank median", topShareRatio: "Top-five share", callLiftRatio: "Call lift", putLiftRatio: "Put lift",
-    apiCalls: "Vendor calls", retainedSessions: "Sessions", windowSessions: "Sessions", keptNames: "Names",
+    apiCalls: "Feed calls", retainedSessions: "Sessions", windowSessions: "Sessions", keptNames: "Names",
   };
   const SKIP = new Set(["robustness", "convictionScale", "boardRows", "gateDays", "rowCap", "perNameCap", "requestedRows", "sessions", "minutesRead", "strikes", "crossings"]);
 
@@ -653,7 +653,7 @@
         return said;
       },
       how: ["The threshold distance is quoted from the watch list's published residual and never from its integer score, which is zero for every row inside the band — reading the score would report the whole band as one undifferentiated tie.",
-        "A negative days-to-earnings is withheld rather than read as due today. It means the vendor's date is stale, and a stale date presented as an imminent one is the more expensive of the two mistakes."] },
+        "A negative days-to-earnings is withheld rather than read as due today. It means the feed's date is stale, and a stale date presented as an imminent one is the more expensive of the two mistakes."] },
   ];
 
   function tile(fact, brief, i) {

@@ -5,7 +5,7 @@
   if (!UI || !UI.F || !UI.h || !UI.s) return;
   const { F, h, s } = UI;
   const DASH = UI.DASH, MINUS = UI.MINUS, MID = " " + UI.MID + " ";
-  const DEALER_CLAUSE = "on the vendor's convention (dealers long calls, short puts)";
+  const DEALER_CLAUSE = "on the feed's convention (dealers long calls, short puts)";
   const RANGES = { "1M": 20, "3M": 63, "6M": 126, "1Y": 252 };
   const FWD = 20;
   const RAIL_PLOT_MIN = 236;

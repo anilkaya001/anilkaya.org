@@ -114,7 +114,7 @@ try {
       const edgeGrid = parseCsv(fs.readFileSync(await edge.path(), "utf8").slice(1));
       eq([edge.suggestedFilename(), edgeGrid[edgeGrid.length - 1][0]], [file, foot], `at ${utc} the stamp, the ISO form and the file's day truncate together, never round, and agree on the Turkiye day`);
     }
-    ok(!/\b(px|chg|Price)\b/.test(grid[0].join(",")), "the vendor quote (last price, day change) is not among the exported columns");
+    ok(!/\b(px|chg|Price)\b/.test(grid[0].join(",")), "the feed quote (last price, day change) is not among the exported columns");
 
     const cells = ["=1+1", "+1", "-2+3", "@SUM(A1)", "\tcmd", "\rcmd", "\u22123.2%", "plain", "a,b", 'say "hi"', "two\nlines", "", null, undefined, NaN, Infinity, -0.5, 0, 1e21, true];
     const raw = await page.evaluate((c) => window.FlowsUI.csv(c.map((v) => [v]), [{ label: "v", get: (r) => r[0] }], []), cells);
@@ -200,7 +200,7 @@ try {
       "Win probability (implied) (fraction)", "Win probability (real-world) (fraction)", "Expected value, real world (USD)"], "the desk's lines export our own model outputs with their units");
     ok(grid.length >= 1 + 9 + 2, `every priced line is a row (${grid.length - 3})`);
     ok(grid.slice(1, -2).every((r) => r[0] === "NVDA" && /^(covered call|cash-secured put)$/.test(r[1]) && Number.isFinite(Number(r[5]))), "each row is a named structure at a numeric strike");
-    ok(!grid[0].some((c) => /bid|ask|spot|mid\b|quoted|premium(?! ÷ collateral \(fraction\))/i.test(c)) && grid[0].filter((c) => /premium/i.test(c)).length === 1, "and the vendor's quoted premium is not among them: the one premium column is the site's own ratio to the collateral, in a fraction");
+    ok(!grid[0].some((c) => /bid|ask|spot|mid\b|quoted|premium(?! ÷ collateral \(fraction\))/i.test(c)) && grid[0].filter((c) => /premium/i.test(c)).length === 1, "and the feed's quoted premium is not among them: the one premium column is the site's own ratio to the collateral, in a fraction");
     ok(grid.slice(1, -2).every((r) => /^\d{4}-\d{2}-\d{2}$/.test(r[3])), "each line names the session of the chain it was priced from");
     ok(/as of \d{4}-\d{2}-\d{2}/.test(grid[grid.length - 2][0]), `and the footer carries that session as its as-of day (${grid[grid.length - 2][0]})`);
     await page.close();

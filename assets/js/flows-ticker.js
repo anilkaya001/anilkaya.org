@@ -9,7 +9,7 @@
   const C = UI.chart;
   const { fx1, tw: textW, dateTicks, heightFor, marker: mark, spread: spreadTags } = C;
   const DASH = UI.DASH, MINUS = UI.MINUS, SEP = " " + UI.MID + " ";
-  const DEALER_CLAUSE = "on the vendor's convention (dealers long calls, short puts)";
+  const DEALER_CLAUSE = "on the feed's convention (dealers long calls, short puts)";
   const NOPE_SIGN = { "sign-agrees": "agrees with", "sign-differs": "differs from" };
   const $ = (id) => document.getElementById(id);
   const statusEl = $("ftStatus");
@@ -84,7 +84,7 @@
     const code = sec.why || sec.code || sec.reason || null;
     const said = code && why[code] ? why[code] : code && FLOW_CODES[code] ? FLOW_CODES[code] : typeof sec.reason === "string" && sec.reason.length > 12 ? sec.reason : null;
     if (sec.status === "ok" || sec.status === "thin") return OK;
-    if (sec.status === "stale") return ST("stale", sentence(said) || "The vendor dated this read to another session.");
+    if (sec.status === "stale") return ST("stale", sentence(said) || "The feed dated this read to another session.");
     if (sec.status === "quiet") return ST("quiet", sentence(said) || "Read, with nothing to report.");
     if (sec.status === "unreadable" || sec.status === "unshaped") return ST("withheld", sentence(said) || FLOW_CODES.malformed);
     if (sec.status === "pending") return ST("pending", sentence(said) || "Not computed yet.");
@@ -150,7 +150,7 @@
 
   function freshNote(sec) {
     if (!sec || sec.sameSession !== false) return null;
-    return "The vendor dated this read " + (sec.asOf || "to another session") + ", not the session the card describes.";
+    return "The feed dated this read " + (sec.asOf || "to another session") + ", not the session the card describes.";
   }
 
   const SESSIONS = (n) => n + (n === 1 ? " session" : " sessions");
@@ -395,12 +395,12 @@
   const PX = { key: null, mode: null };
   const put = (n, text) => { if (n.textContent !== text) n.textContent = text; };
   const liveInfo = () => ({ title: "Live price", state: "live", asOf: F.time(PX.pp.readAt),
-    lead: "Re-read from the vendor's live quote while the session is open. Every other reading on this page is the session's, as the card published it.",
+    lead: "Re-read from the feed's live quote while the session is open. Every other reading on this page is the session's, as the card published it.",
     facts: [["Last", F.px(PX.q.price)], ["Previous close", F.px(PX.q.prevClose)], ["Session open", F.px(PX.q.open)], ["High", F.px(PX.q.high)], ["Low", F.px(PX.q.low)], ["Print time", PX.q.tapeTime ? F.time(PX.q.tapeTime) : null], ["Card close", F.px(PX.S)]] });
-  const closeInfo = () => ({ title: "Close", asOf: F.time(PX.pp.readAt), lead: "The vendor's last price, which can include trades after the regular session closed. The session close is the figure below as Card close. Every other figure on this page is from the session of " + PX.card.sessionDate + ".",
+  const closeInfo = () => ({ title: "Close", asOf: F.time(PX.pp.readAt), lead: "The feed's last price, which can include trades after the regular session closed. The session close is the figure below as Card close. Every other figure on this page is from the session of " + PX.card.sessionDate + ".",
     facts: [["Last", F.px(PX.q.price)], ["Previous close", F.px(PX.q.prevClose)], ["Card close", F.px(PX.S)]] });
   const readInfo = () => ({ title: "Last read", asOf: F.time(PX.at),
-    lead: PX.q ? "The vendor's quote as last read; the market is not in its regular session, so the dossier stays on the session close." : PX.rp.note,
+    lead: PX.q ? "The feed's quote as last read; the market is not in its regular session, so the dossier stays on the session close." : PX.rp.note,
     facts: [["Last read", F.px(PX.lastPx)], ["Session close", F.px(PX.S)], ["Source", PX.q ? "live quote" : PX.rp.source], ["Basis", PX.q ? null : PX.rp.spotBasis], ["Previous close", PX.q ? F.px(PX.q.prevClose) : null]] });
   const cell = (tag) => h(tag, { "data-c": "" });
   const LAST = {
@@ -482,20 +482,20 @@
             ["1Y z", cx && num(cx.z) !== null ? F.signed(cx.z, 2) : null], ["Same sign for", cx && num(cx.persist) !== null ? SESSIONS(cx.persist) : null], ["Long share of the year", cx ? F.pct(cx.longShare, 0) : null]],
           notes: ["The zero-gamma level is open-interest dealer gamma re-priced at each hypothetical spot, each contract at its own volatility and expiry, assuming dealers long calls and short puts."] }) }),
       UI.gaugeChip({ ring: ivr.v, color: "--s-blue", value: ivr.v === null ? chipDash(ivr.st.state) : String(Math.round(ivr.v * 100)), label: "IV rank",
-        info: () => ({ title: "IV rank", state: ivr.st.state === "ok" ? null : ivr.st.state, lead: ivr.st.state === "ok" ? "IV rank, " + Math.round(ivr.v * 100) + " of 100: where today sits between its 1-year low and high. The vendor does not document which tenor of implied volatility it ranks." : ivr.st.reason,
+        info: () => ({ title: "IV rank", state: ivr.st.state === "ok" ? null : ivr.st.state, lead: ivr.st.state === "ok" ? "IV rank, " + Math.round(ivr.v * 100) + " of 100: where today sits between its 1-year low and high. The feed does not document which tenor of implied volatility it ranks." : ivr.st.reason,
           facts: [["IV 30d", F.pct(pm.iv30)], ["Momentum", num(pm.ivMomentum) === null ? null : F.pts(pm.ivMomentum) + " pts"]] }) }),
       UI.gaugeChip({ icon: "levels", color: "--accent-soft", value: im === null ? chipDash(stOf(card.panels.pricedMove, "priced move").state) : "±" + F.pct(im), label: (num(pm.sessions) || 10) + "d move",
         info: () => ({ title: "Priced move", state: stOf(card.panels.pricedMove, "priced move").state === "ok" ? null : stOf(card.panels.pricedMove, "priced move").state,
           lead: leadOf(card.panels.pricedMove) || reasonOf(stOf(card.panels.pricedMove, "priced move")),
-          facts: [["Implied, one standard deviation", im === null ? null : "±" + F.pct(im)], ["Range", F.px(pm.impliedLow) + " – " + F.px(pm.impliedHigh)], ["Realized, same scaling", num(pm.realizedMove) === null ? null : "±" + F.pct(pm.realizedMove)], ["Vendor's end-of-week figure", num(pm.movePerc) === null ? null : "±" + F.pct(pm.movePerc)]],
-          notes: [pm.bandNote, num(pm.movePerc) === null ? null : "The vendor's end-of-week figure is about 0.85 of the at-the-money straddle to " + (pm.horizonRule || "the nearest end-of-week expiry") + ": a band the market prices to hold about half the time, not a forecast and not a one-day move."] }) }),
+          facts: [["Implied, one standard deviation", im === null ? null : "±" + F.pct(im)], ["Range", F.px(pm.impliedLow) + " – " + F.px(pm.impliedHigh)], ["Realized, same scaling", num(pm.realizedMove) === null ? null : "±" + F.pct(pm.realizedMove)], ["Feed's end-of-week figure", num(pm.movePerc) === null ? null : "±" + F.pct(pm.movePerc)]],
+          notes: [pm.bandNote, num(pm.movePerc) === null ? null : "The feed's end-of-week figure is about 0.85 of the at-the-money straddle to " + (pm.horizonRule || "the nearest end-of-week expiry") + ": a band the market prices to hold about half the time, not a forecast and not a one-day move."] }) }),
     ];
     $("ftChips").replaceChildren(UI.chips(chipList.filter(Boolean), "Signal"));
   }
 
   function breaksOf(ctx) {
     const b = ctx && Array.isArray(ctx.breaks) ? ctx.breaks : [];
-    return b.map((x) => "The vendor’s history steps on " + x.date + " (close ×" + x.ratio + (num(x.volumeRatio) !== null ? ", volume ×" + Math.round(x.volumeRatio) + " against the sessions before" : "") + (x.shape === "split" ? ", the shape of an unadjusted split" : "") + "), so the " + x.before + " sessions before it are cut.");
+    return b.map((x) => "The feed’s history steps on " + x.date + " (close ×" + x.ratio + (num(x.volumeRatio) !== null ? ", volume ×" + Math.round(x.volumeRatio) + " against the sessions before" : "") + (x.shape === "split" ? ", the shape of an unadjusted split" : "") + "), so the " + x.before + " sessions before it are cut.");
   }
 
   function paintFreshness(card) {
@@ -1657,7 +1657,7 @@
     const atS = num(sf.atSpot);
     const walls = { call: lv.call_wall ? lv.call_wall.px : null, put: lv.put_wall ? lv.put_wall.px : null };
     const label = card.ticker + " gamma by strike (rows) and expiry (columns); " + (ramp ? "shade steps by a factor of " + ramp.factor + " up to " + F.num(ramp.top) + " Γ" : "shade carries no magnitude") + (cap ? ", slashed cells are beyond the colour cap" : "") +
-      "; hatched cells are short gamma, dotted cells were measured at exactly zero, and dashed outlines are strike and expiry pairs the vendor did not return";
+      "; hatched cells are short gamma, dotted cells were measured at exactly zero, and dashed outlines are strike and expiry pairs the feed did not return";
     return C.mount(host, (el, w, animate) => {
       const R = order.length, N = sf.expiries.length;
       const phone = w < 600;
@@ -1762,7 +1762,7 @@
         : "This surface was published before the colour scale existed, so shade carries no magnitude here: a flat-looking grid is not a uniform book.",
       "Short-gamma cells are hatched as well as coloured, so sign survives without hue.",
       zeros ? zeros + (zeros === 1 ? " pair was" : " pairs were") + " measured at exactly zero, drawn with a dot: zero is neither long nor short." : null,
-      voids ? voids + (voids === 1 ? " strike and expiry pair was" : " strike and expiry pairs were") + " not returned by the vendor and " + (voids === 1 ? "is" : "are") + " drawn as a dashed outline, not as zero." : null,
+      voids ? voids + (voids === 1 ? " strike and expiry pair was" : " strike and expiry pairs were") + " not returned by the feed and " + (voids === 1 ? "is" : "are") + " drawn as a dashed outline, not as zero." : null,
       num(sf.strikesTotal) !== null && sf.strikesTotal > sf.strikesShown ? "The grid shows " + sf.strikesShown + " of " + sf.strikesTotal + " strikes, the band around spot." : null,
     ];
   }
@@ -1863,7 +1863,7 @@
   function greekLegs(host, key, p) {
     const rows = (p.rows || []).filter((r) => isoOk(r.expiry));
     const name = key === "deltaExposure" ? "Delta" : key[0].toUpperCase() + key.slice(1);
-    const label = name + " by expiry, the call and put legs as the vendor signed them, in " + p.unit;
+    const label = name + " by expiry, the call and put legs as the feed signed them, in " + p.unit;
     return C.mount(host, (el, w, animate) => {
       const H = w < 600 ? 84 : 92;
       const left = 4, right = 4, top = 6, bot = 16;
@@ -1981,7 +1981,7 @@
       lv.max_pain ? { x: lv.max_pain.px, shape: "dia", color: "--lvl-pain", row: "base", r: 3.6 } : null,
     ].filter(Boolean);
     const wallLabels = (xs) => ["call_wall", "put_wall"].map((k) => lv[k]).filter((l) => l && xs.some((x) => Math.abs(x - l.px) < 1e-6)).map((l) => ({ x: xs.find((x) => Math.abs(x - l.px) < 1e-6), text: K(l.px) }));
-    const vendorKey = vendorMarks.length ? keyOf("--label-1", "ring", "Vendor") : null;
+    const vendorKey = vendorMarks.length ? keyOf("--label-1", "ring", "Feed") : null;
     const views = [
       { label: "Book", st: stB, never: isIndex(card) && !prof, name: "Gamma book", draw: (host) => {
         const [lo, hi] = strikeWindow(card, S);
@@ -2047,9 +2047,9 @@
           ["1Y z of the daily series", gx && num(gx.z) !== null ? F.signed(gx.z, 2) : null], ["1Y percentile of the daily series", gx ? F.pct(gx.pct, 0) : null], ["Daily series per 1% as a share of ADV", gx ? F.pct(gx.adv, 1) : null], ["Sign flips in the daily series", gx && num(gx.flips) !== null ? String(gx.flips) : null],
           ["Daily series counts", gx ? "contracts expiring that day; the book above does not" : null],
           ...keyStats(card).filter(([k]) => /wall|pain|crossing|gamma|flip|strike/i.test(k)),
-          ["Vendor flip", vl && num(vl.flip) !== null ? F.px(vl.flip) + " (" + (vl.flipAgree ? "agrees" : "differs by " + fx(vl.flipGap, 2, true) + " ATR") + ")" : null],
-          ["Vendor call wall", vl && num(vl.callWall) !== null ? F.px(vl.callWall) + (vl.callWallAgree ? " (agrees)" : " (differs)") : null],
-          ["Vendor put wall", vl && num(vl.putWall) !== null ? F.px(vl.putWall) + (vl.putWallAgree ? " (agrees)" : " (differs)") : null],
+          ["Feed flip", vl && num(vl.flip) !== null ? F.px(vl.flip) + " (" + (vl.flipAgree ? "agrees" : "differs by " + fx(vl.flipGap, 2, true) + " ATR") + ")" : null],
+          ["Feed call wall", vl && num(vl.callWall) !== null ? F.px(vl.callWall) + (vl.callWallAgree ? " (agrees)" : " (differs)") : null],
+          ["Feed put wall", vl && num(vl.putWall) !== null ? F.px(vl.putWall) + (vl.putWallAgree ? " (agrees)" : " (differs)") : null],
           ["Nearby flips", vl && Array.isArray(vl.nearby) && vl.nearby.length ? vl.nearby.map((v) => F.px(v)).join(SEP) + (num(vl.ambiguity) !== null ? " (spread " + fx(vl.ambiguity, 2) + " ATR)" : "") : null]],
         sections: [
           { title: "Book", lines: [stB.state !== "ok" ? stB.reason : "The book view is the open-interest gamma book re-marked at each hypothetical spot: where it crosses zero is the flip.", P.levels && P.levels.book ? "Walls are read from the open-interest book: call wall " + F.px(P.levels.book.callWall) + ", put wall " + F.px(P.levels.book.putWall) + ", magnet " + F.px(P.levels.book.magnet) + "." : null] },
@@ -2057,7 +2057,7 @@
           { title: "Grid", lines: [leadOf(P.surface) || reasonOf(stS)].concat(stS.state === "ok" ? gridNotes(P.surface) : []) },
           { title: "Roll-off", lines: [leadOf(P.calendar) || reasonOf(stC)] },
           { title: "Displacement", lines: [leadOf(P.displacement) || reasonOf(panelSt(card, "displacement", "displacement read"))] },
-          { title: "Vendor levels", lines: [vl ? "The vendor's own levels are drawn as rings; our flip is the book's strike-sum crossing, and the vendor defines its put wall differently, so disagreement there is expected." : reasonOf(xSt(X.gexLevels, "vendor level read"))] },
+          { title: "Feed levels", lines: [vl ? "The feed's own levels are drawn as rings; our flip is the book's strike-sum crossing, and the feed defines its put wall differently, so disagreement there is expected." : reasonOf(xSt(X.gexLevels, "feed level read"))] },
           { title: "One year", lines: [stY.state !== "ok" ? stY.reason : "Net dealer gamma per session over the last year; a gap is a session with no reading, not a zero."] },
         ],
         notes: ["Blue bars are where dealers are long gamma and hedge against the move; orange bars are short gamma, where hedging chases it. Gamma bars are linear: walls dominate, which is the truth; exact values come from scrubbing."],
@@ -2173,7 +2173,7 @@
             ["Variance shares", sh ? parts.map((p) => p[0] + " " + F.pct(p[1], 0, true)).join(SEP) : null]],
           sections: [{ title: "Robustness", lines: [V.robustness && V.robustness.why] },
             { title: "Silences", lines: (V.silences || []).map((x) => (x.kind === "quiet" ? "Quiet" : x.kind === "pending" ? "Pending" : x.kind === "unreadable" ? "Unreadable" : "Unavailable") + " — " + x.reason) },
-            { title: "Conventions", lines: [V.conventions ? (typeof V.conventions === "string" ? V.conventions : Object.values(V.conventions).filter((x) => typeof x === "string").join(" ")) : null, "Every figure is dealer-signed under the vendor's convention: positive cells are shares dealers must buy to stay hedged, negative cells shares they must sell."] },
+            { title: "Conventions", lines: [V.conventions ? (typeof V.conventions === "string" ? V.conventions : Object.values(V.conventions).filter((x) => typeof x === "string").join(" ")) : null, "Every figure is dealer-signed under the feed's convention: positive cells are shares dealers must buy to stay hedged, negative cells shares they must sell."] },
             { title: "Variance", lines: [offsetting ? "The channels offset: at least one share is below zero, so the shares are printed rather than scaled into a bar that would claim they are parts of a whole." : null] },
             { title: "Clock", lines: [gp ? "The open-interest book's gamma per 1% through the regular session (" + gp.minutes + " minutes), " + gp.flips + " sign changes, beside the gamma the day's flow added." : stClock.reason] },
             { title: "Greeks", lines: gk.map(([k, p, st2]) => (st2.state === "ok" ? leadOf(p) : null)).concat(greekLines(card)) }],
@@ -2331,7 +2331,7 @@
     const rr = skew ? skew.rr25 : sk ? sk.skew : null;
     const slope = cone ? cone.slope30_90 : null;
     const rk = ivRankOf(card);
-    const cut = P.ivSurface && P.ivSurface.coverage && P.ivSurface.coverage.truncated ? "The vendor returned " + P.ivSurface.coverage.rowsReturned + " chain rows, the cap, so this surface may be an arbitrary subset of the book and far wings may be missing; " + P.ivSurface.coverage.filter + "." : null;
+    const cut = P.ivSurface && P.ivSurface.coverage && P.ivSurface.coverage.truncated ? "The feed returned " + P.ivSurface.coverage.rowsReturned + " chain rows, the cap, so this surface may be an arbitrary subset of the book and far wings may be missing; " + P.ivSurface.coverage.filter + "." : null;
     mod({ id: "m-vol", title: "Volatility", span: [12, 6], st, seg: vw.seg, views: vw.views, index: 6, body: [
       mets([
         metric("IV 30d", F.pct(iv30), { sub: cone && num(cone.pct30) !== null ? "pct " + Math.round(cone.pct30 * 100) : num(pm.ivMomentum) !== null ? F.pts(pm.ivMomentum) + " pts 1d" : null, state: num(iv30) === null ? ST("unavailable", "No 30-day implied volatility on the card.") : null }),
@@ -2352,8 +2352,8 @@
           ...(sk ? skewTermRead(sk).facts : []), ["Steepest cell", sf ? surfaceRead(sf).steepest : null],
           ["IV half-life", X.ivDyn && X.ivDyn.status === "ok" && num(X.ivDyn.halfLife) !== null ? X.ivDyn.halfLife.toFixed(1) + " sessions (" + X.ivDyn.view + ")" : null],
           ["Vol of vol", X.ivDyn && X.ivDyn.status === "ok" ? F.pct(X.ivDyn.volOfVolRel, 0) : null], ["Spot–vol correlation", X.ivDyn && X.ivDyn.status === "ok" && num(X.ivDyn.spotVolCorr) !== null ? X.ivDyn.spotVolCorr.toFixed(2) : null],
-          ["Vendor anomaly", X.anomaly && X.anomaly.status === "ok" ? X.anomaly.view + " (" + F.signed(X.anomaly.score, 1) + ")" + (X.anomaly.vote === -1 ? ", disagrees with ours" : X.anomaly.vote === 1 ? ", agrees" : "") : null],
-          ["Vendor character", X.character && X.character.status === "ok" ? X.character.character + ", Hurst " + fx(X.character.hurst, 2) : null],
+          ["Feed anomaly", X.anomaly && X.anomaly.status === "ok" ? X.anomaly.view + " (" + F.signed(X.anomaly.score, 1) + ")" + (X.anomaly.vote === -1 ? ", disagrees with ours" : X.anomaly.vote === 1 ? ", agrees" : "") : null],
+          ["Feed character", X.character && X.character.status === "ok" ? X.character.character + ", Hurst " + fx(X.character.hurst, 2) : null],
           ...garchFacts(card)],
         sections: [{ title: "Cone", lines: [cone ? "Each tenor's dot is today's implied volatility; the bar is its year's range and the box its middle half. The grey band behind is the realized-volatility cone at the matching window (10th to 90th percentile over two years)." : reasonOf(views[0].st), freshNote(X.cone)] },
           { title: "Term", lines: [term && term.eventKink ? "The first expiry spanning the earnings day carries a premium of " + F.pts(term.eventKink.premium) + " percentile points over its neighbours." : null, term && term.eventMove && num(term.eventMove.sd) !== null ? "The implied earnings move is ±" + F.pct(term.eventMove.sd) + " (one sd)." : null, sk && sk.termReason] },
@@ -2498,7 +2498,7 @@
       offIndex(card, X.multiLeg) ? null : UI.tile({ title: "Structures", value: ml ? String(ml.n) : DASH, unit: ml ? F.money(ml.grossPrem) : null, state: ml ? null : xSt(X.multiLeg, "multi-leg read"),
         info: () => ({ title: "Multi-leg structures", lead: ml ? ml.n + " multi-leg structures traded in the session" + (ml.truncated ? " (the read hit its page ceiling, so this is a floor)" : "") + "." : null,
           facts: ml ? [["Net premium", moneyPx(ml.netPrem)], ["Credit share", F.pct(ml.creditShare, 0)], ["Opening share", F.pct(ml.openingShare, 0)], ["Long / short", ml.long + " / " + ml.short],
-            ...ml.byStrategy.slice(0, 6).map((b) => [String(b.s).replace(/_/g, " "), b.n + SEP + moneyPx(b.np)])] : [], notes: ["Net greeks on multi-leg rows are in the vendor's own unit and are not converted."] }),
+            ...ml.byStrategy.slice(0, 6).map((b) => [String(b.s).replace(/_/g, " "), b.n + SEP + moneyPx(b.np)])] : [], notes: ["Net greeks on multi-leg rows are in the feed's own unit and are not converted."] }),
         body: ml ? h("div", { class: "ft-meters" }, meter("Credit", ml.creditShare, "--s-purple"), meter("Open", ml.openingShare, "--s-blue"), h("div", { class: "ui-tags" }, ml.byStrategy.slice(0, 2).map((b) => tag(String(b.s).replace(/_/g, " "))))) : null }),
     ].filter(Boolean);
     const tiles = tileList.length ? h("div", { class: "ui-tiles ft-tiles" }, tileList) : null;
@@ -2516,7 +2516,7 @@
           ["Centroid", fs ? F.px(fs.centroid) + " (" + F.signed(fs.centroidSigma, 2) + " SD from spot)" : null], ["Wall share", fs ? F.pct(fs.wallShare, 1) + " of in-band flow at the walls" : null]]),
         sections: [{ title: "Aggressor", lines: [leadOf(P.aggressor) || reasonOf(panelSt(card, "aggressor", "aggressor ladder")), P.aggressor && P.aggressor.relation] },
           { title: "Session", lines: [tp ? "Read from the " + (STATE.tapeLive ? "live " : "") + "prints at " + F.time(tp.readAt) + "." : null].concat(pathNotes(card, legs)) },
-          { title: "Days", lines: [npY ? "Net premium per session over the year from the vendor's options-volume history; a dot is a session with no reading, not a zero." : pt ? pt.unit : reasonOf(panelSt(card, "premiumTrack", "premium history"))] }],
+          { title: "Days", lines: [npY ? "Net premium per session over the year from the feed's options-volume history; a dot is a session with no reading, not a zero." : pt ? pt.unit : reasonOf(panelSt(card, "premiumTrack", "premium history"))] }],
       }) });
     vw.start();
   }
@@ -2559,9 +2559,9 @@
           state: !ins ? xSt(X.insiders, "insider read") : insRead ? null : ST("quiet", "No insider purchase or sale in the last 90 days.") }),
       ], { min: 92 }), vw.box, vw.leg],
       info: () => ({
-        title: "Positioning and ownership", asOf: si ? si.date : null, lead: sh ? "Short interest, borrow and short volume from FINRA and the vendor, and insider Form 4 trades over the last 90 days." : stShort.reason,
+        title: "Positioning and ownership", asOf: si ? si.date : null, lead: sh ? "Short interest, borrow and short volume from FINRA and the feed, and insider Form 4 trades over the last 90 days." : stShort.reason,
         facts: [["Short interest", si ? F.pct(si.si, 2) + " of float (" + F.int(si.shares) + " shares, settled " + si.date + ", " + si.ageDays + " days old)" : null], ["Days to cover", si && num(si.dtc) !== null ? si.dtc.toFixed(2) : null],
-          ["Borrow fee", bo ? F.pct(bo.fee, 2) + " a year" + (bo.htb ? ", hard to borrow" : "") : null], ["Rebate", bo ? F.pct(bo.rebate, 2) : null], ["Shares available", bo ? F.int(bo.avail) + (bo.availCensored ? " (the vendor's cap)" : "") : null],
+          ["Borrow fee", bo ? F.pct(bo.fee, 2) + " a year" + (bo.htb ? ", hard to borrow" : "") : null], ["Rebate", bo ? F.pct(bo.rebate, 2) : null], ["Shares available", bo ? F.int(bo.avail) + (bo.availCensored ? " (the feed's cap)" : "") : null],
           ["Short-volume ratio", sv ? F.pct(sv.ratio, 1) + " (60-day mean " + F.pct(sv.mean60, 1) + ", z " + F.signed(sv.z, 2) + ")" : null],
           ["Squeeze pressure", sh && sh.squeeze && num(sh.squeeze.pressure) !== null ? F.signed(sh.squeeze.pressure, 2) + " sd across the deep names" : null],
           ["Insider net 90d", ins ? moneyPx(ins.net90) + " (" + moneyPx(ins.net90ExPlan) + " outside 10b5-1 plans)" : null], ["Distinct buyers", ins ? String(ins.buyers) : null],
@@ -2622,7 +2622,7 @@
         metric("Implied", implied === null ? DASH : "±" + F.pct(implied, 1), { key: keyOf("--accent-ink", "ln", ""), state: implied === null ? ST("quiet", "No implied earnings move: the report is not inside the listed expiries or the next five sessions.") : null }),
         metric("Realized", E && num(E.medianAbsMove) !== null ? "±" + F.pct(E.medianAbsMove, 1) : DASH, { sub: E && num(E.medianRatio) !== null ? "×" + E.medianRatio.toFixed(2) + " priced" : null, state: E ? null : stE }),
         metric("Beat", E && num(E.beat) !== null ? F.pct(E.beat, 0) : DASH, { sub: (beatOf ? beatOf + " " : "") + "moved > priced", state: E ? null : stE }),
-        metric("Straddle", E && num(E.ls1dHit) !== null ? F.pct(E.ls1dHit, 0) : DASH, { sub: ls1dOf ? ls1dOf + " hit, 1d" : "1d hit rate", state: E && num(E.ls1dHit) !== null ? null : E ? ST("quiet", "The vendor published no straddle values for these reports.") : stE }),
+        metric("Straddle", E && num(E.ls1dHit) !== null ? F.pct(E.ls1dHit, 0) : DASH, { sub: ls1dOf ? ls1dOf + " hit, 1d" : "1d hit rate", state: E && num(E.ls1dHit) !== null ? null : E ? ST("quiet", "The feed published no straddle values for these reports.") : stE }),
       ], { min: 84 }), box, legend([keyOf("--up-mark", "", "Up"), keyOf("--down-mark", "", "Down"), keyOf("--accent-ink", "ln", "Priced"), dashKey("--label-3", "Median")])],
       info: () => ({
         title: "Events", state: stE.state === "ok" ? null : stE.state, asOf: next && next.d ? "Next " + next.d : null,
@@ -2631,7 +2631,7 @@
           ["Implied now", implied === null ? null : "±" + F.pct(implied, 2)], ["Today against history", num(E.ratioToday) !== null ? "×" + E.ratioToday.toFixed(2) + " of the median realized move" : null],
           ["Median ratio", num(E.medianRatio) !== null ? E.medianRatio.toFixed(2) : null], ["Beat share", F.pct(E.beat, 0) + (beatOf ? " (" + beatOf + " reports)" : "")], ["Median move", F.pct(E.medianAbsMove, 1)], ["Median priced", F.pct(E.medianExpected, 1)],
           ["Day-one drift", num(E.drift) !== null ? F.pct(E.drift, 2, true) + " (" + (E.drift > 0 ? "moves kept going" : "moves faded") + ")" : null], ["Run-up", num(E.runup) !== null ? F.pct(E.runup, 2, true) : null],
-          ["Long straddle 1d / 1w", num(E.ls1dHit) !== null ? F.pct(E.ls1dHit, 0) + " / " + F.pct(E.ls1wHit, 0) + " profitable" + (ls1dOf ? " (" + ls1dOf + " / " + (ls1wOf || DASH) + " reports)" : "") : null], ["Vendor cross-check", num(E.vendorRatio) !== null ? E.vendorRatio.toFixed(2) : null]] : [],
+          ["Long straddle 1d / 1w", num(E.ls1dHit) !== null ? F.pct(E.ls1dHit, 0) + " / " + F.pct(E.ls1wHit, 0) + " profitable" + (ls1dOf ? " (" + ls1dOf + " / " + (ls1wOf || DASH) + " reports)" : "") : null], ["Feed cross-check", num(E.vendorRatio) !== null ? E.vendorRatio.toFixed(2) : null]] : [],
         sections: [{ title: "Rules", lines: E && E.rules ? Object.values(E.rules) : [] }, { title: "Term", lines: [term && term.eventExpiry ? "The first expiry after the report is " + term.eventExpiry + "." : null] }],
       }) });
     if (X.off) sec.querySelector(".ui-mod-t").append(tag(day(X.off)));
@@ -2659,7 +2659,7 @@
       const mx = Math.max(...R.map((r) => r.vol), 1);
       return R.map((r, i) => UI.listRow({ badge: r.cp, badgeTone: r.cp === "C" ? "up" : "down", badgeLabel: r.cp === "C" ? "Call" : "Put", primary: K(r.k),
         secondary: day(r.expiry) + (num(r.iv) !== null ? SEP + F.pct(r.iv, 0) : ""), meter: r.vol / mx, index: i, value: F.num(r.vol),
-        signed: num(r.aggr) === null ? UI.dash(ST("withheld", "The vendor did not report which side took this contract's volume, so its aggressor net is withheld rather than zeroed."), "Aggressor net") : F.num(r.aggr, true), signedValue: r.aggr, cols: TAPE_COLS.contracts }));
+        signed: num(r.aggr) === null ? UI.dash(ST("withheld", "The feed did not report which side took this contract's volume, so its aggressor net is withheld rather than zeroed."), "Aggressor net") : F.num(r.aggr, true), signedValue: r.aggr, cols: TAPE_COLS.contracts }));
     }
     if (kind === "oi") {
       const oi = P.oiDeltas;
@@ -2671,8 +2671,8 @@
         const row = UI.listRow({ badge: r.cp, badgeTone: r.cp === "C" ? "up" : "down", badgeLabel: r.cp === "C" ? "Call" : "Put", primary: K(r.k),
           secondary: day(r.exp) + (num(r.oiUpDays) !== null ? SEP + r.oiUpDays + "d ↑OI" : "") + (num(r.volGtOiDays) !== null ? SEP + r.volGtOiDays + "d V>OI" : ""),
           meter: Math.abs(num(r.diff) || 0) / mx, meterColor: num(r.diff) !== null && r.diff < 0 ? "--down-mark" : "--label-2", index: i,
-          value: num(r.currOi) === null ? UI.dash(ST("unavailable", "The vendor published no open interest for this contract."), "Open interest") : F.num(r.currOi),
-          signed: num(r.diff) === null ? UI.dash(ST("unavailable", "The vendor published no prior clearing day's open interest for this contract, so its change is not stated rather than stated as zero."), "Change") : F.num(r.diff, true), signedValue: num(r.diff), cols: TAPE_COLS.oi });
+          value: num(r.currOi) === null ? UI.dash(ST("unavailable", "The feed published no open interest for this contract."), "Open interest") : F.num(r.currOi),
+          signed: num(r.diff) === null ? UI.dash(ST("unavailable", "The feed published no prior clearing day's open interest for this contract, so its change is not stated rather than stated as zero."), "Change") : F.num(r.diff, true), signedValue: num(r.diff), cols: TAPE_COLS.oi });
         row.title = "Open interest " + (num(r.currOi) === null ? DASH : F.int(r.currOi)) + ", change " + (num(r.diff) === null ? DASH : F.int(r.diff, true)) + (num(r.ratio) !== null ? ", growth " + F.pct(r.ratio, 0, true) : "");
         if (lf && Array.isArray(lf.oi)) {
           const sp = h("span", { class: "ft-life", "aria-hidden": "true" });
@@ -2765,7 +2765,7 @@
     const basisLine = (() => {
       if (!basis) return null;
       const ex = num(basis.exceeded), seen = num(basis.seen);
-      if (basis.verdict === "falsified" && ex !== null && ex > 0 && seen) return "On " + ex + " of " + seen + " lines that traded at least " + basis.minVolume + " contracts, volume exceeded open interest, so the vendor's open interest and today's volume are NOT describing the same span: the open interest is the prior clearing day's.";
+      if (basis.verdict === "falsified" && ex !== null && ex > 0 && seen) return "On " + ex + " of " + seen + " lines that traded at least " + basis.minVolume + " contracts, volume exceeded open interest, so the feed's open interest and today's volume are NOT describing the same span: the open interest is the prior clearing day's.";
       if (basis.verdict === "inconclusive" && ex === 0 && seen) return "INCONCLUSIVE: none of the " + seen + " heavy lines traded more than its open interest, which is not evidence that the two counts describe the same span.";
       if (basis.verdict === "no-data") return "Quiet — the basis of open interest against volume could not be checked: no line traded " + basis.minVolume + " contracts.";
       return "Unavailable — the basis check published a " + String(basis.verdict || "verdict") + " verdict without a count that supports it, so no reading is drawn from it.";
@@ -2773,9 +2773,9 @@
     mod({ id: "m-tape", title: "Prints", span: [12, 7], st, seg: vw.seg, views: vw.views, index: 9, body: [vw.box, vw.leg],
       info: () => ({
         title: "Prints", state: st.state === "ok" ? null : st.state,
-        sections: [{ title: "Contracts", lines: [leadOf(tc) || reasonOf(views[0].st), tc && tc.relation, basisLine, "ΔOI counts the change in open interest the vendor reports against the prior clearing day; the spacing of the two counts is unstated, so it is whatever span the vendor clears on."] },
-          { title: "Open interest", lines: [leadOf(oi) || reasonOf(views[1].st), oi && oi.note, oi && num(oi.shed) ? oi.rows.length + " kept of " + oi.seen + " lines." : null, "Streaks count the sessions open interest rose (↑OI) and volume beat open interest (V>OI), as the vendor counts them; a missing counter is a dash, never a zero."] },
-          views[2].never ? null : { title: "Alerts", lines: [al ? "The session's " + al.n + " flow alerts on this name, largest premium first; the right column is the share of each alert's premium the vendor attributes to the ask side." : reasonOf(views[2].st)] },
+        sections: [{ title: "Contracts", lines: [leadOf(tc) || reasonOf(views[0].st), tc && tc.relation, basisLine, "ΔOI counts the change in open interest the feed reports against the prior clearing day; the spacing of the two counts is unstated, so it is whatever span the feed clears on."] },
+          { title: "Open interest", lines: [leadOf(oi) || reasonOf(views[1].st), oi && oi.note, oi && num(oi.shed) ? oi.rows.length + " kept of " + oi.seen + " lines." : null, "Streaks count the sessions open interest rose (↑OI) and volume beat open interest (V>OI), as the feed counts them; a missing counter is a dash, never a zero."] },
+          views[2].never ? null : { title: "Alerts", lines: [al ? "The session's " + al.n + " flow alerts on this name, largest premium first; the right column is the share of each alert's premium the feed attributes to the ask side." : reasonOf(views[2].st)] },
           { title: "Prints", lines: [leadOf(dp) || reasonOf(views[3].st), dp && dp.note, dp && num(dp.shed) ? dp.rows.filter((r) => r.canceled !== true).length + " kept of " + dp.seen + " prints" + (num(dp.unpriced) ? ", +" + dp.unpriced + " unpriced print" + (dp.unpriced === 1 ? "" : "s") : "") + "." : null, dp && num(dp.canceled) ? dp.canceled + " canceled print" + (dp.canceled === 1 ? " is" : "s are") + " left out of the ranking and of the dollars; the largest are listed last, marked canceled." : null, "Each print shows its time, price, distance from the close and the quote at execution; a print missing either side of the quote shows a dash, never half a spread."] },
           views[4].never ? null : { title: "Shelves", lines: [dl ? "Dark and lit volume by price within " + dl.bandAtr + " ATR of spot; " + F.pct(dl.darkShare, 0) + " of the in-band volume printed dark. The purple rows are the three largest dark shelves." : reasonOf(views[4].st)] }],
       }) });
@@ -2846,7 +2846,7 @@
   function feedSection(f, cov) {
     if (!f) return null;
     const title = cap(String(f.label || "market-wide list").replace(/^the /, ""));
-    const cut = f.kind === "money" ? (f.orderedBy && /premium|dollar/.test(f.orderedBy) ? "The list is ranked by dollar size." : f.cutAt ? "The vendor answered newest first; the list reaches back to " + F.time(f.cutAt) + "." : null)
+    const cut = f.kind === "money" ? (f.orderedBy && /premium|dollar/.test(f.orderedBy) ? "The list is ranked by dollar size." : f.cutAt ? "The feed answered newest first; the list reaches back to " + F.time(f.cutAt) + "." : null)
       : num(f.cut) !== null ? "The last place in the list held " + F.int(f.cut, true) + " " + f.unit + "." : null;
     const reach = cov ? "The join reached " + cov.in + " of " + cov.of + " names carrying a card." : null;
     const voided = num(f.canceled) ? f.canceled + " canceled print" + (f.canceled === 1 ? " is" : "s are") + " left out of the list." : null;
@@ -2973,7 +2973,7 @@
   };
 
   const LITE = [["Volatility", [["iv30", "IV 30d", "p"], ["ivp", "IV pct", "i"], ["ivRank", "IV rank", "i"], ["rv20", "RV 20d", "p"], ["vrp", "VRP", "v"], ["ts", "Term", "s"], ["im", "Move", "m"], ["dIv1w", "IV 1w", "v"]]],
-    ["Dealers", [["gexAdv", "γ$ per 1% / ADV", "s", "Dealer gamma per 1% move (the vendor's dollars, dealers long calls and short puts) as a share of 30-day average dollar volume, which is average share volume times the last close. Read it as the fraction of a normal day's dollar volume that dealers would trade to re-hedge a 1% move. Positive is long gamma, negative short."], ["gOi", "γ $ per 1%", "$", "Dealer gamma in dollars of delta change for a 1% move: gamma times open interest times 100 shares times spot squared times 0.01, dealers long calls and short puts."], ["gexRatio", "γ ratio (vendor)", "x", "The vendor's gamma ratio. The vendor documents no unit for it, so compare it across names and do not read it as an amount."], ["dDelta", "Flow Δ / ADV", "t", "The vendor's cumulative directional delta of the day's option flow over 30-day average share volume. The vendor documents no unit for the delta, so compare it across names and do not read it as shares."]]],
+    ["Dealers", [["gexAdv", "γ$ per 1% / ADV", "s", "Dealer gamma per 1% move (the feed's dollars, dealers long calls and short puts) as a share of 30-day average dollar volume, which is average share volume times the last close. Read it as the fraction of a normal day's dollar volume that dealers would trade to re-hedge a 1% move. Positive is long gamma, negative short."], ["gOi", "γ $ per 1%", "$", "Dealer gamma in dollars of delta change for a 1% move: gamma times open interest times 100 shares times spot squared times 0.01, dealers long calls and short puts."], ["gexRatio", "γ ratio (feed)", "x", "The feed's gamma ratio. The feed documents no unit for it, so compare it across names and do not read it as an amount."], ["dDelta", "Flow Δ / ADV", "t", "The feed's cumulative directional delta of the day's option flow over 30-day average share volume. The feed documents no unit for the delta, so compare it across names and do not read it as shares."]]],
     ["Flow", [["net", "Net premium", "$"], ["lean", "Lean", "s"], ["pcr", "P/C", "x"]]],
     ["Trend", [["rsi", "RSI", "i"], ["adx", "ADX", "i"], ["bb", "Band", "p"], ["atr", "ATR", "p"], ["sma50", "vs 50d", "s"], ["rvol", "RVOL", "x"], ["si", "Short float", "p"]]]];
   const liteV = (v, f) => (f === "p" ? F.pct(v, 1) : f === "s" ? F.pct(v, 1, true) : f === "t" ? F.pct(v, 2, true) : f === "v" ? volPts(v) + " pts" : f === "m" ? "±" + F.pct(v, 1) : f === "x" ? "×" + v.toFixed(2) : f === "$" ? moneyPx(v) : String(Math.round(v)));
@@ -2985,10 +2985,10 @@
     const ik = num(u.ivp) === null ? "ivRank" : "ivp", il = ik === "ivp" ? "IV pct" : "IV rank", iv = num(u[ik]), g = num(numOr(u.gexAdv, u.gOi)), ed = num(u.ed), gate = card.gate && isoOk(card.gate.earnings) ? card.gate : null;
     const why = (t, lead) => () => ({ title: t, lead }), gs = g < 0 ? "short" : g > 0 ? "long" : null;
     return [
-      UI.gaugeChip({ ring: iv === null ? null : iv / 100, color: "--s-blue", value: iv === null ? chipDash("unavailable") : String(Math.round(iv)), label: il, info: why(il, ik === "ivp" ? "Share of the past year's sessions with implied volatility below today's. The vendor does not document which tenor it reads." : "Where implied volatility sits between its one-year low and high. The vendor does not document which tenor it ranks.") }),
+      UI.gaugeChip({ ring: iv === null ? null : iv / 100, color: "--s-blue", value: iv === null ? chipDash("unavailable") : String(Math.round(iv)), label: il, info: why(il, ik === "ivp" ? "Share of the past year's sessions with implied volatility below today's. The feed does not document which tenor it reads." : "Where implied volatility sits between its one-year low and high. The feed does not document which tenor it ranks.") }),
       UI.gaugeChip({ icon: "vega", color: "--s-blue", value: num(u.iv30) === null ? chipDash("unavailable") : F.pct(u.iv30, 0), label: "IV 30d", info: why("IV 30d", "Thirty-day implied volatility.") }),
       g === null && card.depth === "quote" ? null : UI.gaugeChip({ icon: "gamma", color: gs === "short" ? "--g-short-ink" : "--g-long-ink", value: g === null ? chipDash("unavailable") : gs ? (gs === "short" ? "Short" : "Long") : "Zero", label: "Dealer γ", tone: gs,
-        info: why("Dealer gamma", g === null ? "No dealer-gamma reading." : "The sign of the vendor's dealer gamma for " + card.ticker + ".") }),
+        info: why("Dealer gamma", g === null ? "No dealer-gamma reading." : "The sign of the feed's dealer gamma for " + card.ticker + ".") }),
       gate || ed !== null ? UI.gaugeChip({ icon: "cal", color: "--lvl-flip", value: gate ? day(gate.earnings) : ed + "d", label: "Earnings",
         info: why("Earnings", gate ? card.ticker + " reports " + gate.earnings + ", inside the earnings gate." : ed + " sessions to the next report.") }) : null,
       card.rank ? UI.gaugeChip({ icon: "levels", color: "--accent-soft", value: "#" + card.rank, label: "Size", info: why("Size", card.ticker + " is number " + card.rank + " by market cap of the " + (card.n || "") + " names screened.") }) : null,
@@ -3014,7 +3014,7 @@
     if (!groups.length) return;
     mod({ id: "m-screen", title: "Screen", span: [12, 12], index: 2,
       body: groups.map(([g, l]) => h("div", { class: "ft-scr" }, h("h3", null, g), mets(l.map(([k, lab, f, long]) => metric(lab, liteV(u[k], f), { tone: /[svt$]/.test(f) ? tone(u[k]) : null, info: long ? UI.infoButton(lab, () => ({ title: lab, lead: long }), { small: true }) : null })), { min: 96 }))),
-      info: () => ({ title: "Screen", asOf: card.sessionDate, lead: card.depth === "quote" ? "One read of the vendor's screener row for " + card.ticker + ", taken at " + F.time(card.generatedAt) + "." : "The nightly screen's row for " + card.ticker + ". No card was built for it this session, so this is its whole dossier.",
+      info: () => ({ title: "Screen", asOf: card.sessionDate, lead: card.depth === "quote" ? "One read of the feed's screener row for " + card.ticker + ", taken at " + F.time(card.generatedAt) + "." : "The nightly screen's row for " + card.ticker + ". No card was built for it this session, so this is its whole dossier.",
         facts: [["No card because", card.why === "gated" ? "the earnings gate" : "outside tonight's coverage"]] }) });
   }
 
@@ -3083,7 +3083,7 @@
   const carded = (rows) => rows.filter((r) => r.card !== false);
   function pickerNote(all, shown, tail) {
     if (all.some((r) => r.card === null)) return "All " + NAMES(all.length) + " on today’s board. This board does not publish which of its rows the run went deep enough on to build a card for, so a name here may still open a page with no card. " + tail;
-    if (all.length > shown.length) return "Today’s board ranks " + NAMES(all.length) + " and this run built a card for " + shown.length + " of them, which are the rows below. A card costs vendor calls the run cannot spend on every name, so the rest are ranked without one and are not listed: such a page would have nothing on it. " + tail;
+    if (all.length > shown.length) return "Today’s board ranks " + NAMES(all.length) + " and this run built a card for " + shown.length + " of them, which are the rows below. A card costs feed calls the run cannot spend on every name, so the rest are ranked without one and are not listed: such a page would have nothing on it. " + tail;
     return "All " + NAMES(all.length) + " on today’s board, every one of which carries a card. " + tail;
   }
   const DEPTH_G = { ...UI.depths, deep: ["list", "Deep read"] };

@@ -403,7 +403,7 @@ export function runChecks(run) {
   }
   if (n(run.deadlineSkipped) > 0) {
     out.push(`HEALTH: ${n(run.deadlineSkipped)} card(s) were skipped past the run's deadline: the nightly ran out of time before ` +
-      "building them, so those names keep the previous dossier (a slow vendor, or a nightly slower than the deadline was sized for)");
+      "building them, so those names keep the previous dossier (a slow feed, or a nightly slower than the deadline was sized for)");
   }
   if (run.rosterWritten === false) {
     out.push("HEALTH: the roster was not written, so the next run cannot age or retire cards and probes the store to rebuild " +
@@ -467,21 +467,21 @@ export function extrasChecks(extras) {
   const soft = rows.filter(([, e]) => e && e.state === "warn");
   const quiet = rows.filter(([, e]) => e && e.state === "report" && Number(e.bad) > 0);
   if (bad.length) {
-    failures.push(`HEALTH: the vendor extras came back in a shape the reducers do not read for ${bad.map(([id, e]) => line(id, e)).join(", ")}: ` +
-      "the vendor changed a field these parts rely on, so the stored extract is withheld for those names until a reducer is fixed");
+    failures.push(`HEALTH: the feed extras came back in a shape the reducers do not read for ${bad.map(([id, e]) => line(id, e)).join(", ")}: ` +
+      "the feed changed a field these parts rely on, so the stored extract is withheld for those names until a reducer is fixed");
   }
   if (probation.length) {
-    warnings.push(`WARNING: vendor extras shape: ${probation.map(([id, e]) => line(id, e)).join(", ")} is past the failing line but is not failed tonight: ` +
+    warnings.push(`WARNING: feed extras shape: ${probation.map(([id, e]) => line(id, e)).join(", ")} is past the failing line but is not failed tonight: ` +
       `it has not yet had ${EXTRAS_LINES.matureNights} clean nights of ${EXTRAS_LINES.minAttempted} or more reads, or it already failed the night before`);
   }
   if (soft.length) {
-    warnings.push(`WARNING: vendor extras shape: ${soft.map(([id, e]) => line(id, e)).join(", ")} answered in a shape the reducers do not read`);
+    warnings.push(`WARNING: feed extras shape: ${soft.map(([id, e]) => line(id, e)).join(", ")} answered in a shape the reducers do not read`);
   }
   if (quiet.length) {
-    notes.push(`vendor extras under ${EXTRAS_LINES.minAttempted} attempts, reported not judged: ${quiet.map(([id, e]) => line(id, e)).join(", ")}`);
+    notes.push(`feed extras under ${EXTRAS_LINES.minAttempted} attempts, reported not judged: ${quiet.map(([id, e]) => line(id, e)).join(", ")}`);
   }
   const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
-  notes.push(`vendor extras: ${n(extras.calls)} call(s), ${n(extras.due)} due, ${n(extras.deferred)} deferred to a later night` +
+  notes.push(`feed extras: ${n(extras.calls)} call(s), ${n(extras.due)} due, ${n(extras.deferred)} deferred to a later night` +
     (n(extras.priorFailed) ? `, ${n(extras.priorFailed)} prior card-x unread` : ""));
   return { failures, warnings, notes };
 }
@@ -546,7 +546,7 @@ export function ledgerChecks({ ledger, sessionDate, clock = null } = {}) {
   notes.push(`ledger ${sessionDate}: ${row.ticks} tick(s); Tier 1 ${t1.ok} ok / ${t1.fail} failed, longest silence ` +
     `${minutesOf(t1.okGapMs)} min; focus ${focus.ok} ok / ${focus.partial} partial / ${focus.fail} failed, longest silence ` +
     `${minutesOf(focus.gapMs)} min; Tier 2 ${t2.passes} pass(es) from ${at(t2.firstAt)}, longest gap ${minutesOf(t2.gapMs)} min, ` +
-    `${t2.failedCalls} of ${t2.calls} vendor call(s) failed; worst lapse ${stale.overS > 0 ? stale.key + " " + minutesOf(stale.overS * 1000) + " min" : "none"}`);
+    `${t2.failedCalls} of ${t2.calls} feed call(s) failed; worst lapse ${stale.overS > 0 ? stale.key + " " + minutesOf(stale.overS * 1000) + " min" : "none"}`);
   const previous = prevTradingDay(sessionDate, clock);
   const before = previous ? days.find((d) => d && d.day === previous) : null;
   const born = previous ? days.some((d) => d && d.day < previous) : false;
@@ -640,7 +640,7 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
           `the Worker's clock still holds ${clock.day}`
         : `HEALTH: Tier 1 never ticked on ${sessionDate}: the Worker's clock still holds ${clock.day}`);
     } else if (clock.trading === 0) {
-      failures.push(`HEALTH: Tier 1 closed ${sessionDate} as a holiday, but the vendor printed a ${sessionDate} session`);
+      failures.push(`HEALTH: Tier 1 closed ${sessionDate} as a holiday, but the feed printed a ${sessionDate} session`);
     }
     if (!tier1) notes.push("the Worker's clock carries no Tier 1 telemetry (a Worker older than this check)");
     else {
@@ -695,7 +695,7 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
     const calls = Number(run.calls) || 0;
     const failedCalls = Number(run.failedCalls) || 0;
     if (!(calls - failedCalls > 0)) {
-      failures.push(`HEALTH: the last live pass for ${sessionDate} answered no vendor call (${failedCalls} of ${calls} failed)`);
+      failures.push(`HEALTH: the last live pass for ${sessionDate} answered no feed call (${failedCalls} of ${calls} failed)`);
     }
     const finished = timeMs(run.finishedAt);
     if (!(finished >= close - HEALTH.lastPassMin * 60000)) {
@@ -704,7 +704,7 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
     }
     const fill = run.prevFill && typeof run.prevFill === "object" ? run.prevFill : null;
     if (fill) {
-      notes.push(fill.declined ? `day change: the last pass declined the ${fill.date} close (${fill.declined}), so rows without a vendor prev_close have no change`
+      notes.push(fill.declined ? `day change: the last pass declined the ${fill.date} close (${fill.declined}), so rows without a feed prev_close have no change`
         : `day change: the last pass filled ${fill.n} null prev_close row(s) from the ${fill.date} close`);
     }
   }
@@ -753,7 +753,7 @@ export async function runHealthGate({ sessionDate, read, now = () => Date.now(),
   log(`health gate: ${verdict.applies ? "checked" : "live checks skipped — " + verdict.why}; ` +
     `${verdict.failures.length} failure(s)` + (verdict.warnings.length ? `, ${verdict.warnings.length} warning(s)` : ""));
   for (const n of verdict.notes) log("  " + n);
-  for (const line of verdict.warnings) warn(annotate ? `::warning title=${/^WARNING: Neuron/.test(line) ? "Neuron coverage" : /^WARNING: vendor extras/.test(line) ? "Vendor extras" : "Lab sign-in"}::${line}` : line);
+  for (const line of verdict.warnings) warn(annotate ? `::warning title=${/^WARNING: Neuron/.test(line) ? "Neuron coverage" : /^WARNING: feed extras/.test(line) ? "Feed extras" : "Lab sign-in"}::${line}` : line);
   for (const line of verdict.failures) warn(line);
   return verdict;
 }
@@ -781,7 +781,7 @@ export const HEALTH_CODES = Object.freeze([
   ["roster-short", /the roster lists/, "the roster lists fewer names than were planned"],
   ["neuron-ledger", /coverage ledger does not add up/, "the Neuron coverage ledger does not add up"],
   ["neuron-missing", /have no Neuron reading tonight/, "universe names have no Neuron reading"],
-  ["extras-shape", /vendor extras came back in a shape/, "a vendor extras part came back in a shape the reducers do not read"],
+  ["extras-shape", /feed extras came back in a shape/, "a feed extras part came back in a shape the reducers do not read"],
   ["ledger-empty", /session ledger holds/, "the session ledger has no row for the session"],
   ["ledger-rth", /rth cron did not tick/, "the Worker's rth cron missed ticks inside the session"],
   ["ledger-tier1", /without writing live:market/, "Tier 1 went too long without writing live:market"],
@@ -792,7 +792,7 @@ export const HEALTH_CODES = Object.freeze([
   ["clock-unreadable", /clock could not be read/, "the Worker's clock could not be read"],
   ["summary-cron", /summary cron/, "the summary cron has not completed a recent firing"],
   ["tier1-session", /Tier 1 (?:ticked through|never ticked)/, "Tier 1 never read the session"],
-  ["tier1-holiday", /as a holiday/, "Tier 1 closed the session as a holiday that the vendor printed"],
+  ["tier1-holiday", /as a holiday/, "Tier 1 closed the session as a holiday that the feed printed"],
   ["tier1-failed", /Tier 1's last tick failed/, "Tier 1's last tick failed"],
   ["tier1-early", /Tier 1 last ticked at/, "Tier 1 stopped before the close"],
   ["dispatch-refused", /refused the Worker's dispatch/, "GitHub refused the Worker's dispatch"],
@@ -802,7 +802,7 @@ export const HEALTH_CODES = Object.freeze([
   ["focus-late", /focus cron last wrote/, "live:focus was not written near the close"],
   ["heartbeat-unread", /live:heartbeat could not be read/, "live:heartbeat could not be read"],
   ["pass-missing", /no live pass for/, "no Tier 2 pass was recorded for the session"],
-  ["pass-failed", /answered no vendor call/, "the last Tier 2 pass answered no vendor call"],
+  ["pass-failed", /answered no feed call/, "the last Tier 2 pass answered no feed call"],
   ["pass-early", /pass for [^ ]+ finished at/, "Tier 2 stopped before the close"],
 ]);
 

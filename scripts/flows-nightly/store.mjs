@@ -38,7 +38,7 @@ export function targetRefusal(env = process.env) {
   if (vendor.status !== "redirect" && vendor.status !== "invalid") return null;
   const host = ingestHost(env);
   if (fixtureHost(host)) return null;
-  return `a run against ${env.FLOWS_UW_BASE_URL} never publishes to ${host || "an unreadable ingest URL"}: the vendor base is not the production origin`;
+  return `a run against ${env.FLOWS_UW_BASE_URL} never publishes to ${host || "an unreadable ingest URL"}: the feed base is not the production origin`;
 }
 
 const INGEST_UA = "anilkaya-flows-pipeline/1 (+https://github.com/anilkaya001/anilkaya.org)";

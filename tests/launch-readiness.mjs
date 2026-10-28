@@ -41,7 +41,7 @@ class_name = "Pulse"
 
 const READBACKS = [
   ["1a", "2026-10-10", "owner", "plan=paid; invoice", ""],
-  ["2a", "2026-11-02", "owner", "classes=A+B+C+D; vendor email reply", ""],
+  ["2a", "2026-11-02", "owner", "classes=A+B+C+D; feed email reply", ""],
   ["2b", "2026-11-02", "owner", "price=49 tiers=1", ""],
   ["3a", "2026-11-03", "owner", "counsel=ranked-ideas; counsel's letter", ""],
   ["6a", "2026-11-04", "owner", "ruleset=test-required; rulesets API readback", ""],

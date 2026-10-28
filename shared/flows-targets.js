@@ -27,7 +27,7 @@ export const THRESHOLD_SOURCES = Object.freeze({
 });
 
 export const REFUSED_SOURCES = Object.freeze({
-  implied_move_perc: "the vendor's implied_move_perc is a 0.85-straddle to the nearest Friday, a band of about 50%, and is never a one-day move or a threshold unit",
+  implied_move_perc: "the feed's implied_move_perc is a 0.85-straddle to the nearest Friday, a band of about 50%, and is never a one-day move or a threshold unit",
 });
 
 const freezeDeep = (x) => {
@@ -69,7 +69,7 @@ function buildTable() {
   add({ id: "move.earn.im", kind: "event", family: "earnings", unit: "indicator", scale: "sigma_qe", k: 1, h: 1, side: "both",
     source: "sigma_q1", rule: "|r_impact| >= sigmaQE, sigmaQE^2 = jumpQ^2 + diffQ^2 of the impact session" });
   add({ id: "move.earn.ratio", kind: "ratio", family: "earnings", unit: "ratio", scale: "none", h: 1, side: "both",
-    source: "track", rule: "|m| / M within one track, vendor or platform, never mixed" });
+    source: "track", rule: "|m| / M within one track, feed or platform, never mixed" });
   for (const h of [1, 5, 21]) {
     add({ id: `move.ret.h${h}`, kind: "quantiles", family: "return", unit: "log return", h, quantiles: QUANTILES,
       gradeCap: h === 21 ? 1 : 3, shown: h === 21 ? "more horizons" : "default" });

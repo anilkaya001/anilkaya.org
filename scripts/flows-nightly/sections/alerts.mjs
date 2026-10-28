@@ -140,7 +140,7 @@ export async function publishSectorPremium({ sessionDate, generatedAt }) {
     });
     console.log(`  sector:premium: ${measured}/${SECTOR_ETFS.length} sectors leaned` +
       (quiet ? `, ${quiet} measured-and-empty` : "") +
-      ` from ${wire.length} vendor row(s)`);
+      ` from ${wire.length} feed row(s)`);
     for (const s of sectors) {
       if (s.reason) console.warn(`    ${s.sector} (${s.etf}): ${s.read} — ${s.reason}`);
     }
@@ -185,7 +185,7 @@ export async function publishNews({ sessionDate, generatedAt, tickers = [] }) {
     console.log(`  news: ${news.kept} headline(s) kept of ${news.returned} returned` +
       (news.shed ? ` (${news.shed} shed by the ${NEWS_ROWS}-row cap)` : "") +
       (news.atVendorLimit
-        ? ` — WHICH IS THE VENDOR'S MAXIMUM (${NEWS_VENDOR_LIMIT}), so the true ` +
+        ? ` — WHICH IS THE FEED'S MAXIMUM (${NEWS_VENDOR_LIMIT}), so the true ` +
           "population is unknown and at least that large"
         : "") +
       (news.unusable ? `, ${news.unusable} unusable` : "") +
@@ -311,7 +311,7 @@ export async function runAlerts(ctx) {
             raws.holders = { __failed: message };
 
             console.log(`  political holders: ${message} — the spec marks this route ` +
-              "enterprise-only, but the status above is what the vendor actually " +
+              "enterprise-only, but the status above is what the feed actually " +
               "returned; one refusal ends the walk rather than buying five more");
             break;
           }

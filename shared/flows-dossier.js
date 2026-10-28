@@ -36,16 +36,16 @@ export const MAX_TEXTS = Object.freeze({ headline: 6, note: 6, description: 2 })
 export const REASONS = Object.freeze({
   null: "the source carried the field with no value",
   absent: "no source held for this name carries it",
-  plan: "the vendor plan does not include this route",
+  plan: "the feed plan does not include this route",
   empty: "the source answered with no rows",
   unshaped: "the source answered in a shape this reader does not recognise",
-  failed: "the vendor refused or failed the call",
-  limited: "the vendor call was held back by the site's own rate limit",
-  timeout: "the vendor did not answer inside the deadline; it is being fetched in the background",
-  budget: "the call was queued behind the per-read vendor budget and will be fetched on a later read",
-  large: "the vendor body was over the parse ceiling, so it was not read",
-  unconfigured: "no vendor key is configured on this site",
-  unit: "the vendor schema states no unit for this field",
+  failed: "the feed refused or failed the call",
+  limited: "the feed call was held back by the site's own rate limit",
+  timeout: "the feed did not answer inside the deadline; it is being fetched in the background",
+  budget: "the call was queued behind the per-read feed budget and will be fetched on a later read",
+  large: "the feed body was over the parse ceiling, so it was not read",
+  unconfigured: "no feed key is configured on this site",
+  unit: "the feed schema states no unit for this field",
   behind: "the source describes an earlier session than the last close",
   expired: "the source is two or more sessions behind the last close",
   scope: "this build does not read it",
@@ -494,7 +494,7 @@ export function buildIdentityPacket(inp) {
   const gap = uni ? behindBy(uni.sessionDate, ctx.expected) : 0;
   if (info && info.mcap !== null && info.mcap > 0) {
     rec.fact("mcap", etf ? "Assets under management" : "Market capitalisation", info.mcap, "usd",
-      { note: etf ? "the vendor reports assets under management in this field for a fund" : null });
+      { note: etf ? "the feed reports assets under management in this field for a fund" : null });
   } else if (prof && prof.mcap !== null && prof.mcap > 0) {
     rec.fact("mcap", "Market capitalisation", prof.mcap, "usd", { grade: 1, note: "profile route; the schema states no scale for this field" });
   } else if (uni && uni.u && isNum(uni.u.mcap) && gap < 2) {
@@ -553,7 +553,7 @@ export function buildPricePacket(inp) {
     last = q.price;
     asOf = q.tapeTime || null;
     parts.push({ kind: "live", key: "quote" });
-    const note = "the close of " + uni.sessionDate + "; no trade since, and the vendor's previous close has already moved to it";
+    const note = "the close of " + uni.sessionDate + "; no trade since, and the feed's previous close has already moved to it";
     rec.fact("last", "Last close", q.price, "usd/share", { grade: ng, note });
     rec.fact("change", "Change on the session", u.chg, "fraction", { signed: true, grade: ng, note: "the session of " + uni.sessionDate + ", from the nightly screen" });
     rec.fact("volume", "Volume on the session", q.volume, "shares", { silent: true });
@@ -562,7 +562,7 @@ export function buildPricePacket(inp) {
     last = q.price;
     asOf = q.tapeTime || null;
     parts.push({ kind: "live", key: "quote" });
-    rec.fact("last", "Last price", q.price, "usd/share", { grade: asOf ? 3 : 1, note: asOf ? null : "the vendor stamped no print time on this quote" });
+    rec.fact("last", "Last price", q.price, "usd/share", { grade: asOf ? 3 : 1, note: asOf ? null : "the feed stamped no print time on this quote" });
     rec.fact("change", "Change from the previous close", q.change, "fraction", { signed: true, grade: asOf ? 3 : 1 });
     rec.fact("open", "Open", q.open, "usd/share", { silent: true });
     rec.fact("high", "Day high", q.high, "usd/share", { silent: true });
@@ -575,7 +575,7 @@ export function buildPricePacket(inp) {
     asOf = isNum(qa) && isNum(strip.readAt) ? isoOf(strip.readAt - qa * 1000) : null;
     session = strip.session || null;
     parts.push({ kind: "live", key: "live:strips" });
-    const note = asOf ? "from the live strip" : "from the live strip; the vendor stamped no quote time";
+    const note = asOf ? "from the live strip" : "from the live strip; the feed stamped no quote time";
     rec.fact("last", "Last price", strip.values.px, "usd/share", { grade: asOf ? 3 : 1, note });
     rec.fact("change", "Change from the previous close", strip.values.chg, "fraction", { signed: true, grade: asOf ? 3 : 1 });
     rec.fact("volume", "Volume today", strip.values.vol, "shares", { silent: true });
@@ -791,7 +791,7 @@ export function buildEventsPacket(inp) {
   let day = null;
   let from = null;
   if (next && isoDay(next.d)) { day = next.d; from = next.confirmed ? "the company's own date" : "an estimated date"; }
-  else if (info && info.next) { day = info.next; from = "the vendor's stock info"; }
+  else if (info && info.next) { day = info.next; from = "the feed's stock info"; }
   else if (row && isoDay(row.d) && evGap < 2) { day = row.d; from = "the nightly events table"; }
   const dayGrade = next ? (next.confirmed ? 3 : 2) : 2;
   rec.fact("next", "Next earnings report", day, "date", { grade: dayGrade, note: from ? "per " + from : null, why: why("absent", "no source names a next report date") });
@@ -805,9 +805,9 @@ export function buildEventsPacket(inp) {
   if (row && evGap < 2) {
     const g = gradeBySession(evGap);
     if (row.st === "gated") rec.fact("gated", "The board does not score this name", true, "bool", { grade: g, note: "names reporting inside the gate window are removed before scoring" });
-    rec.fact("impliedMove", "Move priced for the report (vendor)", row.im, "fraction", { grade: g, silent: true });
+    rec.fact("impliedMove", "Move priced for the report (feed)", row.im, "fraction", { grade: g, silent: true });
     rec.fact("benchmarkMove", "Constant-volatility benchmark for the same span", row.ev, "fraction", { grade: g, silent: true });
-    rec.fact("eventPremium", "Vendor move over the benchmark", row.evp, "ratio", { grade: g, silent: true });
+    rec.fact("eventPremium", "Feed move over the benchmark", row.evp, "ratio", { grade: g, silent: true });
   }
   const macro = ev && isObj(ev.macro) && ev.macro.status === "ok" ? arr(ev.macro.rows) : null;
   if (macro && evGap < 2) {
@@ -833,10 +833,10 @@ export function buildEventsPacket(inp) {
     parts.push({ kind: "nightly", key: "card-x:" + ctx.ticker });
     const g = vxGrade(dv);
     if (dv.x.none === true) {
-      rec.fact("dividend.history", "Dividend events on record", "none on record", "text", { grade: g, note: vxNote(dv) + "; the vendor's list was read and holds no dividend for this name, and the list can be incomplete" });
+      rec.fact("dividend.history", "Dividend events on record", "none on record", "text", { grade: g, note: vxNote(dv) + "; the feed's list was read and holds no dividend for this name, and the list can be incomplete" });
     } else {
       const ex = exSplit(dv.x, ctx.expected);
-      rec.fact("dividend.next", "Next declared ex-dividend date", ex.next, "date", { grade: g, note: vxNote(dv) + "; a call in the money can be exercised early in the session before this date", why: why("absent", "no future ex-dividend date is declared; the vendor's list can be incomplete") });
+      rec.fact("dividend.next", "Next declared ex-dividend date", ex.next, "date", { grade: g, note: vxNote(dv) + "; a call in the money can be exercised early in the session before this date", why: why("absent", "no future ex-dividend date is declared; the feed's list can be incomplete") });
       rec.fact("dividend.last", "Last ex-dividend date", ex.last, "date", { grade: g, note: vxNote(dv) });
       if (dv.x.cadence && dv.x.cadence !== "insufficient") {
         rec.fact("dividend.cadence", "Dividend cadence", dv.x.cadence, "text", { grade: Math.min(g, 2), note: "derived from the median gap of " + Math.round(dv.x.gapDays) + " days between the last ex-dividend dates" });
@@ -953,10 +953,10 @@ export function buildEarningsPacket(inp) {
   }
 
   if (uni && behindBy(uni.sessionDate, ctx.expected) < 2) {
-    rec.fact("erq", "Vendor ratio of realised to priced earnings move, last 12 quarters", u.erq, "ratio", { grade: ug, silent: true, note: "the screener's rv_1d_last_12q" });
+    rec.fact("erq", "Feed ratio of realised to priced earnings move, last 12 quarters", u.erq, "ratio", { grade: ug, silent: true, note: "the screener's rv_1d_last_12q" });
     rec.fact("im5", "Move priced over 5 days", u.im5, "fraction", { grade: ug, silent: true });
     rec.fact("im30", "Move priced over 30 days", u.im30, "fraction", { grade: ug, silent: true });
-    rec.fact("vrpPost", "Variance risk premium (vendor)", u.vrpPost, "vol", { signed: true, grade: ug, silent: true, note: "the screener's variance_risk_premium" });
+    rec.fact("vrpPost", "Variance risk premium (feed)", u.vrpPost, "vol", { signed: true, grade: ug, silent: true, note: "the screener's variance_risk_premium" });
   }
   return build("earnings", inp, {
     title: "Earnings history and expectations", source: vendorSource(VENDOR_ROUTES.earnings, parts),
@@ -1056,10 +1056,10 @@ export function buildNewsPacket(inp) {
     const week = rows.filter((r) => ctx.now - r.ms <= 7 * DAY_MS);
     rec.fact("count24h", "Headlines in the last 24 hours", day.length, "count", { grade: v ? 3 : 2, note: "of the " + rows.length + " most recent headlines read for this name" });
     rec.fact("count7d", "Headlines in the last 7 days", week.length, "count", { grade: v ? 3 : 2, note: "of the " + rows.length + " most recent headlines read for this name" });
-    rec.fact("major24h", "Marked major by the vendor in the last 24 hours", day.filter((r) => r.major === true).length, "count", { grade: 3 });
+    rec.fact("major24h", "Marked major by the feed in the last 24 hours", day.filter((r) => r.major === true).length, "count", { grade: 3 });
     const sentiments = week.filter((r) => r.sent);
     if (sentiments.length) {
-      rec.fact("sentiment.positive", "Positive headlines in the last 7 days", sentiments.filter((r) => r.sent === "positive").length, "count", { grade: 2, note: "the vendor's own sentiment label" });
+      rec.fact("sentiment.positive", "Positive headlines in the last 7 days", sentiments.filter((r) => r.sent === "positive").length, "count", { grade: 2, note: "the feed's own sentiment label" });
       rec.fact("sentiment.negative", "Negative headlines in the last 7 days", sentiments.filter((r) => r.sent === "negative").length, "count", { grade: 2 });
       rec.fact("sentiment.neutral", "Neutral headlines in the last 7 days", sentiments.filter((r) => r.sent === "neutral").length, "count", { grade: 2 });
     } else {
@@ -1242,7 +1242,7 @@ export function buildPositioningPacket(inp) {
   const bor = S && isObj(S.borrow) && S.borrow.status === "ok" ? S.borrow : null;
   if (bor) {
     rec.fact("borrow.fee", "Borrow fee", bor.fee, "fraction", { grade: xg, note: "annualised rate; as of " + (bor.day || "the last snapshot") });
-    rec.fact("borrow.available", "Shares available to borrow", bor.avail, "shares", { grade: xg, note: bor.availCensored ? "10,000,000 reads as a vendor cap" : null, silent: true });
+    rec.fact("borrow.available", "Shares available to borrow", bor.avail, "shares", { grade: xg, note: bor.availCensored ? "10,000,000 reads as a feed cap" : null, silent: true });
     if (typeof bor.htb === "boolean") rec.fact("borrow.hardToBorrow", "Hard to borrow", bor.htb, "bool", { grade: xg, note: "the line is a 3% annual fee" });
   }
   const sv = S && isObj(S.volume) && S.volume.status === "ok" ? S.volume : null;
@@ -1268,7 +1268,7 @@ export function buildPositioningPacket(inp) {
     const cutoff = isoOf(ctx.now - 90 * DAY_MS).slice(0, 10);
     const win = vIns.rows.filter((r) => r.d >= cutoff);
     const side = (s, f) => sum(win.filter((r) => r.side === s).map((r) => (isNum(r[f]) ? r[f] : 0)));
-    rec.fact("insider.buyShares", "Insider shares bought, last 90 days", side("buy", "vol"), "shares", { grade: 2, note: "the vendor's daily aggregates; its premium field has no stated unit and is not read" });
+    rec.fact("insider.buyShares", "Insider shares bought, last 90 days", side("buy", "vol"), "shares", { grade: 2, note: "the feed's daily aggregates; its premium field has no stated unit and is not read" });
     rec.fact("insider.sellShares", "Insider shares sold, last 90 days", Math.abs(side("sell", "vol")), "shares", { grade: 2 });
     rec.fact("insider.buyCount", "Purchase transactions, last 90 days", side("buy", "tx"), "count", { grade: 2 });
     rec.fact("insider.sellCount", "Sale transactions, last 90 days", side("sell", "tx"), "count", { grade: 2 });
@@ -1344,14 +1344,14 @@ export function buildFlowPacket(inp) {
     const at = isNum(qa) && isNum(strip.readAt) ? isoOf(strip.readAt - qa * 1000) : null;
     if (at) stamps.push(at);
     const g = at ? 3 : 1;
-    const note = at ? "today's session total" : "today's session total; the vendor stamped no quote time";
+    const note = at ? "today's session total" : "today's session total; the feed stamped no quote time";
     rec.fact("strip.net", "Net option premium today (calls less puts, ask side less bid side)", v.net, "usd", { signed: true, grade: g, note });
     rec.fact("strip.ncp", "Net call premium today", v.ncp, "usd", { signed: true, grade: g, silent: true });
     rec.fact("strip.npp", "Net put premium today", v.npp, "usd", { signed: true, grade: g, silent: true });
     rec.fact("strip.lean", "Bullish against bearish premium", v.lean, "ratio", { signed: true, grade: g, note: "from -1 (all bearish) to +1 (all bullish)" });
     rec.fact("strip.callVolume", "Call contracts traded today", v.cv, "contracts", { grade: g, silent: true });
     rec.fact("strip.putVolume", "Put contracts traded today", v.pv, "contracts", { grade: g, silent: true });
-    rec.fact("strip.pcr", "Put to call ratio today (vendor)", v.pcr, "ratio", { grade: g, silent: true });
+    rec.fact("strip.pcr", "Put to call ratio today (feed)", v.pcr, "ratio", { grade: g, silent: true });
   } else {
     rec.hold("strip", why("absent", "the live strip does not carry this name"));
   }
@@ -1379,7 +1379,7 @@ export function buildFlowPacket(inp) {
     const at = rows.map((r) => r.lastAt || r.spanEnd || r.spanStart).filter(Boolean).sort().pop() || null;
     if (at) stamps.push(at);
     const g = isNum(alerts.age) && alerts.age > PACKET_CLASSES.breadth.staleAfterS ? 1 : 3;
-    rec.fact("alerts.count", "Flagged option alerts today", rows.length, "count", { grade: g, note: "the vendor's own rules chose what to flag; none flagged is not the same as quiet" });
+    rec.fact("alerts.count", "Flagged option alerts today", rows.length, "count", { grade: g, note: "the feed's own rules chose what to flag; none flagged is not the same as quiet" });
     if (rows.length) {
       const calls = rows.filter((r) => r.cp === "C");
       const puts = rows.filter((r) => r.cp === "P");
@@ -1388,8 +1388,8 @@ export function buildFlowPacket(inp) {
       rec.fact("alerts.putPremium", "Of which puts", sum(puts.map((r) => r.prem)), "usd", { grade: g, silent: true });
       const sidedRead = askShareRead(rows);
       if (sidedRead.classified !== null) {
-        rec.fact("alerts.sidedShare", "Share of that premium the vendor sided", sidedRead.classified, "fraction", { grade: 2, note: "the part of the premium the vendor attributed to the ask or the bid side; the rest was left between the quotes or never split" });
-        if (sidedRead.side === "ask" || sidedRead.side === "bid" || sidedRead.side === "mixed") rec.fact("alerts.askShare", "Share of the premium the vendor sided that is on the ask side", sidedRead.share, "fraction", { grade: 2, note: "the vendor's ask-side attribution against the premium it sided, the site's one ask-share rule; the alert field is undocumented, and no intent is implied" });
+        rec.fact("alerts.sidedShare", "Share of that premium the feed sided", sidedRead.classified, "fraction", { grade: 2, note: "the part of the premium the feed attributed to the ask or the bid side; the rest was left between the quotes or never split" });
+        if (sidedRead.side === "ask" || sidedRead.side === "bid" || sidedRead.side === "mixed") rec.fact("alerts.askShare", "Share of the premium the feed sided that is on the ask side", sidedRead.share, "fraction", { grade: 2, note: "the feed's ask-side attribution against the premium it sided, the site's one ask-share rule; the alert field is undocumented, and no intent is implied" });
       }
       rec.fact("alerts.sweeps", "Alerts flagged as sweeps", rows.filter((r) => r.sweep === true).length, "count", { grade: g, silent: true });
       const top = rows.slice().sort((a, b) => b.prem - a.prem)[0];
@@ -1469,8 +1469,8 @@ export function buildPeersPacket(inp) {
     parts.push({ kind: "nightly", key: "card-x:" + ctx.ticker });
     const g = vgP(ef);
     const top = arr(ef.x.top).filter((e) => Array.isArray(e) && typeof e[0] === "string").slice(0, ETF_TOP);
-    rec.fact("etf.count", "ETFs that hold this name (vendor list)", ef.x.n, "count", { grade: g, note: readNote(ef) + "; the list can be incomplete" });
-    if (top.length) rec.fact("etf.top", "Largest ETF holders by weight", top.slice(0, 5).map((e) => e[0]).join(", "), "text", { grade: g, note: "ordered by weight; the weight itself is withheld because the vendor states no unit for it" });
+    rec.fact("etf.count", "ETFs that hold this name (feed list)", ef.x.n, "count", { grade: g, note: readNote(ef) + "; the list can be incomplete" });
+    if (top.length) rec.fact("etf.top", "Largest ETF holders by weight", top.slice(0, 5).map((e) => e[0]).join(", "), "text", { grade: g, note: "ordered by weight; the weight itself is withheld because the feed states no unit for it" });
     if (isNum(ef.x.sharesSum) && ef.x.sharesRows > 0) {
       rec.fact("etf.shares", "Shares held by those ETFs", ef.x.sharesSum, "shares", { grade: Math.min(g, 2), note: "the sum of " + ef.x.sharesRows + " of " + ef.x.n + " ETF rows that state a share count; a floor" });
     }
@@ -1481,9 +1481,9 @@ export function buildPeersPacket(inp) {
   if (iv && iv.x.ok === true) {
     if (!parts.some((q) => q.key === "card-x:" + ctx.ticker)) parts.push({ kind: "nightly", key: "card-x:" + ctx.ticker });
     const g = vgP(iv);
-    if (isNum(iv.x.p30)) rec.fact("ivp.30", "30-day implied volatility, percentile of its own past year (vendor)", iv.x.p30, "pctile", { grade: g, note: readNote(iv) + "; dated " + iv.x.date });
+    if (isNum(iv.x.p30)) rec.fact("ivp.30", "30-day implied volatility, percentile of its own past year (feed)", iv.x.p30, "pctile", { grade: g, note: readNote(iv) + "; dated " + iv.x.date });
     const curve = arr(iv.x.tenors).filter((e) => Array.isArray(e) && isNum(e[0]) && isNum(e[1])).slice(0, 8);
-    if (curve.length > 1) rec.fact("ivp.curve", "Implied volatility percentile of its own past year, by tenor (vendor)", curve.map((e) => e[0] + "d " + Math.round(e[1])).join(", "), "text", { grade: g, silent: true });
+    if (curve.length > 1) rec.fact("ivp.curve", "Implied volatility percentile of its own past year, by tenor (feed)", curve.map((e) => e[0] + "d " + Math.round(e[1])).join(", "), "text", { grade: g, silent: true });
   }
   const etf = h.sectorEtf && isObj(h.sectorEtf) ? h.sectorEtf : null;
   let asOf = null;
@@ -1491,7 +1491,7 @@ export function buildPeersPacket(inp) {
     parts.push({ kind: "live", key: "live:market" });
     asOf = etf.asOf || null;
     const eg = asOf ? 3 : 1;
-    rec.fact("etf.change", etf.etf + " (" + (etf.name || "sector ETF") + ") change from the previous close", etf.chg, "fraction", { signed: true, grade: eg, note: asOf ? null : "the vendor stamped no time on the sector table" });
+    rec.fact("etf.change", etf.etf + " (" + (etf.name || "sector ETF") + ") change from the previous close", etf.chg, "fraction", { signed: true, grade: eg, note: asOf ? null : "the feed stamped no time on the sector table" });
     rec.fact("etf.lean", etf.etf + " bullish against bearish premium", etf.lean, "ratio", { signed: true, grade: eg, silent: true });
     rec.fact("etf.net", etf.etf + " net premium (bullish less bearish)", etf.net, "usd", { signed: true, grade: eg, silent: true });
   } else {

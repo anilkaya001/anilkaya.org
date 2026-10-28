@@ -173,14 +173,14 @@ try {
   {
     const res = await anon("/api/flows/chain?t=AAPL");
     eq(res.status, 401, "an anonymous chain lookup is refused");
-    eq(upstreamCalls, 0, "and never reaches the upstream — the 401 costs nobody a vendor call");
+    eq(upstreamCalls, 0, "and never reaches the upstream — the 401 costs nobody a feed call");
 
     const learn = await signSession(
       { sub: "g_test", aud: "learn", exp: Date.now() + 60000 }, SESSION_SECRET);
     const cross = await fetch(server.baseURL + "/api/flows/chain?t=AAPL",
       { headers: { Cookie: "flows_session=" + learn } });
     eq(cross.status, 401, "a learning token does not unlock the chain route either");
-    eq(upstreamCalls, 0, "still no vendor call");
+    eq(upstreamCalls, 0, "still no feed call");
 
     const post = await fetch(server.baseURL + "/api/flows/chain?t=AAPL",
       { method: "POST", headers: auth });
@@ -206,7 +206,7 @@ try {
 
     eq(body.spot, 183.4, "spot is the live print, not the latest daily close");
     eq(body.spotSource, "stock-state", "and the payload says which price it used");
-    eq(body.marketTime, "regular", "the vendor's session name is passed through verbatim");
+    eq(body.marketTime, "regular", "the feed's session name is passed through verbatim");
     eq(body.prevClose, 179.1, "the previous close ships alongside rather than as spot");
 
     eq(body.asOf, "2026-08-25", "the date is the New York date of the READ, not the newest candle's and not the tape's UTC date");
@@ -214,7 +214,7 @@ try {
     eq(body.basis.status, "ok", "the chain agrees with its spot");
     eq(body.basis.printSource, "stock-state", "and the basis names the print's source");
     eq(body.basis.printSpot, 183.4, "with the print");
-    eq(body.generatedAt, "2026-08-25T22:00:00.000Z", "the payload is stamped with the instant the vendor was read");
+    eq(body.generatedAt, "2026-08-25T22:00:00.000Z", "the payload is stamped with the instant the feed was read");
     eq(body.tapeTime, "2026-08-25 18:06:00+00:00",
        "and the tape time itself ships beside the read instant");
 
@@ -239,8 +239,8 @@ try {
     const years = (Date.UTC(2026, 8, 18, 20) - Date.parse(READ)) / (365 * 86400000);
     const sigma = put.ivMid * Math.sqrt(years);
     near(put.cushionSigmas, Math.log(body.spot / put.breakeven) / sigma, 1e-9,
-         "cushion is the move to breakeven in the QUOTE's implied sigmas over the exact time from the read to the 4 pm expiry close, not the vendor's last-trade volatility over whole days");
-    ok(Math.abs(put.ivMid - put.iv) > 1e-4, "the volatility it uses is the mid's, which differs from the vendor's figure");
+         "cushion is the move to breakeven in the QUOTE's implied sigmas over the exact time from the read to the 4 pm expiry close, not the feed's last-trade volatility over whole days");
+    ok(Math.abs(put.ivMid - put.iv) > 1e-4, "the volatility it uses is the mid's, which differs from the feed's figure");
     ok(put.cushionSigmas > 0, "and it is positive for a breakeven below spot");
     eq(put.intrinsic, 0, "the put is out of the money and carries no intrinsic value");
     eq(put.extrinsic, 2.5, "so its time value is its whole bid");
@@ -257,7 +257,7 @@ try {
     const a = await get("/api/flows/chain?t=AAPL");
     eq(a.status, 200);
     eq(a.headers.get("x-chain-cache"), "hit", "a second read is served from the edge");
-    eq(upstreamCalls, before, "and costs no vendor call at all");
+    eq(upstreamCalls, before, "and costs no feed call at all");
     eq(a.headers.get("cache-control"), "no-store",
        "a cache HIT is still no-store to the caller — the edge copy is ours, not theirs");
 
@@ -265,7 +265,7 @@ try {
     eq(puts.status, 200);
     ok((await puts.json()).rows.every((r) => r.type === "P"),
        "a csp screen returns puts, so the key separates strategies");
-    ok(upstreamCalls > before, "which cost its own vendor call rather than reusing the wrong body");
+    ok(upstreamCalls > before, "which cost its own feed call rather than reusing the wrong body");
 
     const callsBeforeJunk = upstreamCalls;
     for (const junk of ["xxx", "1", "csp2", "'; DROP", "%00"]) {
@@ -273,7 +273,7 @@ try {
       eq(r.status, 200, `strategy=${junk} normalises rather than erroring`);
     }
     eq(upstreamCalls, callsBeforeJunk,
-       "five junk parameter values minted zero new cache keys and zero vendor calls");
+       "five junk parameter values minted zero new cache keys and zero feed calls");
 
     const badRank = await get("/api/flows/chain?t=AAPL&rank=nonsense");
     eq((await badRank.json()).rankedBy, "annualized",
@@ -311,7 +311,7 @@ try {
       eq(res.status, status, msg);
       const body = await res.json();
       ok(!/test-uw-key/.test(JSON.stringify(body)),
-         `the ${mode} path never echoes the vendor credential`);
+         `the ${mode} path never echoes the feed credential`);
       ok(body.error && body.error.code, "and answers in the project error envelope");
     }
     upstreamMode = "ok";
@@ -360,7 +360,7 @@ try {
     eq(res.status, 200);
     const body = await res.json();
     eq(body.earnings.date, "2026-09-04", "the earnings date ships with the payload");
-    eq(body.earnings.announceTime, "premarket", "and the vendor's own token, verbatim");
+    eq(body.earnings.announceTime, "premarket", "and the feed's own token, verbatim");
     eq(body.earnings.issueType, "Common Stock",
        "and the issue type, which separates 'no earnings' from 'date unknown'");
 
@@ -454,7 +454,7 @@ try {
     eq(body.basis.printSource, "regular-close", "the basis says it is a regular close");
     eq(body.basis.printNote, "regular close 4:00 pm ET", "in words");
     eq(body.spotSource, "daily-close", "and the legacy source field says a close");
-    eq(body.marketTime, "postmarket", "the vendor's session name for the live state passes through");
+    eq(body.marketTime, "postmarket", "the feed's session name for the live state passes through");
     eq(body.prevClose, 179.1, "with its own previous close");
     upstreamMode = "ok";
   }
@@ -482,7 +482,7 @@ try {
     const bare = await startWorker({});
     try {
       const res = await fetch(bare.baseURL + "/api/flows/chain?t=AAPL", { headers: auth });
-      eq(res.status, 503, "with no vendor key the route reports unconfigured");
+      eq(res.status, 503, "with no feed key the route reports unconfigured");
       eq((await res.json()).error.code, "chain_unconfigured", "and names the reason");
       const board = await fetch(bare.baseURL + "/api/flows/board", { headers: auth });
       eq(board.status, 200, "while the precomputed board is unaffected");

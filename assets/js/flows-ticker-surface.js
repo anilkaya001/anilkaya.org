@@ -16,7 +16,7 @@
     back: (t) => 1 + 2.35 * Math.pow(t - 1, 3) + 1.35 * Math.pow(t - 1, 2),
   };
   const lerp = (a, b, t) => a + (b - a) * t;
-  const DEALER_CLAUSE = "on the vendor's convention (dealers long calls, short puts)";
+  const DEALER_CLAUSE = "on the feed's convention (dealers long calls, short puts)";
   const VOL = ["--vol-1", "--vol-2", "--vol-3", "--vol-4", "--vol-5", "--vol-6"];
   const CLIP = 1.25;
   const SUB = 3;
@@ -1107,7 +1107,7 @@
       tm.strikes.map((K) => [F.px(K, K % 1 ? 1 : 0)].concat(tm.rows.map((r) => { const g = r.gamma[sm.xp.strikes.indexOf(K)]; return g === null ? DASH : GSIGN[Math.sign(g)] + gWord(sm.xp, Math.abs(g)); })))
         .concat([["Net, measured cells"].concat(tm.net.map((v) => (v === null ? DASH : GSIGN[Math.sign(v)] + gWord(sm.xp, Math.abs(v)))))])) : null;
     dockEl.append(h("details", { class: "ftsf-tab" }, h("summary", null, "Read it as a table, and how it is drawn"), tabV, calNote, tabG || h("p", { class: "ftsf-cap" }, "No gamma cells to list."),
-      h("p", { class: "ftsf-cap" }, "Fitted body: the engine's stored SVI parameters, read at strikes on the forward of each expiry; between two fitted expiries the surface interpolates total variance linearly in time at a fixed strike, and an expiry with no fit is a ring at its at-the-money level, never a curve. Faded rows interpolate across an expiry with no fit. Gamma is exposure at listed strikes, so it is columns, and a pair the vendor did not return is a dashed outline, never zero. Nothing here is a forecast.")));
+      h("p", { class: "ftsf-cap" }, "Fitted body: the engine's stored SVI parameters, read at strikes on the forward of each expiry; between two fitted expiries the surface interpolates total variance linearly in time at a fixed strike, and an expiry with no fit is a ring at its at-the-money level, never a curve. Faded rows interpolate across an expiry with no fit. Gamma is exposure at listed strikes, so it is columns, and a pair the feed did not return is a dashed outline, never zero. Nothing here is a forecast.")));
 
     paintChips();
     paintKey();

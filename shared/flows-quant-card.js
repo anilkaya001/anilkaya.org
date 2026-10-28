@@ -112,7 +112,7 @@ function seedNear(rows, S) {
   return best;
 }
 
-export const QUOTE_IV_BASIS = "NBBO mid inverted on Black-76 against a put-call parity forward; the vendor's own IV only seeds the solver and is never the reading";
+export const QUOTE_IV_BASIS = "NBBO mid inverted on Black-76 against a put-call parity forward; the feed's own IV only seeds the solver and is never the reading";
 
 export function quoteImpliedVols(priced, { spot, rate, q = 0, asOfMs = null } = {}) {
   const list = Array.isArray(priced) ? priced : [];

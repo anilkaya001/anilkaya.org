@@ -79,7 +79,7 @@ for (const side of ["board:long", "board:short"]) {
   eq(live({ tier1At: RTH - READY_LIMITS.tier1TickMs + 1000 }).ok, true, "just inside it does not");
   const bad = live({ tier1OkAt: RTH - READY_LIMITS.tier1OkMs - 1000, tier1Why: "error:vendor 500" });
   eq(codes(bad), ["tier1"], "ticking with no good read blocks");
-  ok(bad.blockers[0].sentence.includes("vendor 500"), "and carries the reason: " + bad.blockers[0].sentence);
+  ok(bad.blockers[0].sentence.includes("feed 500"), "and carries the reason: " + bad.blockers[0].sentence);
   eq(live({ tier1Why: "off" }).blockers[0].sentence.includes("switched off"), true, "a Tier 1 switched off says so");
   eq(live({ trading: 0, tier1Why: "holiday", tier1At: null, tier1OkAt: null }).checks.tier1 !== undefined, true, "a holiday verdict is read");
   const early = Date.parse("2026-10-12T13:35:00Z");
@@ -165,7 +165,7 @@ for (const side of ["board:long", "board:short"]) {
   const T = at("2026-10-12T11:00:00Z");
   const done = await premarketNewsTick(env, T, { fetchVendor });
   eq(done.written, true, "a due firing writes");
-  eq(calls, [["/api/news/headlines", { limit: 100 }]], "with exactly one vendor call, the news route");
+  eq(calls, [["/api/news/headlines", { limit: 100 }]], "with exactly one feed call, the news route");
   eq(writes.length, 1, "and exactly one row");
   eq(writes[0][1].slice(0, 1).concat(writes[0][1].slice(2)), ["live:news", T, "2026-10-12", 1800, "worker", "worker@premarket-news", T], "keyed live:news, session Monday, 30-minute cadence, the Worker as writer");
   for (const [label, e, t, f] of [
@@ -181,7 +181,7 @@ for (const side of ["board:long", "board:short"]) {
   }
   const logs = [];
   const failed = await premarketNewsTick(env, T, { fetchVendor: async () => { throw new Error("boom"); }, log: { warn: (l) => logs.push(l), error: (l) => logs.push(l), log: (l) => logs.push(l) } });
-  eq([failed.written, failed.why, writes.length], [false, "vendor-failed", 1], "a failed vendor read writes nothing and says why");
+  eq([failed.written, failed.why, writes.length], [false, "vendor-failed", 1], "a failed feed read writes nothing and says why");
   const quiet = await premarketNewsTick(env, T, { fetchVendor: async () => ({ data: [] }) });
   eq([quiet.written, quiet.why, writes.length], [false, "quiet", 1], "a quiet feed writes nothing");
 }

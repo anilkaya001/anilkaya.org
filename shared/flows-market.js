@@ -118,7 +118,7 @@ export const MARKET_NOTES = Object.freeze({
     "Every reading here is over the SCREENED UNIVERSE and not over the " +
     "market: the " +
     "names this run's band ladder returned and the universe gate admitted. " +
-    "The vendor caps each band at about fifty rows, so the population is " +
+    "The feed caps each band at about fifty rows, so the population is " +
     "bounded by how the ladder was walked.",
   presence:
     "Net premium is measured only where BOTH legs were quoted. A name " +

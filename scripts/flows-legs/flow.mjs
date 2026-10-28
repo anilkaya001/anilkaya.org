@@ -430,7 +430,7 @@ async function flowLeg(ctx) {
     sections: tally,
     multiLeg: mlTally,
   };
-  log(`  flow leg: ${deep.length} deep + ${cross.length} cross-section name(s), ${meter.calls} vendor ` +
+  log(`  flow leg: ${deep.length} deep + ${cross.length} cross-section name(s), ${meter.calls} feed ` +
     `call(s) (${meter.failed} failed), ${alertPages} flow-alert page(s)`);
   log(`  flow multi-leg: ${mlTally.names} name(s) in ${mlTally.pages} page(s), ${mlTally.full} with a full first page; ` +
     `${mlTally.firstBad} first page(s) failed, ${mlTally.laterBad} later page(s) failed`);

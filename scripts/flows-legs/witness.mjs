@@ -31,14 +31,14 @@ export const WITNESS_CHECKS = Object.freeze({
     remedy: [
       "Readers see the Stale pill once a live key is 25 minutes old, so this is already visible on the site.",
       "Check that the Worker's crons are registered (wrangler triggers: 1-59/5 13-21 * * MON-FRI and 3-58/5 13-21 * * MON-FRI) and that the Worker holds UW_API_KEY (tier1_why says error:no-key when it does not).",
-      "A vendor outage looks the same from here; the issue closes itself when the keys advance again. DEPLOY.md section 10.5i.",
+      "A feed outage looks the same from here; the issue closes itself when the keys advance again. DEPLOY.md section 10.5i.",
     ],
   }),
   tier2: Object.freeze({
     title: "Tier 2 is stale: live:breadth stopped advancing while the loop runs",
     remedy: [
       "Readers see the Stale pill on breadth, strips, alerts, vol, movers and news once they are 45 minutes old.",
-      "Look at this run's log for `live: N key(s) not published` and `vendor request(s) timed out`: a vendor outage or a rate limit stops a pass from writing.",
+      "Look at this run's log for `live: N key(s) not published` and `feed request(s) timed out`: a feed outage or a rate limit stops a pass from writing.",
       "Tier 1 (live:market, live:focus) is written by the Worker and can be healthy while this is open. DEPLOY.md section 10.5i.",
     ],
   }),
@@ -57,7 +57,7 @@ export const WITNESS_CHECKS = Object.freeze({
       "When the dispatch was refused: until a GitHub starter arrives (they have arrived 4 to 8 hours late), Tier 2 and the nightly start are not running.",
       "Check Settings, Actions, General, Workflow permissions, and that flows-live.yml still grants actions: write and issues: write.",
       "Restart it by hand: gh workflow run flows-live.yml. The next loop closes this issue.",
-      "When a pass hung and the successor was dispatched, the loop restarts by itself. A pass is abandoned only when no vendor or ingest call settled for 90 seconds or it ran past 10 minutes, so a slow or timing-out vendor never does this: read the run's `live loop:` lines and the `vendor request(s) timed out ... in the abandoned pass` line for what stalled. DEPLOY.md section 10.5k.",
+      "When a pass hung and the successor was dispatched, the loop restarts by itself. A pass is abandoned only when no feed or ingest call settled for 90 seconds or it ran past 10 minutes, so a slow or timing-out feed never does this: read the run's `live loop:` lines and the `feed request(s) timed out ... in the abandoned pass` line for what stalled. DEPLOY.md section 10.5k.",
     ],
   }),
   drill: Object.freeze({

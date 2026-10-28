@@ -79,10 +79,10 @@ async function client(extra = {}, D1 = undefined) {
   const on = await client({ FLOWS_METER: "on", FLOWS_COVERAGE: "on" }, f.D1);
   const empty = await on("/api/flows/coverage");
   eq(empty.res.status, 200, "the owner reads the coverage");
-  eq(empty.body.calls.n, 0, "before any vendor call the meter reports none");
+  eq(empty.body.calls.n, 0, "before any feed call the meter reports none");
   const base = vendorLog.length;
   const a = await on("/api/flows/chain?t=NVDA");
-  ok(vendorLog.length > base, "a chain read reaches the stub vendor: " + vendorLog.slice(base).join(","));
+  ok(vendorLog.length > base, "a chain read reaches the stub feed: " + vendorLog.slice(base).join(","));
   const after = await (await client({ FLOWS_METER: "on", FLOWS_COVERAGE: "on" }, f.D1))("/api/flows/coverage");
   eq(after.body.calls.n, 0, "a second Worker instance has its own, empty, meter: the state is per isolate");
   const again = await on("/api/flows/coverage");
@@ -90,13 +90,13 @@ async function client(extra = {}, D1 = undefined) {
   ok(again.body.calls.slowest.every((s) => typeof s.op === "string" && Number.isFinite(s.avgMs)) && again.body.calls.slowest.length >= 1 && again.body.calls.slowest.every((s) => s.op !== "other") && again.body.calls.slowest.some((s) => s.op === "option-contracts"), "by registered operation: " + again.body.calls.slowest.map((s) => s.op).join(","));
   const boom = await on("/api/flows/chain?t=BOOM");
   const withBad = await on("/api/flows/coverage");
-  ok(withBad.body.calls.bad >= 1 && withBad.body.calls.slowest.some((s) => (s.classes["5xx"] || 0) >= 1), "a 503 from the vendor is counted as a 5xx");
+  ok(withBad.body.calls.bad >= 1 && withBad.body.calls.slowest.some((s) => (s.classes["5xx"] || 0) >= 1), "a 503 from the feed is counted as a 5xx");
   ok(boom.res.status >= 500 || boom.res.status === 429 || boom.res.status === 404, "and still reaches the reader as the error it was: " + boom.res.status);
 
   const quiet = await client({ FLOWS_COVERAGE: "on" }, f.D1);
   await quiet("/api/flows/chain?t=NVDA");
   const unmetered = await quiet("/api/flows/coverage");
-  ok(!("calls" in unmetered.body), "WITH THE METER OFF THE REPORT CARRIES NO CALL FIGURES and the vendor path is untouched");
+  ok(!("calls" in unmetered.body), "WITH THE METER OFF THE REPORT CARRIES NO CALL FIGURES and the feed path is untouched");
 }
 
 {
@@ -105,7 +105,7 @@ async function client(extra = {}, D1 = undefined) {
   ok(/vendorMeter: createCallMeter\(\),/.test(own), "the meter lives in the Worker's one state object");
   ok(!/^(let|var) /m.test(own), "and no top-level mutable binding was added");
   ok(/async function uwFetchUnmetered\(/.test(src) && /if \(!meterOn\(env\)\) return uwFetchUnmetered\(/.test(src), "the unmetered body is the old one, reached first when the switch is off");
-  ok(/error\.code === "chain_unconfigured"/.test(src), "a missing key is not counted as a vendor call");
+  ok(/error\.code === "chain_unconfigured"/.test(src), "a missing key is not counted as a feed call");
 }
 
 globalThis.fetch = realFetch;

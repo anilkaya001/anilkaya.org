@@ -16,7 +16,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const bare = shapeNetImpact([{ ticker: "AAA", net_premium: 5 }]);
   const wrapped = shapeNetImpact({ data: [{ ticker: "AAA", net_premium: 5 }] });
   deep(bare.rows, wrapped.rows,
-    "a bare array and a {data:[...]} envelope shape identically — the vendor's " +
+    "a bare array and a {data:[...]} envelope shape identically — the feed's " +
     "own spec declares one and demonstrates the other");
   deep(unwrapRows(null), [], "and a non-response is an empty read, not a throw");
   deep(unwrapRows({ data: "nope" }), [], "as is an envelope holding no array");
@@ -34,7 +34,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
   const dp = shapeDarkpool({ data: [{ ticker: "AAA", price: "12.5", size: 100 }] });
   eq(dp.rows[0].canceled, null,
-    "a flag the vendor did not carry is null, never a confident false");
+    "a flag the feed did not carry is null, never a confident false");
 
   const empty = shapeTide([{ timestamp: "2026-08-24T13:30:00Z" }]);
   eq(empty.status, "quiet",
@@ -50,7 +50,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(built.shed, 9, "and what it removed is counted beside what it kept");
   eq(built.cap, PULSE_CAPS.netImpact, "with the cap itself published");
   eq(built.rows[0].t, "T0",
-    "VENDOR ORDER PRESERVED: the ranking is the vendor's selection and re-sorting " +
+    "VENDOR ORDER PRESERVED: the ranking is the feed's selection and re-sorting " +
     "would claim an ordering rule this payload cannot state");
 }
 
@@ -79,7 +79,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "the market endpoint's thirteen funds by twelve months all survive the cap — the old cap of twelve kept one " +
     "fund's worth of rows and the publisher then could not say whose");
   eq(fund.shed, 0, "nothing shed");
-  deep([...new Set(fund.rows.map((r) => r.t))], FUNDS, "every row carries its fund, in the vendor's order");
+  deep([...new Set(fund.rows.map((r) => r.t))], FUNDS, "every row carries its fund, in the feed's order");
   deep(fund.rows.slice(0, 12).map((r) => r.month), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     "and inside a fund the months run on the calendar");
   eq(new Set(fund.rows.map((r) => r.t + ":" + r.month)).size, fund.rows.length,
@@ -116,7 +116,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     option_symbol: "AAPL260918C00150000", oi_change: "0.5", curr_oi: 30, last_oi: 20,
   }]);
   eq(noDiff.rows[0].diff, null,
-     "a row the vendor sent no oi_diff_plain for publishes no count — not curr minus last");
+     "a row the feed sent no oi_diff_plain for publishes no count — not curr minus last");
   eq(noDiff.rows[0].ratio, 0.5, "while the ratio it did send is still published");
   const noRatio = shapeOiChange([{
     option_symbol: "AAPL260918C00150000", oi_diff_plain: 10, curr_oi: 30, last_oi: 20,
@@ -125,7 +125,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(noRatio.rows[0].ratio, null, "with the ratio absent rather than computed");
   eq(shapeOiChange([{ option_symbol: "AAPL260918C00150000", curr_oi: 30 }]).status, "quiet",
      "a row carrying NEITHER reading measures nothing and is dropped");
-  eq(oi.rows[0].t, "AAPL", "the underlying falls out of the symbol when the vendor omits it");
+  eq(oi.rows[0].t, "AAPL", "the underlying falls out of the symbol when the feed omits it");
   eq(oi.rows[0].cp, "C", "and so do side");
   eq(oi.rows[0].k, 150, "strike");
   eq(oi.rows[0].exp, "2026-09-18", "and expiry — one parser, one spelling of one relation");
@@ -136,7 +136,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 {
   const pulse = buildPulse({
     tide: [{ timestamp: "2026-08-24T13:30:00Z", net_volume: 3 }],
-    totals: { __failed: "HTTP 500 from the vendor" },
+    totals: { __failed: "HTTP 500 from the feed" },
 
     netImpact: [{ ticker: "AAA", net_premium: 9 }],
     insiders: "not even an object",
@@ -184,7 +184,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     }
   }
   ok(/vendor/.test(PULSE_NOTES.oiChange) && /vendor/.test(PULSE_NOTES.netImpact),
-    "the two ranked feeds both name the vendor as the selector — the headline caveat");
+    "the two ranked feeds both name the feed as the selector — the headline caveat");
   ok(/no forecast|never a forecast|carries no claim/i.test(PULSE_NOTES.tide + " " + PULSE_NOTES.seasonality),
     "and the two series feeds refuse the forecast reading in words");
 }
@@ -197,7 +197,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
      "import across");
   ok(Number.isFinite(built.cadenceMinutes) && built.cadenceMinutes > 0,
      "and it is a usable number even on a build where every feed failed — the cadence is a " +
-     "fact about the CRON, not about any feed, so it must not go missing when the vendor does");
+     "fact about the CRON, not about any feed, so it must not go missing when the feed does");
 
   const src = readFileSync(new URL("../shared/flows-pulse.js", import.meta.url), "utf8");
   ok(/import \{ REFRESH_CADENCE_MINUTES \} from "\.\/flows-freshness\.js"/.test(src),
@@ -208,7 +208,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 }
 
 console.log(`✓ flows-pulse: ${checks} assertions — both envelope spellings, absent staying absent ` +
-  `beside measured zeros, caps with counted shed, a series shedding its oldest, vendor order ` +
-  `preserved where the ranking is the vendor's and calendar order claimed where it is ours, ` +
+  `beside measured zeros, caps with counted shed, a series shedding its oldest, feed order ` +
+  `preserved where the ranking is the feed's and calendar order claimed where it is ours, ` +
   `contract fields from one parser, seven feeds failing alone, byte-identical rebuilds, and ` +
   `notes whose one execution-word exception is argued in place`);

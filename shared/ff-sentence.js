@@ -80,7 +80,7 @@ export function hitSentence(e) {
   const verb = verbFor({ subject: lead.subject, op: lead.op }, e.persist);
   const t = timeLine(e.session, e.asOf);
   const when = t ? t.text : (clock(e.asOf) || ABSENT_MARK);
-  const flagged = lead.subject === "window" ? " · flagged by the data vendor" : "";
+  const flagged = lead.subject === "window" ? " · flagged by the data feed" : "";
   const value = lead.unit === "bool" ? formatValue(lead.value, "bool") : formatValue(lead.value, lead.unit);
   return who + " " + lead.label + " " + verb + " " + value + " (" + (OP_TEXT[lead.op] || lead.op) + " " + formatValue(lead.x, lead.unit) + ")" + flagged + " · " + when;
 }

@@ -262,7 +262,7 @@ export function lintProblems(f, text) {
     if (!text.startsWith('(function () {\n  "use strict";')) out.push("not a strict IIFE");
     for (const m of text.matchAll(/["'`](\/api\/[^"'`?]*)/g)) if (!API_OK.includes(m[1])) out.push("route " + m[1]);
     if (/\bfetch\(|XMLHttpRequest|sendBeacon|WebSocket|EventSource/.test(text)) out.push("a network call that is not FlowsUI.ffClient");
-    if (/unusualwhales|\buw[A-Z_(]|\/ai\/|env\.AI|askModels/.test(text)) out.push("vendor or model");
+    if (/unusualwhales|\buw[A-Z_(]|\/ai\/|env\.AI|askModels/.test(text)) out.push("feed or model");
     if (/Date\.now|new Date|toLocale|Intl\./.test(text)) out.push("a time computed in the browser");
   }
   return out;

@@ -190,7 +190,7 @@ function candlesFor(end, n, { from = 100, step = 0.01, volume = 1e6, after = [] 
     scaledNames.push({ rows: vendorRows({ seed: 300 + i, vol, rate: 0, kc: 47, dtes: [2, 3, 5, 8, 11], mutate: hundredfold }).rows, iv30: vol });
   }
   const kcScaled = estimateKc(scaledNames, { asOf: SESSION });
-  rel(kcScaled.value, 0.47, 1e-6, "a vendor vanna a hundred times too large divides K_c by a hundred, since K_c is charm over the vendor's own vanna");
+  rel(kcScaled.value, 0.47, 1e-6, "a feed vanna a hundred times too large divides K_c by a hundred, since K_c is charm over the feed's own vanna");
   const card = { ticker: "T", sessionDate: SESSION, regime: { netGamma: 1e5 },
     panels: { levels: { status: "ok", spot: 100 }, pricedMove: { status: "ok", iv30: 0.3 },
       context: { status: "ok", candles: candlesFor(SESSION, 60) } } };
@@ -238,7 +238,7 @@ function candlesFor(end, n, { from = 100, step = 0.01, volume = 1e6, after = [] 
   rel(model.value, direct, 1e-12, "the chain check sums call vanna × OI × 100, reading an implied volatility quoted in percent as a fraction");
   eq(model.contracts, 7, "and only the calls on that expiry");
   eq(vannaScale([{ vendor: 1.1, model: 1 }, { vendor: 0.95, model: 1 }, { vendor: 1.05, model: 1 }]).status, "agree",
-     "vendor within a quarter of Black-Scholes agrees");
+     "feed within a quarter of Black-Scholes agrees");
   eq(vannaScale([{ vendor: 100, model: 1 }, { vendor: 101, model: 1 }, { vendor: 99, model: 1 }]).status, "disagree",
      "a hundredfold scale is caught");
   eq(vannaScale([{ vendor: 1, model: 1 }]).status, "unmeasured", "one name measures nothing");
@@ -246,14 +246,14 @@ function candlesFor(end, n, { from = 100, step = 0.01, volume = 1e6, after = [] 
   const pctAt = (S) => ({ vendor: S / 100, model: 1, spot: S });
   const coincidence = vannaScale([60, 110, 250].map(pctAt));
   ok(coincidence.status !== "agree",
-     `a dollars-per-1% vendor whose median ratio lands near one by coincidence (${coincidence.ratio}) is no longer read as agreeing in shares: ${coincidence.reason}`);
+     `a dollars-per-1% feed whose median ratio lands near one by coincidence (${coincidence.ratio}) is no longer read as agreeing in shares: ${coincidence.reason}`);
   eq(coincidence.family, "unsettled", "the two names far enough from $100 to tell the units apart both read dollars per 1%, which unsettles the documented share unit");
   const pctRun = vannaScale([30, 60, 250, 400].map(pctAt));
   eq(pctRun.family, "pct$", "four names that tell the units apart and all read dollars per 1% settle that unit");
-  eq(pctRun.status, "agree", "and the vendor's vanna then agrees with Black-Scholes in it");
+  eq(pctRun.status, "agree", "and the feed's vanna then agrees with Black-Scholes in it");
   near(pctRun.ratio, 1, 1e-9, "at a ratio of one once each name is read in dollars per 1%");
   const shareRun = vannaScale([30, 60, 110, 250, 400].map((S) => ({ vendor: 1.05, model: 1, spot: S })));
-  eq(shareRun.family, "share", "a vendor in shares reads as shares");
+  eq(shareRun.family, "share", "a feed in shares reads as shares");
   eq(shareRun.used, "share", "and is converted by the spot");
   eq(shareRun.status, "agree", "and agrees");
   const splitRun = vannaScale([30, 45, 300, 400].map((S, i) => (i % 2 ? pctAt(S) : { vendor: 1, model: 1, spot: S })));
@@ -271,7 +271,7 @@ function candlesFor(end, n, { from = 100, step = 0.01, volume = 1e6, after = [] 
   eq(live.votes.pct, 12, "and 12 just past the midpoint toward dollars per 1%, which a two-thirds vote read as unsettled");
   eq(live.family, "share", `the pooled fit settles shares all the same (log10 ratio ${live.evidence.log10Ratio}, errors ${live.evidence.errorShare} against ${live.evidence.errorPct})`);
   ok(live.evidence.log10Ratio >= 2, "by at least the hundredfold likelihood ratio the rule asks for");
-  eq(live.status, "agree", "so vanna and charm are published on the vendor's share scale");
+  eq(live.status, "agree", "so vanna and charm are published on the feed's share scale");
   const oneAgainst = vannaScale([{ vendor: 2, model: 1, spot: 300 }, { vendor: 1, model: 1, spot: 110 }, { vendor: 1, model: 1, spot: 95 }]);
   eq(oneAgainst.family, "unresolved", "one name leaning toward dollars per 1% on a twofold ratio is noise, not a contrary unit");
   eq(oneAgainst.used, "share", "so the documented share unit stands");
@@ -281,7 +281,7 @@ function candlesFor(end, n, { from = 100, step = 0.01, volume = 1e6, after = [] 
   eq(blind.votes.share + blind.votes.pct, 0, "names all priced near $100 cannot tell the two units apart");
   eq(blind.family, "unresolved", "so the chain check settles no unit");
   eq(blind.used, "pct$", "and the unit the gamma probe read stands, not a share unit nothing measured");
-  near(blind.ratio, 1, 1e-9, "the dollars-per-1% vendor then reads a ratio of one in that unit");
+  near(blind.ratio, 1, 1e-9, "the dollars-per-1% feed then reads a ratio of one in that unit");
   eq(vannaScale(nearPar).used, "share", "while a run whose gamma probe read shares keeps shares");
   const pctCoincidence = vannaScale([60, 110, 250].map(pctAt), { prior: "pct$" });
   eq(pctCoincidence.status, "agree", "two names reading dollars per 1% confirm the gamma probe's dollars-per-1% unit rather than unsettle it");
@@ -297,7 +297,7 @@ function candlesFor(end, n, { from = 100, step = 0.01, volume = 1e6, after = [] 
     candles: candlesFor(SESSION, 60), expiries: [row] },
     { probe: { call: "raw", put: "raw" }, kc: { status: "ok", value: 1 }, unit: { family: "pct$", used: "pct$" }, vannaScale: scale });
   const pctVendor = at(blind);
-  eq(pctVendor.vannaPerPoint, 1000, "a consistent dollars-per-1% vendor the chain check cannot classify keeps vanna at × 100, not × S = 1,400");
+  eq(pctVendor.vannaPerPoint, 1000, "a consistent dollars-per-1% feed the chain check cannot classify keeps vanna at × 100, not × S = 1,400");
   eq(pctVendor.charmPerSession, -500, "and charm with it");
   ok(!("note" in pctVendor.conventions.unit), "with no note claiming the chain check read a different unit");
   const legacy = at({ status: "agree", ratio: 1, n: 5 });
@@ -524,7 +524,7 @@ function ivRows(end, n, { rho = 0 } = {}) {
        `${t}: three implied-volatility changes, too few for a vol-of-vol`);
     const fallback = cardNets(card, { h: 1 });
     eq(fallback.fallback.vanna.drawn, 12, `${t}: the fallback sums the 12 drawn expiries`);
-    eq(fallback.fallback.vanna.seen, g.seen, `${t}: of the ${g.seen} the vendor published`);
+    eq(fallback.fallback.vanna.seen, g.seen, `${t}: of the ${g.seen} the feed published`);
     ok(out.conventions.nets.includes(`12 of ${g.seen} expiries`), `${t}: and says so (${out.conventions.nets})`);
     const stated = card.panels.charm.rows.reduce((s, r) => s + (r.call ?? 0) + (r.put ?? 0), 0);
     const netted = card.panels.charm.rows.reduce((s, r) => s + (r.call ?? 0) - (r.put ?? 0), 0);
@@ -574,7 +574,7 @@ function ivRows(end, n, { rho = 0 } = {}) {
   const vanna = greekTermStructure(rows, { name: "vanna", callLeg: callVannaLeg, putLeg: putVannaLeg, asOf: SESSION });
   eq(vanna.rows.length, 1, "nor a row of the vanna ladder");
   eq(vanna.expired, 1, "which counts what it dropped");
-  eq(vanna.rows[0].dte, 4, "and counts days from the session, not the vendor's own dte of 3");
+  eq(vanna.rows[0].dte, 4, "and counts days from the session, not the feed's own dte of 3");
   eq(vanna.rows[0].dealer, 4, "each expiry carries its dealer net, call − put");
   eq(vanna.signConvention, SIGN_CONVENTION, "and the corrected convention");
   const charm = greekTermStructure(rows, { name: "charm", callLeg: callCharmLeg, putLeg: putCharmLeg, asOf: SESSION });
@@ -662,4 +662,4 @@ function ivRows(end, n, { rho = 0 } = {}) {
     `a deep out-of-the-money put keeps a nonzero delta of ${deep.delta.toExponential(2)}, which the old 1e-7 normal rounded away`);
 }
 
-console.log(`✓ flows-variation: ${checks} assertions — Black-Scholes vendor rows netted call + put for gamma and call − put for delta, vanna and charm to nine digits, a |charm|-weighted convention probe that reads a live-like book raw and a half-and-half one as nothing, a charm scale recovered where the rate term allows, a unit probe that refuses to classify cheap stocks, a vanna scale checked against the chain, a variance whose shares sum to one and fall silent as null rather than zero, a 15-cell grid with the right signs, candles and implied-volatility rows after the session ignored, golden B and CHTR readings from their own cut series, and a score decomposition that accounts for the residual whole`);
+console.log(`✓ flows-variation: ${checks} assertions — Black-Scholes feed rows netted call + put for gamma and call − put for delta, vanna and charm to nine digits, a |charm|-weighted convention probe that reads a live-like book raw and a half-and-half one as nothing, a charm scale recovered where the rate term allows, a unit probe that refuses to classify cheap stocks, a vanna scale checked against the chain, a variance whose shares sum to one and fall silent as null rather than zero, a 15-cell grid with the right signs, candles and implied-volatility rows after the session ignored, golden B and CHTR readings from their own cut series, and a score decomposition that accounts for the residual whole`);

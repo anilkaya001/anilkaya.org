@@ -211,7 +211,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
      `naming the flight, the whole wait and that the retry recovered (${JSON.stringify(hangWarn.lines[0])})`);
   ok(first.res.status === 200 && second.res.status === 200,
      "A FLIGHT THAT NEVER SETTLES DOES NOT TAKE THE ISOLATE WITH IT: in workerd a D1 batch belongs to the request that started it, " +
-     "and when that request answers before the batch lands (the chain route's vendor call rejects at once with no key while its card " +
+     "and when that request answers before the batch lands (the chain route's feed call rejects at once with no key while its card " +
      "read has just started the bootstrap) the promise never settles; every later request awaited it for the life of the isolate " +
      "(flows-chain-contract's bare worker, 300 s to undici's headers timeout, on CI and in the sandbox). Both waiters answer");
   ok(waited >= 3500 - TIMER_SLACK_MS && waited < 6000, `after the 2 s deadline and the 1.5 s retry (${waited} ms), not never`);
@@ -267,7 +267,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
     ok(waited >= 12000 - TIMER_SLACK_MS && waited < 15000, `after the refresh's own budget of two origins at 5 s (${waited} ms), not never`);
     eq(calls, 2 * dead, "with the dead refresh and exactly one retry shared by the two readers: the second reader's poll finds the retry in the field and joins it");
     const again = await get("/api/markets");
-    ok(again.res.status === 200 && calls === 2 * dead, "and a later reader finds the empty snapshot stored and asks the vendor nothing");
+    ok(again.res.status === 200 && calls === 2 * dead, "and a later reader finds the empty snapshot stored and asks the feed nothing");
   } finally {
     globalThis.fetch = realFetch;
   }
@@ -295,7 +295,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
     const marketWarn = captureWarn();
     const got = await get("/api/markets").finally(marketWarn.stop);
     ok(got.res.status === 200 && got.body.quotes.length === dead && calls === 2 * dead,
-       `a dead refresh whose retry reaches the vendor answers the retry's quotes (${got.body.quotes.length} of ${dead})`);
+       `a dead refresh whose retry reaches the feed answers the retry's quotes (${got.body.quotes.length} of ${dead})`);
     ok(marketWarn.lines.length === 1 && marketWarn.lines[0].flight === "market" && marketWarn.lines[0].abandoned === 1 &&
        marketWarn.lines[0].recovered === true,
        `and its one log line says the retry recovered, because the refresh itself succeeded (${JSON.stringify(marketWarn.lines)})`);
@@ -313,9 +313,9 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   const chain = await get("/api/flows/chain?t=AAPL");
   const answered = Date.now() - t0;
   ok(chain.res.status === 503 && chain.body.error.code === "chain_unconfigured" && answered < 300,
-     `THE CHAIN ROUTE STILL FAILS FAST: with no vendor key it answers before the schema batch it started has landed (${answered} ms of a 400 ms batch)`);
+     `THE CHAIN ROUTE STILL FAILS FAST: with no feed key it answers before the schema batch it started has landed (${answered} ms of a 400 ms batch)`);
   await chain.settle();
-  eq(f.count(SCHEMA_RE), 1, "the batch the card read started beside the vendor call is kept alive through ctx.waitUntil until it lands, so the answer never abandons it");
+  eq(f.count(SCHEMA_RE), 1, "the batch the card read started beside the feed call is kept alive through ctx.waitUntil until it lands, so the answer never abandons it");
   f.latency(1);
   const later = f.trips.length;
   const meta = await get("/api/flows/meta");
@@ -346,7 +346,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   const keyed = (t) => t.sqls.map((s) => (/id = 'roster'/.test(s) ? "roster" : /id = 'universe'/.test(s) ? "universe" : /id = 'events'/.test(s) ? "events" : s.slice(0, 20)));
 
   const absent = await route("/api/flows/card?t=ZZZZ");
-  deep(absent.body, { ticker: "ZZZZ", status: "absent", why: "not-covered" }, "a name with no card, no universe row and no vendor key is absent, not covered");
+  deep(absent.body, { ticker: "ZZZZ", status: "absent", why: "not-covered" }, "a name with no card, no universe row and no feed key is absent, not covered");
   eq(absent.trips.length, 2, "ONE BATCH DECIDES AN ABSENT CARD: the card row's own read, then a single batch (three sequential trips before)");
   ok(absent.trips[1].kind === "batch" && absent.trips[1].sqls.length === 3, "of three keyed statements");
   deep(keyed(absent.trips[1]), ["roster", "universe", "events"], "the roster's promise, the universe row and the earnings gate, in one trip");
@@ -371,7 +371,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   eq(tape.trips.length, 1, "THE TAPE ADMISSION RIDES THE TAPE READ: one batch, where the row and the known-name check were two trips");
   ok(tape.trips[0].kind === "batch" && /FROM flows_tape/.test(tape.trips[0].sqls[0]) && /UNION ALL/.test(tape.trips[0].sqls[1]),
      "the tape row first, the card-or-universe membership second");
-  ok(tape.body.status === "pending" && tape.body.why === "unconfigured", "with no vendor key the name is admitted and the tape says unconfigured, as before");
+  ok(tape.body.status === "pending" && tape.body.why === "unconfigured", "with no feed key the name is admitted and the tape says unconfigured, as before");
   const held = await route("/api/flows/tape?t=NVDA");
   eq(held.trips.length, 1, "a covered name with no tape row yet costs the same single trip");
 }
@@ -444,7 +444,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
     ok(calls[0].afterTrips === gld.at + 2 && gld.trips.length === 2,
        "made only after the card read and the keyed batch both came back empty, so it never delays an answer the batch already holds");
     const zz = await route("/api/flows/card?t=ZZZZ");
-    ok(zz.body.status === "absent" && zz.body.why === "unknown" && calls.length === 2, "a name the vendor does not know is unknown");
+    ok(zz.body.status === "absent" && zz.body.why === "unknown" && calls.length === 2, "a name the feed does not know is unknown");
     const tape = await route("/api/flows/tape?t=ZZZZ");
     deep(tape.body, { ticker: "ZZZZ", status: "absent", why: "unknown" }, "the tape refuses an unknown name");
     ok(tape.trips.length === 1 && calls.length === 3 && calls[2].afterTrips === tape.at + 1,
@@ -504,9 +504,9 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
     const liveMs = live.at - firstCall("GOOG");
     ok(live.got.res.status === 200 && live.got.body.status === "unavailable" && live.got.body.why === "chain_timeout",
       `the quote card says why: unavailable, chain_timeout (${live.got.res.status} ${JSON.stringify(live.got.body).slice(0, 80)})`);
-    ok(within(liveMs, 4000), `by the default 4,000 ms deadline plus at most ${TIMER_SLACK_MS} ms (${liveMs} ms after the vendor call)`);
+    ok(within(liveMs, 4000), `by the default 4,000 ms deadline plus at most ${TIMER_SLACK_MS} ms (${liveMs} ms after the feed call)`);
 
-    ok(stalled.got !== null, "a vendor that sends its headers and then stalls the body is bounded by the same deadline");
+    ok(stalled.got !== null, "a feed that sends its headers and then stalls the body is bounded by the same deadline");
     const stalledMs = stalled.at - firstCall("MSFT");
     ok(stalled.got.body.status === "unavailable" && stalled.got.body.why === "chain_timeout" && within(stalledMs, 4000),
       `the body read ends at 4,000 ms as chain_timeout, not as malformed data (${stalledMs} ms, ${JSON.stringify(stalled.got.body).slice(0, 80)})`);
@@ -514,7 +514,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
     ok(chain.got !== null, "the chain route ends too");
     const chainMs = chain.at - firstCall("NVDA");
     ok(chain.got.res.status === 504 && chain.got.body.error && chain.got.body.error.code === "chain_timeout",
-      `a chain read whose vendor never answers is JSON 504 chain_timeout (${chain.got.res.status} ${chain.got.text.slice(0, 80)})`);
+      `a chain read whose feed never answers is JSON 504 chain_timeout (${chain.got.res.status} ${chain.got.text.slice(0, 80)})`);
     eq(chain.got.res.headers.get("Cache-Control"), "no-store", "as a no-store API error");
     ok(within(chainMs, 6000), `at the OHLC deadline of 6,000 ms, the first deadline among the calls it cannot do without (${chainMs} ms)`);
 
@@ -535,7 +535,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
     ok(legs.length === 2 && abortsAt(legs, 6000),
       `THE TAPE'S RACE NOW CANCELS THE SUBREQUEST: both legs are aborted at tier1TimeoutMs, 6,000 ms, not left running behind the race (${legs.map((c) => c.abortedAt === null ? "never" : c.abortedAt - c.at).join(",")} ms)`);
 
-    ok(calls.every((c) => c.signalled), `every vendor call carries an abort signal (${calls.filter((c) => !c.signalled).map((c) => c.path).join(", ")})`);
+    ok(calls.every((c) => c.signalled), `every feed call carries an abort signal (${calls.filter((c) => !c.signalled).map((c) => c.path).join(", ")})`);
   } finally {
     globalThis.fetch = realFetch;
   }
@@ -771,9 +771,9 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   const ix = (name) => live.fields.indexOf(name);
   deep(["AAA", "BBB", "CCC", "DDD"].map((t) => [live.rows[t][ix("prev")], live.rows[t][ix("chg")]]),
     [[100, 0.1], [199.5, 0.102757], [null, null], [1, 2]],
-    "and the written live:focus has AAA and DDD filled from the closes, BBB on the vendor's own prev_close, and CCC (no last close) with a dash");
+    "and the written live:focus has AAA and DDD filled from the closes, BBB on the feed's own prev_close, and CCC (no last close) with a dash");
   deep([live.prevFill.n, live.prevFill.tickers, live.prevFill.date], [2, ["AAA", "DDD"], "2026-09-22"], "with the fill labelled");
-  eq(live.fresh.vendorAt, new Date(at - 40000).toISOString().slice(0, 19) + "Z", "and the vendor's newest quote time as the key's vendorAt");
+  eq(live.fresh.vendorAt, new Date(at - 40000).toISOString().slice(0, 19) + "Z", "and the feed's newest quote time as the key's vendorAt");
 }
 
 {
@@ -1078,7 +1078,7 @@ class FakeCache {
     }
     const unknown = await view("/api/flows/tape?t=ZZZZ");
     ok(unknown.body.status === "pending" && !cache.entries.has(admitKey("ZZZZ")),
-      "a name admitted only because nothing could refuse it (no vendor key, no verdict) is never remembered");
+      "a name admitted only because nothing could refuse it (no feed key, no verdict) is never remembered");
     const unknownAgain = await view("/api/flows/tape?t=ZZZZ");
     ok(scans(unknownAgain), "so its next view checks again");
     const elsewhere = new FakeCache();
@@ -1700,11 +1700,11 @@ class FakeCache {
     const vendorBefore = calls.length;
     for (let i = 1; i <= 60; i++) {
       const r = await get(A, "/api/flows/chain?t=NVDA&refresh=1");
-      ok(r.res.status !== 429 && r.vendor > 0, `MEMBER VENDOR: member A's chain read ${i} of 60 in the window reaches the vendor (${r.res.status}, ${r.vendor} calls)`);
+      ok(r.res.status !== 429 && r.vendor > 0, `MEMBER VENDOR: member A's chain read ${i} of 60 in the window reaches the feed (${r.res.status}, ${r.vendor} calls)`);
     }
-    eq(counts.get(A), 60, "one limiter call per vendor-spending request, however many vendor calls the request makes");
+    eq(counts.get(A), 60, "one limiter call per vendor-spending request, however many feed calls the request makes");
     const spentCalls = calls.length - vendorBefore;
-    ok(spentCalls >= 120, `the 60 chain reads made several vendor calls each (${spentCalls})`);
+    ok(spentCalls >= 120, `the 60 chain reads made several feed calls each (${spentCalls})`);
     eq(ondemand, spentCalls, "THE SHARED UW_ONDEMAND BUDGET IS CHARGED PER VENDOR CALL: one token for each call the 60 chain reads made");
     const before = ondemand;
     refusedJson(await get(A, "/api/flows/chain?t=NVDA"), "member A's 61st chain read in the window, with no copy held");
@@ -1713,7 +1713,7 @@ class FakeCache {
     eq(ondemand, before, "A REFUSED MEMBER NEVER SPENDS THE SHARED UW_ONDEMAND BUDGET: the member check runs first");
     const live = await get(A, "/api/flows/live?t=NVDA");
     ok(live.res.status === 200 && live.body.status === "unavailable" && live.body.why === "throttled" && live.vendor === 0,
-      `the stock-state quote read by member A is refused with no vendor call, as the existing throttled body (${live.res.status} ${JSON.stringify(live.body).slice(0, 80)})`);
+      `the stock-state quote read by member A is refused with no feed call, as the existing throttled body (${live.res.status} ${JSON.stringify(live.body).slice(0, 80)})`);
     ok(live.res.headers.get("X-Fresh-State") === "stale" && live.res.headers.get("X-Fresh-Reason") === "throttled",
       "stamped X-Fresh-State: stale, X-Fresh-Reason: throttled");
     const now = await get(A, "/api/flows/now?t=NVDA");
@@ -1721,10 +1721,10 @@ class FakeCache {
       `the heartbeat's quote leg is refused the same way, and the heartbeat itself still answers (${now.res.status})`);
 
     const chainB = await get(B, "/api/flows/chain?t=NVDA");
-    ok(chainB.res.status !== 429 && chainB.vendor > 0, `MEMBER B IS SERVED while member A is refused: B's chain read reaches the vendor (${chainB.res.status}, ${chainB.vendor} calls)`);
+    ok(chainB.res.status !== 429 && chainB.vendor > 0, `MEMBER B IS SERVED while member A is refused: B's chain read reaches the feed (${chainB.res.status}, ${chainB.vendor} calls)`);
     const liveB = await get(B, "/api/flows/live?t=NVDA");
     ok(liveB.res.status === 200 && liveB.body.status === "ok" && liveB.body.price === 101.5 && liveB.vendor === 1,
-      `and B's quote is read from the vendor (${JSON.stringify(liveB.body).slice(0, 80)})`);
+      `and B's quote is read from the feed (${JSON.stringify(liveB.body).slice(0, 80)})`);
     deep([...new Set(memberKeys)], [A, B], "the limiter is keyed by memberId(session), one key per member");
 
     const meter = (allow = Infinity) => {
@@ -1750,7 +1750,7 @@ class FakeCache {
       try {
         const r = await get(B, route, { UW_ONDEMAND: m.binding, ...priced });
         eq(m.granted, r.vendor, `${what}: ONE SHARED TOKEN PER VENDOR CALL (${m.granted} tokens, ${r.vendor} calls)`);
-        eq(r.vendor, expected, `${what}: makes ${expected} vendor calls`);
+        eq(r.vendor, expected, `${what}: makes ${expected} feed calls`);
         return r;
       } finally {
         world = null;
@@ -1769,7 +1769,7 @@ class FakeCache {
       try {
         const r = await get(B, route, { UW_ONDEMAND: m.binding, ...priced });
         refusedJson({ ...r, vendor: 0 }, `${what} when the shared budget runs dry after two calls (no copy held)`);
-        eq(r.vendor, 2, `${what}: A REFUSAL IN THE MIDDLE OF A BUILD STOPS THE REST: only the two admitted calls reach the vendor`);
+        eq(r.vendor, 2, `${what}: A REFUSAL IN THE MIDDLE OF A BUILD STOPS THE REST: only the two admitted calls reach the feed`);
         eq(m.granted, 2, `${what}: and exactly two tokens were spent`);
       } finally {
         world = null;
@@ -1790,7 +1790,7 @@ class FakeCache {
       for (const [route, field, value] of [["/api/flows/chain?t=NVDA&refresh=1", "held", "chain"], ["/api/flows/strategy?t=NVDA&refresh=1", "held", "strategy"]]) {
         const r = await get(A, route);
         ok(r.res.status === 200 && r.body && r.body[field] === value && r.vendor === 0,
-          `THE CACHED COPY IS THE THROTTLED ANSWER: ${route} past A's window serves the held copy with no vendor call (${r.res.status})`);
+          `THE CACHED COPY IS THE THROTTLED ANSWER: ${route} past A's window serves the held copy with no feed call (${r.res.status})`);
         ok(r.res.headers.get("X-Fresh-State") === "stale" && r.res.headers.get("X-Fresh-Reason") === "throttled" &&
           r.res.headers.get("X-Fresh-Throttled") === "1" && r.res.headers.get("X-Chain-Cache") === "throttled" &&
           r.res.headers.get("X-Chain-Age") !== null && r.res.headers.get("Cache-Control") === "no-store",
@@ -1818,7 +1818,7 @@ class FakeCache {
         const spentA = counts.get(A);
         const r = await get(A, route);
         ok(r.res.status === 200 && r.body && r.body.held === mark && r.vendor === 0,
-          `A PLAIN READ PAST THE TTL BY A REFUSED MEMBER SERVES THE KEPT COPY: ${route} with a 300 s old copy, no refresh, 0 vendor calls (${r.res.status}, ${r.vendor})`);
+          `A PLAIN READ PAST THE TTL BY A REFUSED MEMBER SERVES THE KEPT COPY: ${route} with a 300 s old copy, no refresh, 0 feed calls (${r.res.status}, ${r.vendor})`);
         ok(r.res.headers.get("X-Fresh-State") === "stale" && r.res.headers.get("X-Fresh-Reason") === "throttled" &&
           r.res.headers.get("X-Chain-Cache") === "throttled" && Math.abs(Number(r.res.headers.get("X-Chain-Age")) - 300) <= 1 &&
           r.res.headers.get("Cache-Control") === "no-store",
@@ -1849,7 +1849,7 @@ class FakeCache {
       const rebuilt = await get(B, "/api/flows/chain?t=NVDA", { UW_NOW: "2026-08-25T18:10:00Z" });
       world = null;
       ok(rebuilt.res.status === 200 && rebuilt.res.headers.get("X-Chain-Cache") === "miss" && rebuilt.vendor > 0 && rebuilt.body.held === undefined,
-        `an admitted member's plain read past the TTL is a miss that rebuilds from the vendor (${rebuilt.res.status} ${JSON.stringify(rebuilt.body).slice(0, 120)}, ${rebuilt.res.headers.get("X-Chain-Cache")}, ${rebuilt.vendor} calls)`);
+        `an admitted member's plain read past the TTL is a miss that rebuilds from the feed (${rebuilt.res.status} ${JSON.stringify(rebuilt.body).slice(0, 120)}, ${rebuilt.res.headers.get("X-Chain-Cache")}, ${rebuilt.vendor} calls)`);
       const kept = cache.entries.get("https://flows-chain.internal/NVDA?strategy=both&rank=annualized");
       const keptHeaders = new Headers(kept.headers);
       eq(keptHeaders.get("Cache-Control"), "max-age=21600", "THE REBUILT COPY IS KEPT SIX HOURS, past its 120 s TTL, so a later refusal has it to serve");
@@ -1861,16 +1861,16 @@ class FakeCache {
 
       const tapeA = await get(A, "/api/flows/tape?t=NVDA");
       ok(tapeA.res.status === 200 && tapeA.vendor === 0 && tapeA.body && tapeA.body.status === "pending",
-        `A TAPE MISS BY A REFUSED MEMBER makes 0 vendor calls and answers pending (${tapeA.res.status} ${JSON.stringify(tapeA.body).slice(0, 80)})`);
+        `A TAPE MISS BY A REFUSED MEMBER makes 0 feed calls and answers pending (${tapeA.res.status} ${JSON.stringify(tapeA.body).slice(0, 80)})`);
       const tapeB = await get(B, "/api/flows/tape?t=NVDA");
-      ok(tapeB.vendor > 0, `while member B's tape miss reaches the vendor (${tapeB.vendor} calls)`);
+      ok(tapeB.vendor > 0, `while member B's tape miss reaches the feed (${tapeB.vendor} calls)`);
       const tapeRows = () => f.db.prepare("SELECT count(*) AS n FROM flows_tape").get().n;
       const rowsBefore = tapeRows();
       for (const t of ["QQZA", "QQZB", "QQZC"]) {
         const junk = await get(A, "/api/flows/tape?t=" + t);
         ok(junk.res.status === 200 && junk.vendor === 0 && junk.body && junk.body.status === "pending" && junk.body.why === "throttled" &&
           junk.res.headers.get("X-Tape") === "throttled",
-          `A REFUSED MEMBER'S TAPE READ OF AN UNKNOWN NAME answers pending, throttled, with 0 vendor calls (${t}: ${JSON.stringify(junk.body).slice(0, 80)})`);
+          `A REFUSED MEMBER'S TAPE READ OF AN UNKNOWN NAME answers pending, throttled, with 0 feed calls (${t}: ${JSON.stringify(junk.body).slice(0, 80)})`);
       }
       eq(tapeRows(), rowsBefore, `AND WRITES NO flows_tape ROW: the refused admit never reaches the insert or the lease claim (${rowsBefore} -> ${tapeRows()})`);
       const changes = () => f.db.prepare("SELECT total_changes() AS n").get().n;
@@ -1881,11 +1881,11 @@ class FakeCache {
       for (let i = 0; i < 10; i++) {
         const r = await get(A, "/api/flows/tape?t=NVDA");
         ok(r.res.status === 200 && r.vendor === 0 && /^stale-throttled$|^throttled$/.test(r.res.headers.get("X-Tape") || ""),
-          `A REFUSED MEMBER'S READ OF A KNOWN NAME'S STALE TAPE ${i + 1} of 10 makes 0 vendor calls and is throttled (${r.res.headers.get("X-Tape")})`);
+          `A REFUSED MEMBER'S READ OF A KNOWN NAME'S STALE TAPE ${i + 1} of 10 makes 0 feed calls and is throttled (${r.res.headers.get("X-Tape")})`);
       }
       eq(changes() - staleBefore, 0, "AND WRITES NOTHING: no lease claim, no release, no insert (total_changes unchanged over ten reads)");
       const staleB = await get(B, "/api/flows/tape?t=NVDA");
-      ok(staleB.vendor > 0, `while member B's read of the same stale tape reaches the vendor (${staleB.vendor} calls)`);
+      ok(staleB.vendor > 0, `while member B's read of the same stale tape reaches the feed (${staleB.vendor} calls)`);
       const cardA = await get(A, "/api/flows/card?t=ZZQQ");
       ok(cardA.res.status === 200 && cardA.vendor === 0, `an unknown name's card read by a refused member makes no screener call (${cardA.vendor})`);
       ok(cardA.body && cardA.body.status === "unavailable" && cardA.body.why === "throttled" &&
@@ -1912,9 +1912,9 @@ class FakeCache {
       const background = [];
       await worker.scheduled({ cron, scheduledTime: at }, { ...env, ...counting }, { waitUntil: (p) => background.push(Promise.resolve(p).catch(() => {})) });
       await Promise.all(background);
-      ok(calls.length > n, `the ${W.cronJob(cron, at)} tick reached the vendor (${calls.length - n} calls)`);
+      ok(calls.length > n, `the ${W.cronJob(cron, at)} tick reached the feed (${calls.length - n} calls)`);
     }
-    deep(consulted, { member: 0, ondemand: 0 }, "THE TIER 1 AND FOCUS TICKS NEVER CONSULT A LIMITER: both refuse everything and the engines read the vendor anyway");
+    deep(consulted, { member: 0, ondemand: 0 }, "THE TIER 1 AND FOCUS TICKS NEVER CONSULT A LIMITER: both refuse everything and the engines read the feed anyway");
   } finally {
     globalThis.fetch = realFetch;
   }

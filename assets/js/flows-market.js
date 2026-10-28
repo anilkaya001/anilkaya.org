@@ -357,7 +357,7 @@
     host.dataset.rows = JSON.stringify(rows.map(([, long, value, pop]) => [long, isNum(pop) === 0 ? DASH : value, isNum(pop) === null ? DASH : String(isNum(pop))]));
   }
 
-  const PULSE_QUIET = "The feed answered with nothing: ordinary before the open, a vendor silence after the close.";
+  const PULSE_QUIET = "The feed answered with nothing: ordinary before the open, a feed silence after the close.";
 
   function feedSilence(feed, what) {
     if (!feed || feed.status === "unavailable") {
@@ -650,7 +650,7 @@
     infoInto("mkSecTidesCard", "sector tides", () => ({
       title: "Sector tides", lead: "Net option premium through the session for each of the eleven sectors, on one shared scale so heights compare.",
       facts: [["Source", useLive ? "live:breadth" : "regime"], ["Session", session || null], ["Scale", "±" + usd(peak)]],
-      notes: ["Net is net call premium minus net put premium, cumulative; the vendor's sector tide is assumed cumulative, and the session value is the last row.", "Tile area is the net size, floored at " + Math.round(TM_FLOOR * 100) + "% of the largest so a small sector stays readable; colour is the strength, and the triangle gives the sign."],
+      notes: ["Net is net call premium minus net put premium, cumulative; the feed's sector tide is assumed cumulative, and the session value is the last row.", "Tile area is the net size, floored at " + Math.round(TM_FLOOR * 100) + "% of the largest so a small sector stays readable; colour is the strength, and the triangle gives the sign."],
     }));
   }
 

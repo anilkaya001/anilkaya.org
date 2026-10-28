@@ -193,7 +193,7 @@ const held = (dossier) => codes(R.heldTags(dossier));
     eq(labelled.find((f) => f.k === "engine.iv.pct.30"), undefined, "P1-41: the dossier a card builds carries no iv.pct.30");
     eq(R.forReading(withFacts(BASES.momentum, [["options.engine.iv.rank.1y", { v: 0.6, unit: "fraction" }]])).packets.options.facts.find((f) => f.k === "engine.iv.rank.1y")?.label, "Implied volatility rank over one year", "and the rank is labelled a rank under its own id");
     eq(Object.hasOwn(R.ENGINE_LABELS, "iv.pct.30"), false, "and the retired id has no label left");
-    eq(R.READING_VERSION, 2, "the reading version moved with the wording, so stored readings regenerate on their next read");
+    eq(R.READING_VERSION, 3, "the reading version moved with the wording (the data source is named the feed, never by its trade), so stored readings regenerate on their next read");
   }
   const dead = clone(BASES.momentum);
   dead.packets.events.status = "withheld";
@@ -293,13 +293,13 @@ const held = (dossier) => codes(R.heldTags(dossier));
 const M = BASES.momentum;
 const MT = R.heldTags(M);
 const MP = R.promptForReading(M, MT);
-const clause = " on the vendor's convention (dealers long calls, short puts)";
+const clause = " on the feed's convention (dealers long calls, short puts)";
 const GOOD = {
   identity: { text: "Example Technologies Inc sells subscription software and cloud infrastructure to mid-sized enterprises, with revenue mostly from recurring contracts.", cites: ["identity.name", "identity.description"] },
   now: { text: "The last price is $127.40, +1.27% from the previous close, with RSI at 72.0 of 100 and the close +9.40% against its 50-day average. Net option premium today is +$9.40M and the next earnings report is dated 2026-10-07, 4 sessions after the last close.", cites: ["price.last", "price.change", "price.rsi", "price.sma50", "flow.strip.net", "events.next", "events.sessions"] },
   drivers: [
     { text: "Earnings are close: the report is 4 sessions away and the move priced for it, 7.00%, is above the 5.20% median move after past reports.", cites: ["events.sessions", "events.impliedMove", "earnings.react.medianMove"] },
-    { text: "News flow is heavy: 8 headlines in the last 24 hours, 2 of them marked major by the vendor, and Reuters reports that the company lifts guidance.", cites: ["news.count24h", "news.major24h", "news.h1"] },
+    { text: "News flow is heavy: 8 headlines in the last 24 hours, 2 of them marked major by the feed, and Reuters reports that the company lifts guidance.", cites: ["news.count24h", "news.major24h", "news.h1"] },
     { text: "Dealers are pinned near a level: the implied dealer state is pinned" + clause + ", with the gamma flip at $124.00.", cites: ["options.state", "options.engine.level.flip"] },
     { text: "Option flow leans to calls: bullish against bearish premium is +0.62.", cites: ["flow.strip.lean"] },
   ],
@@ -536,7 +536,7 @@ const hasWhy = (r, section, code) => r.refused.some((x) => x.section === section
   ok(hasWhy(dealer("Gamma is long at the flip of $124.00.", ["options.engine.level.flip"]), "drivers.0", "dealer-sign"), "gamma without the convention likewise");
   ok(hasWhy(dealer("The implied state is pinned.", ["options.state"]), "drivers.0", "dealer-sign"), "a section citing dealer facts needs the clause even when the word dealer is absent");
   ok(!hasWhy(dealer("The implied dealer state is pinned" + clause + "."), "drivers.0", "dealer-sign"), "and with the clause it passes");
-  ok(!hasWhy(dealer("Dealers are pinned; the vendor's convention is that dealers hold calls long and puts short."), "drivers.0", "dealer-sign"), "any wording that names the convention, dealers, calls and puts passes");
+  ok(!hasWhy(dealer("Dealers are pinned; the feed's convention is that dealers hold calls long and puts short."), "drivers.0", "dealer-sign"), "any wording that names the convention, dealers, calls and puts passes");
   ok(hasWhy(dealer("Dealers hold calls long and puts short."), "drivers.0", "dealer-sign"), "but a sign stated as fact, with no word convention, is refused");
   ok(!hasWhy(vet(patch({ drivers: [{ text: "Earnings are close: the report is 4 sessions away.", cites: ["events.sessions"] }, ...GOOD.drivers.slice(1)] })), "drivers.0", "dealer-sign"), "a section with no dealer content is not asked for the clause");
 }
