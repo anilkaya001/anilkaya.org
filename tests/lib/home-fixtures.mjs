@@ -3,6 +3,7 @@ import path from "node:path";
 import * as PAGES_MOD from "../../shared/flows-pages.js";
 import { ROOT, alertsFixture, universeFixture, richAnswer, RICH_NOW } from "./market-fixtures.mjs";
 import { nightlyEmit, emitRead } from "./nightly-emit.mjs";
+import { memberShell } from "../../shared/flows-member-shell.js";
 
 const MIME = { ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json" };
 const FIX = JSON.parse(fs.readFileSync(path.join(ROOT, "scripts/render-preview.fixtures.json"), "utf8"));
@@ -35,7 +36,7 @@ function assertAnchors(patch) {
   }
 }
 
-export async function openHome(browser, { viewport = { width: 1440, height: 820 }, net = true, summary = FIX.summary, alerts = null, universe = null, reduced = false, coarse = false, hash = "", patch = null, overrides = {}, rich = false, dock = false, now = RICH_NOW, onRoute = null } = {}) {
+export async function openHome(browser, { viewport = { width: 1440, height: 820 }, net = true, summary = FIX.summary, alerts = null, universe = null, reduced = false, coarse = false, hash = "", patch = null, overrides = {}, rich = false, dock = false, now = RICH_NOW, onRoute = null, shell = false, stale = null } = {}) {
   assertAnchors(patch);
   const context = await browser.newContext({ viewport, reducedMotion: reduced ? "reduce" : "no-preference", hasTouch: coarse, isMobile: coarse });
   const page = await context.newPage();
@@ -46,7 +47,16 @@ export async function openHome(browser, { viewport = { width: 1440, height: 820 
   if (rich) await page.clock.install({ time: now });
   const alertRows = alerts || (rich ? emitRead(dir, "flowalerts") : alertsFixture());
   const universeBody = universe || (rich ? emitRead(dir, "universe") : universeFixture());
-  const html = PAGES_MOD.overviewPage({ username: "test", summary, net });
+  const bare = PAGES_MOD.overviewPage({ username: "test", summary, net });
+  const html = shell ? memberShell(PAGES_MOD.oracleShell(bare, "on", "overview"), { slug: "overview", on: true }) : bare;
+  const aged = (route, body) => {
+    if (!stale || !body || typeof body !== "object" || !["board", "market", "pulse"].includes(route)) return body;
+    const c = structuredClone(body);
+    if (typeof c.sessionDate === "string") c.sessionDate = stale;
+    if (c.totalsHistory && typeof c.totalsHistory === "object") c.totalsHistory.date = stale;
+    if (c.totals && Array.isArray(c.totals.rows)) for (const r of c.totals.rows) if (r && typeof r.date === "string") r.date = stale;
+    return c;
+  };
   await page.routeWebSocket(/\/api\/rt\/ws/, (ws) => ws.close({ code: 4011, reason: "off" }));
   await page.route("**/*", async (route) => {
     const u = new URL(route.request().url());
@@ -69,7 +79,8 @@ export async function openHome(browser, { viewport = { width: 1440, height: 820 
       const own = Object.keys(overrides).find((x) => key.includes(x));
       if (own) return route.fulfill({ contentType: "application/json", body: JSON.stringify(overrides[own]) });
       if (rich) {
-        const body = homeRich(dir, u.pathname.slice("/api/flows/".length), u);
+        const route0 = u.pathname.slice("/api/flows/".length);
+        const body = aged(route0, homeRich(dir, route0, u));
         if (body !== undefined && body !== null) return route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
       }
       const k = Object.keys(FIX.overview).find((x) => key.includes(x));

@@ -53,7 +53,8 @@ export function planSections({ cap, analytics }) {
   return { run, skipped, left };
 }
 
-export function callCeiling(deadline = null, now = Date.now) {
+export function callCeiling(extrasCap, deadline = null, now = Date.now) {
+  if (Number.isFinite(extrasCap) && extrasCap <= 0) return 0;
   return Number.isFinite(deadline) && now() >= deadline ? 0 : NIGHTLY_MAX;
 }
 

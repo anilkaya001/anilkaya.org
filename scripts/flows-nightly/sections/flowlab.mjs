@@ -1,3 +1,4 @@
+import { extrasCap } from "../../../shared/flows-vendor-extras.js";
 import { nightlyOn } from "../../../shared/flows-flowlab.js";
 import { readFlowlab, FLOWLAB_KEYS, callCeiling } from "../../flows-legs/flowlab.mjs";
 import { DEADLINE_MS } from "../vendor-params.mjs";
@@ -12,7 +13,7 @@ export async function flowlabStage(ctx, deps = {}) {
   const { vendor, sessionDate, generatedAt } = ctx;
   const { env = process.env, put = publish, store = publishedStore, pool = runPooled, width = poolWidth(2).width, now = Date.now, startedAt = stats.startedAt } = deps;
   const deadline = startedAt + DEADLINE_MS;
-  const cap = callCeiling(deadline, now);
+  const cap = callCeiling(extrasCap(env), deadline, now);
   const alerts = store.flowalerts;
   const result = await readFlowlab({
     vendor,

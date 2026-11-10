@@ -2,7 +2,7 @@ import { world } from "./world.mjs";
 
 const LINE = Object.freeze({ day: 60000, minute: 500 });
 
-const CEILING = Object.freeze({ daySharePct: 0.85, timeSharePct: 0.8, minuteSharePct: 0.8, hardCap: 900, deadlineMs: 90 * 60 * 1000, overrunMargin: 0.1 });
+const CEILING = Object.freeze({ daySharePct: 0.85, timeSharePct: 0.8, minuteSharePct: 0.8, hardCap: 900, deadlineMs: 165 * 60 * 1000, overrunMargin: 0.1 });
 
 const pad3 = (n) => String(n % 1000).padStart(3, "0");
 

@@ -613,6 +613,65 @@ if (want("nofit")) {
 
 for (const triples of await pool(jobs, (j) => j())) for (const [a, b, m] of triples) eq(a, b, m);
 
+const SHELL_FACTS = () => {
+  const out = [];
+  for (const c of document.querySelectorAll("#ccVerdict .ui-gchip")) {
+    const r = c.getBoundingClientRect();
+    if (c.scrollHeight > c.clientHeight + 1) out.push(c.dataset.chip + ": the cell's content is taller than the cell");
+    const kids = [...c.children].filter((k) => getComputedStyle(k).display !== "none").map((k) => k.getBoundingClientRect());
+    for (const b of kids) if (b.top < r.top - 0.5 || b.bottom > r.bottom + 0.5) out.push(c.dataset.chip + ": a line leaves the cell");
+    for (let i = 1; i < kids.length; i++) if (kids[i].top < kids[i - 1].bottom - 0.5 && kids[i].left < kids[i - 1].right && kids[i - 1].left < kids[i].right) out.push(c.dataset.chip + ": two lines overlap");
+    const v = c.querySelector(".ui-chip-v");
+    if (v && (v.getBoundingClientRect().height < parseFloat(getComputedStyle(v).fontSize) - 0.5 || parseFloat(getComputedStyle(v).fontSize) < 15)) out.push(c.dataset.chip + ": the figure is cut or under 15 px");
+  }
+  const host = document.getElementById("hmNetHost");
+  const api = host && window.FlowsUI.netMap && window.FlowsUI.netMap.of(host);
+  const s = api && api.scene();
+  if (s) {
+    const top = s.phone ? 0 : 20;
+    for (const ch of s.chips) {
+      if (ch.y < top - 0.5) out.push("map chip " + ch.id + " rises into the column captions");
+      if (ch.y + ch.h > s.h + 0.5) out.push("map chip " + ch.id + " is cut at the bottom");
+    }
+    const st = host.querySelector(".nm-stage").getBoundingClientRect();
+    for (const t of host.querySelectorAll(".nm-chip")) {
+      const box = t.querySelector(".nm-box").getBoundingClientRect();
+      for (const x of t.querySelectorAll("text")) { const b = x.getBoundingClientRect(); if (b.right > box.right + 0.5 || b.left < box.left - 0.5) out.push("map chip text leaves its chip: " + x.textContent); }
+      const tx = [...t.querySelectorAll("text")].map((x) => x.getBoundingClientRect());
+      if (tx.length === 2 && tx[0].right > tx[1].left && tx[0].bottom > tx[1].top + 2 && tx[1].bottom > tx[0].top + 2) out.push("map chip label and figure overlap: " + t.textContent);
+      if (box.bottom > st.bottom + 0.5) out.push("map chip drawn below its stage");
+    }
+  }
+  return { out, stamped: document.querySelectorAll("#ccVerdict .hm-chip-s").length, head: getComputedStyle(document.getElementById("hm")).getPropertyValue("--hm-head").trim(), map: Boolean(s) };
+};
+const SHELL_SIZES = [[1700, 818], [1440, 818], [1440, 900], [1366, 768], [1280, 800], [1920, 1080], [390, 844]];
+async function shellFacts(size, patch = null) {
+  const { page, context } = await openHome(browser, { viewport: { width: size[0], height: size[1] }, rich: true, shell: true, stale: "2026-08-21", patch });
+  await page.waitForTimeout(3000);
+  await page.clock.runFor(3000).catch(() => {});
+  await page.waitForTimeout(1200);
+  const f = await page.evaluate(SHELL_FACTS);
+  await context.close();
+  return f;
+}
+if (want("shell")) {
+  for (const size of SHELL_SIZES) {
+    const f = await shellFacts(size);
+    const at = size.join("x");
+    eq(f.head, "92px", `${at}: served as production serves it, the Neuron strip makes the head 92 px`);
+    ok(f.stamped >= 3, `${at}: the nightly cells carry a day stamp (${f.stamped})`);
+    eq(f.out, [], `${at}: AS PRODUCTION SERVES HOME, WITH STAMPED CELLS, NO KPI LINE IS CUT OR OVERLAPS AND EVERY MAP CHIP SITS BETWEEN ITS CAPTION AND THE STAGE'S END`);
+  }
+  ok((await shellFacts([1700, 818])).map, "the condensed map is the mode measured at 1700x818");
+  const NM = "/assets/js/flows-net-map.js";
+  for (const [name, patch, size] of [
+    ["the stamp goes back on its own line", { [CSS]: [[".hm-stage .hm-hero-chips .ui-chip-l { color", ".hm-stage .hm-hero-chips .ui-chip-l { display: flex; flex-direction: column-reverse; color"], ["font: 600 clamp(15px, min(25cqi, 42cqh), 32px)", "font: 600 clamp(17px, 25cqi, 32px)"]] }, [1440, 818]],
+    ["the KPI figure ignores the cell's height", { [CSS]: [["font: 600 clamp(15px, min(25cqi, 42cqh), 32px)", "font: 600 clamp(40px, 25cqi, 48px)"]] }, [1440, 818]],
+    ["the map assumes 120 px it does not have", { [NM]: [["const availH = Math.max(0, H - capY);", "const availH = Math.max(160, H - capY);"], ["const y0 = capY + Math.max(0, (availH - total) / 2);", "const y0 = capY + (H - capY - total) / 2;"], ["CH_MIN = 24", "CH_MIN = 40"]] }, [1700, 818]],
+    ["the map keeps every sector whatever the height", { [NM]: [["groups: clamp(n, 3, 14)", "groups: 14"]] }, [1700, 818]],
+  ]) ok((await shellFacts(size, patch)).out.length > 0, `PLANTED WRONG BUILD IS CAUGHT BY THE PRODUCTION-SHAPED SWEEP: ${name}`);
+}
+
 if (want("dock")) {
   const { page, context, errors } = await openHome(browser, { viewport: { width: 1920, height: 1080 }, rich: true });
   await page.waitForTimeout(3500);

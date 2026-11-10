@@ -274,15 +274,15 @@ for (const [w, h] of [[1440, 820], [1024, 768]]) {
 const MUTANTS = [
   ["the bullish range counts unsided premium as bullish", [["band(M.cover.bullLo, M.cover.bullHi)", "band(M.cover.bullLo, 1)"]]],
   ["the sided coverage dropped from the stats line", [[" sided of \" + money(M.flagged) + \" flagged (\" + pct(M.cover.share) + \") \u00b7 lean \"", " flagged \u00b7 lean \""]]],
-  ["sector names always abbreviated", [["if (full && ctxW(full, \"600 12px\") <= avail) label = full;", ""]]],
+  ["sector names always abbreviated", [["const labels = [full, d.label + folded, d.label].filter(Boolean);", "const labels = [d.label + folded, d.label];"]]],
   ["Other chips have no member drill", [["if (r.d.other) readEl.append", "if (false) readEl.append"]]],
   ["the readout drops where the premium goes", [["parts.push(\"to \" + d.to);", ""]]],
   ["the readout drops where it comes from", [["parts.push(\"from \" + d.from);", ""]]],
-  ["share printed at twice its value", [["const fig = money(d.v) + \" \\u00b7 \" + pct(d.share);", "const fig = money(d.v) + \" \\u00b7 \" + pct(d.share * 2);"]]],
+  ["share printed at twice its value", [["const figs = [money(d.v) + \" \\u00b7 \" + pct(d.share), money(d.v)];", "const figs = [money(d.v) + \" \\u00b7 \" + pct(d.share * 2), money(d.v)];"]]],
   ["labels cut to six characters", [["const t = chipText(d, G, nd.w - 18);", "const t = chipText(d, G, nd.w - 18); t.label = t.label.slice(0, 6);"]]],
   ["bands all one width", [["const sw = (e) => Math.max(1.4, e.v * k);", "const sw = (e) => 3;"]]],
   ["the legend loses the band width key", [["h(\"span\", { class: \"nm-lg\" }, h(\"i\", { class: \"nm-sw s-band\"", "h(\"span\", { class: \"nm-lg\", hidden: true }, h(\"i\", { class: \"nm-sw s-band\""]]],
-  ["chips overlap", [["const gap = 5;", "const gap = -9;"]]],
+  ["chips overlap", [["const gap = GAP;", "const gap = -9;"]]],
   ["the largest name is not selected at rest", [["const defaultSel = () => (M.layers[2][0] ? M.layers[2][0].id : M.layers[0][0] ? M.layers[0][0].id : null);", "const defaultSel = () => (M.layers[2][1] ? M.layers[2][1].id : null);"]]],
   ["the table twin drops the sector", [["[\"Sector\", \"Side\", \"Name\", LAYER[mode][3], \"Premium\", \"Share\"].map((c, i) => h(\"th\"", "[\"Sector\", \"Side\", \"Name\", LAYER[mode][3], \"Premium\", \"Share\"].filter((c) => c !== \"Sector\").map((c, i) => h(\"th\""]]],
 ];

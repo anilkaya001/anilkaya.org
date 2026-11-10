@@ -85,8 +85,9 @@ async function battery(leg, section) {
 
   await safe("cap", async () => {
     const t0 = Date.parse("2026-10-23T22:00:00Z");
-    need(leg.callCeiling(t0 + 1, () => t0) === 40 && leg.callCeiling(null, () => t0) === 40, "cap: Flow Lab's own allowance is forty calls a night");
-    need(leg.callCeiling(t0, () => t0) === 0 && leg.callCeiling(t0 - 1, () => t0) === 0, "cap: past the run's deadline nothing is read");
+    need(leg.callCeiling(2000, t0 + 1, () => t0) === 40 && leg.callCeiling(6000) === 40 && leg.callCeiling(undefined, null, () => t0) === 40, "cap: the stage has forty calls of its own, whatever the extras leg spent");
+    need(leg.callCeiling(0) === 0 && leg.callCeiling(-5, t0 + 1, () => t0) === 0, "cap: an extras cap of zero stops the stage too");
+    need(leg.callCeiling(2000, t0, () => t0) === 0 && leg.callCeiling(undefined, t0 - 1, () => t0) === 0, "cap: past the run's deadline nothing is read");
     const out = await leg.readFlowlab({ vendor: vendorOf(), sessionDate: SESSION, generatedAt: AT, cap: 10, env: {} });
     need(out.calls === 5 && out.skipped.length === 1 && out.skipped[0].section === "groups" && out.skipped[0].why === "cap", "cap: groups are skipped for the cap when ten calls remain (" + out.calls + ")");
     need(!out.payloads["flowlab-groups"] && out.detail.flSkipped === 1, "cap: nothing is published for the skipped section");
@@ -138,13 +139,16 @@ async function battery(leg, section) {
     const puts = [];
     const notes = [];
     const stages = { run: async (id, fn, onError) => { try { return await fn(); } catch (e) { onError(e); return null; } }, detail: (d) => notes.push(d), skip: (id, why) => notes.push({ skipped: why }) };
-    const ctx = { stages, vendor: vendorOf(), sessionDate: SESSION, generatedAt: AT, marketLegs: { extras: { calls: 2000 } } };
+    const ctx = { stages, vendor: vendorOf(), sessionDate: SESSION, generatedAt: AT, marketLegs: { extras: { calls: 1990 } } };
     const t0 = Date.now();
     await section.runFlowlabWith(ctx, { env: { FLOWS_EXTRAS_CAP: "2000" }, put: async (k, v) => { puts.push(k); }, store: { flowalerts: { rows: ALERTS } }, pool: null, startedAt: t0, now: () => t0 + 60000 });
     need(notes[0] && notes[0].flCalls === 30 && notes[0].flSkipped === 0, "section: Flow Lab keeps its own allowance whatever the extras spent (" + JSON.stringify(notes[0]) + ")");
     need(puts.join() === "flowlab-roots,flowlab-venues,flowlab-screen,flowlab-groups,flowlab-corr", "section: published keys in order");
+    const braked = [];
+    await section.runFlowlabWith({ ...ctx, stages: { ...stages, detail: (d) => braked.push(d) } }, { env: { FLOWS_EXTRAS_CAP: "0" }, put: async () => {}, store: { flowalerts: { rows: ALERTS } }, pool: null });
+    need(braked[0] && braked[0].flCalls === 0 && braked[0].flSkipped === 4, "section: an extras cap of zero reads nothing (" + JSON.stringify(braked[0]) + ")");
     const late = [];
-    await section.runFlowlabWith({ ...ctx, stages: { ...stages, detail: (d) => late.push(d) } }, { env: {}, put: async () => {}, store: { flowalerts: null }, pool: null, startedAt: t0, now: () => t0 + 91 * 60000 });
+    await section.runFlowlabWith({ ...ctx, stages: { ...stages, detail: (d) => late.push(d) } }, { env: {}, put: async () => {}, store: { flowalerts: null }, pool: null, startedAt: t0, now: () => t0 + 1440 * 60000 });
     need(late[0] && late[0].flCalls === 0 && late[0].flSkipped === 4, "section: past the run's deadline the stage reads nothing (" + JSON.stringify(late[0]) + ")");
     const off = [];
     await section.runFlowlabWith({ ...ctx, stages: { ...stages, skip: (id, why) => off.push([id, why]), run: async () => { throw new Error("must not run"); } } }, { env: { FLOWS_FLOWLAB_NIGHTLY: "off" } });
@@ -163,6 +167,7 @@ assert.deepEqual(base, [], "the shipped leg and stage pass their battery:\n" + b
 checks++;
 
 const legPlants = [
+  [29, "an extras cap of zero is ignored", [["if (Number.isFinite(extrasCap) && extrasCap <= 0) return 0;", ""]], "an extras cap of zero"],
   [30, "groups published with a failed group as zeros", [["groups[g] = groupEntry(res.ok ? reduceGreek(res.body, { group: true, expiry }) : res, openMs);", "groups[g] = res.ok ? groupEntry(reduceGreek(res.body, { group: true, expiry }), openMs) : { status: \"plan\", bars: [], callC: 0, putC: 0 };"]], "keeps its reason and no figures"],
   [32, "analytics read with the switch off", [["if (section === \"analytics\" && !analytics) continue;", ""]], "analytics read with the switch off"],
   [71, "analytics asks an undocumented range", [["export const CORR_RANGE = \"3month\";", "export const CORR_RANGE = \"3M\";"]], "documented forms"],
@@ -172,7 +177,7 @@ const legPlants = [
 ];
 
 const sectionPlants = [
-  [29, "the extras remainder bounds the stage", [["const cap = callCeiling(deadline, now);", "const cap = Math.max(0, Math.min(40, 2000 - ((ctx.marketLegs && ctx.marketLegs.extras && ctx.marketLegs.extras.calls) || 0)));"]], "own allowance whatever the extras spent"],
+  [75, "the extras remainder bounds the stage", [["const cap = callCeiling(extrasCap(env), deadline, now);", "const cap = Math.max(0, Math.min(40, 2000 - ((ctx.marketLegs && ctx.marketLegs.extras && ctx.marketLegs.extras.calls) || 0)));"]], "own allowance whatever the extras spent"],
 ];
 
 for (const [n, title, transforms, expect] of legPlants) {

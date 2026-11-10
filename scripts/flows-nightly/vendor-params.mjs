@@ -19,6 +19,9 @@ export const RATE = {
   floorCeilingMs: 400,
 
   errorBackoffX: 4,
+
+  recoverAfter: 600,
+  recoverX: 1.25,
 };
 
 export const CALL_COST = Object.freeze({
@@ -112,7 +115,7 @@ export function deepNames(published, limit = DEEP_NAMES) {
   return rows.slice(0, Math.max(0, limit));
 }
 
-export const DEADLINE_MS = 90 * 60 * 1000;
+export const DEADLINE_MS = 165 * 60 * 1000;
 
 export const CHAIN_RESERVE_MS = 6 * 60 * 1000;
 

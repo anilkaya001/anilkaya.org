@@ -152,7 +152,7 @@ const BASE = {
 
   let st = { delayMs: 150, floorMs: 150 };
   for (let i = 0; i < 5; i++) st = stepRateController(st, "error");
-  eq(st, { delayMs: 150 * RATE.errorBackoffX, floorMs: 150 },
+  eq(st, { delayMs: 150 * RATE.errorBackoffX, floorMs: 150, streak: 0 },
     "five failures in a row slow the pace to four times the floor, not to the 5 s ceiling: one failing call's retries no longer stall every other call");
   eq(stepRateController({ delayMs: 5000, floorMs: 150 }, "error").delayMs, 5000, "and a failure never shortens a backoff a 429 set");
   ok(RATE.errorBackoffX * RATE.floorCeilingMs <= RATE.maxDelayMs, "the error ceiling sits inside the 5 s per-call ceiling at every floor");

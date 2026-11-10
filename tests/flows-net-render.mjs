@@ -1099,7 +1099,7 @@ try {
     deep(await run(null), [], "THE SECTOR LAYER COMES FIRST, THE SIDES SECOND, NO SECTOR IS FOLDED, THE INDEX BUCKETS FOLLOW THE REAL SECTORS and every layer sums to the total");
     for (const [name, patch] of [
       ["the sides lead and the sectors follow", [['node(sid, 0, sid === "s:~"', 'node(sid, 1, sid === "s:~"'], ['node(ids[1], 1, {', 'node(ids[1], 0, {']]],
-      ["sectors fold into Other past six", [["const keepS = new Set((secs.length > 14 ? secs.slice(0, 13) : secs)", "const keepS = new Set((secs.length > 6 ? secs.slice(0, 5) : secs)"]]],
+      ["sectors fold into Other past six", [["const gcap = clamp(Math.round(num(o.groups) || 14), 3, 14);", "const gcap = 6;"]]],
       ["Index funds rank among the sectors", [['"s:fund": 1,', '"s:fund": 0,']]],
     ]) ok((await run(patch)).length > 0, `PLANTED WRONG BUILD FAILS: ${name}`);
   }

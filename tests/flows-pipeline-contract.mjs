@@ -62,6 +62,8 @@ import {
   COMPUTE_JOBS, COMPUTE_NAME_CPU_MS, computeNames, processCpuMs, runCompute,
 } from "../scripts/flows-nightly/sections/compute.mjs";
 
+process.env.FLOWS_WRITE_BATCH = "off";
+
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} — got ${a}, want ${b}`); checks++; };

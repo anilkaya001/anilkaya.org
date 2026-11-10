@@ -36,6 +36,9 @@
 .nm-sw.s-band { width: 28px; height: 6px; background: var(--label-3); opacity: 0.7; border-radius: 0; }
 .nm-sw.s-other { width: 18px; height: 10px; border: 1px dashed var(--sep-strong); background: var(--fill-4); }
 .nm-conv { flex: 1 1 280px; color: var(--label-3); }
+.nm[data-compact] .nm-legend { margin-left: auto; }
+.nm[data-compact] .nm-stats { display: none; }
+.nm[data-compact] .nm-read { -webkit-line-clamp: 1; min-height: 0; }
 .nm-empty { margin: auto; padding: var(--sp-6); text-align: center; color: var(--label-2); font: var(--t-callout); }
 .nm-tw { overflow: hidden; }
 .nm-tbl { width: 100%; border-collapse: collapse; font: var(--t-footnote); }

@@ -25,6 +25,8 @@ export async function runOraclePrep(ctx) {
   }
 }
 
+const ORACLE_WRITES_IN_FLIGHT = 40;
+
 export async function runOraclePublish(ctx) {
   const { stages, computed, sessionDate } = ctx;
   if (!oracleBuildOn()) {
@@ -35,21 +37,28 @@ export async function runOraclePublish(ctx) {
     const results = computed && computed.results ? computed.results.get(ORACLE_JOB.id) : null;
     const records = results ? [...results.values()] : [];
     let calls = 0, signals = 0, conflicts = 0, bytes = 0, shed = 0, failed = 0;
+    let leak = null;
+    const writes = [];
     for (const record of records) {
-      try {
-        const body = JSON.stringify(record);
-        await publish("oracle:" + record.ticker, record);
+      const body = JSON.stringify(record);
+      writes.push(Promise.resolve().then(() => publish("oracle:" + record.ticker, record)).then(() => {
         bytes += body.length;
         calls += record.calls.length;
         if (record.state === "signal") signals++;
         if (record.state === "conflict") conflicts++;
         if (record.shed) shed++;
-      } catch (error) {
-        if (error && error.fixtureLeak) throw error;
+      }, (error) => {
+        if (error && error.fixtureLeak) { leak = leak || error; return; }
         failed++;
         console.warn(`  oracle ${record.ticker}: ${error.message}`);
+      }));
+      if (writes.length >= ORACLE_WRITES_IN_FLIGHT) {
+        await Promise.all(writes.splice(0));
+        if (leak) throw leak;
       }
     }
+    await Promise.all(writes);
+    if (leak) throw leak;
     const generatedAt = stampNow();
     if (records.length) {
       await publish("oracle-top", { v: 1, session: sessionDate, sessionDate, generatedAt, items: rankTop(records, { limit: ORACLE_TOP_ROWS }) });

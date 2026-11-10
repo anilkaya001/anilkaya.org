@@ -103,21 +103,23 @@ export function composeCardXPayload(prior, own, { budgetBytes = CARD_X_BUDGET_BY
   return payload;
 }
 
+export const CARD_X_WRITES_IN_FLIGHT = 40;
+
 export async function publishCardX(store, publish, { generatedAt, sessionDate, readAt, stored = () => null, log = () => {}, skip = new Set() } = {}) {
   let written = 0, failed = 0, over = 0, largest = 0, largestWire = 0, kept = 0;
+  const writes = [];
   for (const t of store.tickers()) {
     if (skip.has(t)) { kept++; continue; }
     const payload = composeCardXPayload(stored("card-x:" + t), cardXPayload(t, store.get(t), { generatedAt, sessionDate, readAt }));
     largest = Math.max(largest, payload.bytes);
     largestWire = Math.max(largestWire, cardXBytes(payload));
     if (payload.bytes > CARD_X_BUDGET_BYTES) { over++; log(`  card-x ${t}: ${payload.bytes} bytes after shedding, over the cap — not written`); continue; }
-    try {
-      await publish("card-x:" + t, payload);
-      written++;
-    } catch (error) {
+    writes.push(Promise.resolve().then(() => publish("card-x:" + t, payload)).then(() => { written++; }, (error) => {
       failed++;
       log(`  card-x ${t}: ${error.message}`);
-    }
+    }));
+    if (writes.length >= CARD_X_WRITES_IN_FLIGHT) await Promise.all(writes.splice(0));
   }
+  await Promise.all(writes);
   return { written, failed, over, largest, largestWire, kept };
 }
