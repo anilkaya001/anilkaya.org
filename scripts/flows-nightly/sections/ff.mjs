@@ -64,14 +64,14 @@ export async function ffStage(ctx, deps = {}) {
   return out;
 }
 
-export async function runFf(ctx, deps = {}) {
-  const { stages } = ctx;
+export async function runFf(ctx) {
+  const { stages, ffDeps: deps = {} } = ctx;
   const env = deps.env || process.env;
   if (!ffNightlyOn(env)) {
-    stages.skip(FF_STAGE_ID, "FF_NIGHTLY is off");
+    stages.skip("ff", "FF_NIGHTLY is off");
     return;
   }
-  const result = await stages.run(FF_STAGE_ID, async () => {
+  const result = await stages.run("ff", async () => {
     const out = await ffStage(ctx, deps);
     const s = out.stats;
     stages.detail({

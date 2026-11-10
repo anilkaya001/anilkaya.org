@@ -83,6 +83,7 @@ for (const [route, name] of [["/flows/about/", "about"], ["/flows/glossary/", "g
     overview: "<strong>Home.</strong>", watch: "(the Watchlist)", long: "<strong>Boards.</strong>", short: "<strong>Boards.</strong>",
     market: "<strong>Market.</strong>", moves: "<strong>Moves.</strong>", unusual: "<strong>Unusual.</strong>", flowlab: "<strong>Flow Lab.</strong>", ledger: "<strong>Ledger.</strong>", events: "<strong>Events.</strong>",
     political: "<strong>Political.</strong>", strategy: "<strong>Strategy, Premium desk and Ask.</strong>", desk: "<strong>Strategy, Premium desk and Ask.</strong>",
+    fire: "<strong>Fire.</strong>",
   };
   const members = FLOWS_NAV.filter((g) => !g.only).flatMap((g) => g.items.map((i) => i.key)).sort();
   eq(Object.keys(NEEDLE).sort().join(","), members.join(","), "the about page's table names every page the members' sidebar links, so a new page cannot ship unlisted");

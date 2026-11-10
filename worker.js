@@ -2,7 +2,7 @@ import { signSession, verifySession, getCookie, cookie } from "./shared/session.
 import {
   FLOWS_COOKIE, FLOWS_SESSION_TTL_SECONDS, LEARN_AUDIENCE, THROTTLE_SHARED_BUCKET,
   parseCredentials, readMembers, memberOf, throttleBucket, throttleAddress, loginNameKey, staleFailureCutoff, verifyCredential,
-  signFlowsSession, verifyFlowsSession, isLearnAudience, isLocked, nextFailureState, sessionEpoch,
+  signFlowsSession, verifyFlowsSession, isLearnAudience, isLocked, nextFailureState, sessionEpoch, timingSafeEqual,
 } from "./shared/flows-auth.js";
 import { FLOWS_PAGES, modelName, neuronProvenance, notFoundPage } from "./shared/flows-pages.js";
 import * as FLOWS_ASK from "./shared/flows-ask.js";
@@ -26,7 +26,7 @@ import {
 } from "./shared/flows-premium.js";
 import { stateOf, printOf, coherence } from "./shared/flows-basis.js";
 import { etDayOf } from "./shared/flows-quant-time.js";
-import { isRefreshWindow, freshHeaders, pendingHeaders, phaseAt, easternDay, sessionOpen } from "./shared/flows-freshness.js";
+import { FRESH_CLASSES, isRefreshWindow, freshHeaders, pendingHeaders, phaseAt, easternDay, sessionOpen, shiftDay } from "./shared/flows-freshness.js";
 import * as FLOWS_LIVE from "./shared/flows-live-worker.js";
 import * as FLOWS_DOSSIER from "./shared/flows-dossier-worker.js";
 import { TICKER_RE } from "./shared/flows-live.js";
@@ -55,6 +55,16 @@ import { flowsIngestRows } from "./server/routes/flows-ingest.js";
 import { flowsPageRows } from "./server/routes/flows-pages.js";
 import { flowsFilmRows } from "./server/routes/flows-film.js";
 import { flowsRtRows } from "./server/routes/flows-rt.js";
+import { flowsFfRows } from "./server/routes/flows-ff.js";
+import { bootstrapFf, createFfStore } from "./server/ff-store.js";
+import { EVAL_LIMITS, createEvaluator, liveSnapshot, nightlySnapshot } from "./server/ff-eval.js";
+import { modeOf as ffMode } from "./server/ff-health.js";
+import { PREVIEW as FF_PREVIEW } from "./server/ff-preview.js";
+import { compileWire, prepareVersion } from "./shared/ff-grammar.js";
+import { prepare as ffPrepare, preview as ffPreview } from "./shared/ff-engine.js";
+import { clauseHash as ffClauseHash, memberWireId } from "./shared/ff-ids.js";
+import { effectiveSession as ffEffective, firstCheck as ffFirstCheck, nightlyFinal, sessionOf as ffSessionOf } from "./shared/ff-session.js";
+import { BUDGET as FF_BUDGET, HEALTH_RULES as FF_HEALTH_RULES, LIMITS as FF_LIMITS, TEMPLATES as FF_TEMPLATES } from "./shared/ff-contract.js";
 import { aiCall, pruneAiOutcomes } from "./server/ai.js";
 import { applySchema } from "./server/schema.js";
 import { chainFor } from "./shared/flows-ai-broker.js";
@@ -94,6 +104,9 @@ function createState() {
     fundsFill: null,
     flowlabFlights: new Map(),
     flowlabLogged: new Map(),
+    ffReady: false,
+    ffFlight: null,
+    ffCache: new Map(),
   };
 }
 const state = createState();
@@ -955,6 +968,179 @@ function flowsLoginLimited() {
 const FLOWS_STORE = createFlowsStore({ ensureFlowsTables: (env) => ensureFlowsTables(env) });
 const MEMBER_STORE = createMemberStore({ schemaSql: MEMBER_STATE_SCHEMA_SQL });
 const readFlowsPayload = (env, key, trace) => FLOWS_STORE.read(env, key, trace);
+
+async function ensureFf(env) {
+  if (state.ffReady || !env.DB) return;
+  const flight = state.ffFlight || (state.ffFlight = bootstrapFf(env.DB)
+    .then(() => { state.ffReady = true; }, (error) => logFailure("warn", "ff schema bootstrap failed", {}, error))
+    .finally(() => { if (state.ffFlight === flight) state.ffFlight = null; }));
+  if (!(await FLOWS_LIVE.settledWithin(flight, FLOWS_LIVE.FLIGHT_WAIT_MS)) && state.ffFlight === flight) state.ffFlight = null;
+}
+
+const FF_TABLES = createFfStore({ ensureFf });
+const ffEffectiveOf = (spec) => ({ ...spec, effectiveSession: spec.version.effective_session || spec.effectiveSession });
+const FF_STORE = Object.freeze({
+  ...FF_TABLES,
+  createWire: (env, member, spec, at) => FF_TABLES.createWire(env, member, ffEffectiveOf(spec), at),
+  adjustWire: (env, member, spec, at) => FF_TABLES.adjustWire(env, member, ffEffectiveOf(spec), at),
+});
+const FF_EVAL = createEvaluator({ store: FF_STORE, flowsStore: FLOWS_STORE, mode: ffMode });
+
+function ffAlerts(text) {
+  let body = null;
+  try { body = JSON.parse(text); } catch { body = null; }
+  return body !== null && typeof body === "object" && !Array.isArray(body) ? { ...body, day: body.sessionDate } : null;
+}
+
+function ffTemplate(hint, clauses) {
+  const template = typeof hint === "string" ? FF_TEMPLATES.find((t) => t.id === hint && t.ast) : null;
+  if (!template) return null;
+  const mine = ffClauseHash(clauses);
+  return [template.ast.all, ...(template.variants || []).map((v) => v.clauses)].some((all) => ffClauseHash(all) === mine) ? template.id : null;
+}
+
+function ffSubjects(prepared, wire, out) {
+  const figures = (values) => wire.clauses.map((c, i) => ({ m: c.m, op: c.op, x: c.x, value: values[i].value, ok: true }));
+  const hits = out.rows.map((r) => ({ subject: r.subject, symbol: r.symbol || r.sector || null, verdict: "true", reason: null, clauses: figures(r.values) }));
+  const lost = wire.subjectKind !== "c" ? "not_carded" : wire.cadence === "live" ? "not_in_live_set" : "missing";
+  if (wire.scope.kind !== "names") {
+    const fill = (n, verdict, reason = null) => Array.from({ length: Math.max(0, n) }, () => ({ verdict, reason, clauses: [] }));
+    const reasons = Object.entries(out.reasons);
+    return [...hits, ...fill(out.wouldHit - hits.length, "true"), ...fill(out.evaluated - out.wouldHit, "false"),
+      ...reasons.flatMap(([reason, n]) => fill(n, "unknown", reason)),
+      ...fill(out.unknown - reasons.reduce((sum, [, n]) => sum + n, 0), "unknown", lost)];
+  }
+  const held = new Map();
+  for (const hit of hits) if (!held.has(hit.symbol)) held.set(hit.symbol, hit);
+  return wire.scope.symbols.map((symbol) => {
+    if (held.has(symbol)) return held.get(symbol);
+    const one = ffPreview(prepared, { ...wire, scope: { kind: "names", symbols: [symbol] } }, { limit: 1 });
+    if (one.evaluated > 0) return { subject: "n:" + symbol, symbol, verdict: "false", reason: null, clauses: [] };
+    return { subject: "n:" + symbol, symbol, verdict: "unknown", reason: Object.keys(one.reasons)[0] || lost, clauses: [] };
+  });
+}
+
+const FF_CORE = Object.freeze({
+  compile({ body, templateHint, universe, now }) {
+    const plain = body !== null && typeof body === "object" && !Array.isArray(body);
+    const ast = plain && body.cooldown === undefined && Object.hasOwn(FF_LIMITS.cooldownDefault, body.cadence)
+      ? { ...body, cooldown: { unit: FF_LIMITS.cooldownUnit, n: FF_LIMITS.cooldownDefault[body.cadence] } } : body;
+    const scope = plain && ast.scope !== null && typeof ast.scope === "object" ? ast.scope : {};
+    const out = prepareVersion(ast, {
+      universe: universe.symbols, sectors: universe.sectors, universeSize: universe.symbols.size, now,
+      sectorSizes: scope.kind === "sector" && typeof scope.sector === "string" ? { [scope.sector]: universe.symbols.size } : undefined,
+    });
+    if (!out.ok) return out;
+    if (out.version.control === "bh" && out.version.exp_week === null) {
+      return { ok: false, code: "ff_metric_unavailable", detail: "the family this wire is tested in has no size" };
+    }
+    const template = ffTemplate(templateHint, ast.all);
+    return template ? { ...out, version: { ...out.version, template } } : out;
+  },
+  effectiveSession: (now) => ffEffective("nightly", now),
+  newWireId: () => memberWireId(),
+  async preview({ compiled, snapshot, now }) {
+    const version = compiled.version;
+    const nightly = version.cadence === "nightly";
+    try {
+      const wire = compileWire({ id: "w-preview", layer: "member", memberId: "preview", version: 1, body: JSON.parse(version.ast_json), sentence: version.sentence });
+      if (nightly && wire.subjectKind === "c" && !wire.clauses.some((c) => c.m === "contract.oi_confirm")) {
+        return { status: "unavailable", reason: "source_missing", subjects: [] };
+      }
+      const metrics = snapshot.metrics;
+      const row = nightly ? null : (snapshot.live || []).find((r) => r && r.id === "live:alerts");
+      const alerts = row ? ffAlerts(row.payload) : null;
+      const prepared = ffPrepare(nightly
+        ? nightlySnapshot({ session: metrics.sessionDate, now, metrics, flowalerts: null })
+        : liveSnapshot({ session: ffSessionOf(now), now, alerts, look: 0 }));
+      const out = ffPreview(prepared, wire, { limit: wire.scope.kind === "names" ? Number.MAX_SAFE_INTEGER : FF_PREVIEW.listMax });
+      return {
+        status: "ok", sessionDate: nightly ? metrics.sessionDate : alerts ? alerts.day : null,
+        generatedAt: nightly ? metrics.generatedAt : alerts ? alerts.readAt : null, subjects: ffSubjects(prepared, wire, out),
+      };
+    } catch (error) {
+      logFailure("warn", "ff preview failed", { route: "/api/ff/preview" }, error);
+      return { status: "unavailable", reason: "evaluator_error", subjects: [] };
+    }
+  },
+});
+
+const ffFirstCheckAt = ({ cadence, now }) => {
+  const check = ffFirstCheck(cadence, now, { periodMin: FRESH_CLASSES.breadth.cadenceS / 60 });
+  return check ? { at: check.at, scheduled: true } : null;
+};
+
+async function ffRunAuth(request, env, url) {
+  const offered = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+  const kind = FLOWS_LIVE.tokenKind(offered, env, timingSafeEqual, url);
+  if (kind || !FLOWS_LIVE.looksLikeJwt(offered)) return kind;
+  return (await FLOWS_LIVE.oidcKind(offered, env)).kind;
+}
+
+async function ffLiveTick(env, at) {
+  const phase = phaseAt(at, null);
+  if (!phase || phase.phase !== "rth") return { status: "closed", reason: "market_closed" };
+  if (!env.DB) return { status: "off", reason: "no_store" };
+  await ensureFf(env);
+  const row = await FLOWS_LIVE.readLive(env.DB, "live:alerts");
+  const alerts = row ? ffAlerts(row.payload) : null;
+  const read = alerts ? Date.parse(alerts.readAt) : NaN;
+  const look = Number.isFinite(read) && read >= phase.open ? Math.floor((read - phase.open) / (FF_HEALTH_RULES.liveCadenceS * 1000)) : 0;
+  return FF_EVAL.live(env, { at, alerts, look, slot: "t" + look });
+}
+
+async function ffNightlyHeld(env, session) {
+  const held = env.DB ? await FLOWS_STORE.metadata(env, ["ff-metrics"]) : null;
+  const metrics = held ? held["ff-metrics"] : null;
+  return Boolean(metrics && metrics.present && metrics.sessionDate === session);
+}
+
+async function ffEvaluate({ env, cadence, session, kind, now }) {
+  if (cadence === "nightly" && kind !== "nightly") throw HttpError.of("forbidden");
+  if (cadence === "nightly" && !(await ffNightlyHeld(env, session))) {
+    return { status: "refused", reason: "source_missing", wires: null, names: null, hits: null, receipts: null, unknown: null, errors: null };
+  }
+  const out = cadence === "nightly" ? await FF_EVAL.nightly(env, { session, at: now }) : await ffLiveTick(env, now);
+  if (out.status === "failed") {
+    logFailure("error", "ff run failed", { route: "/api/ff/run", cadence }, out.error);
+    throw HttpError.of("ff_evaluator_unavailable");
+  }
+  return {
+    status: out.status, reason: out.reason || null, wires: out.wires ?? null, names: out.names ?? null, hits: out.hitsWritten ?? null,
+    receipts: out.receipts ?? null, unknown: out.unknown ?? null, errors: Array.isArray(out.errors) ? out.errors.length : null,
+  };
+}
+
+async function ffHousekeeping(env, at) {
+  if (ffMode(env) === "off" || !env.DB) return null;
+  const phase = phaseAt(at, FLOWS_LIVE.memoizedClock(at));
+  const session = phase ? phase.lastClosed : null;
+  let retried = null;
+  if (session && at < nightlyFinal(session)) {
+    const run = await FF_STORE.runRow(env, "nightly:" + session);
+    const open = !run || run.status === "pending" || run.status === "failed" || (run.status === "running" && !(run.lease_until > at));
+    if (open && (!run || run.attempts < EVAL_LIMITS.attempts) && (await ffNightlyHeld(env, session))) {
+      retried = await FF_EVAL.nightly(env, { session, at });
+      if (retried.status === "failed") logFailure("error", "ff run failed", { route: "housekeeping", cadence: "nightly" }, retried.error);
+    }
+  }
+  const gap = await FF_EVAL.gap(env, { at });
+  if (FLOWS_LIVE.pruneDue(at)) await FF_STORE.pruneRuns(env, shiftDay(easternDay(at), -FF_BUDGET.runRetention));
+  return { retried: retried ? retried.status : null, gap: gap.status };
+}
+
+function ffAfterLive(request, env, url, response, ctx) {
+  try {
+    if (url.pathname !== "/api/flows/ingest" || request.method !== "POST" || response.status !== 200) return;
+    if (url.searchParams.get("key") !== "live:alerts" || ffMode(env) === "off") return;
+    const failed = (error) => logFailure("error", "ff live tick failed", { route: url.pathname }, error);
+    keepAlive(ctx, ffLiveTick(env, Date.now()).then((out) => {
+      if (out && out.status === "failed") failed(out.error);
+    }, failed));
+  } catch (error) {
+    logFailure("error", "ff live tick failed", { route: url.pathname }, error);
+  }
+}
 
 function nightlyFreshHeaders(stored) {
   if (!stored || !stored.fresh) return {};
@@ -3215,6 +3401,8 @@ const FLOWLAB_BUILDERS = createFlowlab({ isRefusal: (error) => error instanceof 
 const ROUTER = createRouter(flowsReadRows({ readServed, readFlowsPayload, readWithOverlay, passthrough, recallLastGood, storeGone,
   absentKey, cardWithEngine, briefWithLive, briefFeedsAhead, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK }),
 flowsDeskRows({ scRefreshAllowed, vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }),
+flowsFfRows({ store: FF_STORE, flowsStore: FLOWS_STORE, core: FF_CORE, readClock: (db) => FLOWS_LIVE.cachedClock({ DB: db }), readLiveRows: FLOWS_LIVE.readLiveRows,
+  cache: state.ffCache, runAuth: ffRunAuth, evaluate: ffEvaluate, firstCheck: ffFirstCheckAt }),
 flowsFlowlabRows({ vendorGate, serveCachedVendorRead, readServed, passthrough, builders: FLOWLAB_BUILDERS, now: chainReadMs, flights: state.flowlabFlights,
   isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsAiRows({ askSpend, summaryResponse, readFlowsSummary, neuronProvenance, ensureFlowsTables, dossierResponse, askQuestion, askAnswer,
@@ -4008,6 +4196,8 @@ export default {
       return FLOWS_LIVE.premarketNewsTick(env, at, { fetchVendor: (p, params) => uwFetch(env, p, params, { deadlineMs: LIVE_BUDGET.tier1TimeoutMs }) });
     })());
 
+    guard("ff housekeeping failed", ffHousekeeping(env, at));
+
     guard("flows nightly dispatch failed", (async () => {
       await ensureFlowsTables(env);
       await FLOWS_LIVE.nightlyTick(env, at);
@@ -4033,6 +4223,7 @@ export default {
     try {
       const response = await route(request, env, url, ctx);
       rememberLastGood(request, url, response, ctx);
+      ffAfterLive(request, env, url, response, ctx);
       return done(response);
     } catch (error) {
       if (error instanceof HttpError) {
