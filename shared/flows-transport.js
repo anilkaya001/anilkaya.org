@@ -1,3 +1,5 @@
+import { fixedHalfUp } from "./flows-display-round.js";
+
 export const TRANSPORT = Object.freeze({
   v: 1,
   classes: Object.freeze([
@@ -192,7 +194,7 @@ export function stepLine(state, night, { working = null, cfg = TRANSPORT.line } 
 export function lineSaid(step, { alloc = null } = {}) {
   if (!step) return "transport: no line on record";
   const pct = step.share === null ? "no calls"
-    : (step.share * 100).toFixed(2) + "% refused, " + (step.slow * 100).toFixed(1) + "% of calls issued while backed off";
+    : fixedHalfUp(step.share, 2, 2) + "% refused, " + fixedHalfUp(step.slow, 1, 2) + "% of calls issued while backed off";
   const moved = step.next === step.used ? `stays at ${step.used}` : `${step.used} to ${step.next}`;
   return `transport: line ${moved} a minute (${step.verdict}; ${pct}` +
     (alloc !== null ? `; the run's share was ${alloc} a minute` : "") + ")";
