@@ -155,7 +155,7 @@ plant("deepen-hard-cap-lifted", "the hard ceiling on a night is out of reach of 
 plant("deepen-overrun-margin-dropped", "the baseline is projected with no room for retries", DEEPEN,
   [["overrunMargin: 0.1,", "overrunMargin: 0,"]], "deepenDetector");
 plant("deepen-deadline-stretched", "the rotation is sized against a deadline the workflow cannot honour", DEEPEN,
-  [["deadlineMs: 90 * 60 * 1000,", "deadlineMs: 300 * 60 * 1000,"]], "deepenDetector");
+  [["deadlineMs: 165 * 60 * 1000,", "deadlineMs: 300 * 60 * 1000,"]], "deepenDetector");
 
 const baselines = new Map();
 
