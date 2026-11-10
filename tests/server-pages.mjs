@@ -221,19 +221,15 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     const env = { FLOWS_MOVES: "on", FLOWS_LEDGER: "on", FLOWS_FLOWLAB: "on" };
     const call = (deps) => createRouter(flowsPageRows(deps)).find(path).handler({ ...rc(path), env }).then((r) => r.text());
     const asOwner = await call(scenario({ username: "anilkaya" }).deps);
-    if (slug === "status") {
-      ok(asOwner.includes('id="railOps"') && asOwner.split('id="railOps"').length === 2, "the status page carries the Operations group once");
-      continue;
-    }
+    ok(!asOwner.includes("railOps") && !asOwner.includes(">Operations<") && !asOwner.includes('href="/flows/status/"') && !asOwner.includes("view=latency"), path + ": NO SIDEBAR CARRIES AN OPERATIONS GROUP, a Status link or a Latency link, an owner's included");
+    if (slug === "status") continue;
     const asMember = await call({ ...scenario({ username: "anilkaya" }).deps, isOwner: () => false });
-    ok(asOwner.split('id="railOps"').length === 2, path + ": an owner's sidebar carries the Operations group exactly once");
-    ok(asOwner.includes('<a href="/flows/status/"') && asOwner.includes('href="/flows/status/#view=latency"'), path + ": with Status and Latency links");
     ok(!asMember.includes("railOps") && !asMember.includes("/flows/status/"), path + ": a member's HTML names neither the group nor the page");
     if (slug === "market" || slug === "unusual") continue;
     const brand = /<a class="ff-brand" href="([^"]*)"/;
     ok((asOwner.match(brand) || [])[1] === "/flows/status/#view=coverage" && (asMember.match(brand) || [])[1] === "/flows/about/", path + ": the trade-mark opens data coverage for an owner and About for a member");
     const noBrand = (t) => t.replace(/<a class="ff-brand"[\s\S]*?<\/a>/, "");
-    eq(noBrand(asOwner.replace(/\n    <p class="rail-group" id="railOps">[\s\S]*?<\/div>(?=\n  <\/nav>)/, "")), noBrand(asMember), path + ": and is otherwise byte-identical to the member's");
+    eq(noBrand(asOwner), noBrand(asMember), path + ": and is otherwise byte-identical to the member's");
   }
   const ledgerAs = async (user, env) => {
     const t = createRouter(flowsPageRows(scenario(user).deps));

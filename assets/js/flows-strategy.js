@@ -476,6 +476,10 @@
           w.classList.toggle("is-l", strip.scrollLeft > 2);
           w.classList.toggle("is-r", strip.scrollLeft < max - 2);
         };
+        const step = (dir) => strip.scrollBy({ left: dir * Math.max(160, strip.clientWidth * 0.8), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        w.append(
+          h("button", { type: "button", class: "tl-nav is-prev", "aria-label": "Scroll " + strip.getAttribute("aria-label").toLowerCase() + " list back", onclick: () => step(-1) }, "\u2039"),
+          h("button", { type: "button", class: "tl-nav is-next", "aria-label": "Scroll " + strip.getAttribute("aria-label").toLowerCase() + " list forward", onclick: () => step(1) }, "\u203a"));
         strip.addEventListener("scroll", edge, { passive: true });
         if (window.ResizeObserver) new ResizeObserver(edge).observe(strip);
         w._edge = edge;

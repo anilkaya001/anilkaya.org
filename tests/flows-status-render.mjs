@@ -460,7 +460,8 @@ try {
     eq(await page.evaluate(() => [...document.querySelectorAll("#stTabs [role=tab]")].map((b) => [b.id, b.getAttribute("aria-controls")])),
       [["stTab-health", "stPanel-health"], ["stTab-capacity", "stPanel-capacity"], ["stTab-latency", "stPanel-latency"], ["stTab-coverage", "stPanel-coverage"]], "four tabs wired to their panels");
     await page.evaluate(() => { window.location.hash = "#view=latency"; });
-    await page.waitForFunction(() => document.querySelector("#railOps").nextElementSibling.querySelector('a[aria-current="page"]').textContent.includes("Latency"));
+    await page.waitForFunction(() => !document.getElementById("stPanel-latency").hidden);
+    ok(await page.evaluate(() => !document.querySelector("#railOps")), "the sidebar carries no Operations group");
     await page.close();
   }
 

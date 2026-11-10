@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "418";
+export const ASSET_VERSION = "419";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -148,10 +148,6 @@ export const FLOWS_NAV = [
     { key: "strategy", href: "/flows/strategy/", label: "Strategy", glyph: "flask" },
     { key: "desk", href: "/flows/desk/", label: "Premium desk", glyph: "layers" },
   ] },
-  { group: "Operations", id: "railOps", only: "status", items: [
-    { key: "status", href: "/flows/status/", label: "Status", glyph: "track" },
-    { key: "latency", href: "/flows/status/#view=latency", label: "Latency", glyph: "clock" },
-  ] },
 ];
 
 const RAIL_END = `
@@ -196,9 +192,7 @@ const BRAND_LINK = brandMark(BRAND_MEMBER);
 export function ownerNav(html) {
   let text = String(html);
   if (text.includes(BRAND_LINK)) text = text.replace(BRAND_LINK, () => brandMark(BRAND_OWNER));
-  if (text.includes('id="railOps"') || !text.includes(RAIL_END)) return text;
-  const ops = FLOWS_NAV.find((g) => g.id === "railOps");
-  return text.replace(RAIL_END, () => railGroup(ops, "") + RAIL_END);
+  return text;
 }
 
 const sidebar = (active, username) => {
