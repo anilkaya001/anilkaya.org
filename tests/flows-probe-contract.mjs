@@ -284,7 +284,7 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
     "each per-name route is asked for AAPL and NVDA, the gold future and the unusual congressional trades once");
   ok(expanded.filter((p) => entitled.includes(p.op)).every((p) => p.entitlement && !p.gated),
     "and each carries the entitlement mark into its run");
-  eq(expanded.length + 1, 221, "a weekly strict run is 220 list calls plus the session call: forty-one more than the 179 before (the fourteen probes the Flow Lab added, six of them per name, the three per-name probes that moved from the entitlement questions to used losing no call, the five fund probes: ETF information and weights for AAPL and NVDA, and the ticker directory once, and the volatility desk's seven per-name audit reads for AAPL and NVDA and two market-wide reads)");
+  eq(expanded.length + 1, 217, "a weekly strict run is 216 list calls plus the session call: thirty-seven more than the 179 before (the Flow Lab reads fix dropped the per-name recent-prints and stock price-level probes for AAPL and NVDA, four calls; the fourteen probes the Flow Lab added, six of them per name, the three per-name probes that moved from the entitlement questions to used losing no call, the five fund probes: ETF information and weights for AAPL and NVDA, and the ticker directory once, and the volatility desk's seven per-name audit reads for AAPL and NVDA and two market-wide reads)");
   ok(list.enums["/api/option-trades"].report_flags.includes("intermarket_sweep") &&
      list.enums["/api/option-trades"].upstream_condition_detail.includes("isoi"),
     "the sweep question is asked of both encodings the spec documents: report_flags and the OPRA code isoi");
