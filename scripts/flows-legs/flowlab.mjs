@@ -48,10 +48,8 @@ export function planSections({ cap, analytics }) {
   return { run, skipped, left };
 }
 
-export function callCeiling(env, extrasCalls, extrasCap) {
-  const used = Number.isFinite(extrasCalls) ? extrasCalls : 0;
-  const room = Number.isFinite(extrasCap) ? extrasCap - used : NIGHTLY_MAX;
-  return Math.max(0, Math.min(NIGHTLY_MAX, Math.floor(room)));
+export function callCeiling(extrasCap) {
+  return Number.isFinite(extrasCap) && extrasCap <= 0 ? 0 : NIGHTLY_MAX;
 }
 
 export function fitTail(payload, capBytes, lists) {
