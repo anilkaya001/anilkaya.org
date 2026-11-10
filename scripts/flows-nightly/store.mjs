@@ -437,11 +437,122 @@ export async function flushHeld({ log = () => {} } = {}) {
   return out;
 }
 
+function refuseLeak(key, body) {
+  const leak = publishRefusal(key, body);
+  if (leak) {
+    process.exitCode = 1;
+    throw fixtureLeakError(leak, `publish ${key}`);
+  }
+}
+
+export const WRITE_BATCH = Object.freeze({
+  switchEnv: "FLOWS_WRITE_BATCH", items: 40, bytes: 1400 * 1024, keyRe: /^(?:card|card-x|hist|oracle):[A-Z][A-Z0-9.-]{0,9}$/,
+});
+
+export const writeBatchStats = { batches: 0, keys: 0, fellBack: 0, off: null };
+
+const batchQueue = [];
+
+let batchPumping = false;
+
+let batchOff = null;
+
+export function resetWriteBatch() {
+  batchQueue.length = 0;
+  batchOff = null;
+  Object.assign(writeBatchStats, { batches: 0, keys: 0, fellBack: 0, off: null });
+}
+
+export function writeBatchOn(key, env = process.env) {
+  if (EMIT || DRY_RUN || LIVE_MODE || batchOff) return false;
+  if (String(env[WRITE_BATCH.switchEnv] ?? "").trim().toLowerCase() === "off") return false;
+  return WRITE_BATCH.keyRe.test(key);
+}
+
+export function takeBatch(queue, { items = WRITE_BATCH.items, bytes = WRITE_BATCH.bytes } = {}) {
+  const taken = [];
+  const keys = new Set();
+  let size = 0;
+  for (let i = 0; i < queue.length && taken.length < items;) {
+    const entry = queue[i];
+    if (keys.has(entry.key)) break;
+    if (taken.length && size + entry.wire.length > bytes) break;
+    keys.add(entry.key);
+    size += entry.wire.length;
+    taken.push(entry);
+    queue.splice(i, 1);
+  }
+  return taken;
+}
+
+async function sendBatch(entries) {
+  const response = await fetch(ingestURL() + "?op=batch", {
+    method: "POST", redirect: "error", headers: await ingestHeaders({ json: true }),
+    body: JSON.stringify({ items: entries.map((e) => ({ key: e.key, payload: e.wire })) }),
+  }).finally(() => wireProgress.settled());
+  if (!response.ok) {
+    await response.text().catch(() => "");
+    return { status: response.status, results: null };
+  }
+  const answer = await response.json().catch(() => null);
+  const results = answer && Array.isArray(answer.results) && answer.results.length === entries.length ? answer.results : null;
+  return { status: response.status, results };
+}
+
+async function pumpBatches() {
+  if (batchPumping) return;
+  batchPumping = true;
+  try {
+    while (batchQueue.length) {
+      await ingestWrites.acquire();
+      const entries = takeBatch(batchQueue);
+      if (!entries.length) continue;
+      let out = { status: 0, results: null };
+      try { out = await sendBatch(entries); } catch { out = { status: 0, results: null }; }
+      if (!out.results) {
+        batchOff = `the batch write answered HTTP ${out.status || "nothing"}`;
+        writeBatchStats.off = batchOff;
+        console.warn(`  ingest: ${batchOff}; this run writes one key a request from here`);
+        for (const e of [...entries, ...batchQueue.splice(0)]) {
+          writeBatchStats.fellBack++;
+          send(e.key, e.payload).then(e.resolve, e.reject);
+        }
+        return;
+      }
+      writeBatchStats.batches++;
+      entries.forEach((e, i) => {
+        const r = out.results[i];
+        if (r && r.ok === true && r.key === e.key) {
+          writeBatchStats.keys++;
+          landedKeys.add(e.key);
+          console.log(`  published ${e.key}: ${summarize(e.payload)}, ${e.body.length} bytes (batched)`);
+          e.resolve();
+        } else {
+          writeBatchStats.fellBack++;
+          send(e.key, e.payload).then(e.resolve, e.reject);
+        }
+      });
+    }
+  } finally {
+    batchPumping = false;
+  }
+}
+
+function sendBatched(key, payload) {
+  const body = JSON.stringify(payload);
+  refuseLeak(key, body);
+  const wire = wireText(key, body, process.env.FLOWS_CARDX_WIRE === "pack");
+  return new Promise((resolve, reject) => {
+    batchQueue.push({ key, payload, body, wire, resolve, reject });
+    pumpBatches();
+  });
+}
+
 export async function publish(key, payload) {
   liveOnly(key);
   publishedStore[key] = payload;
   if (activeStages) activeStages.note(key);
-  return send(key, payload);
+  return writeBatchOn(key) ? sendBatched(key, payload) : send(key, payload);
 }
 
 async function send(key, payload) {
@@ -456,11 +567,7 @@ async function send(key, payload) {
     landedKeys.add(key);
     return;
   }
-  const leak = publishRefusal(key, body);
-  if (leak) {
-    process.exitCode = 1;
-    throw fixtureLeakError(leak, `publish ${key}`);
-  }
+  refuseLeak(key, body);
   const wire = wireText(key, body, process.env.FLOWS_CARDX_WIRE === "pack");
   let response, refusal = null, heard = null, lastDetail = "";
   for (let attempt = 0; ; attempt++) {

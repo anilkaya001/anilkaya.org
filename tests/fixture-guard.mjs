@@ -239,7 +239,12 @@ async function exerciseStore(root) {
   const env = { token: process.env.FLOWS_INGEST_TOKEN, url: process.env.FLOWS_INGEST_URL, exit: process.exitCode };
   const realFetch = globalThis.fetch;
   const sent = [];
-  globalThis.fetch = async (url, init) => { sent.push([String(url), init && init.method]); return new Response('{"ok":true}', { status: 200, headers: { "content-type": "application/json" } }); };
+  globalThis.fetch = async (url, init) => {
+    sent.push([String(url), init && init.method]);
+    const batch = /[?&]op=batch\b/.test(String(url)) ? JSON.parse(init.body).items : null;
+    const answer = batch ? { ok: true, results: batch.map((i) => ({ key: i.key, ok: true })) } : { ok: true };
+    return new Response(JSON.stringify(answer), { status: 200, headers: { "content-type": "application/json" } });
+  };
   const quiet = console.log;
   const quietWarn = console.warn;
   console.log = () => {};

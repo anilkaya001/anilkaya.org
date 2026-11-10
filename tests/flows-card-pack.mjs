@@ -349,13 +349,13 @@ rmSync(wireDir, { recursive: true, force: true });
   const scan = (text) => {
     const dry = /if \(EMIT \|\| DRY_RUN\) \{[\s\S]*?return;\n  \}/.exec(text);
     const post = /const wire = wireText\(key, body, process\.env\.FLOWS_CARDX_WIRE === "pack"\);[\s\S]*?body: wire,/.exec(text);
-    return Boolean(dry) && !/wireText/.test(dry[0]) && Boolean(post) && /const leak = publishRefusal\(key, body\);/.test(text) && text.indexOf("const leak = publishRefusal(key, body);") < text.indexOf("wireText(");
+    return Boolean(dry) && !/wireText/.test(dry[0]) && Boolean(post) && /refuseLeak\(key, body\);/.test(text) && text.indexOf("refuseLeak(key, body);") < text.indexOf("wireText(");
   };
   ok(scan(send[0]), "the body is packed after the fixture check and only on the way to the network: the dry run's emit stays whole for every reader of it");
   for (const [name, from, to] of [
     ["the dry run packs", "if (EMIT || DRY_RUN) {\n", "if (EMIT || DRY_RUN) {\n    wireText(key, body, true);\n"],
     ["the packed body never sent", "      body: wire,", "      body,"],
-    ["the fixture check on the packed body", "const leak = publishRefusal(key, body);", "const leak = publishRefusal(key, wireText(key, body, true));"],
+    ["the fixture check on the packed body", "refuseLeak(key, body);", "refuseLeak(key, wireText(key, body, true));"],
     ["the switch read as anything", "process.env.FLOWS_CARDX_WIRE === \"pack\"", "process.env.FLOWS_CARDX_WIRE"],
   ]) {
     ok(send[0].split(from).length === 2, "the planted build changes send exactly once: " + name);
