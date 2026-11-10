@@ -101,7 +101,8 @@
     const ranked = [...byName.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1));
     const keepN = new Set((ranked.length <= cap + 1 ? ranked : ranked.slice(0, cap)).map((e) => e[0]));
     const secs = [...bySec.values()].sort((x, y) => y.v - x.v || (x.g.k < y.g.k ? -1 : 1));
-    const keepS = new Set((secs.length > 14 ? secs.slice(0, 13) : secs).map((s) => s.g.k));
+    const gcap = clamp(Math.round(num(o.groups) || 14), 3, 14);
+    const keepS = new Set((secs.length > gcap ? secs.slice(0, gcap - 1) : secs).map((s) => s.g.k));
 
     const nodes = new Map(), hops = [new Map(), new Map(), new Map()], paths = new Map();
     const node = (id, layer, o2) => {
