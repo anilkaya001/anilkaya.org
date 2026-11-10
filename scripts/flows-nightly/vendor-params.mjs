@@ -19,6 +19,9 @@ export const RATE = {
   floorCeilingMs: 400,
 
   errorBackoffX: 4,
+
+  recoverAfter: 600,
+  recoverX: 1.25,
 };
 
 export const CALL_COST = Object.freeze({

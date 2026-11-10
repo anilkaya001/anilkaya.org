@@ -7,6 +7,8 @@ import { fixtureHost, fixtureRefusal } from "../../shared/flows-fixture-names.js
 import { vendorBaseInfo } from "../../shared/flows-vendor-core.js";
 import { tainted } from "../flows-legs/taint.mjs";
 import { wireText } from "../../shared/flows-card-pack.js";
+import { inspect, sha256Hex } from "../../shared/flows-door.js";
+import { RECONCILE, chunksOf, reconcilable, reconcilePlan, reconcileVerdict } from "../../shared/flows-transport.js";
 import { DRY_RUN, LIVE_MODE, EMIT } from "./flags.mjs";
 import { sleep, wireProgress } from "./vendor.mjs";
 
@@ -399,6 +401,16 @@ const liveOnly = (key) => {
   }
 };
 
+export const landedHashes = new Map();
+
+function noteLanded(key, body) {
+  landedKeys.add(key);
+  if (LIVE_MODE || !reconcilable(key)) return;
+  const seen = inspect(key, body);
+  if (!seen.ok) { landedHashes.delete(key); return; }
+  landedHashes.set(key, sha256Hex(seen.canonical).catch(() => null));
+}
+
 export const heldKeys = new Map();
 
 export function hold(key, payload) {
@@ -524,7 +536,7 @@ async function pumpBatches() {
         const r = out.results[i];
         if (r && r.ok === true && r.key === e.key) {
           writeBatchStats.keys++;
-          landedKeys.add(e.key);
+          noteLanded(e.key, e.body);
           console.log(`  published ${e.key}: ${summarize(e.payload)}, ${e.body.length} bytes (batched)`);
           e.resolve();
         } else {
@@ -553,6 +565,79 @@ export async function publish(key, payload) {
   publishedStore[key] = payload;
   if (activeStages) activeStages.note(key);
   return writeBatchOn(key) ? sendBatched(key, payload) : send(key, payload);
+}
+
+async function haveRequest(pairs) {
+  let response;
+  try {
+    response = await fetch(ingestURL() + "?op=have", {
+      method: "POST", redirect: "error", headers: await ingestHeaders({ json: true }),
+      body: JSON.stringify({ items: pairs }),
+    }).finally(() => wireProgress.settled());
+  } catch {
+    return { status: 0, need: null };
+  }
+  if (!response.ok) {
+    await response.text().catch(() => "");
+    return { status: response.status, need: null };
+  }
+  const answer = await response.json().catch(() => null);
+  const have = answer && Array.isArray(answer.have) ? answer.have : null;
+  const need = answer && Array.isArray(answer.need) ? answer.need : null;
+  if (!have || !need || have.length + need.length !== pairs.length) return { status: response.status, need: null };
+  const asked = new Set(pairs.map((p) => p.key));
+  if (![...have, ...need].every((k) => asked.has(k))) return { status: response.status, need: null };
+  return { status: response.status, need };
+}
+
+export function reconcileOff(env = process.env) {
+  if (EMIT || DRY_RUN) return "a dry run writes nothing";
+  if (LIVE_MODE) return "the live leg writes live keys only";
+  if (String(env[RECONCILE.switchEnv] ?? "").trim().toLowerCase() === "off") return "the switch is off";
+  return null;
+}
+
+export async function reconcile({ log = (line) => console.log(line) } = {}) {
+  const out = { asked: 0, need: [], resent: 0, still: [], requests: 0, skipped: reconcileOff() };
+  const done = () => ({ ...out, ...reconcileVerdict(out) });
+  if (out.skipped) return done();
+  const hashes = new Map();
+  for (const key of reconcilePlan(landedKeys).keys) {
+    const chash = landedHashes.has(key) ? await landedHashes.get(key) : null;
+    if (typeof chash === "string") hashes.set(key, chash);
+  }
+  const ask = async (keys) => {
+    const need = [];
+    for (const chunk of chunksOf(keys, RECONCILE.items)) {
+      await ingestWrites.acquire();
+      const answer = await haveRequest(chunk.map((key) => ({ key, chash: hashes.get(key) })));
+      out.requests++;
+      if (!answer.need) return { failed: `the store answered HTTP ${answer.status || "nothing"} to the check` };
+      need.push(...answer.need);
+    }
+    return { need };
+  };
+  const keys = [...hashes.keys()];
+  if (!keys.length) return done();
+  const first = await ask(keys);
+  if (first.failed) { out.skipped = first.failed; return done(); }
+  out.asked = keys.length;
+  out.need = first.need;
+  if (!first.need.length) return done();
+  if (first.need.length > RECONCILE.resendMax) { out.still = first.need; return done(); }
+  for (const key of first.need) {
+    try {
+      await send(key, publishedStore[key]);
+      out.resent++;
+    } catch (error) {
+      log(`  reconcile ${key}: ${error.message}`);
+    }
+    const again = landedHashes.has(key) ? await landedHashes.get(key) : null;
+    if (typeof again === "string") hashes.set(key, again);
+  }
+  const second = await ask(first.need);
+  out.still = second.failed ? first.need : second.need;
+  return done();
 }
 
 async function send(key, payload) {
@@ -636,6 +721,6 @@ async function send(key, payload) {
     failure.status = response.status;
     throw failure;
   }
-  landedKeys.add(key);
+  noteLanded(key, body);
   console.log(`  published ${key}: ${summarize(payload)}, ${body.length} bytes`);
 }
