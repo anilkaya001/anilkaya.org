@@ -1994,13 +1994,13 @@ try {
         unavailable: [...document.querySelectorAll("#ftGrid .ui-silent[data-state=unavailable], #ftGrid .ui-tile [data-state=unavailable], #ftGrid .ft-crow [data-state=unavailable]")].filter(vis).map((n) => (n.closest("[id]") || {}).id + ":" + ((n.closest(".ui-metric") || n).innerText || "").replace(/\s+/g, " ").trim()),
       };
     });
-    eq(got.mods.join(" "), "m-gamma m-hedge m-vol m-flow m-tape m-context m-network", "an index dossier leaves out every module an index card never carries: the two worlds the engine does not price for an index, the score, earnings, insiders and short interest, and keeps the Flow network, which reads the name's own flagged windows");
+    eq(got.mods.join(" "), "m-worlds m-gamma m-hedge m-vol m-flow m-tape m-context m-network", "an index dossier draws the two worlds the engine now prices for an index, leaves out every module an index card never carries (the score, earnings, insiders and short interest), and keeps the Flow network, which reads the name's own flagged windows");
     eq(got.read, "card", "a verdict still being worded by the Neuron shows the card's own reading at once");
     ok(/^The greeks imply an? [a-z -]+ state/.test(got.line) && !/No read/.test(got.line), `and it is the implied-state reading the card carries, not a bare wait (${got.line})`);
     eq(got.vStates.filter((x) => x === "pending").length, 0, "with no pending pill on the verdict");
-    eq(got.ideas, 0, "an index dossier draws no ideas placeholder: the engine does not price an index, so nothing is on its way");
+    ok(got.ideas > 0, `an index dossier draws the structures the engine priced for it while the Neuron words its verdict (${got.ideas})`);
     ok(got.chips.length === 3 && !got.chips.some((c) => /Score|Conviction/.test(c)), `the hero strip carries no score or conviction chip (${got.chips.join(" | ")})`);
-    ok(!got.gamma.includes("1Y") && !got.gamma.includes("Book"), `Gamma offers no view the index card cannot fill (${got.gamma.join(", ")})`);
+    ok(!got.gamma.includes("1Y") && got.gamma.includes("Book"), `Gamma offers the book the engine now profiles for an index and no view the card cannot fill (${got.gamma.join(", ")})`);
     ok(!got.hedge.includes("Clock"), `nor does Hedging (${got.hedge.join(", ")})`);
     ok(!got.flow.includes("Tenor") && !got.flow.includes("Days"), `nor Flow (${got.flow.join(", ")})`);
     ok(!got.tape.includes("Alerts") && !got.tape.includes("Shelves"), `nor Tape (${got.tape.join(", ")})`);
