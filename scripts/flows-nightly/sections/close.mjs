@@ -14,7 +14,7 @@ import { summarize } from "../../../shared/flows-call-meter.js";
 import { extrasStanding } from "../../../shared/flows-vendor-extras.js";
 import { volAuditState, volAuditStanding } from "../../flows-legs/health.mjs";
 import {
-  ARCHIVE_DATE_RE, LEDGER_LIST_KINDS, bindStages, edgeSnapshot, landedKeys, listStored, probeStored, publish,
+  ARCHIVE_DATE_RE, LEDGER_LIST_KINDS, bindStages, edgeSnapshot, landedKeys, listStored, probeStored, publish, writeBatchStats,
   publishedStore, readStored,
 } from "../store.mjs";
 import { PIPELINE_CADENCE } from "../clock.mjs";
@@ -352,6 +352,10 @@ export async function runClose(ctx) {
   if (verdict) console.log("  " + verdict);
 
   stages.step("gate");
+  if (writeBatchStats.batches || writeBatchStats.off) {
+    console.log(`  writes: ${writeBatchStats.keys} key(s) in ${writeBatchStats.batches} batch request(s), ${writeBatchStats.fellBack} written alone after a refusal` +
+      (writeBatchStats.off ? `; batching stopped: ${writeBatchStats.off}` : ""));
+  }
   const health = await runHealthGate({ sessionDate, read: readStored, dry: DRY_RUN, edge: edgeSnapshot,
     annotate: process.env.GITHUB_ACTIONS === "true",
     night: {
