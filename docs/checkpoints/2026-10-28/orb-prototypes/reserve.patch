@@ -1,0 +1,427 @@
+diff --git a/assets/css/flows-boards.css b/assets/css/flows-boards.css
+index a65a27f..5a42a82 100644
+--- a/assets/css/flows-boards.css
++++ b/assets/css/flows-boards.css
+@@ -460,7 +460,7 @@
+ .flows-body:is([data-flows-page="long"], [data-flows-page="short"], [data-flows-page="watch"]) .flows-main {
+   height: 100vh;
+   height: 100dvh;
+-  padding-bottom: var(--sp-4);
++  padding-bottom: var(--stage-pb);
+   display: flex;
+   flex-direction: column;
+   overflow: hidden;
+@@ -493,10 +493,7 @@
+   #bdHero .bd-v-full { display: none; }
+   #bdHero .bd-v-short { display: inline; }
+ }
+-.flows-body:has(> #fxOracle:not([hidden])) .bd-mod > .bd-table { padding-bottom: 56px; }
+-.flows-body:has(> #fxOracle:not([hidden])) .bd-mod > .bd-map > .bd-map-foot { padding-inline-end: 64px; }
+ .flows-head .bd-meta { min-height: 18px; margin: var(--sp-1) 0 0; color: var(--label-2); font: var(--t-footnote); font-variant-numeric: tabular-nums; }
+ @media (max-width: 767.98px) {
+-  .flows-body:is([data-flows-page="long"], [data-flows-page="short"], [data-flows-page="watch"]) .flows-main { padding-bottom: calc(var(--tab-h) + var(--safe-b) + var(--sp-3)); }
++  .flows-body:is([data-flows-page="long"], [data-flows-page="short"], [data-flows-page="watch"]) .flows-main { padding-bottom: var(--stage-pb); }
+ }
+-@media (min-width: 768px) { .flows-body:has(> #fxOracle:not([hidden])) .bd-mod > .bd-map { padding-bottom: 28px; } }
+diff --git a/assets/css/flows-desk.css b/assets/css/flows-desk.css
+index 632eef2..b65c5f7 100644
+--- a/assets/css/flows-desk.css
++++ b/assets/css/flows-desk.css
+@@ -46,7 +46,7 @@
+ }
+ 
+ .flows-body[data-flows-page="desk"] .flows-main {
+-  --dk-pad-b: var(--sp-4);
++  --dk-pad-b: var(--stage-pb);
+   height: 100vh;
+   height: 100dvh;
+   padding-bottom: var(--dk-pad-b);
+@@ -92,7 +92,7 @@
+   #dkP-frontier { grid-template-columns: minmax(0, 1fr); }
+ }
+ @media (max-width: 767.98px) {
+-  .flows-body[data-flows-page="desk"] .flows-main { --dk-pad-b: calc(var(--tab-h) + var(--safe-b) + var(--sp-3)); }
++  .flows-body[data-flows-page="desk"] .flows-main { --dk-pad-b: var(--stage-pb); }
+ }
+ @media (max-width: 639.98px) {
+   .dk-filter-btn { display: inline-block; }
+diff --git a/assets/css/flows-feeds.css b/assets/css/flows-feeds.css
+index a649ca7..5a4ce8b 100644
+--- a/assets/css/flows-feeds.css
++++ b/assets/css/flows-feeds.css
+@@ -546,7 +546,7 @@ a.pl-tick:hover { text-decoration: underline; }
+ 
+ .flows-body[data-flows-page="unusual"] .flows-main,
+ .flows-body[data-flows-page="events"] .flows-main {
+-  --fd-pad-b: var(--sp-4);
++  --fd-pad-b: var(--stage-pb);
+   height: 100vh;
+   height: 100dvh;
+   padding-bottom: var(--fd-pad-b);
+@@ -595,7 +595,7 @@ a.pl-tick:hover { text-decoration: underline; }
+ }
+ @media (max-width: 767.98px) {
+   .flows-body[data-flows-page="unusual"] .flows-main,
+-  .flows-body[data-flows-page="events"] .flows-main { --fd-pad-b: calc(var(--tab-h) + var(--safe-b) + var(--sp-3)); }
++  .flows-body[data-flows-page="events"] .flows-main { --fd-pad-b: var(--stage-pb); }
+ }
+ @media (pointer: coarse) { .fd-tabs button { min-height: 44px; } .fd-all { min-height: 44px; } }
+ @media (forced-colors: active) { .fd-tabs button[aria-selected="true"] { outline: 2px solid CanvasText; } }
+diff --git a/assets/css/flows-ff-fire.css b/assets/css/flows-ff-fire.css
+index eb0a54f..c6d931e 100644
+--- a/assets/css/flows-ff-fire.css
++++ b/assets/css/flows-ff-fire.css
+@@ -1,7 +1,7 @@
+ .flows-body[data-flows-page="fire"] .flows-main {
+   height: 100vh;
+   height: 100dvh;
+-  padding-bottom: var(--sp-4);
++  padding-bottom: var(--stage-pb);
+   display: flex;
+   flex-direction: column;
+   overflow: hidden;
+@@ -155,7 +155,7 @@
+   .ffx-cl { min-height: 44px; }
+ }
+ @media (max-width: 767.98px) {
+-  .flows-body[data-flows-page="fire"] .flows-main { padding-bottom: calc(var(--tab-h) + var(--safe-b) + var(--sp-3)); }
++  .flows-body[data-flows-page="fire"] .flows-main { padding-bottom: var(--stage-pb); }
+   .ffx-ph h2 { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+   .ffx-ph { min-height: 0; padding: 4px 12px 0; }
+   .ffx-optrow .ffx-lbl:nth-of-type(2) { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); }
+diff --git a/assets/css/flows-flowlab.css b/assets/css/flows-flowlab.css
+index c0f53dc..d989cdf 100644
+--- a/assets/css/flows-flowlab.css
++++ b/assets/css/flows-flowlab.css
+@@ -1,7 +1,7 @@
+ .flows-body[data-flows-page="flowlab"] .flows-main {
+   height: 100vh;
+   height: 100dvh;
+-  padding-bottom: var(--sp-4);
++  padding-bottom: var(--stage-pb);
+   display: flex;
+   flex-direction: column;
+   overflow: hidden;
+diff --git a/assets/css/flows-home.css b/assets/css/flows-home.css
+index 4698eff..5a5b748 100644
+--- a/assets/css/flows-home.css
++++ b/assets/css/flows-home.css
+@@ -290,11 +290,11 @@ a.hm-chiplink:hover { background: color-mix(in srgb, var(--tone, var(--label-2))
+   .hm-pill .ui-g, .hm-mark .ui-g, .hm-chip-g .ui-g { animation: none !important; }
+ }
+ 
+-.flows-body[data-flows-page="overview"] .flows-main { --hm-pad-b: var(--sp-5); height: 100vh; height: 100dvh; padding-bottom: var(--hm-pad-b); display: flex; flex-direction: column; overflow: hidden; }
++.flows-body[data-flows-page="overview"] .flows-main { --hm-pad-b: var(--stage-pb); height: 100vh; height: 100dvh; padding-bottom: var(--hm-pad-b); display: flex; flex-direction: column; overflow: hidden; }
+ .flows-body[data-flows-page="overview"] .flows-main > * { max-width: none; }
+ .flows-body[data-flows-page="overview"] .flows-main > .visually-hidden { width: 1px; }
+ @media (max-width: 767.98px) {
+-  .flows-body[data-flows-page="overview"] .flows-main { --hm-pad-b: calc(var(--tab-h) + var(--safe-b) + var(--sp-4)); }
++  .flows-body[data-flows-page="overview"] .flows-main { --hm-pad-b: var(--stage-pb); }
+ }
+ .hm { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; container: hm / size; --hm-head: 44px; }
+ .hm:has(> #orcHome) { --hm-head: 92px; }
+diff --git a/assets/css/flows-market.css b/assets/css/flows-market.css
+index df43ce9..c657a19 100644
+--- a/assets/css/flows-market.css
++++ b/assets/css/flows-market.css
+@@ -298,7 +298,7 @@
+ }
+ 
+ .flows-body[data-flows-page="market"] .flows-main {
+-  --mk-pad-b: var(--sp-4);
++  --mk-pad-b: var(--stage-pb);
+   height: 100vh;
+   height: 100dvh;
+   padding-bottom: var(--mk-pad-b);
+@@ -389,7 +389,7 @@
+   .mk-panel > .mk-mod[data-on] { visibility: inherit; }
+ }
+ @media (max-width: 767.98px) {
+-  .flows-body[data-flows-page="market"] .flows-main { --mk-pad-b: calc(var(--tab-h) + var(--safe-b) + var(--sp-3)); }
++  .flows-body[data-flows-page="market"] .flows-main { --mk-pad-b: var(--stage-pb); }
+ }
+ @media (pointer: coarse) {
+   .mk-tabs button, .mk-sub button { min-height: 44px; }
+@@ -443,10 +443,6 @@
+ .mk-hc-v { grid-column: 1; margin-top: 2px; color: var(--tone, var(--label-1)); font: 650 24px / 1.1 var(--font-text); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+ .mk-hc-s { grid-column: 1 / -1; margin-top: 2px; color: var(--label-2); font: 400 12px / 1.25 var(--font-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+ .mk-panel > .mk-mod > .mk-body[id]:empty::before { content: "Loading\2026"; display: block; padding: var(--sp-2) 0; color: var(--label-3); font: var(--t-footnote); }
+-.flows-body[data-flows-page="market"]:has(#fxOracle:not([hidden])) .mk-stage { margin-right: max(0px, calc(84px - max(var(--gutter), var(--safe-r)))); }
+-@media (max-width: 767.98px) {
+-  .flows-body[data-flows-page="market"]:has(#fxOracle:not([hidden])) .mk-stage { margin-right: 0; margin-bottom: 64px; }
+-}
+ .mk-hc-p { position: absolute; top: 8px; right: 10px; width: 46px; height: 38px; pointer-events: none; }
+ .mk-hc:first-child .mk-hc-p { width: 84px; }
+ .mk-hc-p .ui-spark { display: block; width: 100%; height: 38px; }
+diff --git a/assets/css/flows-moves.css b/assets/css/flows-moves.css
+index ff30346..69b452d 100644
+--- a/assets/css/flows-moves.css
++++ b/assets/css/flows-moves.css
+@@ -1,5 +1,5 @@
+ .flows-body[data-flows-page="moves"] .flows-main {
+-  --mv-pad-b: var(--sp-4);
++  --mv-pad-b: var(--stage-pb);
+   height: 100vh;
+   height: 100dvh;
+   padding-bottom: var(--mv-pad-b);
+@@ -207,7 +207,7 @@
+   .dg { padding: 12px 12px 8px; }
+ }
+ @media (max-width: 767.98px) {
+-  .flows-body[data-flows-page="moves"] .flows-main { --mv-pad-b: calc(var(--tab-h) + var(--safe-b) + var(--sp-3)); }
++  .flows-body[data-flows-page="moves"] .flows-main { --mv-pad-b: var(--stage-pb); }
+ }
+ @media (pointer: coarse) {
+   .mv-row, .mv-srow { --rh: 44px; }
+diff --git a/assets/css/flows-now.css b/assets/css/flows-now.css
+index 92bf3bd..f5842aa 100644
+--- a/assets/css/flows-now.css
++++ b/assets/css/flows-now.css
+@@ -153,3 +153,4 @@ body[data-flows-page="now"] .flows-main {
+   }
+ }
+ 
++.flows-body[data-flows-page="now"] .flows-main { padding-bottom: var(--stage-pb); }
+diff --git a/assets/css/flows-oracle.css b/assets/css/flows-oracle.css
+index 5106820..57cb332 100644
+--- a/assets/css/flows-oracle.css
++++ b/assets/css/flows-oracle.css
+@@ -1,7 +1,7 @@
+ .orc {
+   position: fixed;
+-  right: max(24px, var(--safe-r));
+-  bottom: calc(24px + var(--safe-b));
++  right: var(--main-r);
++  bottom: var(--stage-b);
+   z-index: 110;
+   width: 52px;
+   height: 52px;
+@@ -14,11 +14,10 @@
+ .orc[data-state="signal"] { --orc-tint: var(--accent); }
+ .orc[data-state="conflict"] { --orc-tint: var(--warn); }
+ .orc[data-state="stale"] { --orc-tint: var(--label-3); }
+-@media (min-width: 768px) {
+-  .has-dock-open .orc:not(.is-open) { transform: translateX(calc(-1 * (min(420px, 100vw) + 24px))); }
++@media (min-width: 1200px) {
++  .has-dock-open .orc:not(.is-open) { transform: translateX(calc(-1 * min(30rem, 92vw))); }
+ }
+-@media (max-width: 767.98px) {
+-  .orc { right: max(16px, var(--safe-r)); bottom: calc(var(--tab-h) + var(--safe-b) + 12px); }
++@media (max-width: 1199.98px) {
+   .has-dock-open .orc:not(.is-open) { visibility: hidden; }
+ }
+ @media (prefers-reduced-motion: no-preference) {
+@@ -78,10 +77,10 @@
+   display: flex;
+   align-items: center;
+   gap: var(--sp-3);
+-  width: var(--pw, 200px);
+-  max-width: calc(100vw - 32px - 8px);
++  width: max-content;
++  max-width: calc(var(--orc-lane-w, 240px) - 8px);
+   height: 52px;
+-  padding: 0 60px 0 var(--sp-5);
++  padding: 0 60px 0 14px;
+   box-sizing: border-box;
+   border-radius: var(--r-pill);
+   background: var(--mat-opaque);
+@@ -95,21 +94,25 @@
+ }
+ .orc.has-pill .orc-pill { clip-path: inset(0 0 0 0 round 26px); opacity: 1; pointer-events: auto; }
+ .orc-pill-g { flex: none; color: var(--orc-tint); font-size: 11px; line-height: 1; }
+-.orc-pill-t { min-width: 0; overflow: hidden; color: var(--label-1); font: var(--t-callout); letter-spacing: var(--t-callout-track); text-overflow: ellipsis; white-space: nowrap; }
++.orc-pill-t, .orc-toast { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
++.orc-pill-k, .orc-pill-s { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++.orc-pill-k { color: var(--label-1); font: 600 13px / 1.25 var(--font-text); }
++.orc-pill-s { color: var(--label-2); font: 400 12px / 1.3 var(--font-text); }
+ @media (max-width: 767.98px) {
+   .orc-pill { display: none; }
+ }
+ 
+ .orc-toast {
+   position: absolute;
+-  right: 0;
+-  bottom: 64px;
++  right: 60px;
++  bottom: 0;
+   width: max-content;
+-  max-width: calc(100vw - 32px);
++  max-width: calc(100vw - 2 * var(--main-r) - 60px);
++  height: 52px;
+   margin: 0;
+-  padding: var(--sp-4) var(--sp-5);
++  padding: 0 var(--sp-5);
+   box-sizing: border-box;
+-  border-radius: var(--r-md);
++  border-radius: var(--r-pill);
+   background: var(--mat-thick);
+   box-shadow: var(--mat-edge), var(--lift-3);
+   color: var(--label-1);
+@@ -137,7 +140,7 @@
+   flex-direction: column;
+   width: 380px;
+   max-width: calc(100vw - 32px);
+-  max-height: calc(100dvh - 24px - 64px - 16px - var(--safe-b));
++  max-height: calc(100dvh - var(--stage-b) - 64px - 16px);
+   box-sizing: border-box;
+   overflow: hidden;
+   border-radius: var(--r-lg);
+@@ -183,7 +186,6 @@
+     transform-origin: 50% 100%;
+   }
+   .orc-grab { display: block; width: 36px; height: 5px; margin: 8px auto 0; border-radius: var(--r-pill); background: var(--fill-1); }
+-  .orc-toast { right: 0; bottom: 64px; }
+ }
+ @media (prefers-reduced-motion: no-preference) and (max-width: 767.98px) {
+   .orc-sheet { transform: translateY(40px); }
+diff --git a/assets/css/flows-political.css b/assets/css/flows-political.css
+index 9139d6c..42ea5b7 100644
+--- a/assets/css/flows-political.css
++++ b/assets/css/flows-political.css
+@@ -1,5 +1,5 @@
+ .flows-body[data-flows-page="political"] .flows-main {
+-  --pl-pad-b: var(--sp-4);
++  --pl-pad-b: var(--stage-pb);
+   height: 100vh;
+   height: 100dvh;
+   padding-bottom: var(--pl-pad-b);
+@@ -248,10 +248,7 @@
+   .pl-dlg { overflow: auto; }
+ }
+ @media (max-width: 767.98px) {
+-  .flows-body[data-flows-page="political"] .flows-main { --pl-pad-b: calc(var(--tab-h) + var(--safe-b) + var(--sp-3)); }
+-}
+-@media (min-width: 768px) {
+-  .flows-body.has-dock-open:has(#fxOracle:not([hidden])) .pl-acts { padding-inline-end: 28px; }
++  .flows-body[data-flows-page="political"] .flows-main { --pl-pad-b: var(--stage-pb); }
+ }
+ @media (pointer: coarse) {
+   .pl-row, .pl-trow { --rh: 44px; }
+@@ -270,6 +267,4 @@
+ .pl-rc.ctx .kv small.why { display: none; }
+ @container pl (max-width: 899.98px) {
+   .pl-rc.ctx .kv small.why { display: inline; }
+-  .flows-body:has(#fxOracle:not([hidden])) .pl-acts, .flows-body:has(#fxOracle:not([hidden])) .pl-rc.ev { padding-inline-end: 56px; }
+-  .flows-body:has(#fxOracle:not([hidden])) .pl-selbar { width: calc(100% - 72px); }
+ }
+diff --git a/assets/css/flows-popout.css b/assets/css/flows-popout.css
+index d8cd99a..c30a80d 100644
+--- a/assets/css/flows-popout.css
++++ b/assets/css/flows-popout.css
+@@ -86,3 +86,4 @@ a.mk-pop { display: inline-flex; align-items: center; text-decoration: none; }
+   }
+ }
+ 
++.flows-body[data-flows-page="network"] .flows-main { padding-bottom: var(--stage-pb); }
+diff --git a/assets/css/flows-sfc.css b/assets/css/flows-sfc.css
+index 942d451..e10c1ec 100644
+--- a/assets/css/flows-sfc.css
++++ b/assets/css/flows-sfc.css
+@@ -1,5 +1,5 @@
+ .flows-body[data-flows-page="ledger"] .flows-main {
+-  --sf-pad-b: var(--sp-4);
++  --sf-pad-b: var(--stage-pb);
+   height: 100vh;
+   height: 100svh;
+   height: 100dvh;
+@@ -429,7 +429,7 @@
+   .sf-sc .sc-t { display: none; }
+ }
+ @media (max-width: 767.98px) {
+-  .flows-body[data-flows-page="ledger"] .flows-main { --sf-pad-b: calc(var(--tab-h) + var(--safe-b) + var(--sp-3)); }
++  .flows-body[data-flows-page="ledger"] .flows-main { --sf-pad-b: var(--stage-pb); }
+ }
+ @media (pointer: coarse) {
+   .sf-fr { min-height: 44px; }
+diff --git a/assets/css/flows-status.css b/assets/css/flows-status.css
+index b5adc6a..a5d836d 100644
+--- a/assets/css/flows-status.css
++++ b/assets/css/flows-status.css
+@@ -1,5 +1,5 @@
+ .flows-body[data-flows-page="status"] .flows-main {
+-  --st-pad-b: var(--sp-4);
++  --st-pad-b: var(--stage-pb);
+   height: 100vh;
+   height: 100dvh;
+   padding-bottom: var(--st-pad-b);
+@@ -140,7 +140,7 @@
+   .lt-meters { grid-template-columns: minmax(0, 1fr); }
+ }
+ @media (max-width: 767.98px) {
+-  .flows-body[data-flows-page="status"] .flows-main { --st-pad-b: calc(var(--tab-h) + var(--safe-b) + var(--sp-3)); }
++  .flows-body[data-flows-page="status"] .flows-main { --st-pad-b: var(--stage-pb); }
+ }
+ @media (max-width: 640px) {
+   .st-title { gap: 8px; }
+diff --git a/assets/css/flows.css b/assets/css/flows.css
+index 3a0ac13..9f4fa7d 100644
+--- a/assets/css/flows.css
++++ b/assets/css/flows.css
+@@ -221,6 +221,10 @@
+ @media (min-width: 1448px) { :root { --gutter: 40px; } }
+ @media (min-width: 1800px) { :root { --page-max: 1560px; } }
+ @media (min-width: 2400px) { :root { --page-max: 2112px; } }
++.flows-body { --orc-lane: 0px; --main-r: max(var(--gutter), var(--safe-r)); --stage-b: var(--sp-4); }
++.flows-body:has(> #fxOracle) { --orc-lane: 64px; }
++.flows-body .flows-main { --stage-pb: calc(var(--stage-b) + var(--orc-lane)); }
++@media (max-width: 767.98px) { .flows-body { --stage-b: calc(var(--tab-h) + var(--safe-b) + var(--sp-3)); } }
+ 
+ @media (prefers-reduced-motion: reduce) {
+   :root {
+diff --git a/assets/js/flows-oracle.js b/assets/js/flows-oracle.js
+index 03f59c9..50fc257 100644
+--- a/assets/js/flows-oracle.js
++++ b/assets/js/flows-oracle.js
+@@ -160,17 +160,17 @@
+   function recHead(rec) {
+     var c = rec && Array.isArray(rec.calls) ? rec.calls[0] : null;
+     if (!c) return null;
+-    return rec.ticker + " " + "·" + " " + K.strikeText(c.strike) + " " + (c.side === "P" || c.side === "put" ? "put" : "call") + " looks " + c.verdict;
++    return K.strikeText(c.strike) + " " + (c.side === "P" || c.side === "put" ? "put" : "call") + " looks " + c.verdict;
+   }
+   function headline() {
+     var m = bestMsg();
+-    if (m) return { glyph: "●", text: m.ticker + " · " + KIND_SHORT[m.kind] };
++    if (m) return { glyph: "●", k: m.ticker, s: KIND_SHORT[m.kind] };
+     var rec = focusRec();
+     if (rec && rec.state === "signal") {
+       var t = recHead(rec);
+-      if (t) return { glyph: VERDICT_GLYPH[rec.calls[0].verdict] || "●", text: t };
++      if (t) return { glyph: VERDICT_GLYPH[rec.calls[0].verdict] || "●", k: rec.ticker, s: t };
+     }
+-    if (rec && rec.state === "conflict") return { glyph: W.LEAN_GLYPH.mixed, text: rec.ticker + " · readings disagree" };
++    if (rec && rec.state === "conflict") return { glyph: W.LEAN_GLYPH.mixed, k: rec.ticker, s: "readings disagree" };
+     return null;
+   }
+ 
+@@ -377,8 +377,7 @@
+     nnApply(state);
+     host.setAttribute("data-pref", S.pref);
+     host.classList.toggle("has-pill", !!showPill);
+-    if (hl) { pillGlyph.textContent = hl.glyph; pillText.textContent = hl.text; }
+-    pill.style.setProperty("--pw", Math.min(300, 100 + (hl ? hl.text.length * 7.4 : 0)) + "px");
++    if (hl) { pillGlyph.textContent = hl.glyph; pillText.replaceChildren(h("span", { class: "orc-pill-k" }, hl.k), h("span", { class: "visually-hidden" }, " · "), h("span", { class: "orc-pill-s" }, hl.s)); }
+     badge.hidden = n < 1;
+     badge.textContent = String(n);
+     var name = nameOf(state, n);
+@@ -708,7 +707,7 @@
+     S.msgs = S.msgs.filter(function (m) { return now - m.at <= 120 * MIN; });
+     var top = out.slice().sort(function (a, b) { return b.strength - a.strength; })[0];
+     if (S.pref !== "off") say("Neuron: " + top.say);
+-    if (S.pref === "on" && !S.open && window.matchMedia("(max-width: 767.98px)").matches) showToast(top.ticker + " · " + KIND_SHORT[top.kind]);
++    if (S.pref === "on" && !S.open && window.matchMedia("(max-width: 767.98px)").matches) showToast(top.ticker, KIND_SHORT[top.kind]);
+     buzz();
+     paint();
+   }
+@@ -719,8 +718,9 @@
+     toast.classList.remove("is-on");
+   }
+ 
+-  function showToast(text) {
+-    toast.textContent = text;
++  function showToast(k, s) {
++    if (s === undefined) { var cut = String(k).split(" · "); k = cut[0]; s = cut.slice(1).join(" · "); }
++    toast.replaceChildren(h("span", { class: "orc-pill-k" }, k), h("span", { class: "visually-hidden" }, " · "), h("span", { class: "orc-pill-s" }, s));
+     toast.hidden = false;
+     toast.classList.remove("is-on");
+     void toast.offsetWidth;

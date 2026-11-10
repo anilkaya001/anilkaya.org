@@ -1,0 +1,132 @@
+{
+ "verified": [
+  {
+   "title": "The queued fn_oracle_prev fix still lets a stale second tab, or a missing cookie on a capped page, overwrite the saved mode",
+   "real": true,
+   "why": "Reproduced on 5ae3358 in Chromium (oracle-world, two pages in one context). Tab A: Count, then Hidden, gives fn_oracle_prev=quiet. Tab B was loaded earlier and still shows the orb (its in-memory S.pref is \"on\"); hiding there writes fn_oracle_prev=on. Tab A's restore then paints data-pref \"on\". The queued fix (728fac3, `PREF[chosen] > 0 ? chosen : was`) gives the same result, because the raw cookie is already \"off\" and it falls back to S.pref. The capped-page variant also reproduces: a data-oracle=\"quiet\" page with no fn_oracle cookie saves prev=quiet, Undo writes fn_oracle=quiet, and a later \"on\" page paints quiet (the same defect as F11). No route renders quiet today, because oracleMode returns only on or off, but oracleShell accepts it. The two-tab case can happen in production. With the proposed fix applied in a copy, the two-tab restore lands on quiet and the capped no-cookie case lands on on. One trade-off: tab B's own Undo then returns Count, not the Pill it was showing. That matches the documented rule, \"restores the mode chosen before hiding\".",
+   "fix": "In setPref's hide branch, never write S.pref: `var raw = cookie(\"fn_oracle\"); if (raw !== \"off\") setCookie(\"fn_oracle_prev\", PREF[raw] > 0 ? raw : \"on\");`. Add a test with two pages in one context (Count then Hidden in A, Hidden in B, then restore in A must give quiet), plus the capped no-cookie case from F11.",
+   "file": "assets/js/flows-oracle.js",
+   "line": 290
+  },
+  {
+   "title": "The restore checks pass on three broken builds: prev always saved as on, no focus after Undo, and Alt+Shift+N ignoring the saved mode",
+   "real": true,
+   "why": "I applied each edit to the served flows-oracle.js in a copy and ran the whole flows-oracle-render suite. Each build passed with exit 0 and 131 checks: (1) setCookie(\"fn_oracle_prev\", \"on\"); (2) `try { orb.focus(); } catch (e) {   }` deleted from restorePref; (3) onKey calling setPref(\"on\") instead of restorePref(). A probe confirms each build is really broken. In (2), document.activeElement is body after Undo and after the chord. In (3), the chord with fn_oracle_prev=quiet restores \"on\". The only Count case in the suite injects fn_oracle_prev=quiet as a cookie, so hiding from Count is never driven end to end. This overlaps F7, F12 and F14.",
+   "fix": "As proposed. In restoreProbe, choose Count in the sheet before Hidden, then require /fn_oracle_prev=quiet/ and that Undo lands on data-pref quiet. Require document.activeElement to be .orc-orb after reads b and d. On a fresh page with fn_oracle=off and fn_oracle_prev=quiet, press Alt+Shift+KeyN and require quiet with focus on the orb. Plant all three builds. Anchor the chord plant on `{ e.preventDefault(); restorePref(); }`: `restorePref(); }` first occurs in the click listener at line 218, so a plain String.replace would plant the wrong site.",
+   "file": "tests/flows-oracle-render.mjs",
+   "line": 150
+  },
+  {
+   "title": "Hidden leaves the full 52x52 host box catching clicks around the 36 px restore button",
+   "real": true,
+   "why": "Reproduced at 1440x820 with fn_oracle=off. The host is 52x52 at (1364,744) and the restore button is 36x36 at (1380,760). elementFromPoint returns #fxOracle 3 px inside the host's top-left, bottom-left and top-right corners, and also just above and just left of the button. A button placed under the host's top-left corner received 0 clicks. At 390 touch the strip is 8 px. On b0b6e7c, Hidden set host.hidden, so the corner took no input; paintOrb and mount now always set host.hidden = false. This is the same defect as F8 and F10. With the pointer-events fix applied in a copy, those points reach the page and the restore button still works.",
+   "fix": "`.orc[data-pref=\"off\"]:not(.is-open) { pointer-events: none; } .orc-restore { pointer-events: auto; }` (checked in a copy at 1440 and 390). Add an elementFromPoint check at a host corner to restoreProbe.",
+   "file": "assets/css/flows-oracle.css",
+   "line": 1
+  },
+  {
+   "title": "A signal toast survives Hidden for up to 6 s and reopens the sheet; closing that sheet drops focus to body",
+   "real": true,
+   "why": "Reproduced at 390x844 touch, with both tap and click. A surge shows the toast 'SYO001 \u00b7 heavy flow'. The reader taps the orb, then Hidden: the orb is hidden and focus is on the restore button, but the toast stays visible. Tapping the toast opens the sheet while pref is off (open, page inert). After Escape, document.activeElement is body, because the fallback is the display:none orb. On base, Hidden hid the toast along with the host. The same fallback also drops focus on a keyboard path. On the ticker page with Hidden, press Enter on the reading-rail glance, then Escape: focus goes to body. Opening the sheet triggers loadTop(), and paintGlances then replaces the glance button, so `back` falls back to the hidden orb (with Pill, focus returns to the glance). The proposed fallback to the restore button fixes both paths.",
+   "fix": "As proposed. When S.pref becomes off in setPref: `clearTimeout(S.toastTimer); toast.hidden = true; toast.classList.remove(\"is-on\");`. In setOpen, use `orb.hidden ? restore : orb` as the fallback for S.opener (line 261) and for back (line 281). Add a test: glance, then Escape while Hidden, must leave focus on the restore button.",
+   "file": "assets/js/flows-oracle.js",
+   "line": 300
+  },
+  {
+   "title": "A page loaded while Hidden leaves the Home Neuron strip on 'Reading\u2026' forever (pre-existing)",
+   "real": true,
+   "why": "Reproduced on Home (oracleShell(overviewPage)) with fn_oracle=off. After 150 s on the fake clock, #orcHome reads \"Neuron\u2019s view Reading\u2026\" with data-state idle, and no /api/flows/oracle request was made. This is identical on b0b6e7c: paintHome and mount's early return for off are unchanged. So the PR did not introduce it, but it is a wrong result in the Hidden state the PR redesigns, in a file it touches.",
+   "fix": "Either load the ranking for the strip when off: `return S.pref === \"off\" ? (document.getElementById(\"orcHome\") ? loadTop() : Promise.resolve()) : Promise.all([loadTop(), loadRec(ticker())]).then(paint);`, or have paintHome print a neutral line when S.pref is off and S.route is idle.",
+   "file": "assets/js/flows-oracle.js",
+   "line": 750
+  },
+  {
+   "title": "The 10-second Undo pill can completely hide the control that keyboard focus moves to next (WCAG 2.4.11)",
+   "real": true,
+   "why": "Reproduced on Home at 1920x1080 and 1024x768. Choosing Hidden by keyboard puts focus on the 189x44 Undo pill. Two Shift+Tabs reach the hmEvents \"Why\" button (1727,1023, 43x32 at 1920; 842,713, 43x24 at 1024), and elementFromPoint at all four corners and the centre returns the pill. The orb's own 52 px box covers no focusable at these sizes. Pixel check: under prefers-contrast: more, where --mat-thick is opaque #15171b, the button looks the same focused and unfocused (mean diff 0.03), so it is entirely hidden. In the default theme the 84% fill shows the focus ring at about 16% (mean diff 3.96, against 25.6 with no pill). Nothing reveals the button without moving focus; there is only the 10 s timer. The WCAG Understanding text says notifications can meet 2.4.11 'by closing on loss of focus'. With the proposed focusout handler in a copy, the pill is back to 36x36 at (1860,1020) by the second Shift+Tab and nothing is covered.",
+   "fix": "As proposed: `restore.addEventListener(\"focusout\", function () { if (S.undoUntil > Date.now()) { S.undoUntil = 0; clearTimeout(S.undoTimer); paintOrb(); } });`. Add a step that presses Shift+Tab from the pill and requires elementFromPoint at the newly focused element's centre to return that element.",
+   "file": "assets/js/flows-oracle.js",
+   "line": 218
+  },
+  {
+   "title": "restoreProbe still passes when the restore drops focus, the hide announcement is removed, or Alt+Shift+N ignores the saved mode",
+   "real": true,
+   "why": "Full-suite runs on a copy with each edit applied all pass (exit 0, 131 checks): (a) restorePref without orb.focus(); (b) say(\"Neuron hidden. Undo brings it back.\") deleted; (c) the onKey chord calling setPref(\"on\"). A probe confirms each build is broken. In (a), activeElement is body after Undo. In (b), the role=status region is empty after hiding. In (c), the chord with fn_oracle_prev=quiet restores \"on\". No check reads activeElement after a restore or the status region after hiding. This overlaps F2, F12 and F14.",
+   "fix": "As proposed. read() should also return activeElement === orb and the [role=status] text. Require focus on the orb after both restores, \"Neuron hidden. Undo brings it back.\" right after hiding, and \"Neuron shown.\" after page.clock.runFor(5000). Add the chord case with fn_oracle_prev=quiet. Plant (a), (b) and (c), anchoring (c) on `{ e.preventDefault(); restorePref(); }`.",
+   "file": "tests/flows-oracle-render.mjs",
+   "line": 121
+  },
+  {
+   "title": "In Hidden mode, the empty 52x52 #fxOracle box still catches clicks and taps around the small restore button",
+   "real": true,
+   "why": "Reproduced on Home at 390x844 (touch, fn_oracle=off). Sampling the Ask Neuron button (229-358 x 722-766) on a 2 px grid, 149 of 1430 points hit the empty #fxOracle and 175 hit the restore button, so taps on those 149 points do nothing. On b0b6e7c, Hidden freed this corner. This is the same defect as F3 and F10. (With Pill, the orb already covers 324 of these points; that overlap is pre-existing and separate.)",
+   "fix": "`.orc[data-pref=\"off\"]:not(.is-open) { width: 0; height: 0; }` (the restore button is anchored right:0 and bottom:0, so it stays put), or pointer-events: none on that host with pointer-events: auto on .orc-restore (checked in a copy).",
+   "file": "assets/js/flows-oracle.js",
+   "line": 352
+  },
+  {
+   "title": "In Hidden mode, the restore button stays clickable above the open sheet's scrim and moves focus out of the modal",
+   "real": true,
+   "why": "Reproduced at 1440x820 on the ticker page with fn_oracle=off. Clicking the reading-rail glance opens the sheet (aria-modal, #flowsMain inert). elementFromPoint at the restore button's centre returns the button, because the sheet sits 64 px above it and the scrim is z-index -1 inside the host. Clicking it sets pref to on, but the sheet stays open and activeElement becomes the orb, outside the dialog. That breaks the sheet's documented focus trap. The effect is benign for a sighted pointer user: Tab re-enters the sheet and Escape closes it. At 390 the sheet covers the button. Alt+Shift+N pressed inside the open sheet reaches the same state, and the proposed one-line fix does not cover that path. With the fix in a copy, the restore button is hidden while the sheet is open and shown again after Escape.",
+   "fix": "At line 354: `restore.hidden = !off || S.open;`. In restorePref, focus the orb only when !S.open, so the chord path keeps focus in the sheet. Update the planted build at tests/flows-oracle-render.mjs:185 to the new line in the same change; otherwise that plant becomes a no-op and its check fails.",
+   "file": "assets/js/flows-oracle.js",
+   "line": 354
+  },
+  {
+   "title": "Hidden leaves an invisible 52 px box in the corner that swallows clicks",
+   "real": true,
+   "why": "Same defect as F3 and F8, with the same evidence. At 1440x820 and at 390x844 touch, elementFromPoint returns #fxOracle 3 px inside the host's top-left corner, directly above the button and directly left of it, and a button placed under the strip received 0 clicks. Cause: host.hidden = false (flows-oracle.js:352) and the .orc box is 52x52 with no pointer-events rule. With the pointer-events fix applied in a copy, the strip passes clicks through and the restore button still works.",
+   "fix": "`.orc[data-pref=\"off\"]:not(.is-open) { pointer-events: none; } .orc-restore { pointer-events: auto; }`. Keep :not(.is-open) so a sheet opened while Hidden still works.",
+   "file": "assets/css/flows-oracle.css",
+   "line": 387
+  },
+  {
+   "title": "Queued cookie fix still saves the page's cap when the reader has no fn_oracle cookie",
+   "real": true,
+   "why": "Reproduced with harnessHtml({mode:\"quiet\"}) and no cookie. Hidden saves fn_oracle_prev=quiet, Undo writes fn_oracle=quiet, and a later data-oracle=\"on\" page paints quiet. The result is identical with the 728fac3 fix applied, and becomes \"on\" with the \"on\" fallback. This is latent: oracleMode (server/routes/flows-pages.js) renders only on or off today, but oracleShell accepts quiet, and the queued fix already treats capped pages as in scope. This fix still leaves F1's two-tab overwrite; F1's fix covers both.",
+   "fix": "`setCookie(\"fn_oracle_prev\", PREF[chosen] > 0 ? chosen : \"on\")`, or F1's version, which also skips the write when the raw cookie is already off. Add a case that opens a quiet page with no cookie, hides, undoes, and requires that no fn_oracle=quiet was written.",
+   "file": "assets/js/flows-oracle.js",
+   "line": 290
+  },
+  {
+   "title": "Alt+Shift+N restoring the stored mode is never tested; a chord that ignores fn_oracle_prev passes",
+   "real": true,
+   "why": "With onKey's `{ e.preventDefault(); restorePref(); }` changed to setPref(\"on\") in the served file, the full suite passes (exit 0, 131 checks). The only chord check (line 117) runs with no fn_oracle_prev. A probe shows that build restores \"on\" with prev=quiet, against the documented \"it, or Alt+Shift+N, restores the mode chosen before hiding\".",
+   "fix": "In the stored-Hidden case, open a fresh page with fn_oracle=off and fn_oracle_prev=quiet, press Alt+Shift+KeyN, and require data-pref quiet and focus on the orb. Plant the build anchored on `{ e.preventDefault(); restorePref(); }`, not on `restorePref(); }`, whose first match is the click listener at line 218.",
+   "file": "tests/flows-oracle-render.mjs",
+   "line": 117
+  },
+  {
+   "title": "The \"ten seconds\" of Undo is only checked from above; a one-second Undo passes",
+   "real": true,
+   "why": "With `var UNDO_MS = 1000;` in the served file, the full suite passes (exit 0, 131 checks). The first read is at 300 ms of fake time, still inside 1 s; the next is after runFor(10600). Nothing reads the state in between, so the documented ten-second window has no lower bound in any test.",
+   "fix": "After hiding, runFor(9500) and require is-undo with the name \"Neuron hidden. Undo\". Then runFor(1100) and require the small Show the Neuron button. Plant UNDO_MS = 1000.",
+   "file": "tests/flows-oracle-render.mjs",
+   "line": 160
+  },
+  {
+   "title": "Focus moving back to the orb after Undo or Show the Neuron is not checked",
+   "real": true,
+   "why": "With `try { orb.focus(); } catch (e) {   }` removed from restorePref, the full suite passes (exit 0, 131 checks). A probe on that build shows document.activeElement is body after Enter on Undo and after the chord: the focused restore button hides itself and focus is lost (WCAG 2.4.3). The probe reads focus only after hiding (line 149). This overlaps F2 and F7.",
+   "fix": "Have read() return `orbFocus: document.activeElement === orb` and require it in reads b and d. Plant the build without the orb.focus() line.",
+   "file": "tests/flows-oracle-render.mjs",
+   "line": 155
+  },
+  {
+   "title": "The new stored-Hidden check waits on fixed real-time sleeps before a check that does not wait",
+   "real": false,
+   "why": "I could not make the correct build fail. I timed the stored-Hidden page from runFor(3000) until the restore button is visible. Over 10 runs at load average 8 on 4 cores (two suites running beside it) it took 76\u2013467 ms. Over 10 runs with 8 extra busy loops on the same 4 cores it took 69\u2013274 ms. The block allows 1.2 s of real sleep plus runFor(1000) and settle(300), so there is at least 2.5x headroom at the worst load measured. Each planted build is caught by the 1440 and 390 loops whatever the q block does, so a slow mount could not turn a missed plant into a caught one. The risk is theoretical, with no failing steps under realistic load.",
+   "fix": "Nothing is required. As an optional hardening, line 172 could use `await waitOracle(q.page)`, which now works for Hidden readers because mount sets host.hidden = false, and line 112 could drop wait: false.",
+   "file": "tests/flows-oracle-render.mjs",
+   "line": 172
+  },
+  {
+   "title": "File map now says the restore mode is kept in fn_oracle_haptic",
+   "real": true,
+   "why": "docs/modules.json line 271, and the generated AGENTS.md and docs/index.md, read \"restores the mode chosen before hiding, kept in `fn_oracle_prev` and an optional `fn_oracle_haptic`\". fn_oracle_haptic is only the vibration opt-in, read by buzz() at flows-oracle.js:707. The base sentence attached it to \"The preference is the first-party cookie fn_oracle ... and an optional fn_oracle_haptic\". The edit turned that into a false statement in the project handbook. Docs only, with no runtime effect.",
+   "fix": "Change it to \"...restores the mode chosen before hiding, kept in `fn_oracle_prev`. An optional `fn_oracle_haptic` cookie allows a vibration on a signal.\" Then run `node scripts/gen-docs.mjs`.",
+   "file": "docs/modules.json",
+   "line": 271
+  }
+ ]
+}
