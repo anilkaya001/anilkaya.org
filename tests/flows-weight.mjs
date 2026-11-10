@@ -162,6 +162,12 @@ for (const name of Object.keys(CEILING_KIB)) {
   if (name !== "eventsPage") CEILING_KIB[name] += HORIZON_CORE.bytes / 1024;
   GZIP_KIB[name] += HORIZON_CORE.gzip / 1024;
 }
+const CALIB_READ = { od: "MATH-2", bytes: 331, gzip: 72, why: "second math audit: FlowsUI.calibTag, drawn with no payload at every call site, reads /api/flows/calib once and removes the tag at 100 effective outcomes, 74,680 to 75,011 B, so the Not yet calibrated tag can clear" };
+for (const name of Object.keys(CEILING_KIB)) {
+  if (NO_UI_ROUTES.has(name)) continue;
+  if (name !== "eventsPage") CEILING_KIB[name] += CALIB_READ.bytes / 1024;
+  GZIP_KIB[name] += CALIB_READ.gzip / 1024;
+}
 const EVENTS_RECENT = { od: "LANE-4", bytes: 4498, gzip: 1127, cssBytes: 379, cssGzip: 46, why: "lane 4: the Events page counts the names whose report moved the price on the reaction session and the one before and the names whose report time is not stated, lists the largest movers among those that reacted on the nightly's session in typical days, names those that reacted two to five sessions ago, says why when the report column is withheld, pending or empty, cut or has no window, and prints its window in sessions through a date (flows-events.js 49,488 to 53,986 B raw and 14,009 to 15,136 B gzip, flows-feeds.css 31,209 to 31,588 B raw and 6,129 to 6,175 B gzip); the raw JavaScript ceiling is held by HELD_RAW_KIB, so only gzip and the sheet rise" };
 GZIP_KIB.eventsPage += EVENTS_RECENT.gzip / 1024;
 CSS_KIB.eventsPage += EVENTS_RECENT.cssBytes / 1024;
@@ -538,7 +544,7 @@ for (const name of Object.keys(CEILING_KIB)) {
     }
     const core = sizeOf("/assets/js/flows-ui.js"), lib = sizeOf("/assets/js/flows-chart.js");
     console.log("  flows-ui.js " + core + " B, flows-chart.js " + lib + " B");
-    ok(core < 71000 + NN_KERNEL.uiBytes + 64 + FORMAT_CORE.bytes + HORIZON_CORE.bytes, `flows-ui.js is the core alone (${core} B): the chart library is not in it`);
+    ok(core < 71000 + NN_KERNEL.uiBytes + 64 + FORMAT_CORE.bytes + HORIZON_CORE.bytes + CALIB_READ.bytes, `flows-ui.js is the core alone (${core} B): the chart library is not in it`);
     ok(!/const chart = Object\.freeze|function (drawLine|diverging|heatmap|payoff|sparkline)\(/.test(readFileSync(new URL("assets/js/flows-ui.js", REPO), "utf8")),
        "and none of the chart drawing functions is left behind in the core");
   }
