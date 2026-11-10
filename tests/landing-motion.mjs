@@ -334,6 +334,20 @@ for (const [width, motion] of [[320, "no-preference"], [390, "no-preference"], [
   ok(fit.barTop >= fit.footBottom, `the marquee bar starts at or below the footer at ${width} px, ${motion} (bar top ${fit.barTop.toFixed(1)}, footer bottom ${fit.footBottom.toFixed(1)})`);
   ok(fit.barH <= 30.5, `the marquee bar keeps its height at ${width} px, ${motion} (${fit.barH.toFixed(1)} px)`);
   {
+    const board = await page.evaluate(() => {
+      const el = document.getElementById("marketBoard");
+      const r = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      return { mid: r.left + r.width / 2, left: r.left, right: r.right, transform: cs.transform, markets: el.querySelectorAll(".market").length, eyebrow: document.querySelectorAll(".hero__eyebrow").length };
+    });
+    ok(board.markets > 0, `the market board carries its markets at ${width} px, ${motion}`);
+    ok(Math.abs(board.mid - width / 2) <= 1, `the market board sits on the page's centre line at ${width} px, ${motion} (centre ${board.mid.toFixed(1)} of ${width / 2})`);
+    ok(board.left >= 0 && board.right <= width, `and inside the viewport (${board.left.toFixed(1)} to ${board.right.toFixed(1)})`);
+    const shift = board.transform === "none" ? 0 : Number((/^matrix\(([^)]+)\)$/.exec(board.transform) || [, "0,0,0,0,NaN,0"])[1].split(",")[4]);
+    eq(shift, 0, `the board is centred by its margins: no transform moves it sideways, so an entrance animation cannot draw it against a stale width, at ${width} px, ${motion} (${board.transform})`);
+    eq(board.eyebrow, 0, `the hero carries no eyebrow line above its title at ${width} px`);
+  }
+  {
     const trackX = () => page.$eval(".market-ticker__track", (el) => el.getBoundingClientRect().x);
     await page.focus(".market-ticker__toggle");
     const at = [await trackX()];
