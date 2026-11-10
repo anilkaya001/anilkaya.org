@@ -304,3 +304,25 @@ runs slow is still cut by the time term, never by a timeout.
 
 Not yet measured on a real night: the stage times at 794 names. The first run's
 `deepen-plan` record and the ledger summary are the reading.
+
+## The pace learns (2026-11-10)
+
+The 7.8 s a name of 2026-11-09 was not the feed's speed. One call of 23,304 was
+refused, the spacing floor rose from 150 to 225 ms, and it stayed there: 3,868 s
+of that 4,842 s run were spent waiting in the run's own queue. Two changes, both
+specified in `docs/fire-and-forget.md`:
+
+- The floor eases. After 600 clean calls it comes down by a factor of 1.25, never
+  under the paced spacing, so one refusal costs about two minutes and not the
+  night.
+- The minute line is learned. The ledger carries `line`: the line the next night
+  paces by, the last line that held, the last that drew refusals, and fourteen
+  nights of history. The run's share is the line less the 100 a minute reserved
+  for members and the live layer, so the 500 working line still gives 400 a
+  minute. A clean night that used its share raises the line by a quarter; a
+  refused night returns it to the last line that held. It stays between 250 and
+  1,500 and moves at most once a night.
+
+The first night records a line and cannot move it. The governor's `msPerName`
+(6,650) still assumes 150 ms, so a faster line makes the time term conservative,
+never optimistic.

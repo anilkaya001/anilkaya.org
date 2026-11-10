@@ -1481,6 +1481,18 @@ key's tier. If it settles at the same value across several mornings, that value
 belongs in `RATE.startDelayMs` — at which point the run stops paying for the
 same discovery every day.
 
+Since 2026-11-10 the floor is no longer a one-way ratchet once the rotation has
+set a pace. On 2026-11-09 one refusal in 23,304 calls held the floor at 225 ms
+for the rest of the night (`queued 3867.7s` of a 4,841.8 s run). The floor now
+eases by a factor of 1.25 after 600 clean calls and never under the paced
+spacing; before the rotation sets a pace it behaves as before. The minute line
+itself is carried night to night in the deepening ledger and moved on evidence
+(`docs/fire-and-forget.md`, sections 3 and 4). The line to read each morning is
+`transport: line ... a minute (verdict; x% refused, y% of calls issued while
+backed off; the run's share was n a minute); busiest minute m call(s); the
+feed's own per-minute counter read between a and b left`, and beside it
+`reconcile: the store holds all N key(s) this run wrote, by content hash`.
+
 The controller is AIMD: ×2 on a 429 and ×0.9 on a clean response, with the
 floor rising 1.5× per 429 and never falling within a run. A 5xx or a transport
 failure backs off but teaches the floor NOTHING — a server error is not a rate

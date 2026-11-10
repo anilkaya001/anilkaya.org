@@ -15,7 +15,7 @@ import { extrasStanding } from "../../../shared/flows-vendor-extras.js";
 import { volAuditState, volAuditStanding } from "../../flows-legs/health.mjs";
 import {
   ARCHIVE_DATE_RE, LEDGER_LIST_KINDS, bindStages, edgeSnapshot, landedKeys, listStored, probeStored, publish, writeBatchStats,
-  publishedStore, readStored,
+  publishedStore, readStored, reconcile,
 } from "../store.mjs";
 import { PIPELINE_CADENCE } from "../clock.mjs";
 import { shapeNews } from "../rank.mjs";
@@ -356,6 +356,13 @@ export async function runClose(ctx) {
     console.log(`  writes: ${writeBatchStats.keys} key(s) in ${writeBatchStats.batches} batch request(s), ${writeBatchStats.fellBack} written alone after a refusal` +
       (writeBatchStats.off ? `; batching stopped: ${writeBatchStats.off}` : ""));
   }
+  let reconciled = null;
+  try {
+    reconciled = await reconcile();
+    (reconciled.ok === false ? console.warn : console.log)("  " + reconciled.said);
+  } catch (error) {
+    console.warn(`  reconcile: ${error.message}`);
+  }
   const health = await runHealthGate({ sessionDate, read: readStored, dry: DRY_RUN, edge: edgeSnapshot,
     annotate: process.env.GITHUB_ACTIONS === "true",
     night: {
@@ -377,6 +384,9 @@ export async function runClose(ctx) {
         ...metaBody,
         stages: stages.records(),
         ...(outside.length ? { stagesOutside: outside.slice(0, 5) } : {}),
+        ...(reconciled && reconciled.asked
+          ? { reconcile: { asked: reconciled.asked, differed: reconciled.need.length, resent: reconciled.resent, still: reconciled.still.length, requests: reconciled.requests } }
+          : {}),
         health: healthRecord(health),
       });
     } catch (error) {
