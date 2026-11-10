@@ -344,6 +344,8 @@ ${sections}
 <section class="card" id="superseded"><div class="card-h"><h2>Superseded frames</h2></div><p class="caption">These ${fx.superseded.frames.length} frames predate the 19:20 direction and show what it rejected. They are not what is asked of you.</p><ul class="note" style="columns:2">${sup}</ul></section></main></div></body></html>`;
 }
 
+const SHOT_RETRIES = 1;
+
 export async function renderApproval({ out, chromium, capture = false, log = () => {} }) {
   const fx = loadFixtures();
   mkdirSync(out, { recursive: true });
@@ -353,16 +355,26 @@ export async function renderApproval({ out, chromium, capture = false, log = () 
   try {
     for (const f of frames) {
       const v = VIEWPORTS[f.vp];
-      const ctx = await browser.newContext({ viewport: { width: v.w, height: v.h }, deviceScaleFactor: 1, reducedMotion: "reduce" });
-      const page = await ctx.newPage();
       const errs = [];
-      page.on("pageerror", (e) => errs.push(String(e)));
-      await page.setContent(f.html);
-      await page.screenshot({ path: path.join(out, f.id + ".png"), fullPage: true });
+      for (let attempt = 0; ; attempt++) {
+        const ctx = await browser.newContext({ viewport: { width: v.w, height: v.h }, deviceScaleFactor: 1, reducedMotion: "reduce" });
+        try {
+          const page = await ctx.newPage();
+          errs.length = 0;
+          page.on("pageerror", (e) => errs.push(String(e)));
+          await page.setContent(f.html);
+          await page.screenshot({ path: path.join(out, f.id + ".png"), fullPage: true });
+          break;
+        } catch (error) {
+          if (attempt >= SHOT_RETRIES) throw error;
+          log(`${f.id}: the capture failed (${String(error && error.message).split("\n")[0]}), taken again on a fresh page`);
+        } finally {
+          await ctx.close();
+        }
+      }
       writeFileSync(path.join(out, f.id + ".html"), f.html);
       info.push({ id: f.id, errors: errs });
       log(f.id);
-      await ctx.close();
     }
     writeFileSync(path.join(out, "capture-live-ambient.html"), captureHtml(fx));
     if (capture) {
