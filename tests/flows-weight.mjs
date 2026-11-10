@@ -36,6 +36,7 @@ const LEDGER_LIVE = { bytes: 138867, why: "the live Premium ledger, owner-only b
 const NN_ORB = { bytes: 9815, why: "design v3 Lane 2, the physics orb: flows-nn-orb.js is a deferred group (WebGL ray-traced glass sphere with Fresnel, Snell per channel, thin-film caustic and an environment read from the page tokens) asked for after load on Home and the ticker; it adds nothing to the eager JavaScript" };
 const NN_KERNEL = { bytes: 974, uiBytes: 524, gzip: 250, why: "design v3 Lane 2, owner-approved: FlowsUI.nn in flows-ui.js (the six-state setter and the busy flag, 524 B raw) and the dock's two-stylesheet loader and phone Ask slot in flows-dock.js (450 B) ship on every gated route, measured with node tests/flows-weight.mjs against the Lane 1 base" };
 const NN_TICKER = { bytes: 2438, gzip: 685, why: "design v3 Lane 2, owner-approved: flows-ticker.js wiring on the ticker, the strip, verdict card and rail states, the schedule flags that clear at the give-up, the edges and the evidence rims, measured against the Lane 1 base" };
+const STRIP_NAV = { css: 900, gzip: 260, jsGzip: 140, why: "the Strategy page's structure and expiry strips carry back and forward buttons, so a mouse reader can move sideways without a trackpad; the rules sit in flows-tools.css, which the desk loads too" };
 const HOME_FIT = { cssGzip: 100, mapCss: 230, deferred: 850, why: "the KPI cells size their figure by the cell's height and carry the day stamp on the label line, and the condensed flow map has a compact mode, so neither is cut when the Neuron strip shortens the stage" };
 const NN_HOME = { bytes: 452, gzip: 129, why: "design v3 Lane 2, owner-approved: flows-overview.js swaps the orb for the calc tile on the computed line and asks for the physics orb group, measured against the Lane 1 base" };
 const NN_ASK = { bytes: 1004, why: "design v3 Lane 2, owner-approved: flows-ask.js settles the dock head and the screen edge on every answer path and draws the answer tile as the app tile; it is the shared deferred dock file of every gated route, measured against the Lane 1 base" };
@@ -82,7 +83,7 @@ const GZIP_KIB = {
   sidePage: 69 + 2571 / 1024 + (69 + 2571 / 1024 + 830 / 1024) - (69 + 2571 / 1024) + (69 + 2571 / 1024 + 830 / 1024 + 101 / 1024) - (69 + 2571 / 1024 + 830 / 1024) + 722 / 1024 + 428 / 1024 + 428 / 1024 + 450 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
   watchPage: 69 + 2571 / 1024 + (69 + 2571 / 1024 + 830 / 1024) - (69 + 2571 / 1024) + (69 + 2571 / 1024 + 830 / 1024 + 101 / 1024) - (69 + 2571 / 1024 + 830 / 1024) + 722 / 1024 + 428 / 1024 + 428 / 1024 + 450 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
   deskPage: 80 + 1937 / 1024 + (80 + 1937 / 1024 + 830 / 1024) - (80 + 1937 / 1024) + (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024) - (80 + 1937 / 1024 + 830 / 1024) + (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024 + 10 / 1024) - (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024) + 641 / 1024 + 680 / 1024 + 2900 / 1024 + 184 / 1024 + 1480 / 1024 + 64 / 1024 + NN_KERNEL.gzip / 1024 + DESK_FORWARD.gzip / 1024,
-  strategyPage: 83 + 1932 / 1024 + (83 + 1932 / 1024 + 830 / 1024) - (83 + 1932 / 1024) + (83 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (83 + 1932 / 1024 + 830 / 1024) + 641 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + STRATEGY_BUNDLE.gzip / 1024,
+  strategyPage: 83 + 1932 / 1024 + (83 + 1932 / 1024 + 830 / 1024) - (83 + 1932 / 1024) + (83 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (83 + 1932 / 1024 + 830 / 1024) + 641 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + STRATEGY_BUNDLE.gzip / 1024 + STRIP_NAV.jsGzip / 1024,
   marketPage: 76 - 10914 / 1024 + (76 - 10998 / 1024 + 830 / 1024) - (76 - 10998 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) - (76 - 10998 / 1024 + 830 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024 - 322 / 1024) - (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) + 722 / 1024 + 3.3 + 149 / 1024 + NN_KERNEL.gzip / 1024,
   networkPage: 39,
   nowPage: 40.3,
@@ -104,8 +105,8 @@ const CSS_KIB = {
   overviewPage: 104 + (779 + 11690) / 1024 + 300 / 1024 + 1700 / 1024 + 15400 / 1024 + 800 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + NN_IDENTITY.overview.bytes / 1024 + HOME_BENTO.cssBytes / 1024,
   sidePage: 102 + 565 / 1024 + 1700 / 1024 + 2400 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   watchPage: 102 + 565 / 1024 + 1700 / 1024 + 2400 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
-  deskPage: 111 + 880 / 1024 + 1700 / 1024 + 8600 / 1024 + (1180 + SKIP_FOCUS.bytes) / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + 63 / 1024,
-  strategyPage: 111 + 880 / 1024 + 1700 / 1024 + 640 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + 32 / 1024 + 69 / 1024,
+  deskPage: 111 + 880 / 1024 + 1700 / 1024 + 8600 / 1024 + (1180 + SKIP_FOCUS.bytes) / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + 63 / 1024 + STRIP_NAV.css / 1024,
+  strategyPage: 111 + 880 / 1024 + 1700 / 1024 + 640 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + 32 / 1024 + 69 / 1024 + STRIP_NAV.css / 1024,
   marketPage: 94 + 1263 / 1024 + 1230 / 1024 + 160 / 1024 + 13.4 + 8.5 + 2000 / 1024 + 5.8 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + 842 / 1024 + 160 / 1024 + 41 / 1024 + HOME_FIT.mapCss / 1024,
   networkPage: 96,
   nowPage: 90,
@@ -127,8 +128,8 @@ const CSS_GZIP_KIB = {
   overviewPage: 23 + (100 + 2592) / 1024 + 400 / 1024 + 2400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + NN_IDENTITY.overview.gzip / 1024 + HOME_BENTO.cssGzip / 1024 + 11 / 1024 + HOME_FIT.cssGzip / 1024,
   sidePage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + 27 / 1024,
   watchPage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + 27 / 1024,
-  deskPage: 24 + 64 / 1024 + 400 / 1024 + 1500 / 1024 + 113 / 1024 + 64 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
-  strategyPage: 24 + 64 / 1024 + 400 / 1024 - 17 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  deskPage: 24 + 64 / 1024 + 400 / 1024 + 1500 / 1024 + 113 / 1024 + 64 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + STRIP_NAV.gzip / 1024,
+  strategyPage: 24 + 64 / 1024 + 400 / 1024 - 17 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + STRIP_NAV.gzip / 1024,
   marketPage: 21 + 206 / 1024 + 2516 / 1024 + 2516 / 1024 + 300 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + 408 / 1024 + 60 / 1024 + 21 / 1024 + 8 / 1024,
   networkPage: 21,
   nowPage: 21,
