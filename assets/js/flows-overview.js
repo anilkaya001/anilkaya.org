@@ -356,12 +356,10 @@
       ? h("span", { class: "ui-gchip-g hm-chip-g", "data-empty": o.silence[0] }, glyph((KIND[o.silence[0]] || KIND.unavailable)[0]))
       : o.g;
     if (o.stamp) attrs["data-session"] = o.stamp.day;
-    const top = o.stamp
-      ? h("span", { class: "hm-chip-top" }, g, h("span", { class: "hm-chip-s", title: o.stamp.said }, o.stamp.text, h("span", { class: "hm-chip-sx" }, " close")))
-      : g;
-    return h("button", attrs, top,
+    const stamp = o.stamp ? h("span", { class: "hm-chip-s", title: o.stamp.said }, o.stamp.text, h("span", { class: "hm-chip-sx" }, " close")) : null;
+    return h("button", attrs, g,
       h("span", { class: "ui-chip-v", "data-tone": o.silence ? "silent" : o.tone || null }, o.value),
-      h("span", { class: "ui-chip-l" }, o.key));
+      h("span", { class: "ui-chip-l" }, h("span", { class: "hm-chip-k" }, o.key), stamp));
   }
 
   function pair(a, b, word) {

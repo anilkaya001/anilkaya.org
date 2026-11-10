@@ -1644,7 +1644,7 @@ The member state's page half (Decision 6). `memberShell(html, { slug, on, export
 | `assets/js/flows-member-ui.js` |  | flows-layout-sweep, flows-member-shell |
 | `assets/js/flows-member.js` |  | flows-layout-sweep, flows-member-shell |
 | `docs/member-state.md` |  |  |
-| `shared/flows-member-shell.js` | `shared/flows-member-shell.js#EXPORT_ANCHORS`, `shared/flows-member-shell.js#MEMBER_ROOT`, `shared/flows-member-shell.js#MEMBER_SLUGS`, `shared/flows-member-shell.js#memberShell` | flows, flows-basis, flows-desk-audit, flows-dossier-reads, flows-engine-budget, flows-home-net-render and 15 more |
+| `shared/flows-member-shell.js` | `shared/flows-member-shell.js#EXPORT_ANCHORS`, `shared/flows-member-shell.js#MEMBER_ROOT`, `shared/flows-member-shell.js#MEMBER_SLUGS`, `shared/flows-member-shell.js#memberShell` | flows, flows-basis, flows-board-hit-render, flows-desk-audit, flows-dossier-reads, flows-engine-budget and 19 more |
 | `tests/flows-member-render.mjs` |  | flows-member-mutants, flows-member-onescreen, flows-member-render |
 | `tests/flows-member-shell.mjs` |  | flows-member-shell |
 | `tests/lib/member-client-batteries.mjs` | `tests/lib/member-client-batteries.mjs#STORAGE_MUTANTS`, `tests/lib/member-client-batteries.mjs#STORAGE_TEXT`, `tests/lib/member-client-batteries.mjs#harness`, `tests/lib/member-client-batteries.mjs#mutateText`, `tests/lib/member-client-batteries.mjs#storageBattery` | flows-member-shell |
