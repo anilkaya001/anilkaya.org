@@ -77,9 +77,9 @@ async function battery(leg, section) {
   });
 
   await safe("cap", async () => {
-    need(leg.callCeiling({}, 1990, 2000) === 10, "cap: the extras remainder (10) bounds the stage");
-    need(leg.callCeiling({}, 0, 2000) === 40 && leg.callCeiling({}, 1999.9, 2000) === 0, "cap: forty at most, zero at the extras cap");
-    const out = await leg.readFlowlab({ vendor: vendorOf(), sessionDate: SESSION, generatedAt: AT, cap: leg.callCeiling({}, 1990, 2000), env: {} });
+    need(leg.callCeiling(2000) === 40 && leg.callCeiling(6000) === 40 && leg.callCeiling(undefined) === 40, "cap: the stage has forty calls of its own, whatever the extras leg spent");
+    need(leg.callCeiling(0) === 0 && leg.callCeiling(-5) === 0, "cap: an extras cap of zero stops the stage too");
+    const out = await leg.readFlowlab({ vendor: vendorOf(), sessionDate: SESSION, generatedAt: AT, cap: 10, env: {} });
     need(out.calls === 6 && out.skipped.length === 1 && out.skipped[0].section === "groups" && out.skipped[0].why === "cap", "cap: groups are skipped for the cap when ten calls remain (" + out.calls + ")");
     need(!out.payloads["flowlab-groups"] && out.detail.flSkipped === 1, "cap: nothing is published for the skipped section");
     const none = await leg.readFlowlab({ vendor: vendorOf(), sessionDate: SESSION, generatedAt: AT, cap: 0, env: {} });
@@ -130,8 +130,11 @@ async function battery(leg, section) {
     const stages = { run: async (id, fn, onError) => { try { return await fn(); } catch (e) { onError(e); return null; } }, detail: (d) => notes.push(d), skip: (id, why) => notes.push({ skipped: why }) };
     const ctx = { stages, vendor: vendorOf(), sessionDate: SESSION, generatedAt: AT, marketLegs: { extras: { calls: 1990 } } };
     await section.runFlowlabWith(ctx, { env: { FLOWS_EXTRAS_CAP: "2000" }, put: async (k, v) => { puts.push(k); }, store: { flowalerts: { rows: ALERTS } }, pool: null });
-    need(notes[0] && notes[0].flCalls === 6 && notes[0].flSkipped === 1, "section: the extras remainder bounds the stage (" + JSON.stringify(notes[0]) + ")");
-    need(puts.join() === "flowlab-roots,flowlab-venues,flowlab-screen,flowlab-corr", "section: published keys in order");
+    need(notes[0] && notes[0].flCalls === 31 && notes[0].flSkipped === 0, "section: an extras leg that spent its cap leaves the stage its own calls (" + JSON.stringify(notes[0]) + ")");
+    need(puts.join() === "flowlab-roots,flowlab-venues,flowlab-screen,flowlab-groups,flowlab-corr", "section: published keys in order (" + puts.join() + ")");
+    const braked = [];
+    await section.runFlowlabWith({ ...ctx, stages: { ...stages, detail: (d) => braked.push(d) } }, { env: { FLOWS_EXTRAS_CAP: "0" }, put: async () => {}, store: { flowalerts: { rows: ALERTS } }, pool: null });
+    need(braked[0] && braked[0].flCalls === 0 && braked[0].flSkipped === 4, "section: an extras cap of zero reads nothing (" + JSON.stringify(braked[0]) + ")");
     const off = [];
     await section.runFlowlabWith({ ...ctx, stages: { ...stages, skip: (id, why) => off.push([id, why]), run: async () => { throw new Error("must not run"); } } }, { env: { FLOWS_FLOWLAB_NIGHTLY: "off" } });
     need(off.length === 1 && off[0][0] === "flowlab", "section: FLOWS_FLOWLAB_NIGHTLY=off skips the stage");
@@ -149,7 +152,7 @@ assert.deepEqual(base, [], "the shipped leg and stage pass their battery:\n" + b
 checks++;
 
 const legPlants = [
-  [29, "stage ignores the extras remainder", [["const room = Number.isFinite(extrasCap) ? extrasCap - used : NIGHTLY_MAX;", "const room = NIGHTLY_MAX;"]], "extras remainder"],
+  [29, "an extras cap of zero is ignored", [["return Number.isFinite(extrasCap) && extrasCap <= 0 ? 0 : NIGHTLY_MAX;", "return NIGHTLY_MAX;"]], "an extras cap of zero"],
   [30, "groups published with a failed group as zeros", [["groups[g] = x.ok ? { status: \"ok\", n: x.x.t.length, bars: groupBars(x.x, openMs), callC: x.x.net.callC, putC: x.x.net.putC } : { status: x.why };", "groups[g] = x.ok ? { status: \"ok\", n: x.x.t.length, bars: groupBars(x.x, openMs), callC: x.x.net.callC, putC: x.x.net.putC } : { status: x.why, bars: [], callC: 0, putC: 0 };"]], "keeps its reason and no figures"],
   [32, "analytics read with the switch off", [["if (section === \"analytics\" && !analytics) continue;", ""]], "analytics read with the switch off"],
 ];
