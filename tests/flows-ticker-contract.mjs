@@ -19,6 +19,7 @@ let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const clone = (x) => JSON.parse(JSON.stringify(x));
+const bare = (card) => { const { engine, ...rest } = clone(card); return rest; };
 
 const EMIT_DIR = nightlyEmit();
 const emitted = (name) => { const f = path.join(EMIT_DIR, name); return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : null; };
@@ -2070,7 +2071,7 @@ try {
   }
 
   {
-    const spy = cards.find((c) => c.depth === "index");
+    const spy = bare(cards.find((c) => c.depth === "index"));
     const base = neuronFor(spy);
     const idea = { title: "Range", structure: "iron condor", direction: "neutral", invalidation: "The state ends past the put wall at 760.00", horizon: "5 sessions",
       robustness: 2, robustnessWord: "fair", restsOn: ["state", "gamma", "levels"], fromState: true, thesis: "The range holds." };
@@ -2081,8 +2082,8 @@ try {
     const v = await page.evaluate(() => ({ ideas: document.querySelectorAll("#ftVerdict .ft-idea").length, slots: document.querySelectorAll("#ftVerdict .ft-slots").length,
       bad: [...document.querySelectorAll("#ftVerdict [data-state]")].filter((n) => n.dataset.state === "unavailable" || n.dataset.state === "pending").length,
       snug: getComputedStyle(document.getElementById("m-context")).alignSelf }));
-    eq(v.ideas, 1, "an index dossier with an ok Neuron draws the Neuron's idea");
-    eq(v.slots, 0, "without the priced PoP, EV and Risk row the engine never fills for an index");
+    eq(v.ideas, 1, "an index dossier whose chain could not be fitted, so it carries no engine block, draws the Neuron's idea with an ok Neuron");
+    eq(v.slots, 0, "without the priced PoP, EV and Risk row that only an engine block fills");
     eq(v.bad, 0, "so its verdict carries no unavailable or pending mark");
     eq(v.snug, "start", "and Context on an index sits at its own height beside Tape instead of stretching to an empty card");
     eq(errors.length, 0, `the index idea throws nothing (${errors.join("; ")})`);
@@ -2090,7 +2091,7 @@ try {
   }
 
   {
-    const spy = cards.find((c) => c.depth === "index");
+    const spy = bare(cards.find((c) => c.depth === "index"));
     const base = neuronFor(spy);
     const ctx = clone(base.context);
     ctx.state = { ...ctx.state, state: "pinned", direction: null, flow: "bearish", brief: null };
