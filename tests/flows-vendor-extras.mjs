@@ -719,4 +719,116 @@ for (const [title, transforms, expected] of planted) {
   ok(!d.packets.events.withheld.some((w) => w.k === "dividend"), "PLANTED WRONG BUILD, a packet that is silent about a part the card shed: it says nothing, which the real packet does not");
 }
 
+{
+  const DV = "shared/flows-dossier-vendor.js";
+  const row = (o = {}) => ({ report_date: "2026-06-30", rev_group: "product", field: "Revenues", members: ["Widgets"], axis: ["ProductOrServiceAxis"], value: "1200", ...o });
+  const body = (rows) => ({ data: { annual_only: false, general: [], rev_breakdown: rows } });
+  const whole = (o = {}) => { const r = row(o); delete r.members; delete r.axis; return r; };
+  const breakdownBattery = (m) => {
+    const bad = [];
+    const t = (name, c) => { if (!c) bad.push(name); };
+    const seg = m.reduceBreakdown(body([row(), row({ members: ["Gadgets"], value: "800" }), whole({ value: "2000" })]));
+    t("segments-read", seg.ok === true && seg.groups.length === 1 && seg.groups[0].n === 2 && seg.groups[0].total === 2000);
+    const totals = m.reduceBreakdown(body([whole(), whole({ report_date: "2026-03-31", value: "900" }), row({ members: [] })]));
+    t("totals-only-is-empty", totals.ok === false && totals.reason === "empty");
+    const zero = m.reduceBreakdown(body([row({ value: "0" }), row({ value: "-5" })]));
+    t("no-positive-is-empty", zero.ok === false && zero.reason === "empty");
+    t("none-is-empty", m.reduceBreakdown(body([])).reason === "empty" && m.reduceBreakdown({ data: { general: [] } }).reason === "empty");
+    t("group-drift-named", m.reduceBreakdown(body([row({ rev_group: "geography" }), whole()])).reason === "type:rev_group");
+    t("date-drift-named", m.reduceBreakdown(body([row({ report_date: "Q2 2026" })])).reason === "type:report_date");
+    t("value-drift-named", m.reduceBreakdown(body([row({ value: "n/a" })])).reason === "type:value");
+    t("members-drift-named", m.reduceBreakdown(body([row({ members: "Widgets" })])).reason === "type:members" && m.reduceBreakdown(body([row({ members: [7] })])).reason === "type:members");
+    t("rows-not-objects", m.reduceBreakdown(body(["Widgets", 3])).reason === "unshaped" && m.reduceBreakdown(body("rows")).reason === "unshaped" && m.reduceBreakdown("text").reason === "unshaped");
+    t("one-good-row-reads", m.reduceBreakdown(body([row({ rev_group: "geography" }), row()])).ok === true);
+    return bad;
+  };
+  same(breakdownBattery(await import("../shared/flows-dossier-vendor.js")), [], "the breakdown reducer reads segments, calls a name with totals only empty (the feed documents members as optional and sends rows without them), and names the field that drifted");
+  for (const [title, transforms, expected] of [
+    ["a breakdown that calls totals-only rows unshaped", [["    if (read.some((r) => !r.member && !r.whole)) return fail(\"type:members\");\n    return fail(\"empty\");", "    return fail(\"unshaped\");"]], "totals-only-is-empty"],
+    ["a breakdown that forgives an unknown group", [["[\"rev_group\", (r) => !r.group], ", ""]], "group-drift-named"],
+    ["a breakdown that forgives members of the wrong type", [["    if (read.some((r) => !r.member && !r.whole)) return fail(\"type:members\");\n", ""]], "members-drift-named"],
+    ["a breakdown that forgives a value that is not a number", [[", [\"value\", (r) => r.value === null]]", "]"]], "value-drift-named"],
+  ]) {
+    const bad = breakdownBattery(await loadMutated(DV, transforms, { salt: checks }));
+    ok(bad.includes(expected), `PLANTED WRONG BUILD, ${title}: the battery fails on ${expected} (${bad.join(", ") || "nothing"})`);
+  }
+
+  const dv = (rows) => ({ data: { ticker: "SYX101", dividends: rows } });
+  const ev = (ex, o = {}) => ({ ex_date: ex, declaration_date: null, record_date: null, payment_date: null, amount: 0.25, ...o });
+  const dividendBattery = (m) => {
+    const bad = [];
+    const t = (name, c) => { if (!c) bad.push(name); };
+    const undated = m.reduceDividends(dv([ev(null), ev(null, { declaration_date: "2026-09-01" })]), { today: TODAY });
+    t("undated-is-not-a-failure", undated.ok === true && undated.n === 0 && undated.undated === 2 && undated.lastEx === null && undated.nextEx === null);
+    t("undated-is-not-none", undated.none === false);
+    const old = m.reduceDividends(dv([ev("2009-03-13"), ev("2010-06-11")]), { today: TODAY });
+    t("old-is-not-a-failure", old.ok === true && old.n === 0 && old.bad === 2 && old.none === false && old.undated === undefined);
+    t("junk-fails", m.reduceDividends(dv([ev("someday"), ev(null)]), { today: TODAY }).reason === "type:ex_date" && m.reduceDividends(dv([ev(20260710)]), { today: TODAY }).reason === "type:ex_date");
+    t("junk-date-fails", m.reduceDividends(dv([ev("2026-13-40")]), { today: TODAY }).reason === "type:ex_date");
+    const mixed = m.reduceDividends(dv([ev("2026-07-10"), ev(null), ev("someday")]), { today: TODAY });
+    t("one-dated-row-reads", mixed.ok === true && mixed.n === 1 && mixed.bad === 2 && mixed.undated === 1 && mixed.none === false);
+    const none = m.reduceDividends(dv([]), { today: TODAY });
+    t("empty-is-none", none.ok === true && none.none === true && none.undated === undefined);
+    t("no-list-unshaped", m.reduceDividends({ data: { ticker: "SYX101", dividends: null } }, { today: TODAY }).reason === "unshaped");
+    const press = m.exercisePressure({ exDates: [], expected: undated.expected, expiry: "2026-11-20", today: TODAY });
+    t("undated-claims-no-date", press.state === "none-known" && undated.expected === null);
+    return bad;
+  };
+  same(dividendBattery(X), [], "the dividends reducer keeps a list whose ex-dates are null (the feed documents the field as nullable) or older than the window, and still fails a date that is not a date");
+  for (const [title, transforms, expected] of [
+    ["a dividends reducer that fails a list with no ex-date", [["if (rows.length && !events.length && mistyped) return fail(\"type:ex_date\");", "if (rows.length && !events.length) return fail(\"type:ex_date\");"]], "undated-is-not-a-failure"],
+    ["a dividends reducer that forgives a date that is not a date", [["if (rows.length && !events.length && mistyped) return fail(\"type:ex_date\");", ""]], "junk-fails"],
+    ["a dividends reducer that calls an undated payer a name with no dividends", [["none: rows.length === 0,", "none: events.length === 0,"]], "undated-is-not-none"],
+    ["a dividends reducer that counts an old date as mistyped", [["else if (!(typeof r.ex_date === \"string\" && isoDay(r.ex_date))) mistyped++;", "else mistyped++;"]], "old-is-not-a-failure"],
+  ]) {
+    const bad = dividendBattery(await loadMutated(LEAF, transforms, { salt: checks }));
+    ok(bad.includes(expected), `PLANTED WRONG BUILD, ${title}: the battery fails on ${expected} (${bad.join(", ") || "nothing"})`);
+  }
+  const undatedPart = { v: 1, status: "ok", parts: { dividends: { at: NOW - 3600 * 1000, rv: 1, x: X.reduceDividends(dv([ev(null)]), { today: "2026-10-20" }) } } };
+  const ud = buildDossier({ ticker: F.T, now: NOW, expectedSession: "2026-10-20", held: { expected: "2026-10-20", cardX: { ...F.cardX(F.T, { sessionDate: "2026-10-20" }), vx: undatedPart } }, vendor: {} });
+  const facts = Object.fromEntries(ud.packets.events.facts.map((f) => [f.k, f]));
+  ok(!facts["dividend.history"] && !facts["dividend.last"] && ud.packets.events.withheld.some((w) => w.k === "dividend.last") && ud.packets.events.withheld.some((w) => w.k === "dividend.next"),
+    "a payer whose ex-dates are not stated is never printed as none on record: its dates are withheld, each with a reason");
+
+  const rows = [
+    { id: "breakdown", why: "type:rev_group" }, { id: "breakdown", why: "type:rev_group" }, { id: "breakdown", why: "unshaped" }, { id: "breakdown", why: "ok" }, { id: "breakdown", why: "empty" },
+    { id: "dividends", why: "type:ex_date" }, { id: "dividends", why: "plan" }, { id: "dividends", skipped: true }, { id: "etf", why: "failed" }, { id: "ivp", why: "missing:tenor" },
+    { id: "ivp", why: "type:<script>" },
+  ];
+  const reasons = X.reasonTally(rows);
+  same(reasons, { breakdown: { "type:rev_group": 2, unshaped: 1 }, dividends: { "type:ex_date": 1 }, ivp: { "missing:tenor": 1, type: 1 } },
+    "the reasons a reducer gave are counted by part and by name, only for the answers shapeHealth counts, and a reason that is not a plain name is filed under its kind");
+  const tally = X.outcomeTally(rows);
+  for (const [id, e] of Object.entries(reasons)) eq(Object.values(e).reduce((a, b) => a + b, 0), tally[id].unshaped + tally[id].missing + tally[id].type, `${id}: the named reasons add to the count shapeHealth judges`);
+  eq(X.reasonsSaid(reasons, "breakdown"), "type:rev_group 2, unshaped 1", "said most frequent first");
+  eq(X.reasonsSaid(reasons, "etf"), "", "and a part with none says nothing");
+  const many = X.reasonTally(Array.from({ length: 40 }, (_, i) => ({ id: "etf", why: "type:f" + String.fromCharCode(97 + (i % 26)) })));
+  eq(Object.keys(many.etf).length, X.REASON_KINDS, "a part keeps a bounded number of reason names");
+  const shaped = { breakdown: { attempted: 132, bad: 44, rate: 0.333, state: "fail" }, dividends: { attempted: 302, bad: 16, rate: 0.053, state: "warn" } };
+  const said = extrasChecks({ calls: 1, due: 1, deferred: 0, health: shaped, eligible: [], reasons: { breakdown: { "type:rev_group": 44 }, dividends: { "type:ex_date": 16 } } });
+  ok(said.warnings.some((w) => /breakdown 44 of 132 \(33\.3%\) \[type:rev_group 44\]/.test(w)) && said.warnings.some((w) => /dividends 16 of 302 \(5\.3%\) \[type:ex_date 16\]/.test(w)),
+    "the health gate's warning names the reducer's reason beside the count, so the night's log says which field moved");
+  ok(extrasChecks({ calls: 1, due: 1, deferred: 0, health: shaped, eligible: [] }).warnings.some((w) => /breakdown 44 of 132 \(33\.3%\) is past/.test(w)), "and a night stored before the reasons were kept reads as it did");
+
+  const lines = [];
+  const feed = (bodyOf) => async (p) => bodyOf(p);
+  const run = await runExtras({
+    uw: feed((p) => (/fundamental-breakdown$/.test(p) ? body([whole(), whole({ value: "5" })]) : /dividends$/.test(p) ? dv([ev(null)]) : { data: [] })),
+    names: ["SYX101", "SYX102"], sessionDate: TODAY, now: NOW, only: ["breakdown", "dividends"], log: (l) => lines.push(l),
+  });
+  ok(run.health.breakdown.bad === 0 && run.health.dividends.bad === 0 && run.tally.breakdown.empty === 2 && run.tally.dividends.ok === 2,
+    "THE NIGHT OF 2026-11-13: names whose breakdown holds totals only and whose dividends carry no ex-date count as read, not as a shape the reducers do not know");
+  same(run.reasons, {}, "and no reason is recorded for them");
+  ok(run.sections.get("SYX101").dx.parts.breakdown.x.reason === "empty" && run.sections.get("SYX101").vx.parts.dividends.x.ok === true, "the empty breakdown is stored, so the name is not asked again every night");
+  const drift = await runExtras({
+    uw: feed((p) => (/fundamental-breakdown$/.test(p) ? body([row({ rev_group: "geography" })]) : { data: [] })),
+    names: ["SYX101"], sessionDate: TODAY, now: NOW, only: ["breakdown"], log: (l) => lines.push(l),
+  });
+  same(drift.reasons, { breakdown: { "type:rev_group": 1 } }, "a real drift is still counted, by name");
+  ok(lines.some((l) => /not read, by reducer reason: breakdown type:rev_group 1/.test(l)), "and the leg's own line prints it");
+  const mute = await loadMutated("scripts/flows-legs/extras.mjs", [["  const reasons = reasonTally(rows);\n", "  const reasons = {};\n"]], { salt: checks });
+  const muted = await mute.runExtras({ uw: feed(() => body([row({ rev_group: "geography" })])), names: ["SYX101"], sessionDate: TODAY, now: NOW, only: ["breakdown"] });
+  ok(Object.keys(muted.reasons).length === 0, "PLANTED WRONG BUILD, a leg that drops the reducers' reasons: it records none, which the real leg does not");
+}
+
 console.log(`✓ flows-vendor-extras: ${checks} assertions — four operations the spec documents and no code read, registered with the fields the code reads, a used probe each and a weekly entitlement question for the trade-stance route; reducers that name their failures, keep dates as dates and withhold every amount, factor and weight whose unit the schema does not state; the early-assignment window with its four boundaries and the holiday skip; per-part ages, versions and stubs; a 40-night simulation of the slow cap on 700 and 856 names that converges in the stated nights and never reads a part after its maximum age; carry-forward that keeps a good part through a failed read; the nightly leg against a scripted vendor (cold, warm, past the deadline, refused, limited, failed, unshaped, prior unreadable); sections shed as stubs before any volatility or flow section; the Worker taking a nightly part as a cache hit for its own refresh age and never over a newer cache row; the packets' dividend, split, ETF and implied-volatility-percentile facts; the governor's numbers; and ${planted.length + 14} planted wrong builds each of which the suite fails`);
