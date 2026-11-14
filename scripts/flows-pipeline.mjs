@@ -35,6 +35,7 @@ import { openTransport, runDeepenLedger, runDeepenPlan } from "./flows-nightly/s
 import { pathFor } from "../shared/flows-vendor-ops.js";
 import { processCpuMs, runCompute } from "./flows-nightly/sections/compute.mjs";
 import { runOraclePrep, runOraclePublish } from "./flows-nightly/sections/oracle.mjs";
+import { runMacroStage, runPmNames, runPmSectors } from "./flows-nightly/sections/macro.mjs";
 import { runVolAuditSection, runVoldeskStage, volAuditFailed } from "./flows-nightly/sections/voldesk.mjs";
 import { voldeskBuildOn } from "../shared/flows-voldesk.js";
 import { runFlowlab } from "./flows-nightly/sections/flowlab.mjs";
@@ -283,16 +284,21 @@ async function main() {
     console.warn(`  deepen: ${error.message} — no rotation tonight`);
   });
   await runMarket(ctx);
+  await runMacroStage(ctx);
   await runRecord(ctx);
   await runChains(ctx);
   await runAlerts(ctx);
   await runContext(ctx);
   await runCards(ctx);
+  ctx.beforeFocus = async () => {
+    await runPmNames(ctx);
+  };
   await runFocus(ctx);
   await runPositioning(ctx);
   await runOraclePrep(ctx);
   await runCompute(ctx);
   await runOraclePublish(ctx);
+  await runPmSectors(ctx);
   await runVoldeskStage(ctx);
   await stages.run("deepen-ledger", () => runDeepenLedger(ctx), (error) => {
     console.warn(`  deepen ledger: ${error.message} — the next run re-reads what the store holds`);

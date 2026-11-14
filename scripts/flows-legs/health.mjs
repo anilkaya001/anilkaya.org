@@ -489,6 +489,29 @@ export function extrasChecks(extras) {
   return { failures, warnings, notes };
 }
 
+export const MACRO_LINES = Object.freeze({ minAttempted: 10, badShare: 0.2, matureNights: 7 });
+
+export function macroChecks(macro) {
+  const failures = [], warnings = [], notes = [];
+  if (!macro || typeof macro !== "object" || macro.build !== true) return { failures, warnings, notes };
+  if (macro.address === true) {
+    failures.push("HEALTH: the macro payload holds an address-shaped string (a wallet address or a transaction hash), which the site never stores");
+  }
+  if (macro.written !== true) {
+    const text = "HEALTH: the macro payload was not written tonight while the macro build is on";
+    if (Number(macro.priorClean) >= MACRO_LINES.matureNights) failures.push(text);
+    else warnings.push("WARNING: macro: the payload was not written tonight, and it has not yet had " + MACRO_LINES.matureNights + " clean nights behind it");
+  }
+  const rows = Object.entries(macro.ops && typeof macro.ops === "object" ? macro.ops : {});
+  const bad = rows.filter(([, o]) => o && Number(o.n) >= MACRO_LINES.minAttempted && Number(o.bad) / Number(o.n) > MACRO_LINES.badShare);
+  if (bad.length) {
+    warnings.push("WARNING: macro feed came back in a shape the reducers do not read for " + bad.map(([id, o]) => `${id} ${Number(o.bad)} of ${Number(o.n)}`).join(", "));
+  }
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  notes.push(`macro: ${n(macro.calls)} call(s)`);
+  return { failures, warnings, notes };
+}
+
 export const VOLAUDIT_LINES = Object.freeze({ warn: 0.10, fail: 0.25, minCompared: 50, shapeRate: 0.20, shapeMin: 20, matureNights: 7 });
 
 export function volAuditGap(v) {
@@ -624,6 +647,10 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
   failures.push(...extras.failures);
   warnings.push(...extras.warnings);
   notes.push(...extras.notes);
+  const macro = macroChecks(night && night.macro);
+  failures.push(...macro.failures);
+  warnings.push(...macro.warnings);
+  notes.push(...macro.notes);
   const volaudit = volAuditChecks(night && night.volaudit);
   failures.push(...volaudit.failures);
   warnings.push(...volaudit.warnings);
@@ -787,15 +814,17 @@ export async function runHealthGate({ sessionDate, read, now = () => Date.now(),
     log("health gate: skipped in a dry run, which reads no store");
     const neuron = neuronChecks(night && night.neuron);
     const extras = extrasChecks(night && night.extras);
+    const macro = macroChecks(night && night.macro);
     const volaudit = volAuditChecks(night && night.volaudit);
-    const failures = [...runChecks(night), ...neuron.failures, ...extras.failures, ...volaudit.failures];
+    const failures = [...runChecks(night), ...neuron.failures, ...extras.failures, ...macro.failures, ...volaudit.failures];
     if (night) log(`  run facts: ${night.planned} planned, ${night.rostered} rostered, ${night.cardsFailed} failed, ${night.deadlineSkipped} skipped; ${failures.length} failure(s)`);
     if (night && night.neuron) for (const line of neuron.notes) log("  " + line);
     for (const line of neuron.warnings) warn(line);
     for (const line of extras.warnings) warn(line);
+    for (const line of macro.warnings) warn(line);
     for (const line of volaudit.warnings) warn(line);
     for (const line of failures) warn(line);
-    return { applies: false, failures, warnings: [...neuron.warnings, ...extras.warnings, ...volaudit.warnings], notes: [...neuron.notes, ...extras.notes, ...volaudit.notes] };
+    return { applies: false, failures, warnings: [...neuron.warnings, ...extras.warnings, ...macro.warnings, ...volaudit.warnings], notes: [...neuron.notes, ...extras.notes, ...volaudit.notes] };
   }
   const safe = async (key) => {
     try { return await read(key); } catch (error) {
@@ -839,6 +868,9 @@ export const HEALTH_CODES = Object.freeze([
   ["neuron-ledger", /coverage ledger does not add up/, "the Neuron coverage ledger does not add up"],
   ["neuron-missing", /have no Neuron reading tonight/, "universe names have no Neuron reading"],
   ["extras-shape", /vendor extras came back in a shape/, "a vendor extras part came back in a shape the reducers do not read"],
+  ["macro-shape", /macro feed came back in a shape/, "a macro operation came back in a shape the reducers do not read"],
+  ["macro-missing", /macro payload was not written/, "the macro payload was not written while the build is on"],
+  ["macro-address", /address-shaped string/, "the macro payload holds an address-shaped string"],
   ["volaudit-gap", /engine cross-check differs on/, "the engine cross-check differs from the feed on too many checks"],
   ["volaudit-shape", /engine cross-check shape/, "a cross-check feed answered in a shape the reducer does not read"],
   ["ledger-empty", /session ledger holds/, "the session ledger has no row for the session"],

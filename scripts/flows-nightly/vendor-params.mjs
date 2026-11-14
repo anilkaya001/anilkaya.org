@@ -53,6 +53,8 @@ export const CALL_COST = Object.freeze({
   slow: 1500,
   voldesk: 337,
   positioning: 720,
+  macro: 152,
+  privateMarkets: 150,
   misc: 67,
 });
 
@@ -80,6 +82,8 @@ export function callModel({ enriched = 0, deep = 0, cross = 0, dossiers = 0, ear
     slow: cost.slow,
     voldesk: cost.voldesk,
     positioning: cost.positioning,
+    macro: cost.macro,
+    privateMarkets: cost.privateMarkets,
     misc: cost.misc,
   };
   return { legs, total: Object.values(legs).reduce((a, b) => a + b, 0) };

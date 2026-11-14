@@ -50,6 +50,8 @@ const GLOBALS = [
   global("scoretrack"),
   global("calib"),
   global("dispersion"),
+  global("macro", { capBytes: 96 * 1024, required: ["v", "session"] }),
+  global("pm", { capBytes: 64 * 1024, required: ["v", "session"] }),
   global("voldesk", { capBytes: 64 * 1024, dueByMin: 120, volatile: frozen(["generatedAt"]), required: ["v", "session", "term"] }),
   global("voldesk-stance", { capBytes: 96 * 1024, dueByMin: 120, volatile: frozen(["generatedAt"]), required: ["v", "ring"] }),
   global("flowalerts"),

@@ -18,6 +18,10 @@ const BYTES_FIELD = 16;
 const overSoft = (payload) => cardXBytes(payload) + BYTES_FIELD > CARD_X_SOFT_BYTES || servedBytes(payload) + BYTES_FIELD > CARD_X_SERVED_BYTES;
 
 function fitSoft(payload) {
+  if (payload.pm && overSoft(payload)) {
+    delete payload.pm;
+    payload.shed.push("pm.soft");
+  }
   while (overSoft(payload)) {
     const id = shedNextPart(payload);
     if (!id) break;
@@ -27,6 +31,7 @@ function fitSoft(payload) {
 }
 
 export const CARD_X_SHED = Object.freeze([
+  ["pm", (p) => { if (!p.pm) return false; delete p.pm; return true; }],
   ["va", (p) => { if (!p.va) return false; delete p.va; return true; }],
   ["dx.parts", (p) => { if (!hasLiveParts(p.dx)) return false; p.dx = stubSection(p.dx, "dx"); return true; }],
   ["vx.parts", (p) => { if (!hasLiveParts(p.vx)) return false; p.vx = stubSection(p.vx, "vx"); return true; }],

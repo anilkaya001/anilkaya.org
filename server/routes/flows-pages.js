@@ -1,5 +1,5 @@
 import { HttpError, redirect } from "../http.js";
-import { FLOWS_PAGES, fireNav, ownerNav, oracleShell, sideShell } from "../../shared/flows-pages.js";
+import { FLOWS_PAGES, fireNav, ownerNav, macroNav, oracleShell, sideShell } from "../../shared/flows-pages.js";
 import { ROUTE_FLAGS, flagOn, modeOf as ffMode } from "../ff-health.js";
 import { memberShell } from "../../shared/flows-member-shell.js";
 import { modeOf } from "../../shared/flows-member-state.js";
@@ -52,12 +52,13 @@ const PAGES = Object.freeze([
   { slug: "now", render: (username) => FLOWS_PAGES.nowPage({ username }) },
   { slug: "desk", render: (username) => FLOWS_PAGES.deskPage({ username }) },
   { slug: "strategy", render: (username) => FLOWS_PAGES.strategyPage({ username }) },
-  { slug: "ticker", render: (username, summary, owner, scenes, env, voldesk) => FLOWS_PAGES.tickerPage({ username, scenes, xcheck: voldesk }) },
+  { slug: "ticker", render: (username, summary, owner, scenes, env, voldesk, gates) => FLOWS_PAGES.tickerPage({ username, scenes, xcheck: voldesk, privateLens: gates.macroOn(env, owner) }) },
   { slug: "moves", gate: "FLOWS_MOVES", render: (username) => FLOWS_PAGES.movesPage({ username }) },
   { slug: "flowlab", flowlab: true, render: (username) => FLOWS_PAGES.flowlabPage({ username }) },
   { slug: "unusual", render: (username, summary, owner) => FLOWS_PAGES.unusualPage({ username, owner }) },
   { slug: "ledger", gate: "FLOWS_LEDGER", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.ledgerPage({ username, live: ledgerLiveOn(env, owner) }) },
-  { slug: "events", render: (username) => FLOWS_PAGES.eventsPage({ username }) },
+  { slug: "macro", open: "macro", render: (username, summary, owner, scenes, env, voldesk, gates) => FLOWS_PAGES.macroPage({ username, live: gates.macroLiveOn(env, owner) }) },
+  { slug: "events", render: (username, summary, owner, scenes, env, voldesk, gates) => FLOWS_PAGES.eventsPage({ username, odds: gates.macroOn(env, owner) }) },
   { slug: "political", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.politicalPage({ username, layers: positioningMode(env, owner) }) },
   { slug: "positioning", gate: "FLOWS_POSITIONING", render: (username) => FLOWS_PAGES.positioningPage({ username }) },
   { slug: "status", ownerOnly: true, render: (username) => FLOWS_PAGES.statusPage({ username }) },
@@ -86,7 +87,7 @@ const html = (body) => new Response(body, { status: 200, headers: { "Content-Typ
 const slashed = (slug) => "/flows/" + (slug === "" ? "" : slug + "/");
 
 export function flowsPageRows(deps) {
-  const { currentFlowsUser, readFlowsSummary, isOwner, scenesOn = () => false, voldeskOn = () => false } = deps;
+  const { currentFlowsUser, readFlowsSummary, isOwner, scenesOn = () => false, voldeskOn = () => false, macroOn = () => false, macroLiveOn = () => false } = deps;
   const rows = [];
 
   rows.push({
@@ -126,6 +127,7 @@ export function flowsPageRows(deps) {
           const mode = String(env[page.gate] || "owner").trim().toLowerCase();
           if (mode === "off" || (mode !== "on" && !isOwner(env, session.username))) throw HttpError.of("not_found");
         }
+        if (session && page.open === "macro" && !macroOn(env, isOwner(env, session.username))) throw HttpError.of("not_found");
         if (session && page.ff && !ffPageOpen(env, page.ff)) throw HttpError.of("not_found");
         const summary = session && page.summary ? await readFlowsSummary(env, "board") : null;
         if (!session) return html(FLOWS_PAGES.loginPage());
@@ -134,7 +136,8 @@ export function flowsPageRows(deps) {
         const slug = page.slug || "overview";
         const labOn = flowlabMode(env, owner) === "on";
         if (page.flowlab && !labOn) throw HttpError.of("not_found");
-        const shelled = memberShell(oracleShell(flowlabShell(page.render(session.username, summary, owner, scenesOn(env, session.username), env, voldeskOn(env, session.username)), slug, labOn), oracleMode(env, owner), slug), memberOptions(env, owner, slug));
+        const shown = memberShell(oracleShell(flowlabShell(page.render(session.username, summary, owner, scenesOn(env, session.username), env, voldeskOn(env, session.username), { macroOn, macroLiveOn }), slug, labOn), oracleMode(env, owner), slug), memberOptions(env, owner, slug));
+        const shelled = macroOn(env, owner) ? macroNav(shown) : shown;
         const rendered = fireNav(shelled, ffPageOpen(env, "fire"), slug);
         return html(sideShell(owner ? ownerNav(rendered) : rendered, request.headers.get("Cookie")));
       },

@@ -233,7 +233,7 @@ const asked = (cases) => {
   eq(d.path, "/api/stock-directory/ticker-exchanges", "and the directory");
   ok([e, w, d].every((x) => x.klass === "slow" && x.limiter === null && x.reads.length), "each is a slow, engine-only read with the fields it reads named");
   same(v.reads, ["date", "call_premium", "put_premium", "call_volume", "put_volume", "bullish_premium", "bearish_premium"], "options-volume names the fields the fallback reads");
-  eq(OPS.length, 137, "the registry holds 137 operations: the eighty-two with the fund reads, the sixteen the Flow Lab reads of the eighteen it registered (the recent flows read and the exact stock levels retired), the thirteen the volatility desk reads and the 26 the positioning package plans");
+  eq(OPS.length, 174, "the registry holds 174 operations: the 37 macro and private-markets entries, the eighty-two with the fund reads, the sixteen the Flow Lab reads of the eighteen it registered (the recent flows read and the exact stock levels retired), the thirteen the volatility desk reads and the 26 the positioning package plans");
   const stage = STAGES.map((s) => s.id);
   ok(stage.indexOf("funds") === stage.indexOf("market") - 1, "STAGE: funds runs immediately before market");
   eq(STAGES.find((s) => s.id === "funds").isolation, "isolated", "and is isolated, so a failure leaves the market payload as it was");
