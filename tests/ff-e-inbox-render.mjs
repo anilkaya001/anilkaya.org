@@ -126,6 +126,7 @@ S.list = async (b) => {
     ok(r.withdrawn === Boolean(h.withdrawn), "a withdrawn hit is marked as withdrawn " + r.id);
   }
   ok(rows.every((r) => !/^0 /.test(r.sent)), "no row is a zero placeholder");
+  ok(rows.some((r) => !r.group && r.unread) && rows.some((r) => !r.group && !r.unread), "the list holds both read and unread hits, so the marker is tested both ways");
   await m.page.click("#ffxIbList .ffx-ib-group");
   const expanded = await m.page.evaluate(() => [...document.querySelectorAll("#ffxIbList .ffx-ib-row")].map((r) => r.getAttribute("data-ff-hit")));
   eq(expanded.slice(0, groupSize), first.filter((h) => h.wire.id + "|" + h.session === groupKey).map((h) => h.id), "a group opens into its own hits");
@@ -348,7 +349,11 @@ for (const name of production) {
 }
 let survivors = 0;
 if (process.env.FF_E_PLANTS && production.length === 0) {
-  for (const [name, scenarios, opts] of PLANTS) {
+  let ran = 0;
+  const wanted = process.env.FF_E_PLANT ? process.env.FF_E_PLANT.split(",").map(Number) : null;
+  for (const [index, [name, scenarios, opts]] of PLANTS.entries()) {
+    if (wanted && !wanted.includes(index)) continue;
+    ran++;
     let patch;
     try { patch = opts(); } catch (err) { console.log("PLANT DID NOT APPLY: " + name + ": " + err.message); survivors++; continue; }
     PATCH = patch;
@@ -362,7 +367,7 @@ if (process.env.FF_E_PLANTS && production.length === 0) {
     if (!caught) survivors++;
     console.log((caught ? "killed   " : "SURVIVED ") + name);
   }
-  console.log(PLANTS.length + " planted wrong builds, " + survivors + " survived");
+  console.log(ran + " of " + PLANTS.length + " planted wrong builds run, " + survivors + " survived");
 }
 await browser.close();
 for (const f of failures) console.log("not ok - " + f);

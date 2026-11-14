@@ -94,7 +94,7 @@ export function health({ mode = "on", memberMax = 12, houseMax = 9, readSeq = 3,
 export { unreadView };
 
 export function apiFor({ total = 40, groupOf = 0, shadowApi = false, withdrawn = [], healthView: hv = health(), receipts = null, pageSize = 30 } = {}) {
-  const world = hitRows(total, { groupOf, withdrawn });
+  const world = hitRows(total, { groupOf, withdrawn, readSeq: 3, houseReadSeq: 2 });
   const byId = new Map(world.rows.map((r) => [r.hit_id, r]));
   const state = { read: null, marks: {} };
   return {

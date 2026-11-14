@@ -130,7 +130,7 @@
   .ffx-ib-filters button { padding: 0 9px; }
 }
 @media (pointer: coarse) {
-  .ffx-ib-filters button, .ffx-ib-tabs button, .ffx-ib-act, .ffx-ib-link, .ffx-ib-btn { min-height: 44px; }
+  .ffx-ib-filters button, .ffx-ib-tabs button, .ffx-ib-act, .ffx-ib-link, .ffx-ib-btn { min-height: 44px; min-width: 44px; }
   .ffx-ib-row { min-height: 56px; }
 }
 @media (max-height: 700px) {
