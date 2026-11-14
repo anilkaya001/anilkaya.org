@@ -235,6 +235,7 @@ const readBattery = async () => {
     [/\n {6}<li><strong>Macro\.<\/strong>[^\n]*<\/li>/, ""],
     [/\s*<section class="fx-doc-term" id="[a-z0-9-]+" aria-labelledby="[a-z0-9-]+">(?:(?!<\/section>)[\s\S])*<a href="\/flows\/macro\/">Macro<\/a>(?:(?!<\/section>)[\s\S])*<\/section>/g, ""],
     [", each name&#39;s Ticker page and Macro, collected", " and each name&#39;s Ticker page, collected"],
+    [/ data-past="[0-9,-]*"/, ""],
   ];
   const render = async (root) => {
     const saved = Date.now;
@@ -267,7 +268,7 @@ const readBattery = async () => {
   const got = await render(ROOT);
   eq(Object.keys(got).sort(), Object.keys(want.pages).sort(), "the baseline covers every page function but the new ones (Positioning, and the Macro page of the package after it), as member and as owner");
   const moved = Object.keys(want.pages).filter((k) => want.pages[k] !== got[k]);
-  eq(moved, [], "WITH BOTH SWITCHES OFF EVERY EXISTING PAGE RENDERS BYTE FOR BYTE AS ORIGIN/MAIN RENDERS IT (version tokens, the declared renames and what the Macro package adds to every page aside: its glyph in the sprite, its About line and its glossary entries): " + moved.join(", "));
+  eq(moved, [], "WITH BOTH SWITCHES OFF EVERY EXISTING PAGE RENDERS BYTE FOR BYTE AS ORIGIN/MAIN RENDERS IT (version tokens, the declared renames and what the Macro package adds to every page aside: its glyph in the sprite, its About line and its glossary entries; and the ticker calendar's sessions before today): " + moved.join(", "));
 }
 
 console.log(`✓ flows-pos-route: ${checks} assertions — the positioning route's gate for each spelling and caller, the whole payload and per-name projection with absent and pending states, the read rows stripping the layers and ps for a closed reader and passing an older payload byte for byte, 405 before the session, one row read, the gate before the read, the stored bytes with the switches off, every other page unchanged against a committed baseline, and the planted wrong builds that each fail`);
