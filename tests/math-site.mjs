@@ -138,9 +138,9 @@ for (const [name, target, run, transforms] of PLANTS) ok(run(await loadMutated(t
   const UI = bootModules(["flows-ui.js"]).window.FlowsUI;
   eq(UI.calibTag({ nEff: 100 }), null, "the calibration tag is absent once a payload carries 100 effective outcomes");
   const src = readFileSync(new URL("../assets/js/flows-ui.js", import.meta.url), "utf8");
-  const wired = (text) => /fetch\("\/api\/flows\/calib"\)/.test(text) && /nEff\) >= 100\) el\.remove\(\)/.test(text) && /if \(c === undefined/.test(text);
+  const wired = (text) => /fetch\("\/api\/flows\/calib", o\)/.test(text) && /nEff\) >= 100\) el\.remove\(\)/.test(text) && /if \(c === undefined/.test(text);
   ok(wired(src), "a tag drawn with no payload reads the calibration payload and removes itself at 100 effective outcomes");
-  ok(!wired(src.replace("if (c === undefined && typeof fetch === \"function\") {", "if (false) {")), "PLANTED WRONG BUILD FAILS: a tag that never reads the payload");
+  ok(!wired(src.replace("if (c === undefined && window.fetch) {", "if (false) {")), "PLANTED WRONG BUILD FAILS: a tag that never reads the payload");
   const served = readFileSync(new URL("../server/routes/flows-read.js", import.meta.url), "utf8");
   ok(/row\("calib"/.test(served), "and the route it reads is served");
 }

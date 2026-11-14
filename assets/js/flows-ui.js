@@ -746,13 +746,13 @@
     return h("span", { class: "ui-tag" + (o.accent ? " is-accent" : ""), "data-tone": o.tone || null }, o.glyph ? glyph(o.glyph) : null, text);
   }
   let calibRead = null;
-  function calibTag(c) {
+  function calibTag(c, o) {
     const t = "Not yet calibrated";
     if (c && num(c.nEff) >= 100) return null;
     const el = h("button", { class: "ui-tag ui-calib", type: "button", ...POP, "aria-expanded": "false",
       "data-info": info({ title: t, lead: "Model probability, not yet checked against outcomes.", notes: ["It stays until 100 effectively independent outcomes are scored."] }) }, t);
-    if (c === undefined && typeof fetch === "function") {
-      calibRead = calibRead || fetch("/api/flows/calib").then((r) => (r && r.ok ? r.json() : null)).catch(() => null);
+    if (c === undefined && window.fetch) {
+      calibRead = calibRead || fetch("/api/flows/calib", o).then((r) => (r && r.ok ? r.json() : null)).catch(() => null);
       calibRead.then((p) => { if (p && num(p.nEff) >= 100) el.remove(); }).catch(() => {});
     }
     return el;
