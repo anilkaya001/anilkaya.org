@@ -28,6 +28,7 @@ const REASONS = {
 const ALLOWED = [
   ["assets/js/flows-ask.js", 1, "month"],
   ["assets/js/flows-board.js", 1, "pace"],
+  ["assets/js/flows-macro.js", 2, "month"],
   ["assets/js/flows-moves.js", 4, "chart"],
   ["assets/js/flows-pos.js", 1, "age"],
   ["assets/js/flows-strategy.js", 1, "dte"],
@@ -55,6 +56,7 @@ const ALLOWED = [
   ["shared/flows-garch.js", 1, "month"],
   ["shared/flows-glossary.js", 1, "month"],
   ["shared/flows-live-worker.js", 1, "clock"],
+  ["shared/flows-macro.js", 1, "month"],
   ["shared/flows-neuron-screen.js", 1, "month"],
   ["shared/flows-neuron.js", 6, "month"],
   ["shared/flows-pages.js", 1, "glyph"],

@@ -2,7 +2,7 @@ export const LIMITERS = Object.freeze(["ondemand", "feature"]);
 
 export const LICENCES = Object.freeze(["aggregate", "derived", "print", "quote", "text"]);
 
-export const PLANS = Object.freeze(["advanced", "addon:volatility", "addon:futures", "enterprise", "premium"]);
+export const PLANS = Object.freeze(["advanced", "addon:volatility", "addon:futures", "addon:private", "enterprise", "premium"]);
 
 const DEFAULTS = Object.freeze({ method: "GET", plan: "advanced", envelope: "data", limiter: null, liveOnly: false, deprecated: false, maxBytes: null, reads: null });
 
@@ -118,6 +118,43 @@ const RAW = [
   { id: "etf-info", path: "/api/etfs/{ticker}/info", licence: "text", klass: "slow", maxBytes: 32768, reads: ["name", "etf_company", "holdings_count", "has_options"] },
   { id: "etf-weights", path: "/api/etfs/{ticker}/weights", licence: "aggregate", klass: "slow", maxBytes: 32768, reads: ["sector", "country", "weight"] },
   { id: "ticker-exchanges", path: "/api/stock-directory/ticker-exchanges", licence: "aggregate", klass: "slow", maxBytes: 1048576, reads: ["ticker", "exchange"] },
+  { id: "futures-contracts", path: "/api/futures/contracts", licence: "aggregate", klass: "nightly", maxBytes: 262144, reads: ["name", "product", "is_spread", "volume", "trades", "last_trade"] },
+  { id: "futures-flow", path: "/api/futures/flow", licence: "print", klass: "quote", limiter: "ondemand", maxBytes: 262144, reads: ["executed_at", "product", "sym", "side", "size", "price", "crossed"] },
+  { id: "futures-candles", path: "/api/futures/{contract}/candles", licence: "quote", klass: "nightly", limiter: "ondemand", maxBytes: 131072, reads: ["o", "h", "l", "c", "v", "start", "end", "date"] },
+  { id: "futures-stats", path: "/api/futures/{contract}/stats", licence: "quote", klass: "quote", limiter: "ondemand", maxBytes: 4096, reads: ["settlement", "settlement_date", "open_interest", "session_volume"] },
+  { id: "futures-trades", path: "/api/futures/{contract}/trades", licence: "print", klass: "quote", limiter: "ondemand", maxBytes: 262144, reads: ["executed_at", "side", "size", "price", "crossed"] },
+  { id: "commodity", path: "/api/commodities/{name}", licence: "aggregate", klass: "nightly", maxBytes: 262144, reads: ["name", "unit", "interval", "data", "date", "value"] },
+  { id: "economy", path: "/api/economy/{indicator}", licence: "aggregate", klass: "nightly", maxBytes: 524288, reads: ["name", "unit", "interval", "data", "date", "value"] },
+  { id: "fx-rate", path: "/api/forex/rate", licence: "quote", klass: "quote", limiter: "ondemand", maxBytes: 4096, reads: ["rate", "bid", "ask", "from", "to", "last_refreshed", "time_zone"] },
+  { id: "fx-history", path: "/api/forex/history", licence: "quote", klass: "nightly", maxBytes: 524288, reads: ["bars", "timestamp", "open", "high", "low", "close", "time_zone"] },
+  { id: "fx-intraday", path: "/api/forex/intraday", licence: "quote", klass: "quote", limiter: "ondemand", maxBytes: 262144, reads: ["bars", "timestamp", "open", "high", "low", "close", "time_zone"] },
+  { id: "digital-history", path: "/api/digital-currencies/history", licence: "quote", klass: "nightly", maxBytes: 524288, reads: ["bars", "timestamp", "close", "time_zone"] },
+  { id: "digital-intraday", path: "/api/digital-currencies/intraday", licence: "quote", klass: "quote", limiter: "ondemand", maxBytes: 262144, reads: ["bars", "timestamp", "close", "time_zone"] },
+  { id: "crypto-state", path: "/api/crypto/{pair}/state", licence: "quote", klass: "quote", limiter: "ondemand", maxBytes: 4096, reads: ["open_24h", "high_24h", "low_24h", "close_24h", "volume_24h", "timestamp", "date"] },
+  { id: "crypto-ohlc", path: "/api/crypto/{pair}/ohlc/{candle_size}", licence: "quote", klass: "nightly", limiter: "ondemand", maxBytes: 131072, reads: ["open", "high", "low", "close", "volume", "start_time", "timestamp"] },
+  { id: "crypto-whales", path: "/api/crypto/whales/recent", licence: "print", klass: "quote", limiter: "ondemand", maxBytes: 65536, reads: ["pair", "side", "size", "price", "total", "whaled_at"] },
+  { id: "crypto-whale-tx", path: "/api/crypto/whale-transactions", licence: "print", klass: "quote", limiter: "ondemand", maxBytes: 131072, reads: ["usd_value", "transaction_type", "blockchain", "token_symbol", "timestamp"] },
+  { id: "market-movers", path: "/api/market/movers", licence: "quote", klass: "nightly", maxBytes: 32768, reads: ["top_gainers", "top_losers", "most_active", "ticker", "price", "change_percent", "volume", "last_updated"] },
+  { id: "seasonality-performers", path: "/api/seasonality/{month}/performers", licence: "aggregate", klass: "nightly", maxBytes: 65536, reads: ["ticker", "sector", "years", "positive_closes"] },
+  { id: "seasonality-monthly", path: "/api/seasonality/{ticker}/monthly", licence: "aggregate", klass: "nightly", maxBytes: 8192, reads: ["month", "years", "positive_closes"] },
+  { id: "seasonality-year-month", path: "/api/seasonality/{ticker}/year-month", licence: "aggregate", klass: "nightly", maxBytes: 32768, reads: ["year", "month", "open", "close", "change"] },
+  { id: "pred-unusual", path: "/api/predictions/unusual", licence: "derived", klass: "nightly", maxBytes: 262144, reads: ["asset_id", "market", "outcome", "current", "resolves", "category", "volume"] },
+  { id: "pred-smart-money", path: "/api/predictions/smart-money", licence: "derived", klass: "nightly", maxBytes: 262144, reads: ["title", "resolves", "category", "outcomes", "asset_id", "label", "price"] },
+  { id: "pred-whales", path: "/api/predictions/whales", licence: "derived", klass: "nightly", maxBytes: 262144, reads: ["asset_id", "question", "outcome", "category", "current_price", "resolves"] },
+  { id: "pred-insiders", path: "/api/predictions/insiders", licence: "derived", klass: "nightly", maxBytes: 262144, reads: ["asset_id", "question", "outcome", "category", "current_price", "resolves"] },
+  { id: "pred-market", path: "/api/predictions/market/{asset_id}", licence: "text", klass: "nightly", maxBytes: 524288, reads: ["question", "question_type", "outcomes", "outcome_index", "outcome_assets", "asset_id", "label", "prices", "date", "price", "volume", "end_date", "closed", "active", "category"] },
+  { id: "pred-liquidity", path: "/api/predictions/market/{asset_id}/liquidity", licence: "quote", klass: "nightly", maxBytes: 131072, reads: ["best_bid", "best_ask", "mid_price", "spread", "total_liquidity", "timestamp"] },
+  { id: "pred-positions", path: "/api/predictions/market/{asset_id}/positions", licence: "aggregate", klass: "nightly", maxBytes: 524288, reads: ["invested_usd", "tags", "user_address"] },
+  { id: "pred-user", path: "/api/predictions/user/{user_id}", licence: "aggregate", klass: "nightly", maxBytes: 262144, reads: ["category_scores", "category", "win_rate", "num_markets"] },
+  { id: "pm-companies", path: "/api/private-markets/companies", plan: "addon:private", licence: "text", klass: "slow", maxBytes: 524288, reads: ["npm_ticker", "name", "sector", "sub_sectors", "year_founded"] },
+  { id: "pm-company", path: "/api/private-markets/companies/{npm_ticker}", plan: "addon:private", licence: "aggregate", klass: "slow", maxBytes: 16384, reads: ["company", "npm_ticker", "name", "sector", "total_funding", "investor_count", "latest_price", "date", "price"] },
+  { id: "pm-funding", path: "/api/private-markets/companies/{npm_ticker}/funding", plan: "addon:private", licence: "aggregate", klass: "slow", maxBytes: 32768, reads: ["financing_round", "investment_amount", "investment_date"] },
+  { id: "pm-pricing", path: "/api/private-markets/companies/{npm_ticker}/pricing", plan: "addon:private", licence: "quote", klass: "slow", maxBytes: 65536, reads: ["date", "price"] },
+  { id: "pm-investors-of", path: "/api/private-markets/companies/{npm_ticker}/investors", plan: "addon:private", licence: "text", klass: "slow", maxBytes: 65536, reads: ["name"] },
+  { id: "pm-management", path: "/api/private-markets/companies/{npm_ticker}/management", plan: "addon:private", licence: "text", klass: "slow", maxBytes: 32768, reads: ["title"] },
+  { id: "pm-investors", path: "/api/private-markets/investors", plan: "addon:private", licence: "aggregate", klass: "slow", maxBytes: 131072, reads: ["name", "company_count"] },
+  { id: "pm-investor", path: "/api/private-markets/investors/{name}", plan: "addon:private", licence: "text", klass: "slow", maxBytes: 131072, reads: ["name", "companies", "npm_ticker", "sector"] },
+  { id: "pm-search", path: "/api/private-markets/search", plan: "addon:private", licence: "text", klass: "slow", maxBytes: 32768, reads: ["investors", "name", "company_count"] },
   { id: "inst-list", path: "/api/institutions", licence: "text", klass: "slow", maxBytes: 262144, reads: ["cik", "name", "short_name", "is_hedge_fund", "date", "filing_date", "total_value", "share_value", "call_value", "put_value", "buy_value", "sell_value"] },
   { id: "inst-latest", path: "/api/institutions/latest_filings", licence: "text", klass: "slow", maxBytes: 131072, reads: ["cik", "name", "short_name", "is_hedge_fund", "filing_date"] },
   { id: "inst-holdings", path: "/api/institution/{name}/holdings", licence: "aggregate", klass: "slow", maxBytes: 262144, reads: ["ticker", "sector", "units", "units_change", "value", "perc_of_share_value", "put_call", "security_type", "date"] },
@@ -187,6 +224,9 @@ export const BUDGETS = Object.freeze({
   premarketNews: Object.freeze({ window: "04:00-09:30 ET, trading days", everyMin: 30, callsPerFiring: 1, maxFiringsPerDay: 11, perMinute: 1 }),
   positioning: Object.freeze({ window: "night", nightlyMax: 720 }),
   ondemand: Object.freeze({ binding: "UW_ONDEMAND", limit: 120, periodS: 60, failsOpen: true }),
+  macroLive: Object.freeze({ binding: "UW_ONDEMAND", ttlS: 300, callsPerMiss: Object.freeze({ board: 18, futures: 3, crypto: 4, fx: 1 }) }),
+  macroNightly: Object.freeze({ calls: 152 }),
+  privateMarkets: Object.freeze({ calls: 150, max: 400 }),
   flowlab: Object.freeze({
     nightlyMax: 40,
     memberCallsPerRead: Object.freeze({ screen: 1, core: 3, alert: 1, structure: 1, legs: 1, strikes: 2, recent: 1, greek: 1, levels: 2, lit: 1, venues: 1, group: 1, litMarket: 1, groups: 25, venuesUniverse: 1 }),
