@@ -2,7 +2,7 @@ import { vnum, isoDay, sessionsBetween } from "./flows-cross.js";
 import { median } from "./flows-stats.js";
 import { askShareRead } from "./flows-tape-stats.js";
 import { opById } from "./flows-vendor-ops.js";
-import { formatScaled } from "./flows-display-round.js";
+import { formatScaled, wholePercent } from "./flows-display-round.js";
 import { usableX, exSplit, ETF_TOP } from "./flows-vendor-extras.js";
 
 export const DOSSIER_VERSION = 1;
@@ -1576,7 +1576,7 @@ export function buildMacroPacket(inp) {
       if (isNum(mc.es)) rec.fact("futures.ES.chg1", "S&P 500 futures, one-day change", mc.es, "fraction", { signed: true, grade: mg, silent: true });
       if (isNum(mc.btc)) rec.fact("crypto.BTC.chg1", "Bitcoin, one-day change", mc.btc, "fraction", { signed: true, grade: mg, silent: true });
       const next = arr(mc.events).filter((e) => isNum(e.price) && e.resolved !== true && typeof e.at === "string" && Date.parse(e.at) >= ctx.now).sort((x, y) => x.at.localeCompare(y.at))[0];
-      if (next) rec.fact("odds.next", "Prediction-market price for the next matched release", Math.round(next.price * 100) + "% for " + cleanLabel(next.event, 60), "text", { grade: next.thin === true ? Math.min(mg, 1) : mg, silent: true, note: "the market's number, not a forecast" });
+      if (next) rec.fact("odds.next", "Prediction-market price for the next matched release", wholePercent(next.price) + "% for " + cleanLabel(next.event, 60), "text", { grade: next.thin === true ? Math.min(mg, 1) : mg, silent: true, note: "the market's number, not a forecast" });
     } else {
       rec.hold("macro", why("expired", "the macro board describes " + mc.sessionDate));
     }

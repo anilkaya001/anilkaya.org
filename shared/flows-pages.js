@@ -1218,6 +1218,9 @@ export function macroPage({ username = "", live = false } = {}) {
     scripts: MACRO_SCRIPTS,
     body: macroBody(glyph, { live }) + `
   <i hidden data-defer="macro-charts" data-src="${v(MACRO_DEFER)}"></i>`,
+  });
+}
+
 export function positioningPage({ username = "", now = Date.now() } = {}) {
   return flowsDocument({
     title: "Positioning",

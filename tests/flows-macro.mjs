@@ -13,6 +13,7 @@ import { makeMacroFakeVendor, makeLiveFake } from "../scripts/flows-legs/macro-f
 import { clearTaint } from "../scripts/flows-legs/taint.mjs";
 import { addSessions } from "../shared/flows-calendar.js";
 import { OPS, BUDGETS } from "../shared/flows-vendor-ops.js";
+import { CALL_COST } from "../scripts/flows-nightly/vendor-params.mjs";
 import { COPY } from "../shared/flows-macro-copy.js";
 import { loadMutated } from "./truth/mutants.mjs";
 import { buildPeersPacket, buildMacroPacket } from "../shared/flows-dossier.js";
@@ -339,6 +340,8 @@ function MACRO_CAP() { return M.MACRO_CAP_BYTES; }
   eq(BUDGETS.macroNightly.calls, M.MACRO_NIGHTLY_CALLS, "the nightly budget equals the code constant");
   eq(BUDGETS.privateMarkets.calls, P.PM_CAP_DEFAULT, "the private-markets default equals the code constant");
   eq(BUDGETS.privateMarkets.max, P.PM_CAP_MAX, "and its ceiling");
+  eq(CALL_COST.macro, BUDGETS.macroNightly.calls, "the pipeline's call model counts the nightly macro reads");
+  eq(CALL_COST.privateMarkets, BUDGETS.privateMarkets.calls, "and the private-markets reads at their default cap");
   ok(Object.values(L.MACRO_LIVE_CALLS).reduce((a, b) => a + b, 0) <= 26, "the worst case of one miss of every part in a minute is 26 calls");
   ok(26 < BUDGETS.ondemand.limit, "under the on-demand limiter's allowance");
 }
@@ -444,7 +447,8 @@ function MACRO_CAP() { return M.MACRO_CAP_BYTES; }
   for (const key of Object.keys(COPY)) ok(!/\btape\b|vendor|unusual whales/i.test(COPY[key]), `no banned word in ${key}`);
   for (const [key, text] of Object.entries(COPY)) ok(text.replace(/\{[a-z0-9]+\}/g, "x").split(/\s+/).length <= 14, `${key} is at most fourteen words`);
   const first = OPS.findIndex((e) => e.id === "futures-contracts");
-  eq(OPS.length - first, 37, "the 37 operations are registered after the ETF exposure");
+  const last = OPS.findIndex((e) => e.id === "pm-search");
+  eq(last - first + 1, 37, "the 37 operations are registered together, after the ETF exposure");
 }
 
 const MUTANTS = [

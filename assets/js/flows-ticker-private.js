@@ -78,7 +78,7 @@
     };
   }
 
-  const signed = (v) => (v === null ? DASH : (v >= 0 ? "+" : MINUS) + Math.abs(v * 100).toFixed(1) + "%");
+  const signed = (v) => (v === null ? DASH : F.pct(v, 1, true));
   const cell = (cls, label, ...kids) => h("span", { class: cls, "data-k": label }, ...kids);
 
   function peerRow(r) {

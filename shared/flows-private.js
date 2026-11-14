@@ -173,7 +173,7 @@ export function sectorEntry({ status, listed, cursor, profiled, complete, top })
 
 export function buildPm({ session, generatedAt, sectors, investors, calls, plan }, { test = false } = {}) {
   const payload = {
-    v: PM_VERSION, session, generatedAt, ...(test ? { fixture: true } : {}),
+    v: PM_VERSION, session, sessionDate: session, generatedAt, ...(test ? { fixture: true } : {}),
     sectors: sectors || {},
     investors: investors || { asOf: null, n: 0, top: [] },
     basis: { calls: calls || 0, plan: !!plan },

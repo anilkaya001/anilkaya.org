@@ -125,7 +125,7 @@ const CSS_KIB = {
   movesPage: 95.5 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + MOVES_SECTORS.cssBytes / 1024,
   ledgerPage: 86.5 + LEDGER_PAGE.cssBytes / 1024,
   flowlabPage: 86.5 + FLOWLAB_PAGE.cssBytes / 1024,
-  macroPage: 106,
+  macroPage: 104.5,
   politicalPage: 103 + 1700 / 1024 + 400 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   positioningPage: 136.2,
   loginPage: 80 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
@@ -494,7 +494,7 @@ for (const m of measured) {
   ok(judge({ ...base, raw: base.raw - 13 * 1024 }).length > 0,
      "the ratchet fails a route that saved 13 KiB raw and left its ceiling where it was");
   ok(judge({ ...base, name: "nowhere" }).length === 4, "a route with no ceilings fails on all four bases");
-  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 40427 + NN_KERNEL.gzip, css: 119045 + NN_FLOWS_CSS.bytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip };
+  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 40627 + NN_KERNEL.gzip, css: 119045 + NN_FLOWS_CSS.bytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip };
   eq(judge(events).join("; "), "", "events, whose ceiling is held for the earnings strip, passes with its wide raw headroom");
   eq(Object.keys(HELD_RAW_KIB).join(", "), "eventsPage", "events is the only route whose raw ceiling is held above the ratchet");
 }

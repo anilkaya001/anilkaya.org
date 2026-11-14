@@ -74,8 +74,8 @@
     const hit = table.get(String(m.at) + "|" + String(m.event));
     const mk = hit && hit.markets && hit.markets[0] ? hit.markets[0] : null;
     if (!mk || n(mk.price) === null) return h("span", { class: "fe-modd", title: ODDS_COPY.none }, DASH, h("span", { class: "visually-hidden" }, " " + ODDS_COPY.none));
-    const label = (mk.resolved ? "Resolved " : "") + Math.round(mk.price * 100) + "%" + (mk.thin ? " \u25cb" : "");
-    return h("span", { class: "fe-modd", title: "Market price " + Math.round(mk.price * 100) + "%." + (mk.thin ? " " + ODDS_COPY.thin : "") + (mk.basis === "last" ? " " + ODDS_COPY.last : "") + (mk.resolved ? " " + ODDS_COPY.resolved : "") }, label);
+    const label = (mk.resolved ? "Resolved " : "") + F.pct(mk.price, 0) + (mk.thin ? " \u25cb" : "");
+    return h("span", { class: "fe-modd", title: "Market price " + F.pct(mk.price, 0) + "." + (mk.thin ? " " + ODDS_COPY.thin : "") + (mk.basis === "last" ? " " + ODDS_COPY.last : "") + (mk.resolved ? " " + ODDS_COPY.resolved : "") }, label);
   }
 
   function loadOdds() {

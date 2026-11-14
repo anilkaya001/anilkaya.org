@@ -7,7 +7,7 @@
   const SVGNS = "http://www.w3.org/2000/svg";
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const esc = (s) => String(s === null || s === undefined ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-  const r1 = (x) => Math.round(x * 10) / 10;
+  const r1 = (x) => Number(U.chart.fx1(x));
   const MATS = { "3month": 0.25, "2year": 2, "5year": 5, "7year": 7, "10year": 10, "30year": 30 };
   const LABELS = { "3month": "3M", "2year": "2Y", "5year": "5Y", "7year": "7Y", "10year": "10Y", "30year": "30Y" };
   const NAMES = { "3month": "3-month", "2year": "2-year", "5year": "5-year", "7year": "7-year", "10year": "10-year", "30year": "30-year" };
