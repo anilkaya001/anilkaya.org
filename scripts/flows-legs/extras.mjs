@@ -5,6 +5,7 @@ import { REDUCERS } from "../../shared/flows-dossier-vendor.js";
 import { sanitizeText } from "../../shared/flows-dossier.js";
 import {
   PARTS, NIGHTLY_IDS, PS_IDS, SLOW_CAP, REDUCERS_X, REDUCERS_PS, planSlow, partState, mergeParts, sectionOf, fitSection, outcomeTally, shapeHealth,
+  reasonTally, reasonsSaid,
 } from "../../shared/flows-vendor-extras.js";
 
 export const PRIOR_WIDTH = 4;
@@ -134,10 +135,13 @@ export async function runExtras({
   }
   const health = shapeHealth(tally);
   const failing = Object.entries(health).filter(([, h]) => h.state === "fail").map(([id]) => id);
+  const reasons = reasonTally(rows);
+  const named = Object.keys(reasons).sort().map((id) => `${id} ${reasonsSaid(reasons, id)}`);
   log(`  extras: ${calls} call(s) for ${list.length} name(s): ${plan.picked.length} of ${plan.due} due slow part(s) read` +
     (plan.deferred ? `, ${plan.deferred} deferred by the ${cap}-call cap` : "") + `, ${nightly.length} implied-volatility read(s)` +
     (priorFailed.size ? `, ${priorFailed.size} prior card-x unread` : "") +
-    (failing.length ? `; SHAPE FAILING ${failing.join(", ")}` : ""));
-  return { sections, tally, health, calls, plan: { due: plan.due, picked: plan.picked.length, deferred: plan.deferred, fresh: plan.fresh }, psPlan: positioning ? { due: psPlan.due, picked: psPlan.picked.length, deferred: psPlan.deferred, fresh: psPlan.fresh } : null, priorFailed: priorFailed.size, failing };
+    (failing.length ? `; SHAPE FAILING ${failing.join(", ")}` : "") +
+    (named.length ? `; not read, by reducer reason: ${named.join("; ")}` : ""));
+  return { sections, tally, health, reasons, calls, plan: { due: plan.due, picked: plan.picked.length, deferred: plan.deferred, fresh: plan.fresh }, psPlan: positioning ? { due: psPlan.due, picked: psPlan.picked.length, deferred: psPlan.deferred, fresh: psPlan.fresh } : null, priorFailed: priorFailed.size, failing };
 }
 

@@ -166,6 +166,7 @@ export async function runClose(ctx) {
   const extrasSummary = extrasRun ? {
     calls: extrasRun.calls, due: extrasRun.plan.due, deferred: extrasRun.plan.deferred, picked: extrasRun.plan.picked,
     priorFailed: extrasRun.priorFailed, health: extrasRun.health, ...extrasStanding(extrasRun.health, priorExtras),
+    ...(extrasRun.reasons && Object.keys(extrasRun.reasons).length ? { reasons: extrasRun.reasons } : {}),
   } : null;
 
   let macroNight = null;
