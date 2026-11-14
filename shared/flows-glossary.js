@@ -19,7 +19,7 @@ export const GLOSSARY = Object.freeze([
     "No aggressor side: the feed does not report one.",
     "Crossed-quote prints are counted apart, never sided.",
   ] },
-  { key: "contango", term: "Contango (futures)", ...MACRO, lines: [
+  { key: "contango-futures", term: "Contango (futures)", ...MACRO, lines: [
     "Index futures usually sit above spot by carry.",
   ] },
   { key: "dollar-breadth", term: "Dollar breadth", ...MACRO, lines: [

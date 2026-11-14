@@ -1190,7 +1190,7 @@ const LAST_GOOD_REFRESH_MS = 10 * 60 * 1000;
 const LAST_GOOD_MAX_KEYS = 256;
 const LAST_GOOD_PATHS = new Set(["board", "market", "events", "scoretrack", "calib", "dispersion", "meta", "flowalerts", "pulse", "political", "unusual",
   "movers", "sectors", "sector-premium", "universe", "regime", "ideas", "focus", "roster", "news", "record", "card", "card-x",
-  "hist", "macro", "voldesk"].map((name) => "/api/flows/" + name));
+  "macro", "hist", "voldesk"].map((name) => "/api/flows/" + name));
 
 function lastGoodKey(request, url) {
   if (request.method !== "GET" || !LAST_GOOD_PATHS.has(url.pathname)) return null;
