@@ -5,6 +5,7 @@ import {
 import { buildFlowAlerts, mergeAlerts } from "./flows-alerts.js";
 import { rowsOf } from "./flows-rows.js";
 import { pathFor } from "./flows-vendor-ops.js";
+import { capTide } from "./flows-cap-tide.js";
 
 export const LIVE_KEY_RE = /^live:[a-z]+(?::[a-z]+)?$/;
 
@@ -15,7 +16,7 @@ const spec = (klass, writer, maxBytes, reads) => Object.freeze({
 export const LIVE_KEYS = Object.freeze({
   "live:market": spec("market", "worker", 16 * 1024, 2),
   "live:focus": spec("market", "worker", 16 * 1024, 1),
-  "live:breadth": spec("breadth", "actions", 96 * 1024, 17),
+  "live:breadth": spec("breadth", "actions", 96 * 1024, 25),
   "live:strips": spec("breadth", "actions", 64 * 1024, 1),
   "live:strips:series": spec("breadth", "actions", 112 * 1024, 0),
   "live:alerts": spec("breadth", "actions", 120 * 1024, 5),
@@ -46,6 +47,8 @@ export const LIVE_BUDGET = Object.freeze({
   alertPages: 5,
   alertsPerTape: 20,
   alertsHeadRows: 20,
+  capChunk: 160,
+  capCalls: 8,
   seriesPoints: 30,
   tapeLeaseMs: 20 * 1000,
   tapeUsableMs: 30 * 60 * 1000,
@@ -547,7 +550,90 @@ export function zeroDteShare(zero, weekly) {
   return { value: round(Math.abs(z) / denom, 6), zeroNet: z, weeklyNet: w, date, reason: null };
 }
 
-export function shapeBreadth(raws, { at, session, writer } = {}) {
+export function capUniverse(payload, { max = LIVE_BUDGET.capChunk * LIVE_BUDGET.capCalls } = {}) {
+  const p = payload && typeof payload === "object" ? payload : {};
+  const list = p.status === "ok" && Array.isArray(p.t) ? p.t : [];
+  const scale = p.units && Array.isArray(p.units.mcap) ? vnum(p.units.mcap[1]) : null;
+  const col = p.cols && Array.isArray(p.cols.mcap) && scale !== null && scale > 0 ? p.cols.mcap : null;
+  const names = [];
+  const caps = {};
+  const seen = new Set();
+  for (let i = 0; i < list.length; i++) {
+    const t = upperTicker(list[i]);
+    if (!TICKER_RE.test(t) || seen.has(t)) continue;
+    seen.add(t);
+    names.push(t);
+    const c = col ? vnum(col[i]) : null;
+    if (c !== null && c > 0) caps[t] = c / scale;
+  }
+  return {
+    names, asked: names.slice(0, Math.max(0, max)), caps,
+    sessionDate: typeof p.sessionDate === "string" && DAY_RE.test(p.sessionDate) ? p.sessionDate : null,
+  };
+}
+
+export function capChunks(names, { size = LIVE_BUDGET.capChunk, max = LIVE_BUDGET.capCalls } = {}) {
+  const out = [];
+  const list = Array.isArray(names) ? names : [];
+  for (let i = 0; i < list.length && out.length < max; i += size) out.push(list.slice(i, i + size));
+  return out;
+}
+
+const CAP_ROW = Object.freeze(["marketcap", "net_call_premium", "net_put_premium", "call_premium", "put_premium"]);
+
+export function shapeCapTide(raws, { at, session, universe = null } = {}) {
+  const atMs = typeof at === "number" ? at : timeMs(at);
+  const stamp = Number.isFinite(atMs) ? new Date(atMs).toISOString() : null;
+  const names = universe && Array.isArray(universe.names) ? universe.names : [];
+  const caps = universe && universe.caps && typeof universe.caps === "object" ? universe.caps : {};
+  const list = Array.isArray(raws) ? raws : [];
+  const answered = list.filter((raw) => raw !== undefined && raw !== null && !failed(raw));
+  const detail = { calls: list.length, failed: list.length - answered.length, returned: 0, off: 0, rowDate: null, excluded: null };
+  const blank = (reason) => ({
+    cap: { value: null, coverage: null, n: 0, of: names.length, effN: null, dollarNet: null, equal: null,
+      at: reason === SILENCE.notRead ? null : stamp, reason },
+    ...detail,
+  });
+  if (!names.length || !list.length) return blank(SILENCE.notRead);
+  if (!answered.length) return blank(SILENCE.failed);
+  const seen = new Map();
+  const dates = new Map();
+  for (const raw of answered) {
+    for (const r of rowsOf(raw)) {
+      const t = r && typeof r.ticker === "string" ? upperTicker(r.ticker) : "";
+      if (!t || seen.has(t)) continue;
+      const d = typeof r.date === "string" && DAY_RE.test(r.date) ? r.date : null;
+      if (d) dates.set(d, (dates.get(d) || 0) + 1);
+      seen.set(t, { r, d });
+    }
+  }
+  let rowDate = null;
+  for (const [d, n] of dates) if (rowDate === null || n > rowDate[1] || (n === rowDate[1] && d > rowDate[0])) rowDate = [d, n];
+  detail.rowDate = rowDate ? rowDate[0] : null;
+  const dated = typeof session === "string" && DAY_RE.test(session);
+  if (rowDate && dated && rowDate[0] < session) return blank(SILENCE.prior);
+  const rows = names.map((t) => {
+    const e = seen.get(t);
+    if (!e) return { ticker: t, marketcap: Object.hasOwn(caps, t) ? caps[t] : null };
+    if (dated && e.d && e.d < session) {
+      detail.off++;
+      return { ticker: t, marketcap: Object.hasOwn(caps, t) ? caps[t] : null };
+    }
+    detail.returned++;
+    const row = { ticker: t };
+    for (const f of CAP_ROW) row[f] = e.r[f];
+    return row;
+  });
+  const c = capTide(rows);
+  detail.excluded = c.excluded;
+  return {
+    cap: { value: c.value, coverage: c.coverage, n: c.n, of: c.of, effN: c.effN, dollarNet: c.dollarNet, equal: c.equal,
+      at: stamp, reason: c.reason },
+    ...detail,
+  };
+}
+
+export function shapeBreadth(raws, { at, session, writer, cap = null } = {}) {
   const r = raws || {};
   const sectorEntries = SECTOR_TIDES.map(({ sector, etf }) => {
     const s = shapeTideFeed(r.sectors ? r.sectors[sector] : undefined, { session });
@@ -567,9 +653,13 @@ export function shapeBreadth(raws, { at, session, writer } = {}) {
     units: {
       ncp: "USD, cumulative net call premium (ask - bid)", npp: "USD, cumulative net put premium (ask - bid)",
       net: "USD, ncp - npp", share: "ratio in [0, 1], |net 0DTE| / (|net 0DTE| + |net weekly|)",
+      cap: "value: ratio in [-1, 1], the market-cap weighted mean over stocks of (ncp - npp) / (call premium + put premium); " +
+        "coverage: the share of the universe's market value in it; n of names; effN: 1 / the sum of squared weights; " +
+        "dollarNet: USD; equal: the unweighted mean; at: ISO-8601 UTC read instant; funds and index options are outside it",
     },
     sectors: block, etf,
     dte: { zero, weekly, share: zeroDteShare(zero, weekly) },
+    cap: cap && typeof cap === "object" ? cap : shapeCapTide(null, { at: null, session }).cap,
   };
 }
 

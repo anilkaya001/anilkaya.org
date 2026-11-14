@@ -2,12 +2,14 @@ import { num } from "../../../shared/flows-features.js";
 import { buildCard, SURFACE_EXPIRIES } from "../../../shared/flows-card.js";
 import { runFlowLeg } from "../../flows-legs/flow.mjs";
 import { makeFlowFakeVendor, makeFlowFakeStore } from "../../flows-legs/flow-fake.mjs";
-import { buildChainPanels, CHAIN_PAGE_SIZE } from "../../../shared/flows-chain.js";
+import { buildChainPanels, CHAIN_PAGE_SIZE, CHAIN_MAX_PAGES, mergeChainPages } from "../../../shared/flows-chain.js";
+import { regimeState } from "../../../shared/flows-neuron.js";
+import * as QP from "../../flows-quant-pipeline.mjs";
 import {
   FOCUS_FUNDS, focusTickers, focusGroups, focusCloses, FOCUS_BUDGET_BYTES,
 } from "../../../shared/flows-focus.js";
 import { buildFocusPayload } from "../../flows-legs/focus.mjs";
-import { attachVol, publishVol } from "../../flows-legs/vol.mjs";
+import { attachVol, coneThinOf, publishVol } from "../../flows-legs/vol.mjs";
 import { INDEX_TICKERS, readFocusRows } from "../../flows-legs/universe.mjs";
 import { publishCardX } from "../../flows-legs/card-x.mjs";
 import { buildIndexDossiers, dossierRoster } from "../../flows-legs/index-dossier.mjs";
@@ -26,7 +28,9 @@ import {
   fakeTermStructure, tickerSeed,
 } from "../fixtures.mjs";
 
-function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, congressState, marketCross, variationRun, volLeg = null }) {
+function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, congressState, marketCross, variationRun, volLeg = null, quantRate = null, deadline = null }) {
+  const preps = new Map();
+  const engineStats = { built: 0, withIdeas: 0, failed: 0, pages: 0 };
   const onSession = ARCHIVE_DATE_RE.test(String(sessionDate || "")) ? { date: sessionDate } : {};
   return {
     enrich: async (ticker, spot, row) => {
@@ -69,20 +73,76 @@ function indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, co
         readFailures: lost,
       };
     },
-    chain: async (ticker, spot) => {
-      const rows = DRY_RUN
-        ? fakeChain(ticker, spot, 9500 + tickerSeed(ticker))
-        : await uw(pathFor("option-contracts", { ticker }), {
-          exclude_zero_oi_chains: "true", limit: CHAIN_PAGE_SIZE,
-        }).catch(() => []);
-      if (!Array.isArray(rows) || !rows.length) return null;
-      return buildChainPanels(rows, { spot, asOf: sessionDate, ticker, complete: false, pages: 1 });
+    engineStats,
+    chain: async (ticker, spot, raw, features) => {
+      const readPage = async (page) => {
+        const rows = DRY_RUN
+          ? (page ? [] : fakeChain(ticker, spot, 9500 + tickerSeed(ticker)))
+          : await uw(pathFor("option-contracts", { ticker }), {
+            exclude_zero_oi_chains: "true", limit: CHAIN_PAGE_SIZE, ...(page ? { page } : {}),
+          });
+        return Array.isArray(rows) ? rows : [];
+      };
+      const first = await readPage(0).catch(() => []);
+      if (!first.length) return null;
+      const pages = [first];
+      let nextPage = 1;
+      while (pages[pages.length - 1].length >= CHAIN_PAGE_SIZE && pages.length < CHAIN_MAX_PAGES &&
+             !(deadline && Date.now() > deadline)) {
+        let next;
+        try { next = await readPage(nextPage); } catch { break; }
+        nextPage++;
+        if (nextPage === 2 && next.length && mergeChainPages([first, next]).duplicates === next.length) continue;
+        pages.push(next);
+        if (mergeChainPages(pages).duplicates) break;
+      }
+      engineStats.pages += nextPage;
+      const merged = mergeChainPages(pages);
+      const whole = pages.length > 1 ? merged.complete : first.length < CHAIN_PAGE_SIZE;
+      if (quantRate) {
+        try {
+          const pass = QP.preparePass({
+            rowsByTicker: new Map([[ticker, merged.rows]]), sessionDate, rate: quantRate, spotOf: () => spot,
+            atrOf: () => (features && features.atr) || null, expiriesOf: () => (raw && raw.expiries) || [],
+            gammaUnit: variationRun.unit.used,
+          });
+          const prep = pass.preps.get(ticker);
+          if (prep) preps.set(ticker, { prep, crossSection: pass.crossSection.get(ticker) || null });
+        } catch (error) {
+          console.warn(`  quant ${ticker}: ${error.message}`);
+        }
+      }
+      return buildChainPanels(merged.rows, {
+        spot, asOf: sessionDate, ticker, ...(whole ? {} : { complete: false, pages: pages.length }),
+      });
+    },
+    engine: ({ ticker, card, raw, features }) => {
+      const held = preps.get(ticker);
+      if (!held || !quantRate) return null;
+      try {
+        const closes = Array.isArray(features.candles) ? features.candles.map((c) => c && c[4]) : features.closes;
+        const law = QP.garchLaw({ garch: features.garch, ticker, sessionDate, closes, rate: quantRate.r });
+        const block = QP.engineBlock({
+          ticker, sessionDate, spot: num(features.spot) || null, atr: features.atr, card, prep: held.prep, rate: quantRate,
+          garch: features.garch, law, event: null, state: regimeState(card, {}), strikes: raw.strikes,
+          crossSection: held.crossSection, coneThin: coneThinOf(volLeg, ticker),
+        });
+        if (!block) return null;
+        engineStats.built++;
+        if (block.ideas && block.ideas.length) engineStats.withIdeas++;
+        return QP.attachEngine(card, block);
+      } catch (error) {
+        engineStats.failed++;
+        console.warn(`  engine ${ticker}: ${error.message} — the card publishes without it`);
+        return null;
+      }
     },
     card: ({ ticker, row, raw, features, reads, chain, depth = "index" }) => {
       const card = buildCard({
         ticker, row: { ...sessionRow(row, features), nm: typeof row.full_name === "string" && row.full_name.trim() ? row.full_name.trim().slice(0, 60) : null }, features,
         strikes: raw.strikes, ticks: raw.ticks, expiries: raw.expiries,
         surface: reads.surface, chain,
+        quant: preps.has(ticker) ? { zeroGamma: preps.get(ticker).prep.zero } : null,
         chainMissing: chain ? null : `the ${depth === "fund" ? "fund" : "index"} chain page could not be read this run`,
         scoreHistory: null, weights: null,
         maxPain: reads.maxPain, congress: congressRows(ticker, congressState), generatedAt, sessionDate,
@@ -153,7 +213,7 @@ export async function runFocus(ctx) {
     const roster = dossierRoster({ index: INDEX_TICKERS, funds: FOCUS_FUNDS });
     const rows = new Map(marketLegs ? marketLegs.indexRows : []);
     for (const [t, row] of fundRows) if (!rows.has(t)) rows.set(t, row);
-    const deps = indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, congressState, marketCross, variationRun, volLeg });
+    const deps = indexDossierDeps({ sessionDate, dating, generatedAt, screenerReadAt, congressState, marketCross, variationRun, volLeg, quantRate: ctx.quantRate || null, deadline });
     const dossiers = await buildIndexDossiers({
       tickers: roster.tickers, depthOf: (t) => roster.depth.get(t), indexRows: rows, deadline,
       ...deps,
@@ -175,6 +235,12 @@ export async function runFocus(ctx) {
     };
     console.log(`  dossiers: ${say("index")}; ${say("fund")}` +
       Object.entries(dossiers.shed).map(([t, keys]) => `; ${t} shed ${keys.join(", ")}`).join(""));
+    console.log(`  dossiers: engine ran on ${deps.engineStats.built} of ${dossiers.built.length}, ${deps.engineStats.withIdeas} with a structure` +
+      (deps.engineStats.failed ? `, ${deps.engineStats.failed} failed` : "") + `, ${deps.engineStats.pages} chain page call(s)`);
+  }
+  if (ctx.auditHooks) {
+    if (ctx.auditHooks.on) await stages.run("vol-audit", () => ctx.auditHooks.run(), (error) => ctx.auditHooks.failed(error));
+    else stages.skip("vol-audit", "FLOWS_VOLDESK_BUILD is off");
   }
   if (typeof ctx.beforeFocus === "function") await ctx.beforeFocus();
   {

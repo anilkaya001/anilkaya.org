@@ -19,6 +19,7 @@ let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const clone = (x) => JSON.parse(JSON.stringify(x));
+const bare = (card) => { const { engine, ...rest } = clone(card); return rest; };
 
 const EMIT_DIR = nightlyEmit();
 const emitted = (name) => { const f = path.join(EMIT_DIR, name); return fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : null; };
@@ -1994,13 +1995,13 @@ try {
         unavailable: [...document.querySelectorAll("#ftGrid .ui-silent[data-state=unavailable], #ftGrid .ui-tile [data-state=unavailable], #ftGrid .ft-crow [data-state=unavailable]")].filter(vis).map((n) => (n.closest("[id]") || {}).id + ":" + ((n.closest(".ui-metric") || n).innerText || "").replace(/\s+/g, " ").trim()),
       };
     });
-    eq(got.mods.join(" "), "m-gamma m-hedge m-vol m-flow m-tape m-context m-network", "an index dossier leaves out every module an index card never carries: the two worlds the engine does not price for an index, the score, earnings, insiders and short interest, and keeps the Flow network, which reads the name's own flagged windows");
+    eq(got.mods.join(" "), "m-worlds m-gamma m-hedge m-vol m-flow m-tape m-context m-network", "an index dossier draws the two worlds the engine now prices for an index, leaves out every module an index card never carries (the score, earnings, insiders and short interest), and keeps the Flow network, which reads the name's own flagged windows");
     eq(got.read, "card", "a verdict still being worded by the Neuron shows the card's own reading at once");
     ok(/^The greeks imply an? [a-z -]+ state/.test(got.line) && !/No read/.test(got.line), `and it is the implied-state reading the card carries, not a bare wait (${got.line})`);
     eq(got.vStates.filter((x) => x === "pending").length, 0, "with no pending pill on the verdict");
-    eq(got.ideas, 0, "an index dossier draws no ideas placeholder: the engine does not price an index, so nothing is on its way");
+    ok(got.ideas > 0, `an index dossier draws the structures the engine priced for it while the Neuron words its verdict (${got.ideas})`);
     ok(got.chips.length === 3 && !got.chips.some((c) => /Score|Conviction/.test(c)), `the hero strip carries no score or conviction chip (${got.chips.join(" | ")})`);
-    ok(!got.gamma.includes("1Y") && !got.gamma.includes("Book"), `Gamma offers no view the index card cannot fill (${got.gamma.join(", ")})`);
+    ok(!got.gamma.includes("1Y") && got.gamma.includes("Book"), `Gamma offers the book the engine now profiles for an index and no view the card cannot fill (${got.gamma.join(", ")})`);
     ok(!got.hedge.includes("Clock"), `nor does Hedging (${got.hedge.join(", ")})`);
     ok(!got.flow.includes("Tenor") && !got.flow.includes("Days"), `nor Flow (${got.flow.join(", ")})`);
     ok(!got.tape.includes("Alerts") && !got.tape.includes("Shelves"), `nor Tape (${got.tape.join(", ")})`);
@@ -2070,7 +2071,7 @@ try {
   }
 
   {
-    const spy = cards.find((c) => c.depth === "index");
+    const spy = bare(cards.find((c) => c.depth === "index"));
     const base = neuronFor(spy);
     const idea = { title: "Range", structure: "iron condor", direction: "neutral", invalidation: "The state ends past the put wall at 760.00", horizon: "5 sessions",
       robustness: 2, robustnessWord: "fair", restsOn: ["state", "gamma", "levels"], fromState: true, thesis: "The range holds." };
@@ -2081,8 +2082,8 @@ try {
     const v = await page.evaluate(() => ({ ideas: document.querySelectorAll("#ftVerdict .ft-idea").length, slots: document.querySelectorAll("#ftVerdict .ft-slots").length,
       bad: [...document.querySelectorAll("#ftVerdict [data-state]")].filter((n) => n.dataset.state === "unavailable" || n.dataset.state === "pending").length,
       snug: getComputedStyle(document.getElementById("m-context")).alignSelf }));
-    eq(v.ideas, 1, "an index dossier with an ok Neuron draws the Neuron's idea");
-    eq(v.slots, 0, "without the priced PoP, EV and Risk row the engine never fills for an index");
+    eq(v.ideas, 1, "an index dossier whose chain could not be fitted, so it carries no engine block, draws the Neuron's idea with an ok Neuron");
+    eq(v.slots, 0, "without the priced PoP, EV and Risk row that only an engine block fills");
     eq(v.bad, 0, "so its verdict carries no unavailable or pending mark");
     eq(v.snug, "start", "and Context on an index sits at its own height beside Tape instead of stretching to an empty card");
     eq(errors.length, 0, `the index idea throws nothing (${errors.join("; ")})`);
@@ -2090,7 +2091,7 @@ try {
   }
 
   {
-    const spy = cards.find((c) => c.depth === "index");
+    const spy = bare(cards.find((c) => c.depth === "index"));
     const base = neuronFor(spy);
     const ctx = clone(base.context);
     ctx.state = { ...ctx.state, state: "pinned", direction: null, flow: "bearish", brief: null };

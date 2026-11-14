@@ -98,6 +98,7 @@ export async function runChains(ctx) {
   const deepened = deepen ? deepen.names : [];
   const chainByTicker = new Map();
   const quantRows = new Map();
+  const chainShort = new Set();
   let quantPass = { preps: new Map(), crossSection: new Map() };
   let quantRate = null;
   const vannaSamples = [];
@@ -170,6 +171,7 @@ export async function runChains(ctx) {
         const merged = mergeChainPages(pages);
         const rows = merged.rows;
         quantRows.set(ticker, rows.slice());
+        if (pages.length > 1 ? !merged.complete : firstPage.length >= CHAIN_PAGE_SIZE) chainShort.add(ticker);
         if (nextPage > 1) {
           paging.names++;
           paging.extra += nextPage - 1;
@@ -683,5 +685,5 @@ export async function runChains(ctx) {
     console.warn(`  chains: ${error.message} — the boards published before this leg ran ` +
       "and are unaffected");
   });
-  Object.assign(ctx, { chainByTicker, quantPass, quantRate, chainMiss });
+  Object.assign(ctx, { chainByTicker, quantPass, quantRate, chainMiss, quantRows, chainShort });
 }

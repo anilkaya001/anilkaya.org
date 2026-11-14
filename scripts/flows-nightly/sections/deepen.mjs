@@ -4,6 +4,7 @@ import { priorLedger } from "../../../shared/flows-universe.js";
 import {
   DEEPEN, capFromEnv, coverageNights, deepenMode, holdSet, ledgerPayload, planNight, settleNight,
 } from "../../../shared/flows-deepen.js";
+import { lineOf, lineSaid, readLine, shareOf, stepLine } from "../../../shared/flows-transport.js";
 import { DRY_RUN } from "../flags.mjs";
 import { DEADLINE_MS, EARNINGS_GATE_DAYS } from "../vendor-params.mjs";
 import { poolWidth, raiseReadPace, runPooled, stats } from "../vendor.mjs";
@@ -15,6 +16,7 @@ import { fakeEnrichment } from "../fixtures.mjs";
 
 export const NONE = Object.freeze({
   mode: "off", names: [], added: new Set(), set: new Set(), carried: new Map(), keep: new Set(), failed: new Set(), plan: null, ledger: null,
+  transport: null,
 });
 
 export async function runDeepenPlan(ctx) {
@@ -32,12 +34,18 @@ export async function runDeepenPlan(ctx) {
   }
   const rows = (universe || []).filter((r) => r && typeof r.ticker === "string");
   const lines = planLines(process.env);
+  const working = lines["uw.min"].cap;
+  const lineState = readable && read ? readLine(read.payload) : null;
+  const line = lineOf(lineState, working);
+  const share = shareOf(line, "nightly");
+  const transport = { state: lineState, working, line, share, paced: false };
   const night = planNight({
     mode, cap: capFromEnv(process.env, DRY_RUN ? DEEPEN.dryRunCap : DEEPEN.perNightCap), payload: read ? read.payload : null, readable, sessionDate,
     rows: rows.map((r) => ({ t: r.ticker, w: screenerDollarVolume(r) ?? num(r.marketcap, 0) })),
     board: new Set(deepTickers), rosterKnown,
     dayLine: lines["uw.day"].cap, minuteLine: lines["uw.min"].cap,
     callsSoFar: stats.calls, dailySeen: stats.dailySeen, elapsedMs: Date.now() - stats.startedAt, deadlineMs: DEADLINE_MS,
+    perMinute: share,
   });
   const { carried, gov, picked } = night;
   const ledgerBody = readable ? read.payload : null;
@@ -47,18 +55,20 @@ export async function runDeepenPlan(ctx) {
       (night.protectAll ? `, and the ${keep.size - carried.size} card(s) of other carded names are left as they stand` : ""));
     stages.detail({ n: 0, carried: carried.size, never: 0 });
     ctx.deepen = {
-      ...NONE, mode: night.protectAll ? "protect" : mode, carried, keep, ledger: ledgerBody,
+      ...NONE, mode: night.protectAll ? "protect" : mode, carried, keep, ledger: ledgerBody, transport,
       plan: night.protectAll || mode === "off" ? null : { n: 0, binding: gov.binding, why: night.why },
     };
     return;
   }
   const byTicker = new Map(rows.map((r) => [r.ticker, r]));
   raiseReadPace(gov.pace.spacingMs);
+  transport.paced = true;
   const need = picked.picked.filter((t) => !byCard.has(t));
   const lane = poolWidth(2);
   console.log(`  deepen: ${picked.picked.length} name(s) chosen (${picked.never} never read deep, ${picked.waiting} waiting out a failure, ` +
     `${carried.size} carried); ${picked.picked.length - need.length} already enriched, ${need.length} to enrich, ` +
-    `${lane.width} in flight — ${gov.why}; pace ${gov.pace.spacingMs}ms (${gov.pace.perMinute}/min)`);
+    `${lane.width} in flight — ${gov.why}; pace ${gov.pace.spacingMs}ms (${gov.pace.perMinute}/min of a ${line}/min line` +
+    (lineState ? ", learned" : ", the working line") + ")");
   const built = new Map();
   const enrichFailed = new Set();
   await runPooled(need, async (ticker, i) => {
@@ -101,6 +111,7 @@ export async function runDeepenPlan(ctx) {
   stages.detail({ n: names.length, carried: carried.size, never: picked.never, failed: enrichFailed.size });
   ctx.deepen = {
     mode, names, added, set: new Set(names), carried, keep: holdSet({ carried, chosen: new Set(names), board: new Set(deepTickers) }), failed: enrichFailed, ledger: ledgerBody,
+    transport,
     plan: { n: names.length, binding: gov.binding, limits: gov.limits, never: picked.never, waiting: picked.waiting, nights, left },
   };
 }
@@ -119,11 +130,17 @@ export async function runDeepenLedger(ctx) {
   });
   const landed = new Set([...deepNow, ...settled.landed]);
   const lines = planLines(process.env);
+  const t = deepen.transport;
+  const step = t && !DRY_RUN
+    ? stepLine(t.state, { day: sessionDate, calls: stats.calls, refused: stats.rateLimited, slowed: stats.slowedCalls, alloc: t.paced ? t.share : 0, peak: stats.peakMinute },
+      { working: t.working })
+    : null;
   const built = ledgerPayload(deepen.ledger, {
     sessionDate, generatedAt, landed, failed: settled.failed,
     universe: new Set((universe || []).map((r) => r && r.ticker).filter(Boolean)),
     plan: { n: deepen.plan.n, binding: deepen.plan.binding, never: deepen.plan.never ?? 0 },
     usage: { read: settled.landed.size, calls: stats.calls, dailySeen: stats.dailySeen || null, dayLine: lines["uw.day"].cap, minuteLine: lines["uw.min"].cap },
+    line: step ? step.state : null,
   });
   if (!built.fits) {
     console.warn(`  deepen ledger: ${built.bytes} bytes, over its ${DEEPEN.ledgerBudgetBytes} cap — not written`);
@@ -132,4 +149,9 @@ export async function runDeepenLedger(ctx) {
   await publish(DEEPEN.key, built.payload);
   console.log(`  deepen ledger: ${built.payload.names} name(s) with a deep read on record, ${landed.size} deep tonight` +
     (settled.failed.size ? `, ${settled.failed.size} to retry` : ""));
+  if (step) {
+    console.log("  " + lineSaid(step, { alloc: t.paced ? t.share : null }) + `; busiest minute ${stats.peakMinute} call(s)` +
+      (stats.minuteLeftMax === null ? "; the feed sent no per-minute counter"
+        : `; the feed's own per-minute counter read between ${stats.minuteLeftMin} and ${stats.minuteLeftMax} left`));
+  }
 }

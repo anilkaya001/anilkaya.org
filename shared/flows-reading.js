@@ -594,21 +594,39 @@ export function shownIds(text) {
 
 const bad = (why, detail) => ({ why, ...(detail ? { detail: String(detail).slice(0, 160) } : {}) });
 
-function checkCites(item, index, shown) {
+function citeFault(entry, index, shown) {
+  if (typeof entry !== "string") return bad("schema", "a cite is not a string");
+  const id = normaliseId(entry);
+  if (!id) return bad("schema", "an empty cite");
+  const f = index.get(id);
+  if (!f) return bad("unknown-id", id);
+  if (f.withheld || !f.usable) return bad("withheld-cite", id);
+  if (shown && !shown.has(id)) return bad("unseen-id", id);
+  return null;
+}
+
+function checkCites(item, index, shown, repair = false) {
   const raw = Array.isArray(item.cites) ? item.cites : null;
-  if (!raw || raw.length < 1 || raw.length > SECTION_COUNTS.cites) return bad("schema", "cites must be 1 to " + SECTION_COUNTS.cites + " ids");
+  if (!raw || raw.length < 1) return bad("schema", "cites must be 1 to " + SECTION_COUNTS.cites + " ids");
+  if (!repair && raw.length > SECTION_COUNTS.cites) return bad("schema", "cites must be 1 to " + SECTION_COUNTS.cites + " ids");
   const ids = [];
+  let first = null;
+  let dropped = 0;
   for (const entry of raw) {
-    if (typeof entry !== "string") return bad("schema", "a cite is not a string");
+    const fault = citeFault(entry, index, shown);
+    if (fault) {
+      if (!repair) return fault;
+      if (!first) first = fault;
+      dropped++;
+      continue;
+    }
     const id = normaliseId(entry);
-    if (!id) return bad("schema", "an empty cite");
-    const f = index.get(id);
-    if (!f) return bad("unknown-id", id);
-    if (f.withheld || !f.usable) return bad("withheld-cite", id);
-    if (shown && !shown.has(id)) return bad("unseen-id", id);
-    if (!ids.includes(id)) ids.push(id);
+    if (ids.includes(id)) continue;
+    if (ids.length >= SECTION_COUNTS.cites) { dropped++; continue; }
+    ids.push(id);
   }
-  return { ids };
+  if (!ids.length) return first || bad("schema", "cites must be 1 to " + SECTION_COUNTS.cites + " ids");
+  return { ids, dropped, first: first || (dropped ? bad("schema", "more than " + SECTION_COUNTS.cites + " cites") : null) };
 }
 
 function checkText(text, cap) {
@@ -718,7 +736,18 @@ export function parseReading(text) {
 
 const SECTION_ORDER = Object.freeze(["identity", "now", "drivers", "tensions", "unknown", "watch"]);
 
-const TRIMMABLE = new Set(["quote", "dealer-sign"]);
+const TRIMMABLE = new Set(["quote", "dealer-sign", "invented", "mislabeled", "unit", "forecast", "entity"]);
+
+function fitSentences(text, cap) {
+  const kept = [];
+  let size = 0;
+  for (const s of sentencesOf(text)) {
+    if (size + s.length + (kept.length ? 1 : 0) > cap) break;
+    kept.push(s);
+    size += s.length + (kept.length > 1 ? 1 : 0);
+  }
+  return kept.join(" ");
+}
 
 const emptySections = () => ({ identity: null, now: null, drivers: [], tensions: [], unknown: [], watch: [] });
 
@@ -744,16 +773,27 @@ export function vetReading(reply, dossier, tags, opts = {}) {
   const trim = opts.trim !== false;
   const vetItem = (item, where, cap, o = {}) => {
     if (!isObj(item)) return refuse(where, bad("schema", "not an object"));
-    const t = checkText(item.text, cap);
+    let t = checkText(item.text, cap);
+    if (t.why === "length" && trim) {
+      const short = checkText(fitSentences(String(item.text).trim(), cap), cap);
+      if (!short.why) {
+        refused.push({ section: where, ...t, trimmed: sentencesOf(String(item.text).trim()).length - sentencesOf(short.text).length });
+        t = short;
+      }
+    }
     if (t.why) return refuse(where, t);
-    const c = checkCites(item, index, shown);
+    const c = checkCites(item, index, shown, trim);
     if (c.why) return refuse(where, c);
-    const run = (text, ids) => checkNumbers(text, ids.map((id) => index.get(id)), index) || checkEntities(text, vocab, ticker) || checkQuote(text, grams) ||
+    if (c.dropped) refused.push({ section: where, ...c.first, cites: c.dropped });
+    const facts = (ids) => ids.map((id) => index.get(id));
+    const run = (text, ids) => checkNumbers(text, facts(ids), index) || checkEntities(text, vocab, ticker) || checkQuote(text, grams) ||
       checkDealer(text, ids) || checkAttribution(text, ids, index) || (o.ground ? checkGrounding(text, ids, index) : null);
+    const sentenceFault = (s) => checkNumbers(s, facts(c.ids), index) || checkEntities(s, vocab, ticker) || checkQuote(s, grams) ||
+      (DEALER_WORDS.test(s) && !dealerClauseOk(s) ? bad("dealer-sign") : null);
     const failure = run(t.text, c.ids);
     if (failure && trim && TRIMMABLE.has(failure.why)) {
       const parts = sentencesOf(t.text);
-      const keep = parts.filter((s) => !checkQuote(s, grams) && !(DEALER_WORDS.test(s) && !dealerClauseOk(s)));
+      const keep = parts.filter((s) => !sentenceFault(s));
       const text = keep.join(" ");
       const ids = DEALER_WORDS.test(text) ? c.ids : c.ids.filter((id) => !isDealerFact(id));
       if (keep.length && keep.length < parts.length && ids.length && !run(text, ids)) {

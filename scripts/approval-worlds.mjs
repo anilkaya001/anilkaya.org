@@ -143,7 +143,7 @@ export function skylineScene(world, opts = {}) {
 
 export function skylineSvg(sc, o = {}) {
   const out = [];
-  out.push(`<svg class="scene" viewBox="0 0 ${sc.W} ${sc.H}" width="100%" role="img" aria-label="${esc(o.aria || "Move skyline")}" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif">`);
+  out.push(`<svg class="scene" viewBox="0 0 ${sc.W} ${sc.H}" width="100%" role="img" aria-label="${esc(o.aria || "Move skyline")}" xmlns="http://www.w3.org/2000/svg" font-family="Google Sans,system-ui,sans-serif">`);
   out.push(`<defs><radialGradient id="g2" cx="46%" cy="40%" r="75%"><stop offset="0" stop-color="#0b1120"/><stop offset="0.6" stop-color="#080d19"/><stop offset="1" stop-color="#05070c"/></radialGradient>`);
   out.push(`<pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="rgba(255,255,255,0.05)"/><line x1="0" y1="0" x2="0" y2="6" stroke="rgba(255,255,255,0.55)" stroke-width="1.4"/></pattern></defs>`);
   out.push(`<rect width="${sc.W}" height="${sc.H}" fill="url(#g2)"/>`);
@@ -193,7 +193,7 @@ export function lollipopSvg(world, o = {}) {
   const H = top + rows.length * rh + 30;
   const x = (h) => left + (W - left - right) * (h / 6);
   const out = [];
-  out.push(`<svg class="scene" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${esc(o.aria || "Sorted list of rarity with the selection line")}" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif"><rect width="${W}" height="${H}" fill="#080d19" rx="12"/>`);
+  out.push(`<svg class="scene" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${esc(o.aria || "Sorted list of rarity with the selection line")}" xmlns="http://www.w3.org/2000/svg" font-family="Google Sans,system-ui,sans-serif"><rect width="${W}" height="${H}" fill="#080d19" rx="12"/>`);
   for (let d = 1; d <= 6; d++) out.push(`<line x1="${x(d)}" y1="${top - 8}" x2="${x(d)}" y2="${H - 24}" stroke="rgba(255,255,255,0.08)"/><text x="${x(d)}" y="${H - 10}" text-anchor="middle" font-size="9.5" fill="#9a9cad">${d}</text>`);
   rows.forEach((r, i) => {
     const y = top + i * rh + rh / 2;
@@ -298,7 +298,7 @@ const gamColor = (g) => (g >= 0 ? mix("#10223f", "#388cf0", clamp(g / 1.6, 0, 1)
 
 export function terrainSvg(sc, o = {}) {
   const out = [];
-  out.push(`<svg class="scene" viewBox="0 0 ${sc.W} ${sc.H}" width="100%" role="img" aria-label="${esc(o.aria || "Dealer gamma terrain")}" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif"><defs><radialGradient id="g3" cx="46%" cy="40%" r="75%"><stop offset="0" stop-color="#0b1120"/><stop offset="0.6" stop-color="#080d19"/><stop offset="1" stop-color="#05070c"/></radialGradient></defs><rect width="${sc.W}" height="${sc.H}" fill="url(#g3)"/>`);
+  out.push(`<svg class="scene" viewBox="0 0 ${sc.W} ${sc.H}" width="100%" role="img" aria-label="${esc(o.aria || "Dealer gamma terrain")}" xmlns="http://www.w3.org/2000/svg" font-family="Google Sans,system-ui,sans-serif"><defs><radialGradient id="g3" cx="46%" cy="40%" r="75%"><stop offset="0" stop-color="#0b1120"/><stop offset="0.6" stop-color="#080d19"/><stop offset="1" stop-color="#05070c"/></radialGradient></defs><rect width="${sc.W}" height="${sc.H}" fill="url(#g3)"/>`);
   out.push(`<polygon class="wall" points="${sc.wallQuad.map((p) => p.join(",")).join(" ")}" fill="rgba(96,140,255,0.05)" stroke="rgba(140,180,255,0.2)"/>`);
   for (const c of sc.cells) out.push(`<polygon points="${c.poly.map((p) => r1(p[0]) + "," + r1(p[1])).join(" ")}" fill="${gamColor(c.g)}" stroke="${gamColor(c.g)}" stroke-width="0.6"/>`);
   for (const ct of sc.contours) for (const s of ct.segs) out.push(`<line x1="${s[0][0]}" y1="${s[0][1]}" x2="${s[1][0]}" y2="${s[1][1]}" stroke="${ct.level > 0 ? "rgba(158,203,255,0.8)" : "rgba(255,190,120,0.8)"}" stroke-width="1"${ct.dashed ? ' stroke-dasharray="3 3"' : ""}/>`);
@@ -316,7 +316,7 @@ export function gridSvg(sc, o = {}) {
   const W = 358, left = 34, top = 24, cw = (W - left - 10) / (sc.nk - 1), rh = 20;
   const H = top + sc.ne * rh + 34;
   const out = [];
-  out.push(`<svg class="scene" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${esc(o.aria || "Dealer gamma grid")}" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif"><rect width="${W}" height="${H}" fill="#080d19" rx="12"/>`);
+  out.push(`<svg class="scene" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${esc(o.aria || "Dealer gamma grid")}" xmlns="http://www.w3.org/2000/svg" font-family="Google Sans,system-ui,sans-serif"><rect width="${W}" height="${H}" fill="#080d19" rx="12"/>`);
   sc.grid.forEach((row, j) => {
     row.forEach((c, i) => out.push(`<rect x="${r1(left + i * cw)}" y="${top + j * rh}" width="${r1(cw + 0.6)}" height="${rh - 1}" fill="${gamColor(c.g)}"/>`));
     out.push(`<text x="${left - 5}" y="${top + j * rh + 13}" text-anchor="end" font-size="9.5" fill="#9a9cad">${esc(sc.axisE[j].label)}</text>`);
@@ -403,7 +403,7 @@ const ivColor = (iv) => mix("#1b3a6b", "#ffd60a", clamp((iv - 0.18) / 0.5, 0, 1)
 
 export function surfaceSvg(sc, o = {}) {
   const out = [];
-  out.push(`<svg class="scene" viewBox="0 0 ${sc.W} ${sc.H}" width="100%" role="img" aria-label="${esc(o.aria || "Implied volatility surface")}" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif"><defs><radialGradient id="g4" cx="46%" cy="40%" r="75%"><stop offset="0" stop-color="#0b1120"/><stop offset="0.6" stop-color="#080d19"/><stop offset="1" stop-color="#05070c"/></radialGradient><pattern id="hatch2" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="rgba(255,255,255,0.5)" stroke-width="1.2"/></pattern></defs><rect width="${sc.W}" height="${sc.H}" fill="url(#g4)"/>`);
+  out.push(`<svg class="scene" viewBox="0 0 ${sc.W} ${sc.H}" width="100%" role="img" aria-label="${esc(o.aria || "Implied volatility surface")}" xmlns="http://www.w3.org/2000/svg" font-family="Google Sans,system-ui,sans-serif"><defs><radialGradient id="g4" cx="46%" cy="40%" r="75%"><stop offset="0" stop-color="#0b1120"/><stop offset="0.6" stop-color="#080d19"/><stop offset="1" stop-color="#05070c"/></radialGradient><pattern id="hatch2" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="rgba(255,255,255,0.5)" stroke-width="1.2"/></pattern></defs><rect width="${sc.W}" height="${sc.H}" fill="url(#g4)"/>`);
   for (const c of sc.cells) {
     const col = ivColor(c.iv);
     out.push(`<polygon points="${c.poly.map((p) => r1(p[0]) + "," + r1(p[1])).join(" ")}" fill="${col}" fill-opacity="${c.inside ? 0.95 : 0.32}" stroke="${col}" stroke-opacity="${c.inside ? 0.95 : 0.32}" stroke-width="0.6"/>`);
@@ -426,7 +426,7 @@ export function heatSvg(sc, o = {}) {
   const W = 358, left = 34, top = 22, cw = (W - left - 10) / (sc.nk - 1), rh = 16;
   const H = top + sc.nt * rh + 34;
   const out = [];
-  out.push(`<svg class="scene" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${esc(o.aria || "Implied volatility heatmap")}" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif"><defs><pattern id="hatch3" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5" stroke="rgba(255,255,255,0.5)" stroke-width="1"/></pattern></defs><rect width="${W}" height="${H}" fill="#080d19" rx="12"/>`);
+  out.push(`<svg class="scene" viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="${esc(o.aria || "Implied volatility heatmap")}" xmlns="http://www.w3.org/2000/svg" font-family="Google Sans,system-ui,sans-serif"><defs><pattern id="hatch3" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5" stroke="rgba(255,255,255,0.5)" stroke-width="1"/></pattern></defs><rect width="${W}" height="${H}" fill="#080d19" rx="12"/>`);
   sc.grid.forEach((row, j) => row.forEach((c, i) => {
     out.push(`<rect x="${r1(left + i * cw)}" y="${top + j * rh}" width="${r1(cw + 0.6)}" height="${rh - 1}" fill="${ivColor(c.iv)}" fill-opacity="${c.inside ? 1 : 0.35}"/>`);
     if (!c.inside) out.push(`<rect x="${r1(left + i * cw)}" y="${top + j * rh}" width="${r1(cw + 0.6)}" height="${rh - 1}" fill="url(#hatch3)" fill-opacity="0.4"/>`);
@@ -465,7 +465,7 @@ export function relationsScene(world, opts = {}) {
 
 export function relationsSvg(sc, o = {}) {
   const out = [];
-  out.push(`<svg class="scene" viewBox="0 0 ${sc.W} ${sc.H}" width="100%" role="img" aria-label="${esc(o.aria || "Names on a ring with tested edges")}" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif"><defs><radialGradient id="g5" cx="50%" cy="50%" r="70%"><stop offset="0" stop-color="#0b1120"/><stop offset="1" stop-color="#05070c"/></radialGradient><filter id="cg" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="14"/></filter></defs><rect width="${sc.W}" height="${sc.H}" fill="url(#g5)"/>`);
+  out.push(`<svg class="scene" viewBox="0 0 ${sc.W} ${sc.H}" width="100%" role="img" aria-label="${esc(o.aria || "Names on a ring with tested edges")}" xmlns="http://www.w3.org/2000/svg" font-family="Google Sans,system-ui,sans-serif"><defs><radialGradient id="g5" cx="50%" cy="50%" r="70%"><stop offset="0" stop-color="#0b1120"/><stop offset="1" stop-color="#05070c"/></radialGradient><filter id="cg" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="14"/></filter></defs><rect width="${sc.W}" height="${sc.H}" fill="url(#g5)"/>`);
   out.push(`<circle cx="${sc.cx}" cy="${sc.cy}" r="${r1(sc.R)}" fill="none" stroke="rgba(255,255,255,0.08)"/>`);
   if (sc.community) {
     const mem = sc.community.members.map((t) => sc.nodes.find((n) => n.t === t)).filter(Boolean);

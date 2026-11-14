@@ -25,7 +25,7 @@ export const NOTICE_MARGIN_DAYS = 5;
 export const MIN_BOUND_CHARS = 4;
 export const CLOSE_MINUTES = 16 * 60;
 export const REDACTED = "[redacted]";
-export const TIERS = Object.freeze(["used", "1", "2"]);
+export const TIERS = Object.freeze(["used", "planned", "1", "2"]);
 export const CLASSES = Object.freeze(["ok", "empty", "4xx", "5xx", "network", "other", "skipped"]);
 export const SESSION_PROBE = Object.freeze({
   id: "session:SPY",
@@ -292,14 +292,14 @@ export function validateList(list) {
 
 export function registryReads(ops) {
   const out = {};
-  for (const entry of OPS) if (entry.reads && ops.has(entry.op)) out[entry.op] = [...entry.reads];
+  for (const entry of OPS) if (entry.reads && entry.reads.length && ops.has(entry.op)) out[entry.op] = [...entry.reads];
   return out;
 }
 
 export function loadList(file = LIST_PATH) {
   const parsed = JSON.parse(readFileSync(file, "utf8"));
   if (isObj(parsed) && Array.isArray(parsed.probes) && parsed.reads === undefined) {
-    const reads = registryReads(new Set(parsed.probes.map((p) => p && p.op)));
+    const reads = registryReads(new Set(parsed.probes.filter((p) => p && p.tier !== "planned").map((p) => p.op)));
     if (Object.keys(reads).length) parsed.reads = reads;
   }
   return validateList(parsed);
@@ -332,7 +332,7 @@ export function expandProbes(list, tickers) {
         reads: (list.reads && list.reads[p.op]) || null,
         gated: (list.gated && list.gated[p.op]) || null,
         liveOnly: (list.liveOnly || []).includes(p.op),
-        entitlement: (list.entitlement || []).includes(p.op),
+        entitlement: p.tier === "planned" || (list.entitlement || []).includes(p.op),
         enums: (list.enums && list.enums[p.op]) || null,
       });
     }
@@ -947,6 +947,12 @@ export function exitCode(results) {
   return called.some((r) => r.cls === "ok" || r.cls === "empty") ? 0 : 1;
 }
 
+export function registryCap(op) {
+  let cap = 0;
+  for (const e of OPS) if (e.op === op && Number.isInteger(e.maxBytes) && e.maxBytes > cap) cap = e.maxBytes;
+  return cap || null;
+}
+
 export function strictVerdict(results, list) {
   const gated = (list && list.gated) || {};
   const proveRows = (list && list.proveRows) || [];
@@ -964,6 +970,8 @@ export function strictVerdict(results, list) {
       continue;
     }
     if (expected !== null) notes.push(`${r.id} answers ${r.status} where ${expected} was expected: the plan changed`);
+    const cap = registryCap(r.op);
+    if (cap !== null && Number.isFinite(r.bytes) && r.bytes > cap) notes.push(`OVERSIZE ${r.id}: ${r.bytes} bytes, over the ${cap} byte cap the registry reads it with`);
     if (r.cls === "empty" && proveRows.includes(r.op)) failures.push(`UNPROVEN ${r.id}: answered with no rows, so none of the fields the code reads was checked`);
     if (r.reads && r.reads.unseen.length) failures.push(`DRIFT ${r.id}: ${r.reads.unseen.join(" ")} did not arrive`);
   }

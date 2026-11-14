@@ -76,6 +76,28 @@ async function restoreProbe(mutate, only) {
     need(d.orbFocus && d.status === "Neuron shown.", `${width}: and hands focus to the orb, saying so: ${d.status}`);
     await w.close();
   }
+  if (want("undo")) {
+    const w = await open(browser, { mutate, records: RECORDS, topBody: FX.top() });
+    await waitOracle(w.page);
+    await settle(w.page, 300);
+    await w.page.click(".orc-orb");
+    await sleep(400);
+    const now = () => w.page.evaluate(() => Date.now());
+    const before = await now();
+    await w.page.click('.orc-pref-b[data-pref="off"]');
+    const after = await now();
+    await w.page.clock.pauseAt(new Date(after + 2000));
+    const early = before + 9500 - (after + 2000);
+    need(early > 0, `hiding took ${after - before} ms of page time, too long to look at Undo at 9.5 s`);
+    if (early > 0) await w.page.clock.runFor(early);
+    const a = await read(w.page);
+    need(a.undo && a.name === "Neuron hidden. Undo" && a.focus, `Undo is still offered nine and a half seconds after hiding: ${a.name}`);
+    await w.page.clock.runFor(after + 10100 - Math.max(before + 9500, after + 2000));
+    const b = await read(w.page);
+    need(b.restore && !b.undo && b.name === "Show the Neuron", `and gives way to the small button once the ten seconds are over: ${b.name}`);
+    await w.page.clock.resume();
+    await w.close();
+  }
   if (want("count")) {
     const w = await open(browser, { mutate, records: RECORDS, topBody: FX.top() });
     await waitOracle(w.page);
@@ -197,6 +219,23 @@ async function restoreProbe(mutate, only) {
     need(r.restore && r.focus, "and closing the sheet hands focus to that button");
     await w.close();
   }
+  if (want("chord")) {
+    const w = await open(browser, { mutate, records: RECORDS, topBody: FX.top(), cookies: [...off, { name: "fn_oracle_prev", value: "quiet", path: "/flows" }] });
+    await ready(w.page);
+    await w.page.evaluate(() => window.FlowsUI.oracle.open());
+    await settle(w.page, 400);
+    await w.page.keyboard.press("Alt+Shift+KeyN");
+    await settle(w.page, 300);
+    const s = await w.page.evaluate(() => {
+      const sheet = document.querySelector(".orc-sheet"), a = document.activeElement;
+      return { open: !!sheet && !sheet.hidden, inside: !!(sheet && a && sheet.contains(a)), pref: document.getElementById("fxOracle").getAttribute("data-pref") };
+    });
+    need(s.pref === "quiet" && s.open && s.inside, `Alt+Shift+N with the sheet open brings the Neuron back and keeps focus inside the sheet: ${JSON.stringify(s)}`);
+    await w.page.keyboard.press("Escape");
+    await settle(w.page, 400);
+    need((await read(w.page)).orbFocus, "and closing the sheet then hands focus to the orb");
+    await w.close();
+  }
   if (want("toast")) {
     const html = harnessHtml({ mode: "on", slug: "ticker", active: "ticker" });
     const w = await open(browser, { width: 390, height: 844, touch: true, url: TICKER_URL("SYO001"), slug: "ticker", html, mutate, records: RECORDS, topBody: FX.top() });
@@ -237,7 +276,7 @@ async function restoreProbe(mutate, only) {
     ["hiding with no way back", "flows-oracle.js", "    restore.hidden = !off || S.open;\n", "    restore.hidden = true;\n", ["core0"]],
     ["restore always lands on Count", "flows-oracle.js", 'setPref(PREF[p] > 0 ? p : "on");', 'setPref("quiet");', ["core0"]],
     ["no undo window", "flows-oracle.js", "S.undoUntil = Date.now() + UNDO_MS;", "S.undoUntil = 0;", ["core0"]],
-    ["no focus after a restore", "flows-oracle.js", "    say(\"Neuron shown.\");\n    try { orb.focus(); } catch (e) {   }\n", "    say(\"Neuron shown.\");\n", ["core0"]],
+    ["no focus after a restore", "flows-oracle.js", "    say(\"Neuron shown.\");\n    if (!S.open) { try { orb.focus(); } catch (e) {   } }\n", "    say(\"Neuron shown.\");\n", ["core0"]],
     ["hiding is not announced", "flows-oracle.js", '      say("Neuron hidden. Undo brings it back.");\n', "", ["core0"]],
     ["the saved mode is always Pill", "flows-oracle.js", SAVE, 'setCookie("fn_oracle_prev", "on");', ["count"]],
     ["a capped page saves its cap as the reader's choice", "flows-oracle.js", SAVE, 'setCookie("fn_oracle_prev", was);', ["capped"]],
@@ -248,6 +287,8 @@ async function restoreProbe(mutate, only) {
     ["the hidden corner takes clicks", "flows-oracle.css", '.orc[data-pref="off"]:not(.is-open) { width: 0; height: 0; }\n', "", ["dead1"]],
     ["the restore button sits over an open sheet", "flows-oracle.js", "    restore.hidden = !off || S.open;\n", "    restore.hidden = !off;\n", ["sheet"]],
     ["the toast outlives Hidden", "flows-oracle.js", 'if (S.pref === "off") { setOpen(false); dropToast(); }', 'if (S.pref === "off") { setOpen(false); }', ["toast"]],
+    ["a one-second Undo", "flows-oracle.js", "  var UNDO_MS = 10000;", "  var UNDO_MS = 1000;", ["undo"]],
+    ["a restore pulls focus out of an open sheet", "flows-oracle.js", "    if (!S.open) { try { orb.focus(); } catch (e) {   } }\n", "    try { orb.focus(); } catch (e) {   }\n", ["chord"]],
     ["the Home strip keeps reading", "flows-oracle.js", '    if (S.pref === "off") { el.append(h("span", { class: "orc-home-t" }, HIDDEN_TEXT)); return; }\n', "", ["home"]],
   ]) {
     eq(SRC[file].split(from).length - 1, 1, `planted wrong build "${name}" finds its line exactly once`);

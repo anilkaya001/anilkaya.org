@@ -1,1 +1,1 @@
-{"name": "flows-readers", "class": "N", "group": "shard", "timing": false, "medianS": 0.4, "shard": 1, "files": ["flows-readers-contract.mjs"], "covers": ["schema.sql"]}
+{"name": "flows-readers", "class": "N", "group": "shard", "timing": false, "medianS": 0.4, "shard": 5, "files": ["flows-readers-contract.mjs"], "covers": ["schema.sql"]}

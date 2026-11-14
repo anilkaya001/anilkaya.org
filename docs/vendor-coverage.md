@@ -6,7 +6,7 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 
 ## Per-name operations (87 paths with a ticker in the path)
 
-84 spec paths carry a ticker, and 3 more are read from the live documentation: 47 read, 4 added, 7 probe only, 3 deprecated, 3 Enterprise only, 23 not added.
+84 spec paths carry a ticker, and 3 more are read from the live documentation: 61 read, 4 added, 1 probe only, 3 deprecated, 3 Enterprise only, 15 not added.
 
 | Operation | Status | Registry id | Plan | Wire | Returns | Unit status | Surface | Decision |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -16,17 +16,17 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/companies/{ticker}/splits` | added | splits | Advanced+ | not observed | effective date and split factor of each split | date stated; factor withheld (4 or 0.25 for a 4-for-1 is not stated) | events packet; break mask for the typical-day scale | added: `vx.splits`, refreshed every 14 days |
 | `/api/companies/{ticker}/transcripts/{quarter}` | not added | - | Advanced+ | not observed | the full earnings call text | text | none | no: size, the 8 KiB cache rows and the sanitiser's surface all argue against it |
 | `/api/darkpool/{ticker}` | read | darkpool | any | observed | whole body | read by the code | dossier, engines, nightly | read |
-| `/api/darkpool/{ticker}/price-levels` | read | darkpool-levels | any | observed | date, price, dark_pool_volume, regular_volume | read by the code | dossier, nightly | read |
+| `/api/darkpool/{ticker}/price-levels` | read | darkpool-levels | any | observed | date, price, dark_pool_volume, regular_volume | read by the code | dossier, nightly, Flow Lab ladders | read: the stock half of the price ladders, lit and off-exchange volume across the market in the feed's price buckets (1.2 to 1.7 KB a day measured) |
 | `/api/earnings/{ticker}` | read | earnings | any | observed | report_date, report_time, source, expected_move_perc, post_earnings_move_1d, ... | read by the code | dossier, engines, nightly | read |
 | `/api/etfs/{ticker}/exposure` | added | etf-exposure | any | not observed | every ETF that holds the name: ticker, shares, weight, fund name, prices | ticker and shares stated; weight, prices and fund name withheld | peers packet | added: `vx.etf`, refreshed every 7 days, top ten by weight |
 | `/api/etfs/{ticker}/holdings` | read | etf-holdings | any | observed | ticker, type, weight | read by the code | nightly | read |
 | `/api/etfs/{ticker}/in-outflow` | read | etf-in-outflow | any | observed | whole body | read by the code | nightly | read |
 | `/api/etfs/{ticker}/info` | read | etf-info | any | not observed | an ETF's name, issuer and holdings count; assets and expense ratio withheld | name, issuer and holdings count stated; amounts withheld | Market Floor readout | read: the Floor funds leg (WP1), 12 funds a night, kept 14 days |
 | `/api/etfs/{ticker}/weights` | read | etf-weights | any | not observed | an ETF's sector and country weights | weights are shares of the fund | Market Floor readout | read: the Floor funds leg (WP1), top three of each |
-| `/api/insider/{ticker}` | not added | - | any | not observed | the names of a company's insiders | third-party names | none | no: names of people; the insider batch and `insider-flow` already carry the flow |
+| `/api/insider/{ticker}` | read | insiders | any | not observed | the names of a company's insiders | third-party names | none | no: names of people; the insider batch and `insider-flow` already carry the flow |
 | `/api/insider/{ticker}/ticker-flow` | read | insider-flow | any | observed | date, buy_sell, transactions, uniq_insiders, volume, ... | read by the code | dossier | read |
 | `/api/institution/{ticker}/ownership` | read | ownership | any | observed | name, short_name, units, units_changed, historical_units, ... | read by the code | dossier | read |
-| `/api/lit-flow/{ticker}` | read | lit-ticker | any | not observed | lit-exchange stock prints | stated | none | no: print-level and heavy; asked weekly as an entitlement question (tier 2) |
+| `/api/lit-flow/{ticker}` | read | lit-ticker | any | not observed | lit-exchange stock prints | stated | Flow Lab lit prints | read: the newest 100 prints for the name on demand |
 | `/api/market/{ticker}/etf-tide` | read | etf-tide | any | observed | timestamp, net_call_premium, net_put_premium, net_volume, underlying_price | read by the code | Tier 2, nightly | read |
 | `/api/politician-portfolios/holders/{ticker}` | read | politician-holders | Enterprise | not observed | whole body | read by the code | nightly | read |
 | `/api/politics/fec/company/{ticker}/lobbying` | enterprise | - | Enterprise | not observed | lobbying spend by quarter and issue | stated | none | no: Enterprise only |
@@ -34,35 +34,35 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/seasonality/{ticker}/monthly` | added | seasonality-monthly | any | not observed | average and median change, share of positive closes and years by calendar month | years and positive closes read; the change fields are not read | Macro page (WP5) | added for SPY, QQQ, IWM and DIA only, as a cross-check of the year and positive-close counts the year-month table gives; no change figure is printed |
 | `/api/seasonality/{ticker}/year-month` | added | seasonality-year-month | any | not observed | open, close and change for every past month | open and close stated as prices; change recomputed from them and the feed's unit checked | Macro page (WP5) | added for the fifteen index and sector funds only: a share with its Wilson interval and a mean with its t interval, under 8 years printed as a count |
 | `/api/shorts/{ticker}/data` | read | shorts-data | any | observed | whole body | read by the code | nightly | read |
-| `/api/shorts/{ticker}/ftds` | not added | - | any | not observed | failures to deliver per settlement date: shares and price | quantity stated in shares; price withheld | positioning packet | no: published twice a month with a lag of weeks, a squeeze narrative and not a desk input; first to add if wanted |
+| `/api/shorts/{ticker}/ftds` | read | ftds | any | not observed | failures to deliver per settlement date: shares and price | quantity stated in shares; price withheld | positioning packet | no: published twice a month with a lag of weeks, a squeeze narrative and not a desk input; first to add if wanted |
 | `/api/shorts/{ticker}/interest-float` | deprecated | - | any | not observed | short interest and float (version 1) | - | - | deprecated: version 2 is read |
 | `/api/shorts/{ticker}/interest-float/v2` | read | short-interest | any | observed | market_date, short_interest, total_float, days_to_cover | read by the code | dossier | read |
 | `/api/shorts/{ticker}/volume-and-ratio` | read | shorts-volume | any | observed | whole body | read by the code | nightly | read |
-| `/api/shorts/{ticker}/volumes-by-exchange` | not added | - | any | not observed | short volume by exchange | shares stated | positioning packet | no: `shorts-volume` already carries the ratio |
-| `/api/stock/{ticker}/atm-chains` | not added | - | any | not observed | at-the-money chains for expirations the caller names | stated | options | no: needs `expirations[]` and duplicates `option-contracts` |
+| `/api/shorts/{ticker}/volumes-by-exchange` | read | short-venues | any | not observed | short volume by exchange | shares stated | positioning packet | no: `shorts-volume` already carries the ratio |
+| `/api/stock/{ticker}/atm-chains` | read | atm-chains | any | not observed | at-the-money chains for expirations the caller names | stated | options | no: needs `expirations[]` and duplicates `option-contracts` |
 | `/api/stock/{ticker}/balance-sheets` | not added | - | any | not observed | balance sheet statements | stated | fundamentals packet | no: duplicate of `financials` |
 | `/api/stock/{ticker}/cash-flows` | not added | - | any | not observed | cash flow statements | stated | fundamentals packet | no: duplicate of `financials` |
 | `/api/stock/{ticker}/earnings` | not added | - | any | not observed | reported and estimated EPS with the surprise | strings | earnings packet | no: the EPS history is inside `financials.earnings`, which the dossier stores |
 | `/api/stock/{ticker}/expiry-breakdown` | read | expiry-breakdown | any | observed | whole body | read by the code | Worker | read |
 | `/api/stock/{ticker}/financials` | read | financials | any | observed | income_statements, balance_sheets, cash_flows, earnings, fiscal_date_ending, ... | read by the code | dossier | read |
 | `/api/stock/{ticker}/flow-alerts` | deprecated | - | any | not observed | a name's flow alerts | - | - | deprecated: the market-wide alerts route is read |
-| `/api/stock/{ticker}/flow-per-expiry` | read | flow-per-expiry | any | observed | whole body | read by the code | nightly | read |
-| `/api/stock/{ticker}/flow-per-strike` | read | flow-per-strike | any | observed | whole body | read by the code | nightly | read |
-| `/api/stock/{ticker}/flow-per-strike-intraday` | read | strike-flow-intraday | any | not observed | flow by strike through the day | stated | flow | no: entitlement unanswered; asked weekly (tier 2) |
-| `/api/stock/{ticker}/flow-recent` | read | flow-recent | any | not observed | call and put premium and volume splits by expiry | stated | flow | no: duplicate of `flow-per-expiry` |
+| `/api/stock/{ticker}/flow-per-expiry` | read | flow-per-expiry | any | observed | call and put premium, side premiums, volume and trades by expiry for the last trading day | read by the code | nightly, Flow Lab premium by expiry | read: on demand for Premium by expiry and the Greek flow expiry (13 to 15 KB measured) |
+| `/api/stock/{ticker}/flow-per-strike` | read | flow-per-strike | any | observed | call and put volume and premium by side for each strike for a day | read by the code | nightly, Flow Lab strike totals | read: on demand for the session totals by strike (65 to 107 KB measured) |
+| `/api/stock/{ticker}/flow-per-strike-intraday` | read | strike-flow-intraday | any | not observed | each minute's strikes the feed ranks highest, by volume as asked | stated | Flow Lab strike map | read: answered 200 for AAPL and NVDA on 2026-10-18 and 10-25 at 0.67 to 1.51 MB, over the old 512 KiB cap; the cap is 4 MiB |
+| `/api/stock/{ticker}/flow-recent` | not added | - | any | not observed | the latest flows for the name; the spec names a per-expiry schema its rows do not match | - | none | no: production rows carried an expiry and none of the documented figures, so the Flow Lab reads its per-expiry totals from `flow-per-expiry`; retired from the registry and the probe list |
 | `/api/stock/{ticker}/fundamental-breakdown` | read | fundamental-breakdown | any | observed | rev_breakdown, report_date, rev_group, members, value, ... | read by the code | dossier | read |
 | `/api/stock/{ticker}/gex-levels` | read | gex-levels | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/greek-exposure` | read | greek-exposure | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/greek-exposure/expiry` | read | greek-exposure-expiry | any | observed | whole body | read by the code | Worker, engines, nightly | read |
-| `/api/stock/{ticker}/greek-exposure/strike` | not added | - | any | not observed | greek exposure by strike | stated | gamma modules | no: duplicate of `spot-exposures/strike` |
-| `/api/stock/{ticker}/greek-exposure/strike-expiry` | not added | - | any | not observed | greek exposure by strike and expiry | stated | gamma modules | no: duplicate of `spot-exposures/expiry-strike` |
+| `/api/stock/{ticker}/greek-exposure/strike` | read | greek-exposure-strike | any | not observed | greek exposure by strike | stated | gamma modules | no: duplicate of `spot-exposures/strike` |
+| `/api/stock/{ticker}/greek-exposure/strike-expiry` | read | greek-exposure-strike-expiry | any | not observed | greek exposure by strike and expiry | stated | gamma modules | no: duplicate of `spot-exposures/expiry-strike` |
 | `/api/stock/{ticker}/greek-flow` | read | greek-flow | any | observed | whole body | read by the code | nightly | read |
-| `/api/stock/{ticker}/greek-flow/{expiry}` | read | greek-flow-expiry | any | not observed | delta and vega flow per minute for one expiry | stated | flow | no: large, and the engines use the all-expiry series |
-| `/api/stock/{ticker}/greeks` | probe only | - | any | observed | the vendor's greeks per strike and expiry | strings | engine cross-check | no: observed on the wire but large; a follow-up as an independent check of the engine's greeks |
+| `/api/stock/{ticker}/greek-flow/{expiry}` | read | greek-flow-expiry | any | not observed | delta and vega flow per minute for one expiry | stated | Flow Lab Greek flow | read: one expiry on demand; the cap is 512 KiB |
+| `/api/stock/{ticker}/greeks` | read | greeks | any | observed | the vendor's greeks per strike and expiry | strings | engine cross-check | no: observed on the wire but large; a follow-up as an independent check of the engine's greeks |
 | `/api/stock/{ticker}/historical-risk-reversal-skew` | read | rr-skew | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/income-statements` | not added | - | any | not observed | income statements | stated | fundamentals packet | no: duplicate of `financials` |
 | `/api/stock/{ticker}/info` | read | info | any | observed | full_name, sector, issue_type, marketcap, avg30_volume, ... | read by the code | Worker, dossier, engines | read |
-| `/api/stock/{ticker}/insider-buy-sells` | not added | - | any | not observed | insider purchases and sales with notional | notional stated as value | positioning packet | no: duplicate of the insider batch and `insider-flow` |
+| `/api/stock/{ticker}/insider-buy-sells` | read | insider-bs | any | not observed | insider purchases and sales with notional | notional stated as value | positioning packet | no: duplicate of the insider batch and `insider-flow` |
 | `/api/stock/{ticker}/interpolated-iv` | added | interpolated-iv | any | not observed | implied volatility, implied move and 1-year percentile for each tenor | days and percentile stated; volatility and implied move withheld | peers packet | added: `vx.ivp`, read every night; overlaps the screener's 30-day `iv_percentile_1y`, so its unique value is the other tenors |
 | `/api/stock/{ticker}/iv-rank` | read | iv-rank | any | observed | whole body | read by the code | engines, nightly | read |
 | `/api/stock/{ticker}/max-pain` | read | max-pain | any | observed | whole body | read by the code | nightly | read |
@@ -70,13 +70,13 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/stock/{ticker}/nope` | read | nope | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/ohlc/{candle_size}` | read | ohlc-1d | any | observed | open, high, low, close, volume | read by the code | Worker, nightly | read |
 | `/api/stock/{ticker}/oi-change` | read | oi-change | any | observed | whole body | read by the code | engines, nightly | read |
-| `/api/stock/{ticker}/oi-per-expiry` | not added | - | any | not observed | call and put open interest per expiry | stated | options | no: a sum of `option-contracts`, which can disagree with a second source |
+| `/api/stock/{ticker}/oi-per-expiry` | read | oi-per-expiry | any | not observed | call and put open interest per expiry | stated | options | no: a sum of `option-contracts`, which can disagree with a second source |
 | `/api/stock/{ticker}/oi-per-strike` | read | oi-per-strike | any | observed | whole body | read by the code | nightly | read |
-| `/api/stock/{ticker}/option-chains` | probe only | - | any | observed | option chains with greeks | strings | options | no: observed on the wire (tier 1) but duplicates `option-contracts` |
+| `/api/stock/{ticker}/option-chains` | read | option-chains | any | observed | option chains with greeks | strings | options | no: observed on the wire (tier 1) but duplicates `option-contracts` |
 | `/api/stock/{ticker}/option-contracts` | read | option-contracts | any | observed | whole body | read by the code | Worker, nightly | read |
-| `/api/stock/{ticker}/option-stance` | probe only | - | any | not observed | a vendor trade-stance ranking of contracts with a fit score, return on capital and pop | return on capital unit not stated | none | probe only: asked weekly (tier 2) for a later comparison with our own ratio and Win %, never displayed |
-| `/api/stock/{ticker}/option/stock-price-levels` | read | option-price-levels | any | not observed | option volume by price level | stated | flow | no: low value |
-| `/api/stock/{ticker}/option/volume-oi-expiry` | not added | - | any | not observed | volume and open interest per expiry | stated | options | no: a sum of `option-contracts` |
+| `/api/stock/{ticker}/option-stance` | read | option-stance | any | not observed | a vendor trade-stance ranking of contracts with a fit score, return on capital and pop | return on capital unit not stated | none | probe only: asked weekly (tier 2) for a later comparison with our own ratio and Win %, never displayed |
+| `/api/stock/{ticker}/option/stock-price-levels` | read | option-price-levels | any | not observed | option volume by price level | stated | Flow Lab ladders | read: the option half of the price ladders |
+| `/api/stock/{ticker}/option/volume-oi-expiry` | read | volume-oi-expiry | any | not observed | volume and open interest per expiry | stated | options | no: a sum of `option-contracts` |
 | `/api/stock/{ticker}/options-pulse` | not added | - | any | not observed | the Nasdaq options pulse for a name | the spec documents no response | flow | no: the response schema is empty in the committed spec |
 | `/api/stock/{ticker}/options-volume` | read | options-volume | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/ownership` | enterprise | - | Enterprise | not observed | institutions, insiders and politicians with the most shares | stated | positioning packet | no: Enterprise only; `institution/{ticker}/ownership` is read |
@@ -86,12 +86,12 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/stock/{ticker}/spot-exposures/strike` | read | spot-exposures-strike | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/spot-exposures/{expiry}/strike` | deprecated | - | any | not observed | spot gamma by strike for one expiry | - | - | deprecated: the expiry-strike route is read |
 | `/api/stock/{ticker}/stock-state` | read | stock-state | any | observed | close, prev_close, open, high, low, ... | read by the code | Worker, dossier, engines | read |
-| `/api/stock/{ticker}/stock-volume-price-levels` | read | stock-price-levels | any | not observed | lit and off-lit stock volume by price | shares stated | flow | no: entitlement unanswered; asked weekly (tier 2); if it answers it ranks above the ETF read |
+| `/api/stock/{ticker}/stock-volume-price-levels` | not added | - | any | not observed | lit and off-lit stock volume at each exact price, Nasdaq and FINRA only | shares stated | none | no: answered 200 at 1.07 to 1.80 MB (25,000 to 43,000 levels) and covers part of the market; the off-exchange price levels replace it in the Flow Lab ladders; retired from the registry and the probe list |
 | `/api/stock/{ticker}/technical-indicator/{function}` | not added | - | any | not observed | any technical indicator series | per function | price packet | no: computed from the candles the nightly holds |
 | `/api/stock/{ticker}/volatility/anomaly` | read | vol-anomaly | any | observed | whole body | read by the code | nightly | read |
 | `/api/stock/{ticker}/volatility/character` | read | vol-character | any | observed | whole body | read by the code | nightly | read |
-| `/api/stock/{ticker}/volatility/realized` | not added | - | any | not observed | 30-day implied against 21-session realised volatility | strings, units not stated | options | no: duplicate of `vrp` and the realised-volatility section |
-| `/api/stock/{ticker}/volatility/stats` | not added | - | any | not observed | implied and realised volatility with 1-year highs and lows | every field is described only as the implied volatility value | options | no: the schema is copied between fields, so even the meaning is unknown; duplicates `iv-rank`, `vrp` and the realised section |
+| `/api/stock/{ticker}/volatility/realized` | read | vol-realized | any | not observed | 30-day implied against 21-session realised volatility | strings, units not stated | options | no: duplicate of `vrp` and the realised-volatility section |
+| `/api/stock/{ticker}/volatility/stats` | read | vol-stats | any | not observed | implied and realised volatility with 1-year highs and lows | every field is described only as the implied volatility value | options | no: the schema is copied between fields, so even the meaning is unknown; duplicates `iv-rank`, `vrp` and the realised section |
 | `/api/stock/{ticker}/volatility/term-structure` | read | term-structure | any | observed | whole body | read by the code | engines, nightly | read |
 | `/api/stock/{ticker}/volatility/variance-risk-premium` | read | vrp | any | observed | whole body | read by the code | dossier, engines, nightly | read |
 | `/api/stock/{ticker}/volatility/term-structure/distribution` | read | term-structure-dist | Advanced+ | observed | whole body | read by the code | nightly | read; in the live documentation and not in the committed copy |
@@ -146,6 +146,9 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/options-pulse/total` | read | options-pulse-total | Advanced | observed | nightly |
 | `/api/volatility/anomaly/top` | read | vol-anomaly-top | Advanced | observed | nightly |
 | `/api/volatility/option-sentiment/top` | read | vol-sentiment-top | Advanced | observed | nightly |
+| `/api/volatility/vix-term-structure` | read | vix-term | Advanced | not observed | nightly |
+| `/api/volatility/character/top` | read | vol-character-top | Advanced | not observed | nightly |
+| `/api/market/correlations` | read | market-correlations | Advanced | not observed | nightly |
 | `/api/screener/analysts` | read | analysts | Advanced | observed | dossier, engines |
 | `/api/futures/contracts` | added | futures-contracts | Advanced | not observed | nightly (Macro, WP5) |
 | `/api/futures/flow` | added | futures-flow | Advanced | not observed | nightly and the Macro page's 5-minute read (WP5) |
@@ -193,3 +196,31 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 - Bytes: `dx` is held to 24 KiB and `vx` to 8 KiB; a deep name's card-x grows by about 6 KiB in the dry run (53.5 to 59.6 KB) and is shed (as stubs) before any volatility or flow section if it nears 100 KiB.
 - The dossier's on-demand fan-out stays at nine calls and charges a member token per call; nothing here widens it. A fresh nightly part is a cache hit, which frees one of the nine.
 - Third-party text is cleaned with the dossier sanitiser before it is stored.
+
+
+## Positioning package
+
+| Operation | Status | Registry id | Plan | Wire | Returns | Unit status | Surface | Decision |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `/api/institutions` | read | inst-list | Advanced | not observed | the largest 13F filers with their book totals | dollar totals stated as strings | positioning page | read |
+| `/api/institutions/latest_filings` | read | inst-latest | Advanced | not observed | the newest 13F filings | dates stated | positioning page | read |
+| `/api/institution/{name}/holdings` | read | inst-holdings | Advanced | not observed | one filer's holdings | units and dollars stated | positioning page | read |
+| `/api/institution/{name}/activity` | read | inst-activity-v1 | Advanced | not observed | one filer's changes, deprecated form | units stated | positioning page, fallback only | read |
+| `/api/institution/{name}/activity/v2` | read | inst-activity | Advanced | not observed | one filer's changes by report date | units stated, price as a string | positioning page | read |
+| `/api/institution/{name}/sectors` | read | inst-sectors | Advanced | not observed | one filer's book by sector and quarter | dollars and counts stated | positioning page | read |
+| `/api/insider/{sector}/sector-flow` | read | insider-sector | Advanced | not observed | insiders buying and selling by sector and day | counts stated, dollars withheld | positioning page | read |
+| `/api/congress/unusual-trades` | read | cg-unusual | Premium | not observed | disclosures the feed flagged | band stated, tags documented | political layers | read |
+| `/api/congress/unusual-trades/by-tickers` | read | cg-unusual-tickers | Premium | not observed | flagged disclosures for chosen names | band stated | political layers | read |
+| `/api/congress/unusual-trades/stats` | read | cg-unusual-stats | Premium | not observed | groupings of flagged disclosures | key names not yet observed | political layers | read |
+| `/api/congress/unusual-trades/chart-data` | read | cg-unusual-chart | Premium | not observed | prices at trade and now for flagged disclosures | prices stated | political layers | read |
+| `/api/congress/late-reports` | read | cg-late | Advanced | not observed | disclosures filed late | band stated | political layers | read |
+| `/api/congress/politicians` | read | cg-politicians | Advanced | not observed | the members who traded lately | names reduced to initials | political layers | read |
+| `/api/congress/congress-trader` | read | cg-trader | Advanced | not observed | one member's disclosures over a year | band stated | political layers | read |
+| `/api/politician-portfolios/disclosures` | read | pp-disclosures | Enterprise | not observed | disclosure filings by member and year | dates stated | political layers | read |
+| `/api/politician-portfolios/people` | read | pp-people | Enterprise | not observed | members with portfolios | names reduced to initials | political layers | read |
+| `/api/politician-portfolios/recent_trades` | read | pp-recent | Enterprise | not observed | recent disclosed trades with a late filter | band stated | political layers | read |
+| `/api/politician-portfolios/{politician_id}` | read | pp-portfolio | Enterprise | not observed | one member's holdings | counts only | political layers | read |
+| `/api/politics/politician/trades` | read | pol-trades | Enterprise | not observed | disclosed trades with a late filter | band stated | political layers | read |
+| `/api/politics/fec/candidates` | read | fec-candidates | Enterprise | not observed | campaign candidates | count only, no names | political layers | read |
+| `/api/politics/fec/companies` | read | fec-companies | Advanced | not observed | company committee money and lobbying | dollars stated | political layers | read |
+| `/api/politics/fec/contributions` | read | fec-contributions | Enterprise | not observed | committee money to candidates | sums stated, no names | political layers | read |

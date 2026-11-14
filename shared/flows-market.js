@@ -1,4 +1,5 @@
 import { median } from "./flows-stats.js";
+import { capTide, CAP_TIDE_COPY } from "./flows-cap-tide.js";
 
 const onWire = (v) => v !== undefined && v !== null && v !== "";
 
@@ -109,6 +110,7 @@ export function marketAggregate(eligibleRows, tiltsByTicker = new Map(), { scree
       ivRankMedian: round(median(ranks), 4),
       ivRankQuoted: ranks.length,
     },
+    capTide: capTide(rows),
   };
 }
 
@@ -140,4 +142,5 @@ export const MARKET_NOTES = Object.freeze({
     "No probability, no forecast and no direction is claimed for the " +
     "market. These are sums and ratios of quoted numbers over a stated " +
     "population.",
+  capTide: [CAP_TIDE_COPY.define, CAP_TIDE_COPY.net, CAP_TIDE_COPY.outside, CAP_TIDE_COPY.scope, CAP_TIDE_COPY.withheld].join(" "),
 });

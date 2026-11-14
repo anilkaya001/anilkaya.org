@@ -79,7 +79,7 @@ export function pageOf(params) {
 }
 
 export function codeOf(status, kind) {
-  if (kind === "timeout" || kind === "network" || kind === "parse") return kind;
+  if (kind === "timeout" || kind === "network" || kind === "parse" || kind === "size") return kind;
   const s = Number(status);
   if (!Number.isInteger(s) || s < 100) return "network";
   return String(s);
@@ -87,7 +87,7 @@ export function codeOf(status, kind) {
 
 export function classOf(status, kind) {
   if (kind === "timeout" || kind === "network") return kind;
-  if (kind === "parse") return "network";
+  if (kind === "parse" || kind === "size") return "network";
   const s = Number(status);
   if (!Number.isInteger(s) || s < 100) return "network";
   if (s === 429) return "429";

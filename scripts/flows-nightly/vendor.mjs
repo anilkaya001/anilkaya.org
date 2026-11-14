@@ -1,5 +1,5 @@
 import { makePermitQueue } from "../../shared/flows-permits.js";
-import { vendorBaseInfo, retryAfterMs } from "../../shared/flows-vendor-core.js";
+import { vendorBaseInfo, retryAfterMs, vendorMeter } from "../../shared/flows-vendor-core.js";
 import { createCallMeter, opIdOf, pageOf, shapeOf, tickerOf } from "../../shared/flows-call-meter.js";
 import { createProgress } from "../flows-legs/live.mjs";
 import { LIVE_MODE } from "./flags.mjs";
@@ -23,23 +23,53 @@ export function raiseRateFloor(floor, { minStepMs = 150, ceilingMs = RATE.floorC
   return Math.min(Math.max(floor * 1.5, minStepMs), ceilingMs);
 }
 
-export function stepRateController({ delayMs, floorMs }, outcome, { maxDelayMs = RATE.maxDelayMs, errorBackoffX = RATE.errorBackoffX } = {}) {
+export function stepRateController(
+  { delayMs, floorMs, baseMs = null, streak = 0 }, outcome,
+  { maxDelayMs = RATE.maxDelayMs, errorBackoffX = RATE.errorBackoffX, recoverAfter = RATE.recoverAfter, recoverX = RATE.recoverX } = {},
+) {
   if (outcome === "limited") {
     const raised = raiseRateFloor(floorMs);
-    return { floorMs: raised, delayMs: Math.min(Math.max(delayMs * 2, raised), maxDelayMs) };
+    return { floorMs: raised, delayMs: Math.min(Math.max(delayMs * 2, raised), maxDelayMs), streak: 0 };
   }
   if (outcome === "error") {
     const ceiling = Math.min(maxDelayMs, floorMs * errorBackoffX);
-    return { floorMs, delayMs: Math.max(delayMs, Math.min(delayMs * 2, ceiling)) };
+    return { floorMs, delayMs: Math.max(delayMs, Math.min(delayMs * 2, ceiling)), streak };
   }
-  return { floorMs, delayMs: Math.max(floorMs, delayMs * 0.9) };
+  const clean = streak + 1;
+  if (typeof baseMs === "number" && Number.isFinite(baseMs) && baseMs > 0 && floorMs > baseMs && clean >= recoverAfter) {
+    const eased = Math.max(baseMs, floorMs / recoverX);
+    return { floorMs: eased, delayMs: Math.max(eased, delayMs * 0.9), streak: 0 };
+  }
+  return { floorMs, delayMs: Math.max(floorMs, delayMs * 0.9), streak: clean };
 }
 
 export const stats = {
   calls: 0, dailySeen: 0, retries: 0, rateLimited: 0, failures: 0, timedOut: 0, startedAt: Date.now(),
 
   permitWaitMs: 0, networkMs: 0, rateLimitWaitMs: 0, rateLimitQueueMs: 0,
+
+  peakMinute: 0, minuteLeftMin: null, minuteLeftMax: null, slowedCalls: 0, floorEased: 0,
 };
+
+const minuteCalls = new Map();
+
+export function noteMinute(at, meter = stats, counts = minuteCalls) {
+  const k = Math.floor(at / 60000);
+  const n = (counts.get(k) || 0) + 1;
+  counts.set(k, n);
+  if (n > meter.peakMinute) meter.peakMinute = n;
+  if (counts.size > 4) for (const key of [...counts.keys()]) if (key < k - 2) counts.delete(key);
+  return n;
+}
+
+export function noteMinuteLeft(headers, at, meter = stats) {
+  const seen = vendorMeter(headers, at);
+  const left = seen ? seen.minuteRemaining : null;
+  if (left === null) return null;
+  if (meter.minuteLeftMin === null || left < meter.minuteLeftMin) meter.minuteLeftMin = left;
+  if (meter.minuteLeftMax === null || left > meter.minuteLeftMax) meter.minuteLeftMax = left;
+  return left;
+}
 
 export let delayMs = RATE.startDelayMs;
 
@@ -47,9 +77,21 @@ export const wireProgress = createProgress();
 
 export let delayFloorMs = RATE.minDelayMs;
 
+export let paceFloorMs = null;
+
+let cleanStreak = 0;
+
 export function raiseReadPace(ms) {
+  paceFloorMs = paceFloorMs === null ? ms : Math.max(paceFloorMs, ms);
   delayFloorMs = Math.max(delayFloorMs, ms);
   delayMs = Math.max(delayMs, ms);
+}
+
+function stepPace(outcome) {
+  const before = delayFloorMs;
+  ({ delayMs, floorMs: delayFloorMs, streak: cleanStreak } = stepRateController(
+    { delayMs, floorMs: delayFloorMs, baseMs: paceFloorMs, streak: cleanStreak }, outcome));
+  if (delayFloorMs < before) stats.floorEased++;
 }
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -249,6 +291,8 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
 
     stats.permitWaitMs += await permits.acquire();
     stats.calls++;
+    noteMinute(Date.now());
+    if (paceFloorMs !== null && delayFloorMs > paceFloorMs) stats.slowedCalls++;
     let response;
     const wireStarted = Date.now();
     const landed = permits.enter();
@@ -265,8 +309,7 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
       landed();
       wireProgress.settled();
       stats.retries++;
-      ({ delayMs, floorMs: delayFloorMs } = stepRateController(
-        { delayMs, floorMs: delayFloorMs }, "error"));
+      stepPace("error");
       const timedOut = !!limitMs && isTimeout(error);
       wire.record({ path, ms: Date.now() - wireStarted, kind: timedOut ? "timeout" : "network", note });
       if (timedOut) {
@@ -282,6 +325,7 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
     const declared = response.headers && typeof response.headers.get === "function" ? Number(response.headers.get("content-length")) : NaN;
     const seenDaily = response.headers && typeof response.headers.get === "function" ? Number(response.headers.get("x-uw-daily-req-count")) : NaN;
     if (Number.isSafeInteger(seenDaily) && seenDaily > stats.dailySeen) stats.dailySeen = seenDaily;
+    noteMinuteLeft(response.headers, Date.now());
     const noteWire = () => wire.record({ path, ms: Date.now() - wireStarted, status: response.status, bytes: declared, note });
 
     if (response.status === 429) {
@@ -293,8 +337,7 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
         ? Math.min(hinted, RATE.maxRetryAfterMs)
         : Math.min(delayMs * 4, RATE.maxDelayMs);
 
-      ({ delayMs, floorMs: delayFloorMs } = stepRateController(
-        { delayMs, floorMs: delayFloorMs }, "limited"));
+      stepPace("limited");
 
       stats.rateLimitQueueMs += permits.defer(wait);
       stats.rateLimitWaitMs += wait;
@@ -306,8 +349,7 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
     if (response.status >= 500) {
       noteWire();
       stats.retries++;
-      ({ delayMs, floorMs: delayFloorMs } = stepRateController(
-        { delayMs, floorMs: delayFloorMs }, "error"));
+      stepPace("error");
       if (attempt === RATE.maxRetries) throw httpFailure(path, response.status);
       continue;
     }
@@ -317,8 +359,7 @@ export async function uw(path, params = {}, { envelope = false } = {}) {
       throw httpFailure(path, response.status);
     }
 
-    ({ delayMs, floorMs: delayFloorMs } = stepRateController(
-      { delayMs, floorMs: delayFloorMs }, "ok"));
+    stepPace("ok");
     let body;
     try {
       body = await response.json();

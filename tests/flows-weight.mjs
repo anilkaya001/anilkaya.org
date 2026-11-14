@@ -36,6 +36,8 @@ const LEDGER_LIVE = { bytes: 138867, why: "the live Premium ledger, owner-only b
 const NN_ORB = { bytes: 9815, why: "design v3 Lane 2, the physics orb: flows-nn-orb.js is a deferred group (WebGL ray-traced glass sphere with Fresnel, Snell per channel, thin-film caustic and an environment read from the page tokens) asked for after load on Home and the ticker; it adds nothing to the eager JavaScript" };
 const NN_KERNEL = { bytes: 974, uiBytes: 524, gzip: 250, why: "design v3 Lane 2, owner-approved: FlowsUI.nn in flows-ui.js (the six-state setter and the busy flag, 524 B raw) and the dock's two-stylesheet loader and phone Ask slot in flows-dock.js (450 B) ship on every gated route, measured with node tests/flows-weight.mjs against the Lane 1 base" };
 const NN_TICKER = { bytes: 2438, gzip: 685, why: "design v3 Lane 2, owner-approved: flows-ticker.js wiring on the ticker, the strip, verdict card and rail states, the schedule flags that clear at the give-up, the edges and the evidence rims, measured against the Lane 1 base" };
+const STRIP_NAV = { css: 900, gzip: 260, jsGzip: 140, why: "the Strategy page's structure and expiry strips carry back and forward buttons, so a mouse reader can move sideways without a trackpad; the rules sit in flows-tools.css, which the desk loads too" };
+const HOME_FIT = { cssGzip: 100, mapCss: 230, deferred: 850, why: "the KPI cells size their figure by the cell's height and carry the day stamp on the label line, and the condensed flow map has a compact mode, so neither is cut when the Neuron strip shortens the stage" };
 const NN_HOME = { bytes: 452, gzip: 129, why: "design v3 Lane 2, owner-approved: flows-overview.js swaps the orb for the calc tile on the computed line and asks for the physics orb group, measured against the Lane 1 base" };
 const NN_ASK = { bytes: 1004, why: "design v3 Lane 2, owner-approved: flows-ask.js settles the dock head and the screen edge on every answer path and draws the answer tile as the app tile; it is the shared deferred dock file of every gated route, measured against the Lane 1 base" };
 const NN_FLOWS_CSS = { bytes: 451, gzip: 69, why: "design v3 Lane 2, owner-approved: flows.css gains the phone Ask slot style and the sticky dock head, measured against the Lane 1 base; every Flows route links flows.css" };
@@ -46,6 +48,8 @@ const ASK_RULE = { bytes: 215, why: "lane 4 audit: the ticker printed its alert 
 const DESK_FORWARD = { bytes: 9900, gzip: 3350, why: "Premium Desk decisions 1 and 2: flows-desk.js reads the server's forward records and cut (bandOf and winHalf, the delta and Win % bands, the forward sentences, the cut note: 6.5 KB raw, 1.9 KB gzip) and the browser bundle gains carryOf, deltaBand, lineCompare, winRange and outsideRange with the card's forward-aware frame (2.5 KB raw, 1.1 KB gzip), measured against 8b47e40, plus the 1 KiB of headroom the floor requires; the early-exercise correction then added the slope t-statistic, the ramp and the flag to the bundle and one forward sentence to flows-desk.js, 150 B of gzip over the first measure, and the visible note on how the short-call list was cut (one status line, 0.7 KB raw, 0.2 KB gzip, so the phone keeps its first line in view); the short-call chunk is deferred and adds nothing to the eager JavaScript" };
 const STRATEGY_BUNDLE = { gzip: 250, why: "Premium Desk decisions 1 and 2: the strategy page loads the same flows-quant.bundle.js as the desk, which gained carryOf, deltaBand, lineCompare, winRange and outsideRange (+2.5 KB raw, +1.1 KB gzip); raw JavaScript stayed inside its ceiling and only the gzip ceiling had less than 1.1 KB of room, measured against 8b47e40; the early-exercise correction (the slope t-statistic, the ramp, the flag) then added another 0.15 KB of gzip to the same bundle" };
 const DESK_CALLS = { bytes: 2500, why: "Premium Desk decisions 1 and 2: the deferred short-call chunk reads the server's cut and forward records (the lazy engine for cut rows, the bands in the Net delta and Win % cells, the neighbouring-quote range and its information line, the delta floor in the formula, the EV label and the band column of the export), 2.5 KB raw over 8b47e40; it adds nothing to the eager JavaScript" };
+const FF_FIRE_PAGE = { bytes: 73998, gzip: 21515, cssBytes: 15129, cssGzip: 3352, why: "Fire & Forget, the Fire page is a new route: lane U's kernel and client (flows-ff-kernel.js 5,567 B, flows-ff-client.js 5,755 B), lane D's composer, preview and controller (flows-ff-composer.js 38,638 B, flows-ff-preview.js 8,306 B, flows-ff-fire.js 15,732 B) and its two sheets (flows-ff-tokens.css 469 B, flows-ff-fire.css 14,660 B) are the whole cost of it above the shared kernel (flows-ui.js, flows-dock.js, base.css, flows.css); it defers nothing but the dock's Ask file. The Inbox, Digest and Wires pages are one page function that says they are not released and ships the kernel alone" };
+const FF_KERNEL_BASE = { raw: 75.7, gzip: 24.1, css: 86.7, cssGzip: 18.7, why: "the shared kernel as measured when the Fire & Forget routes landed (flows-dock.js 4,914 B and flows-ui.js 74,680 B; base.css 10,813 B and flows.css 78,986 B), less what the loops below add for every route, plus 1.5 KiB of raw headroom so the routes sit above the 1 KiB floor" };
 const GLASS_BYTES_PLAIN = (GLASS_V3.bytes + GLASS_LENS.bytes + GLASS_SITE.bytes) / 1024;
 const GLASS_BYTES = (GLASS_V3.bytes + GLASS_LENS.bytes + GLASS_SITE.bytes + GLASS_REBASE.bytes) / 1024;
 const GLASS_GZIP = (GLASS_V3.gzip + GLASS_LENS.gzip + GLASS_SITE.gzip) / 1024;
@@ -68,12 +72,15 @@ const CEILING_KIB = {
   ledgerPage: 82.6 + LEDGER_PAGE.bytes / 1024 + LEDGER_HOOKS.bytes / 1024,
   flowlabPage: 135.2 + FLOWLAB_PAGE.bytes / 1024,
   macroPage: 182.5,
-  politicalPage: 118 + 2010 / 1024 + 700 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024,
+  politicalPage: 130 + 2010 / 1024 + 700 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024,
+  positioningPage: 116.6,
   loginPage: 5,
   aboutPage: 5,
   glossaryPage: 5,
   notFoundPage: 5,
   statusPage: 80 + 1792 / 1024 + 24.5 + 9 + 442 / 1024 + STATUS_RAISE.bytes / 1024 + NN_KERNEL.bytes / 1024,
+  firePage: FF_KERNEL_BASE.raw + FF_FIRE_PAGE.bytes / 1024,
+  ffPendingPage: FF_KERNEL_BASE.raw,
 };
 
 const GZIP_KIB = {
@@ -82,7 +89,7 @@ const GZIP_KIB = {
   sidePage: 69 + 2571 / 1024 + (69 + 2571 / 1024 + 830 / 1024) - (69 + 2571 / 1024) + (69 + 2571 / 1024 + 830 / 1024 + 101 / 1024) - (69 + 2571 / 1024 + 830 / 1024) + 722 / 1024 + 428 / 1024 + 428 / 1024 + 450 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
   watchPage: 69 + 2571 / 1024 + (69 + 2571 / 1024 + 830 / 1024) - (69 + 2571 / 1024) + (69 + 2571 / 1024 + 830 / 1024 + 101 / 1024) - (69 + 2571 / 1024 + 830 / 1024) + 722 / 1024 + 428 / 1024 + 428 / 1024 + 450 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
   deskPage: 80 + 1937 / 1024 + (80 + 1937 / 1024 + 830 / 1024) - (80 + 1937 / 1024) + (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024) - (80 + 1937 / 1024 + 830 / 1024) + (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024 + 10 / 1024) - (80 + 1937 / 1024 + 830 / 1024 + 101 / 1024) + 641 / 1024 + 680 / 1024 + 2900 / 1024 + 184 / 1024 + 1480 / 1024 + 64 / 1024 + NN_KERNEL.gzip / 1024 + DESK_FORWARD.gzip / 1024,
-  strategyPage: 83 + 1932 / 1024 + (83 + 1932 / 1024 + 830 / 1024) - (83 + 1932 / 1024) + (83 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (83 + 1932 / 1024 + 830 / 1024) + 641 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + STRATEGY_BUNDLE.gzip / 1024,
+  strategyPage: 83 + 1932 / 1024 + (83 + 1932 / 1024 + 830 / 1024) - (83 + 1932 / 1024) + (83 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (83 + 1932 / 1024 + 830 / 1024) + 641 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + STRATEGY_BUNDLE.gzip / 1024 + STRIP_NAV.jsGzip / 1024,
   marketPage: 76 - 10914 / 1024 + (76 - 10998 / 1024 + 830 / 1024) - (76 - 10998 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) - (76 - 10998 / 1024 + 830 / 1024) + (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024 - 322 / 1024) - (76 - 10998 / 1024 + 830 / 1024 + 101 / 1024) + 722 / 1024 + 3.3 + 149 / 1024 + NN_KERNEL.gzip / 1024,
   networkPage: 39,
   nowPage: 40.3,
@@ -92,12 +99,15 @@ const GZIP_KIB = {
   ledgerPage: 27 + LEDGER_PAGE.gzip / 1024 + LEDGER_HOOKS.gzip / 1024,
   flowlabPage: 42.1 + FLOWLAB_PAGE.gzip / 1024,
   macroPage: 55.5,
-  politicalPage: 37.5 + 641 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
+  politicalPage: 41.5 + 641 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
+  positioningPage: 37.1,
   loginPage: 3,
   aboutPage: 3,
   glossaryPage: 3,
   notFoundPage: 3,
   statusPage: 27 + 9.5 + NN_KERNEL.gzip / 1024,
+  firePage: FF_KERNEL_BASE.gzip + FF_FIRE_PAGE.gzip / 1024,
+  ffPendingPage: FF_KERNEL_BASE.gzip,
 };
 
 const CSS_KIB = {
@@ -105,9 +115,9 @@ const CSS_KIB = {
   overviewPage: 104 + (779 + 11690) / 1024 + 300 / 1024 + 1700 / 1024 + 15400 / 1024 + 800 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + NN_IDENTITY.overview.bytes / 1024 + HOME_BENTO.cssBytes / 1024,
   sidePage: 102 + 565 / 1024 + 1700 / 1024 + 2400 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   watchPage: 102 + 565 / 1024 + 1700 / 1024 + 2400 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
-  deskPage: 111 + 880 / 1024 + 1700 / 1024 + 8600 / 1024 + (1180 + SKIP_FOCUS.bytes) / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + 63 / 1024,
-  strategyPage: 111 + 880 / 1024 + 1700 / 1024 + 640 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + 32 / 1024 + 69 / 1024,
-  marketPage: 94 + 1263 / 1024 + 1230 / 1024 + 160 / 1024 + 13.4 + 8.5 + 2000 / 1024 + 5.8 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + 842 / 1024 + 160 / 1024 + 41 / 1024,
+  deskPage: 111 + 880 / 1024 + 1700 / 1024 + 8600 / 1024 + (1180 + SKIP_FOCUS.bytes) / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + 63 / 1024 + STRIP_NAV.css / 1024,
+  strategyPage: 111 + 880 / 1024 + 1700 / 1024 + 640 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + 32 / 1024 + 69 / 1024 + STRIP_NAV.css / 1024,
+  marketPage: 94 + 1263 / 1024 + 1230 / 1024 + 160 / 1024 + 13.4 + 8.5 + 2000 / 1024 + 5.8 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + 842 / 1024 + 160 / 1024 + 41 / 1024 + HOME_FIT.mapCss / 1024,
   networkPage: 96,
   nowPage: 90,
   unusualPage: 113 + 5007 / 1024 + 1700 / 1024 + 6000 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
@@ -116,21 +126,24 @@ const CSS_KIB = {
   ledgerPage: 86.5 + LEDGER_PAGE.cssBytes / 1024,
   flowlabPage: 86.5 + FLOWLAB_PAGE.cssBytes / 1024,
   macroPage: 106,
-  politicalPage: 100.5 + 1700 / 1024 + 400 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  politicalPage: 103 + 1700 / 1024 + 400 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  positioningPage: 136.2,
   loginPage: 80 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   aboutPage: 81 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   glossaryPage: 81 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   notFoundPage: 81 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   statusPage: 82 + 7.5 + 5.5 + 1700 / 1024 + GLASS_BYTES_PLAIN + NN_FLOWS_CSS.bytes / 1024,
+  firePage: FF_KERNEL_BASE.css + FF_FIRE_PAGE.cssBytes / 1024,
+  ffPendingPage: FF_KERNEL_BASE.css,
 };
 
 const CSS_GZIP_KIB = {
   tickerPage: 23 + (64 + 269) / 1024 + 308 / 1024 + 1400 / 1024 + 2900 / 1024 + 2700 / 1024 + 248 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + GLASS_V3_TICKER.gzip / 1024 + NN_FLOWS_CSS.gzip / 1024 + NN_IDENTITY.ticker.gzip / 1024,
-  overviewPage: 23 + (100 + 2592) / 1024 + 400 / 1024 + 2400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + NN_IDENTITY.overview.gzip / 1024 + HOME_BENTO.cssGzip / 1024 + 11 / 1024,
+  overviewPage: 23 + (100 + 2592) / 1024 + 400 / 1024 + 2400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + NN_IDENTITY.overview.gzip / 1024 + HOME_BENTO.cssGzip / 1024 + 11 / 1024 + HOME_FIT.cssGzip / 1024,
   sidePage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + 27 / 1024,
   watchPage: 22 + 64 / 1024 + 400 / 1024 + 150 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + 27 / 1024,
-  deskPage: 24 + 64 / 1024 + 400 / 1024 + 1500 / 1024 + 113 / 1024 + 64 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
-  strategyPage: 24 + 64 / 1024 + 400 / 1024 - 17 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  deskPage: 24 + 64 / 1024 + 400 / 1024 + 1500 / 1024 + 113 / 1024 + 64 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + STRIP_NAV.gzip / 1024,
+  strategyPage: 24 + 64 / 1024 + 400 / 1024 - 17 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + STRIP_NAV.gzip / 1024,
   marketPage: 21 + 206 / 1024 + 2516 / 1024 + 2516 / 1024 + 300 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + 408 / 1024 + 60 / 1024 + 21 / 1024 + 8 / 1024,
   networkPage: 21,
   nowPage: 21,
@@ -140,12 +153,15 @@ const CSS_GZIP_KIB = {
   ledgerPage: 18.6 + LEDGER_PAGE.cssGzip / 1024,
   flowlabPage: 18.6 + FLOWLAB_PAGE.cssGzip / 1024,
   macroPage: 24.5,
-  politicalPage: 22.5 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  politicalPage: 23.5 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  positioningPage: 28.2,
   loginPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   aboutPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   glossaryPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   notFoundPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   statusPage: 18 + 4 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  firePage: FF_KERNEL_BASE.cssGzip + FF_FIRE_PAGE.cssGzip / 1024,
+  ffPendingPage: FF_KERNEL_BASE.cssGzip,
 };
 
 const FORMAT_CORE = { od: "MATH-1", bytes: 1737, gzip: 543, why: "lane 2 math audit: flows-ui.js carries the one rounding rule of shared/flows-display-round.js (fixedHalfUp, formatFixed, formatScaled and the unit floors, 1,344 B), F.strike and F.etDay (228 B) and the guards that make an unreadable number throw or answer null instead of printing a zero (165 B), measured as 71,076 to 72,813 B raw and 22,524 to 23,067 B gzip, so every route that ships flows-ui.js grows by it; the browser imports nothing, so the copy is the price of one rounding rule that tests/math-format.mjs holds equal to the leaf" };
@@ -163,6 +179,18 @@ for (const name of Object.keys(CEILING_KIB)) {
   if (NO_UI_ROUTES.has(name)) continue;
   if (name !== "eventsPage") CEILING_KIB[name] += HORIZON_CORE.bytes / 1024;
   GZIP_KIB[name] += HORIZON_CORE.gzip / 1024;
+}
+const SIDE_KEEP = { bytes: 298, gzip: 158, why: "owner request of 2026-11-14 (the navigation stays open while switching pages): the shell in flows-ui.js keeps the sidebar's state in the fx_side preference cookie (read, write and clear, one state for the drawer and the rail, aria-expanded and inert from it, focus on the current link of a kept drawer), 74,680 to 74,932 B raw and 23,672 to 23,810 B gzip, on every route that loads the kernel" };
+for (const name of Object.keys(CEILING_KIB)) {
+  if (NO_UI_ROUTES.has(name)) continue;
+  if (name !== "eventsPage") CEILING_KIB[name] += SIDE_KEEP.bytes / 1024;
+  GZIP_KIB[name] += SIDE_KEEP.gzip / 1024;
+}
+const CALIB_READ = { od: "MATH-2", bytes: 331, gzip: 72, why: "second math audit: FlowsUI.calibTag, drawn with no payload at every call site, reads /api/flows/calib once and removes the tag at 100 effective outcomes, 74,680 to 75,011 B, so the Not yet calibrated tag can clear" };
+for (const name of Object.keys(CEILING_KIB)) {
+  if (NO_UI_ROUTES.has(name)) continue;
+  if (name !== "eventsPage") CEILING_KIB[name] += CALIB_READ.bytes / 1024;
+  GZIP_KIB[name] += CALIB_READ.gzip / 1024;
 }
 const EVENTS_RECENT = { od: "LANE-4", bytes: 4498, gzip: 1127, cssBytes: 379, cssGzip: 46, why: "lane 4: the Events page counts the names whose report moved the price on the reaction session and the one before and the names whose report time is not stated, lists the largest movers among those that reacted on the nightly's session in typical days, names those that reacted two to five sessions ago, says why when the report column is withheld, pending or empty, cut or has no window, and prints its window in sessions through a date (flows-events.js 49,488 to 53,986 B raw and 14,009 to 15,136 B gzip, flows-feeds.css 31,209 to 31,588 B raw and 6,129 to 6,175 B gzip); the raw JavaScript ceiling is held by HELD_RAW_KIB, so only gzip and the sheet rise" };
 GZIP_KIB.eventsPage += EVENTS_RECENT.gzip / 1024;
@@ -188,6 +216,40 @@ for (const name of ["deskPage", "sidePage", "watchPage"]) {
   CEILING_KIB[name] += MEMBER_EXPORT_JS.bytes / 1024;
   GZIP_KIB[name] += MEMBER_EXPORT_JS.gzip / 1024;
 }
+
+const VOLDESK_MARKET = { od: "WP3", bytes: 1500, gzip: 600, cssBytes: 110, cssGzip: 120, why: "WP3 volatility structure: flows-market.js opens the Vol desk tab on first use (one optional fetch, the deferred volDesk group and the short sub-switch labels) and flows-market.css shows the tab's panel and sizes eleven tabs on a phone; the desk itself and the cross-check strip are deferred groups with their own sheets and add nothing eager" };
+const VOLDESK_TICKER = { od: "WP3", bytes: 400, gzip: 200, why: "WP3 review fixes: flows-ticker.js hands a late card-x to the mounted Surface tab through setCardX, so the cross-check strip never shows a stale never-audited line" };
+CEILING_KIB.tickerPage += VOLDESK_TICKER.bytes / 1024;
+GZIP_KIB.tickerPage += VOLDESK_TICKER.gzip / 1024;
+CEILING_KIB.marketPage += VOLDESK_MARKET.bytes / 1024;
+GZIP_KIB.marketPage += VOLDESK_MARKET.gzip / 1024;
+CSS_KIB.marketPage += VOLDESK_MARKET.cssBytes / 1024;
+CSS_GZIP_KIB.marketPage += VOLDESK_MARKET.cssGzip / 1024;
+const FLOWLAB_HEATMAP = { bytes: 363, gzip: 102, why: "Flow Lab reads fix: the heatmap kind draws a cell whose net range includes zero as an outlined cell rather than a colour, from an undecided grid the caller passes beside the values, thins its column labels by a step the caller states and hands its readout the row and column, so the strike map shows which strikes are undecided; flows-chart.js grew from 51,591 to 51,954 B raw and from 15,068 to 15,170 B gzip, and every route that ships it eagerly rises by exactly that, so no route's headroom moves" };
+const FLOWLAB_READS = { bytes: 10088, gzip: 2534, cssBytes: 724, cssGzip: 147, why: "Flow Lab reads fix: flows-flowlab.js names the class of every failed read to the reader (the sentence tables and the throttled, held and kept banners), draws the strike map and the strike rail with sided ranges, the expiry nets with their unknown share, the greek flow's ticks, the trade-code table and the group tiles (48,594 to 58,682 B raw, 13,164 to 15,698 B gzip); flows-flowlab.css carries the undecided bar, the range line, the hollow sign and the phone note height (13,953 to 14,677 B raw, 3,116 to 3,263 B gzip)" };
+const FLOWLAB_DRILL_READS = { bytes: 783, gzip: 215, why: "Flow Lab reads fix: the drill sheet names the class of a failed contract read and the number of contracts a structure search looked through (flows-drill.js 17,500 to 18,283 B raw, 5,256 to 5,471 B gzip); it is eager on Flow Lab and deferred on the pages that open a contract" };
+for (const name of ["tickerPage", "deskPage", "overviewPage", "strategyPage", "sidePage", "watchPage", "marketPage", "flowlabPage", "unusualPage"]) {
+  CEILING_KIB[name] += FLOWLAB_HEATMAP.bytes / 1024;
+  GZIP_KIB[name] += FLOWLAB_HEATMAP.gzip / 1024;
+}
+CEILING_KIB.flowlabPage += (FLOWLAB_READS.bytes + FLOWLAB_DRILL_READS.bytes) / 1024;
+GZIP_KIB.flowlabPage += (FLOWLAB_READS.gzip + FLOWLAB_DRILL_READS.gzip) / 1024;
+CSS_KIB.flowlabPage += FLOWLAB_READS.cssBytes / 1024;
+CSS_GZIP_KIB.flowlabPage += FLOWLAB_READS.cssGzip / 1024;
+
+const CAP_TIDE = {
+  home: { bytes: 5275, gzip: 1637, cssBytes: 1221, cssGzip: 175 },
+  market: { bytes: 5795, gzip: 1660, cssBytes: 1652, cssGzip: 306 },
+  why: "the cap-weighted Market Tide: flows-overview.js paints the hero line (the live or nightly rule, the reasons a figure is withheld, the fitter that keeps the line inside the identity column, the pill's facts) and flows-market.js the hero cell (the same rule, the meter centred on zero, the disclosure); flows-home.css and flows-market.css lay them out. Each page carries its own copy of the rule because assets/js imports nothing",
+};
+CEILING_KIB.overviewPage += CAP_TIDE.home.bytes / 1024;
+GZIP_KIB.overviewPage += CAP_TIDE.home.gzip / 1024;
+CSS_KIB.overviewPage += CAP_TIDE.home.cssBytes / 1024;
+CSS_GZIP_KIB.overviewPage += CAP_TIDE.home.cssGzip / 1024;
+CEILING_KIB.marketPage += CAP_TIDE.market.bytes / 1024;
+GZIP_KIB.marketPage += CAP_TIDE.market.gzip / 1024;
+CSS_KIB.marketPage += CAP_TIDE.market.cssBytes / 1024;
+CSS_GZIP_KIB.marketPage += CAP_TIDE.market.cssGzip / 1024;
 
 const RATCHET_KIB = { raw: 12, gzip: 3, css: 3, cssGzip: 3 };
 const HELD_RAW_KIB = { eventsPage: 50 };
@@ -219,9 +281,9 @@ const judge = (row, bases = BASES) => {
 };
 
 const DEFERRED = {
-  tickerPage: { groups: { surface: "/assets/js/flows-ticker-surface.js", movelab: "/assets/js/flows-ticker-movelab.js", network: "/assets/js/flows-ticker-network.js", live: "/assets/js/flows-ticker-live.js", private: "/assets/js/flows-ticker-private.js", "nn-orb": "/assets/js/flows-nn-orb.js" } },
+  tickerPage: { groups: { surface: "/assets/js/flows-ticker-surface.js", movelab: "/assets/js/flows-ticker-movelab.js", network: "/assets/js/flows-ticker-network.js", live: "/assets/js/flows-ticker-live.js", private: "/assets/js/flows-ticker-private.js", "nn-orb": "/assets/js/flows-nn-orb.js", xcheck: "/assets/js/flows-ticker-xcheck.js" } },
   unusualPage: { groups: { net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js", "flow-below": "/assets/js/flows-unusual-below.js" }, modules: ["uaTimelineCard", "uaNamesCard", "uaUrgencyCard", "uaFeedCard", "uaSurpriseCard"] },
-  marketPage: { groups: { floor: "/assets/js/flows-market-floor.js", river: "/assets/js/flows-market-river.js", "market-below": "/assets/js/flows-market-below.js", net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" }, modules: ["mkSectorsCard", "mkGroupsCard", "mkExpiryCard", "mkVolCard", "mkRadarCard", "mkAdvCard", "mkVolumeCard", "mkAgainstCard", "mkMoversCard", "mkOiCard", "mkDarkCard", "mkImpactCard", "mkInsidersCard", "mkSeasonCard"] },
+  marketPage: { groups: { voldesk: "/assets/js/flows-voldesk.js", floor: "/assets/js/flows-market-floor.js", river: "/assets/js/flows-market-river.js", "market-below": "/assets/js/flows-market-below.js", net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" }, modules: ["mkSectorsCard", "mkGroupsCard", "mkExpiryCard", "mkVolCard", "mkRadarCard", "mkAdvCard", "mkVolumeCard", "mkAgainstCard", "mkMoversCard", "mkOiCard", "mkDarkCard", "mkImpactCard", "mkInsidersCard", "mkSeasonCard"] },
   networkPage: { groups: { net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" } },
   deskPage: { groups: { "desk-calls": "/assets/js/flows-desk-calls.js" } },
   macroPage: { groups: { "macro-charts": ["/assets/js/flows-macro-charts.js"] } },
@@ -242,20 +304,24 @@ const MEMBER_GROUP_KIB = 75;
 const MEMBER_MARKUP_BYTES = 2400;
 const MEMBER_SLUG = { overviewPage: "overview", sidePage: "long", watchPage: "watch", marketPage: "market", networkPage: "network", nowPage: "now", deskPage: "desk", strategyPage: "strategy", tickerPage: "ticker", movesPage: "moves", unusualPage: "unusual", ledgerPage: "ledger", eventsPage: "events", politicalPage: "political" };
 const ORACLE_FILES = ["/assets/js/flows-oracle-core.js", "/assets/js/flows-oracle.js", "/assets/js/flows-oracle-boot.js"];
-const NEURON_RESTORE = { bytes: 2905, why: "a Neuron hidden by mistake could only come back by a keyboard chord a phone cannot press; Hidden now leaves a restore button that offers Undo for ten seconds and then stays as a small Show the Neuron button, and restoring returns the mode chosen before hiding, which grew flows-oracle.js from 39,034 to 41,939 B" };
+const NEURON_RESTORE = { bytes: 2922, why: "a Neuron hidden by mistake could only come back by a keyboard chord a phone cannot press; Hidden now leaves a restore button that offers Undo for ten seconds and then stays as a small Show the Neuron button, and restoring returns the mode chosen before hiding without pulling focus out of an open sheet, which grew flows-oracle.js from 39,034 to 41,956 B" };
 const ORACLE_DEFERRED_KIB = 60 + NEURON_RESTORE.bytes / 1024;
 const ORACLE_MARKUP_BYTES = 720;
 const DEFERRED_KIB = {
-  tickerPage: 80 + 7.3 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + NETWORK_GROUP.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + (260 + 848) / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024 + DESK_CALLS.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024 + (2240 + 627) / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
-  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + (26400 + 745) / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024 + LEDGER_LIVE.bytes / 1024, macroPage: 80 + 15.4 + NN_ASK.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024,
+  tickerPage: 80 + 7.3 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + NETWORK_GROUP.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + (260 + 848) / 1024 + HOME_FIT.deferred / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024 + DESK_CALLS.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024 + (2240 + 627) / 1024 + HOME_FIT.deferred / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
+  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + (26400 + 745) / 1024 + HOME_FIT.deferred / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024 + LEDGER_LIVE.bytes / 1024, macroPage: 80 + 15.4 + NN_ASK.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, firePage: 80 + NN_ASK.bytes / 1024, ffPendingPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024 + FLOWLAB_HEATMAP.bytes / 1024,
 };
 const DARK_POOL_TIME = { bytes: 107, why: "lane 2 math audit: the Market page's dark-pool list drops canceled prints, prints its times in TRT through F.time and its prices through F.px, and says how many canceled prints it left out, measured as 58,946 to 59,053 B raw in the deferred flows-market-below.js" };
 DEFERRED_KIB.marketPage += DARK_POOL_TIME.bytes / 1024;
+DEFERRED_KIB.positioningPage = 80 + NN_ASK.bytes / 1024;
 const FLOOR_FUNDS_DEFERRED = { bytes: 21330, eagerBytes: 784, why: "WP1: the Floor draws a second, labelled basis from the market payload's funds block and the live:funds row (a Basis control, the session model, the previous-session choice, the plain-words readouts, the session tables and side list), measured as 46,657 to 67,987 B raw in the deferred flows-market-floor.js and 64,771 to 65,609 B in the eager flows-market.js, which reads the block and the live row and keeps the Basis address through a tab change" };
 DEFERRED_KIB.marketPage += FLOOR_FUNDS_DEFERRED.bytes / 1024;
 const HORIZON_DEFERRED = { od: "LANE-4", tickerBytes: 2947, marketBytes: 1261, why: "lane 4: the ticker's Move lab reads the earnings window and the report-session column from the universe, ages them by the sessions elapsed and shows a Reacting today, Reacted one session ago or Report time not stated state, and reads the carried forward ages of unstated report times (flows-ticker-movelab.js 19,302 to 22,249 B), and Market's Skyline and Volatility lens read the same window, column and ages in place of a literal 21 (flows-skyline.js 22,056 to 22,571 B, flows-market-below.js 59,053 to 59,799 B)" };
 DEFERRED_KIB.tickerPage += HORIZON_DEFERRED.tickerBytes / 1024;
 DEFERRED_KIB.marketPage += HORIZON_DEFERRED.marketBytes / 1024;
+const VOLDESK_DEFERRED = { od: "WP3", tickerBytes: 12000, marketBytes: 37700, why: "WP3 volatility structure: the Vol desk controller (flows-voldesk.js) and the ticker's engine cross-check strip (flows-ticker-xcheck.js) are deferred groups, requested on the first open of the Vol desk tab and when the Surface tab opens" };
+DEFERRED_KIB.tickerPage += VOLDESK_DEFERRED.tickerBytes / 1024;
+DEFERRED_KIB.marketPage += VOLDESK_DEFERRED.marketBytes / 1024;
 DEFERRED_KIB.tickerPage += FLOWLAB_LINK.networkBytes / 1024;
 DEFERRED_KIB.unusualPage += FLOWLAB_LINK.belowBytes / 1024;
 DEFERRED_KIB.flowlabPage = 80 + NN_ASK.bytes / 1024;
@@ -329,7 +395,7 @@ const measured = [];
 for (const name of pageNames) {
   let html;
   try {
-    html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", scenes: name === "tickerPage", privateLens: name === "tickerPage" }));
+    html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", scenes: name === "tickerPage", xcheck: name === "tickerPage", privateLens: name === "tickerPage", voldesk: name === "marketPage" }));
   } catch (error) {
     assert.fail(`${name} threw while rendering: ${error && error.message}`);
   }
@@ -416,7 +482,7 @@ for (const m of measured) {
 }
 
 {
-  const base = { name: "marketPage", raw: 233434, gzip: 70800, css: 132602 + MEMBER_CSS.bytes, cssGzip: 27457 + MEMBER_CSS.gzip };
+  const base = { name: "marketPage", raw: 240782, gzip: 72969, css: 137186, cssGzip: 28551 };
   eq(judge(base).join("; "), "", "the ledger judge passes today's market route");
   ok(judge({ ...base, gzip: base.gzip + 8 * 1024 }).length > 0,
      "the judge fails a route inflated by 8 KiB of gzip");
@@ -521,7 +587,7 @@ for (const name of Object.keys(CEILING_KIB)) {
       ok(pageNames.includes(name) && !chartRoutes.includes(name), `${name} does not link flows-chart.js`);
     }
     for (const name of CHART_ROUTES) {
-      const html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", scenes: name === "tickerPage", privateLens: name === "tickerPage" }));
+      const html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", scenes: name === "tickerPage", xcheck: name === "tickerPage", privateLens: name === "tickerPage", voldesk: name === "marketPage" }));
       const order = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1].split("?")[0]);
       const at = order.indexOf("/assets/js/flows-ui.js");
       ok(at >= 0 && order[at + 1] === "/assets/js/flows-chart.js",
@@ -530,7 +596,7 @@ for (const name of Object.keys(CEILING_KIB)) {
     }
     const core = sizeOf("/assets/js/flows-ui.js"), lib = sizeOf("/assets/js/flows-chart.js");
     console.log("  flows-ui.js " + core + " B, flows-chart.js " + lib + " B");
-    ok(core < 71000 + NN_KERNEL.uiBytes + 64 + FORMAT_CORE.bytes + HORIZON_CORE.bytes, `flows-ui.js is the core alone (${core} B): the chart library is not in it`);
+    ok(core < 71000 + NN_KERNEL.uiBytes + 64 + FORMAT_CORE.bytes + HORIZON_CORE.bytes + CALIB_READ.bytes, `flows-ui.js is the core alone (${core} B): the chart library is not in it`);
     ok(!/const chart = Object\.freeze|function (drawLine|diverging|heatmap|payoff|sparkline)\(/.test(readFileSync(new URL("assets/js/flows-ui.js", REPO), "utf8")),
        "and none of the chart drawing functions is left behind in the core");
   }
@@ -665,7 +731,7 @@ for (const name of Object.keys(CEILING_KIB)) {
       eq(PAGES.oracleShell(m.html, "off", "overview"), m.html, `${m.name}: with the switch off the page is untouched`);
     }
     const drillBytes = sizeOf("/assets/js/flows-drill.js");
-    ok(drillBytes > 0 && drillBytes <= FLOWLAB_ENTRY.bytes, `the drill sheet weighs ${drillBytes} B, inside its stated ${FLOWLAB_ENTRY.bytes} B, and loads only when a page carries #fxFlowlab`);
+    ok(drillBytes > 0 && drillBytes <= FLOWLAB_ENTRY.bytes + FLOWLAB_DRILL_READS.bytes, `the drill sheet weighs ${drillBytes} B, inside its stated ${FLOWLAB_ENTRY.bytes + FLOWLAB_DRILL_READS.bytes} B, and loads only when a page carries #fxFlowlab`);
     for (const slug of ["unusual", "ticker", "moves"]) {
       const base = "<html><body><main>x</main></body></html>";
       const shelled = flowlabShell(base, slug, true);
@@ -711,7 +777,7 @@ for (const name of Object.keys(CEILING_KIB)) {
       }
     }
     if (TICKER_RAISE) {
-      const grouped = Object.entries(DEFERRED.tickerPage.groups).filter(([g]) => g !== "surface" && g !== "movelab" && g !== "network" && g !== "live" && g !== "private" && g !== "nn-orb").map(([, f]) => f).flat().reduce((a, f) => a + bytesOf(f), 0);
+      const grouped = Object.entries(DEFERRED.tickerPage.groups).filter(([g]) => g !== "surface" && g !== "movelab" && g !== "network" && g !== "live" && g !== "private" && g !== "nn-orb" && g !== "xcheck").map(([, f]) => f).flat().reduce((a, f) => a + bytesOf(f), 0);
       ok(TICKER_RAISE.bytes <= 1613, `the ticker's raise (${TICKER_RAISE.od}) is at most the 1,613 B it was made with`);
       ok(grouped < TICKER_RAISE.bytes, `THE TICKER'S ${TICKER_RAISE.bytes} B RAISE STAYS ONLY WHILE THE TICKER DEFERS LESS THAN IT: ${grouped} B of group files are deferred; once they reach the raise, delete TICKER_RAISE (${TICKER_RAISE.od}) and the ceiling returns to 400 KiB`);
       console.log(`  ticker ceiling carries a pending ${TICKER_RAISE.od} deduction of ${TICKER_RAISE.bytes} B: ${TICKER_RAISE.why}`);

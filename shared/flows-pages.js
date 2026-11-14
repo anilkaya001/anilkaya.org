@@ -1,13 +1,16 @@
-export const ASSET_VERSION = "416";
+export const ASSET_VERSION = "430";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
 import { stamp as trtStamp } from "./flows-time.js";
 import { etDayOf, isSession, shiftDay } from "./flows-quant-time.js";
 import { ledgerBody, LEDGER_DESCRIPTION, LEDGER_STYLES, LEDGER_SCRIPTS } from "./flows-page-ledger.js";
+import { positioningBody, POSITIONING_DESCRIPTION, POSITIONING_STYLES, POSITIONING_SCRIPTS } from "./flows-page-positioning.js";
 import { HORIZON_SESSIONS } from "./flows-horizon.js";
 import { macroBody, MACRO_DESCRIPTION, MACRO_STYLES, MACRO_SCRIPTS, MACRO_DEFER } from "./flows-page-macro.js";
+import { COPY as VD_COPY } from "./flows-voldesk-copy.js";
 import { flowlabBody, FLOWLAB_DESCRIPTION, FLOWLAB_STYLES, FLOWLAB_SCRIPTS } from "./flows-page-flowlab.js";
+import { FIRE_DESCRIPTION, FIRE_SCRIPTS, FIRE_STYLES, fireBody } from "./ff-pages-fire.js";
 
 export const CALENDAR_BACK_DAYS = 14;
 export const CALENDAR_SESSIONS = 60;
@@ -20,7 +23,7 @@ export function sessionCalendar(now = Date.now()) {
   return out;
 }
 
-export const FONTS_VERSION = "230";
+export const FONTS_VERSION = "428";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -35,7 +38,7 @@ const head = (title, description, styles = []) => `<!doctype html>
 <title>${title}</title>
 <meta name="description" content="${description}">
 <link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
-<link rel="preload" href="/assets/fonts/Inter-latin.woff2?v=${FONTS_VERSION}" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/assets/fonts/GoogleSans-latin.woff2?v=${FONTS_VERSION}" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="${v("/assets/css/base.css")}">
 <link rel="stylesheet" href="${v("/assets/css/flows.css")}">
 ${styles.map((href) => `<link rel="stylesheet" href="${v(String(href))}">`).join("\n")}
@@ -87,6 +90,7 @@ const GLYPHS = {
   boards: '<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/>',
   bars: '<path d="M6 18v-3M12 18v-7M18 18V7"/>',
   globe: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="3.8" ry="9"/><path d="M3 12h18"/>',
+  fire: '<path d="M12 4.5c.75 3.6 4.8 5.55 4.8 9.75a4.8 4.8 0 0 1-9.6 0c0-2.25 1.2-3.3 2.1-4.8.75 1.05 1.5 1.35 1.95 1.35C11.55 9.6 11.85 7.8 12 4.5z"/>',
 };
 
 const SPRITE = `<svg class="ui-sprite" aria-hidden="true" focusable="false" width="0" height="0">${
@@ -147,12 +151,9 @@ export const FLOWS_NAV = [
     { key: "political", href: "/flows/political/", label: "Political", glyph: "hall" },
   ] },
   { group: "Tools", id: "railTools", items: [
+    { key: "fire", href: "/flows/fire/", label: "Fire", glyph: "fire", switched: true },
     { key: "strategy", href: "/flows/strategy/", label: "Strategy", glyph: "flask" },
     { key: "desk", href: "/flows/desk/", label: "Premium desk", glyph: "layers" },
-  ] },
-  { group: "Operations", id: "railOps", only: "status", items: [
-    { key: "status", href: "/flows/status/", label: "Status", glyph: "track" },
-    { key: "latency", href: "/flows/status/#view=latency", label: "Latency", glyph: "clock" },
   ] },
 ];
 
@@ -168,8 +169,7 @@ const TABS = [
 ];
 
 const railItem = (active) => (it) => {
-  if (it.ownerOnly && it.key !== active) return "";
-  if (it.gate && it.key !== active) return "";
+  if ((it.ownerOnly || it.switched || it.gate) && it.key !== active) return "";
   const on = it.key === active;
   const badge = it.count ? `<span class="rail-count" data-rail-count="${it.key}" hidden></span>` : "";
   return `<a href="${it.href}"${on ? ' class="is-on" aria-current="page"' : ""}>` +
@@ -211,9 +211,7 @@ export function macroNav(html) {
 export function ownerNav(html) {
   let text = String(html);
   if (text.includes(BRAND_LINK)) text = text.replace(BRAND_LINK, () => brandMark(BRAND_OWNER));
-  if (text.includes('id="railOps"') || !text.includes(RAIL_END)) return text;
-  const ops = FLOWS_NAV.find((g) => g.id === "railOps");
-  return text.replace(RAIL_END, () => railGroup(ops, "") + RAIL_END);
+  return text;
 }
 
 const sidebar = (active, username) => {
@@ -473,6 +471,7 @@ export function aboutPage() {
       <li><strong>Events.</strong> Earnings, economic prints and FDA dates for the coming sessions, with the move each report is priced for.</li>
       <li><strong>Political.</strong> Stocks that members of Congress disclosed buying or selling, in the dollar ranges the filings give, with how late each filing arrives.</li>
       <li><strong>Ticker.</strong> One name's dossier: price against the priced move, the dealer book, volatility, flow and positioning, and a written reading of how they fit together.</li>
+      <li><strong>Fire.</strong> A wire is a standing condition a member writes once. Flows reads it on the nightly run or in the live session, records a hit when it first holds, and keeps a receipt for every session it was read or not read.</li>
       <li><strong>Strategy, Premium desk and Ask.</strong> Option structures priced on the name's own smile, and questions answered from what has been published.</li>
     </ul>
   </section>
@@ -575,7 +574,7 @@ ${shell("Session", "overview", username, `
       <div class="hm-hero-id">
         <div class="hm-hero-k"><h2 class="hm-hero-t" id="hmHeroT">Market tide</h2><span id="hmTideState"></span></div>
         <div class="hm-hero-v" id="hmTideV" data-tone="silent">\u2014</div>
-        <div class="hm-hero-cap" id="hmTideCap"></div>
+        <div class="hm-hero-sub"><div class="hm-hero-cap" id="hmTideCap"></div><p class="hm-cw" id="hmTideCw" hidden></p></div>
         <div class="hm-hero-legs" id="hmTideLegs"></div>
       </div>
       <div class="hm-hero-chart" id="hmTide"></div>
@@ -930,8 +929,8 @@ ${UI_CHART_SCRIPTS}
 </html>`;
 }
 
-const marketModule = (id, title, bodyId, { sub = "", seg = "", body = "" } = {}) => `
-    <section class="ui-card ui-mod mk-mod" id="${id}" aria-labelledby="${id}T">
+const marketModule = (id, title, bodyId, { sub = "", seg = "", body = "", short = "" } = {}) => `
+    <section class="ui-card ui-mod mk-mod" id="${id}" aria-labelledby="${id}T"${short ? ` data-short="${short}"` : ""}>
       <header class="ui-mod-h"><h2 class="ui-mod-t" id="${id}T">${title}</h2><span class="ui-mod-sp"></span>${sub}${seg}</header>
       ${body || `<div class="mk-body" id="${bodyId}"></div>`}
     </section>`;
@@ -940,13 +939,13 @@ const dossier = (t) => `<a class="mk-dossier" href="/flows/ticker/?t=${t}">Dossi
 
 const INDEX_NAV = `<nav class="fx-index" id="fxIndex" aria-label="On this page" hidden></nav>`;
 
-const MARKET_TABS = (scenes) => [
-  ["floor", "Floor"], ["session", "Session"], ["tide", "Tide"], ["sectors", "Sectors"], ["indices", "Indices"], ["network", "Network"],
+const MARKET_TABS = (scenes, voldesk = false) => [
+  ["floor", "Floor"], ["session", "Session"], ["tide", "Tide"], ["sectors", "Sectors"], ["indices", "Indices"], ...(voldesk ? [["voldesk", VD_COPY["title.tab"]]] : []), ["network", "Network"],
   ["extremes", "Extremes"], ...(scenes ? [["relations", "Relations"]] : []), ["prints", "Prints"], ["context", "Context"],
 ];
 
-export function marketPage({ username = "", owner = false, scenes = false, funds = false } = {}) {
-  const tabs = MARKET_TABS(scenes);
+export function marketPage({ username = "", owner = false, scenes = false, voldesk = false, funds = false } = {}) {
+  const tabs = MARKET_TABS(scenes, voldesk);
   const panel = (key, body) => `
     <div class="mk-panel" role="tabpanel" id="mkP-${key}" aria-labelledby="mkT-${key}" data-panel="${key}"${key === "floor" ? "" : " inert"}>${body}
     </div>`;
@@ -961,7 +960,7 @@ ${shell("Market", "market", username, `
   <p class="visually-hidden" id="mktStatus" role="status">Loading the session\u2026</p>
   <p class="visually-hidden" id="mktStale" role="status" hidden></p>
   <p class="visually-hidden" id="mkPulseStamp"></p>
-  <div class="mk-tabs" role="tablist" aria-label="Market views" id="mkTabs">${tabs.map(([k, t], i) => `<button type="button" role="tab" id="mkT-${k}" aria-controls="mkP-${k}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-tab="${k}">${t}</button>`).join("")}</div>
+  <div class="mk-tabs${voldesk ? " mk-dn" : ""}" role="tablist" aria-label="Market views" id="mkTabs">${tabs.map(([k, t], i) => `<button type="button" role="tab" id="mkT-${k}" aria-controls="mkP-${k}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-tab="${k}">${t}</button>`).join("")}</div>
   </div>
   <section class="mk-hero" id="mkHero" aria-label="The market at a glance"></section>
   <div class="mk-sub" id="mkSub" role="tablist" aria-label="Modules in this view" hidden></div>
@@ -981,7 +980,11 @@ ${marketModule("mkGroupsCard", "Groups", "mkGroups")}`)}
 ${panel("indices", `
 ${["SPY", "QQQ", "IWM"].map((t) => marketModule("mkEtf" + t + "Card", t, "mkEtf" + t, { sub: dossier(t) })).join("")}
 ${marketModule("mkExpiryCard", "Expiry", "mkExpiry")}
-${marketModule("mkVolCard", "Volatility", "mkVol")}`)}
+${marketModule("mkVolCard", "Volatility", "mkVol")}`)}${voldesk ? panel("voldesk", `
+${marketModule("mkVdTermCard", VD_COPY["title.term"], "mkVdTerm", { short: "Term", seg: `<div class="mk-segc" id="mkVdTermSeg"></div>` })}
+${marketModule("mkVdIvrvCard", VD_COPY["title.ivrv"], "mkVdIvrv", { short: "Implied" })}
+${marketModule("mkVdCorrCard", VD_COPY["title.matrix"], "mkVdCorr", { short: "Correlation", seg: `<div class="mk-segc" id="mkVdCorrSeg"></div>` })}
+${marketModule("mkVdCharCard", VD_COPY["title.character"], "mkVdChar", { short: "Character" })}`) : ""}
 ${panel("network", `
 ${marketModule("mkNetCard", "Flow network", "mkNet", { sub: `<button type="button" class="mk-pop" id="mkNetPop" aria-label="Pop out the flow network into its own window" hidden>Pop out</button>`, seg: `<div class="mk-segc" id="mkNetSeg"></div>` })}`)}
 ${panel("extremes", `
@@ -1006,7 +1009,8 @@ ${marketModule("mkSeasonCard", "Seasonality", "mkSeason", { seg: `<div class="mk
   <i hidden data-defer="river" data-src="${v("/assets/js/flows-market-river.js")}"></i>
   <i hidden data-defer="market-below" data-src="${v("/assets/js/flows-market-below.js")}"></i>
   <i hidden data-defer="net" data-src="${v("/assets/js/flows-net.js")}"></i>
-  <i hidden data-defer="netmap" data-src="${v("/assets/js/flows-net-map.js")}"></i>${scenes ? `
+  <i hidden data-defer="netmap" data-src="${v("/assets/js/flows-net-map.js")}"></i>${voldesk ? `
+  <i hidden data-defer="voldesk" data-src="${v("/assets/js/flows-voldesk.js")}" data-css="${v("/assets/css/flows-voldesk.css")}"></i>` : ""}${scenes ? `
   <i hidden data-defer="skyline" data-src="${v("/assets/js/flows-skyline.js")}"></i>
   <i hidden data-defer="relations" data-src="${v("/assets/js/flows-relations.js")}"></i>` : ""}
   <p class="visually-hidden" id="mkPulseFoot"></p>
@@ -1214,6 +1218,16 @@ export function macroPage({ username = "", live = false } = {}) {
     scripts: MACRO_SCRIPTS,
     body: macroBody(glyph, { live }) + `
   <i hidden data-defer="macro-charts" data-src="${v(MACRO_DEFER)}"></i>`,
+export function positioningPage({ username = "", now = Date.now() } = {}) {
+  return flowsDocument({
+    title: "Positioning",
+    description: POSITIONING_DESCRIPTION,
+    active: "positioning",
+    username,
+    chrome: false,
+    styles: POSITIONING_STYLES,
+    scripts: POSITIONING_SCRIPTS,
+    body: positioningBody(glyph, sessionCalendar(now)),
   });
 }
 
@@ -1261,7 +1275,7 @@ ${UI_CHART_SCRIPTS}
 </html>`;
 }
 
-export function tickerPage({ username = "", scenes = false, privateLens = false, now = Date.now() } = {}) {
+export function tickerPage({ username = "", scenes = false, xcheck = false, privateLens = false, now = Date.now() } = {}) {
   return flowsDocument({
     title: "Ticker",
     description: "One name's options dossier: price against the priced move, the Neuron verdict with priced structures, and the dealer book, volatility, flow and positioning behind it.",
@@ -1334,7 +1348,8 @@ export function tickerPage({ username = "", scenes = false, privateLens = false,
   <i hidden data-defer="network" data-src="${v("/assets/js/flows-ticker-network.js")}" data-css="${v("/assets/css/flows-ticker-network.css")}" id="ftNetwork"></i>
   <i hidden data-defer="live" data-src="${v("/assets/js/flows-ticker-live.js")}" id="ftLive"></i>${privateLens ? `
   <i hidden data-defer="private" data-src="${v("/assets/js/flows-ticker-private.js")}" data-css="${v("/assets/css/flows-ticker-private.css")}" id="ftPrivate"></i>` : ""}${scenes ? `
-  <i hidden data-defer="surface" data-src="${v("/assets/js/flows-ticker-surface.js")}" id="ftSurface"></i>` : ""}
+  <i hidden data-defer="surface" data-src="${v("/assets/js/flows-ticker-surface.js")}" id="ftSurface"${xcheck ? ' data-xcheck="1"' : ""}></i>${xcheck ? `
+  <i hidden data-defer="xcheck" data-src="${v("/assets/js/flows-ticker-xcheck.js")}" data-css="${v("/assets/css/flows-voldesk.css")}" id="ftXcheckLoad"></i>` : ""}` : ""}
 `,
   });
 }
@@ -1345,7 +1360,7 @@ function escapeHTML(value) {
   })[c]);
 }
 
-export function politicalPage({ username = "" } = {}) {
+export function politicalPage({ username = "", layers = false } = {}) {
   return flowsDocument({
     title: "Political",
     description: "The stocks politicians disclosed buying and selling, with the range each filing stated, how many people filed, and the delay since the trade.",
@@ -1360,12 +1375,12 @@ export function politicalPage({ username = "" } = {}) {
     <div class="pl-title" data-fx-hero>
       <h1 id="fxTitle">Political</h1>
       <div class="pl-stamp" id="plStamp"></div>
-      <div class="pl-chips" id="plChips"><span class="pl-chip warn">Ranges, not amounts</span><span class="pl-chip mut opt"><span class="l">Not advice \u00b7 not positions</span><span class="s">Not advice</span></span><span class="pl-chip mut" title="The vendor feed carries no party field, so no Republican or Democrat split is shown or inferred.">No party in feed</span></div>
+      <div class="pl-chips" id="plChips"><span class="pl-chip warn">Ranges, not amounts</span><span class="pl-chip mut opt"><span class="l">Not advice \u00b7 not positions</span><span class="s">Not advice</span></span><span class="pl-chip mut" title="The feed carries no party per filing, so no party split is shown or inferred.">No party in feed</span>${layers ? '<a class="pl-chip" id="plPosChip" href="/flows/positioning/">Positioning</a>' : ""}</div>
       <button type="button" class="pl-ibtn" id="plInfoBtn" aria-label="How to read this page" aria-haspopup="dialog">${glyph("info")}</button>
     </div>
     <p class="pl-note" id="plNote" hidden></p>
     <div class="pl-seg5" role="tablist" aria-label="Panels" id="plSeg5">
-      <button type="button" role="tab" aria-selected="true" aria-controls="plMain" data-v="stocks">Stocks</button><button type="button" role="tab" aria-selected="false" aria-controls="plTape" data-v="tape">Filings</button><button type="button" role="tab" aria-selected="false" aria-controls="plRail" data-v="detail">Detail</button>
+      <button type="button" role="tab" aria-selected="true" aria-controls="plMain" data-v="stocks">Stocks</button><button type="button" role="tab" aria-selected="false" aria-controls="plFeed" data-v="feed">Filings</button><button type="button" role="tab" aria-selected="false" aria-controls="plRail" data-v="detail">Detail</button>
     </div>
     <div class="pl-stage" id="plStage" data-view="stocks">
       <section class="pl-panel" id="plMain" aria-label="Stocks by disclosed net position">
@@ -1373,7 +1388,7 @@ export function politicalPage({ username = "" } = {}) {
           <div class="pl-seg" role="tablist" aria-label="Show stocks that are" id="plTabs"></div>
           <div class="r">
             <div class="pl-seg sm" role="group" aria-label="View" id="plViewSeg"><button type="button" data-view="map" aria-pressed="true">Map</button><button type="button" data-view="list" aria-pressed="false">List</button></div>
-            <div class="pl-seg sm" role="group" aria-label="Tile size" id="plSizeSeg"><button type="button" data-size="usd" aria-pressed="true">Dollars</button><button type="button" data-size="fil" aria-pressed="false">Filers</button></div>
+            <div class="pl-seg sm" role="group" aria-label="Tile size" id="plSizeSeg"><button type="button" data-size="usd" aria-pressed="true">Dollars</button><button type="button" data-size="fil" aria-pressed="false">Filers</button></div>${layers ? '<div class="pl-seg sm" role="group" aria-label="Layer" id="plLayerSeg"><button type="button" data-layer="none" aria-pressed="true">None</button><button type="button" data-layer="late" aria-pressed="false">Late</button><button type="button" data-layer="unusual" aria-pressed="false">Unusual</button><button type="button" data-layer="money" aria-pressed="false">Money</button></div>' : ""}
           </div>
         </div>
         <div class="pl-map" id="plMap" role="group" aria-label="Treemap of stocks. Arrow keys move, Enter opens the ticker page."></div>
@@ -1384,16 +1399,16 @@ export function politicalPage({ username = "" } = {}) {
         <button type="button" class="pl-selbar" id="plSelbar" aria-label="Open detail for the selected stock"></button>
         <div class="pl-foot"><div class="pl-lg" id="plLegend"></div><span class="pl-fnote" id="plFnote"></span><span class="pl-acts"><button type="button" class="link q" id="plFundBtn" aria-pressed="false"></button><button type="button" class="link" id="plAllBtn" aria-haspopup="dialog"></button></span></div>
       </section>
-      <section class="pl-panel" id="plTape" aria-label="Newest filings">
-        <div class="pl-ph"><h2>Newest filings</h2><span class="note" id="plTapeNote"></span></div>
-        <div class="pl-listbox" id="plTapeList" role="group" aria-label="Newest filings that name a stock"></div>
-        <div class="pl-foot"><span class="pl-fnote" id="plTapeFoot"></span><span class="pl-acts"><button type="button" class="link" id="plTapeAll" aria-haspopup="dialog"></button></span></div>
+      <section class="pl-panel" id="plFeed" aria-label="Newest filings">
+        <div class="pl-ph"><h2>Newest filings</h2><span class="note" id="plFeedNote"></span></div>
+        <div class="pl-listbox" id="plFeedList" role="group" aria-label="Newest filings that name a stock"></div>
+        <div class="pl-foot"><span class="pl-fnote" id="plFeedFoot"></span><span class="pl-acts"><button type="button" class="link" id="plFeedAll" aria-haspopup="dialog"></button></span></div>
       </section>
       <section class="pl-panel pl-rail" id="plRail" aria-label="Selected stock"></section>
     </div>
   </div>
   <dialog class="pl-dlg" id="plAllDlg" aria-labelledby="plAllT"><div class="dg"><h2 id="plAllT">All stocks</h2><p id="plAllP"></p><div class="pl-grid3" id="plAllG"></div><div class="x"><button type="button" class="link" id="plAllX">Close</button></div></div></dialog>
-  <dialog class="pl-dlg" id="plTapeDlg" aria-labelledby="plTapeT"><div class="dg"><h2 id="plTapeT">All filings</h2><p id="plTapeP"></p><ul class="pl-tl" id="plTapeL"></ul><div class="x"><button type="button" class="link" id="plTapeX">Close</button></div></div></dialog>
+  <dialog class="pl-dlg" id="plFeedDlg" aria-labelledby="plFeedT"><div class="dg"><h2 id="plFeedT">All filings</h2><p id="plFeedP"></p><ul class="pl-tl" id="plFeedL"></ul><div class="x"><button type="button" class="link" id="plFeedX">Close</button></div></div></dialog>
   <dialog class="pl-dlg" id="plInfoDlg" aria-labelledby="plInfoT"><div class="dg"><h2 id="plInfoT">How to read this page</h2><div class="body" id="plInfoB"></div><div class="x"><button type="button" class="link" id="plInfoX">Close</button></div></div></dialog>
 `,
   });
@@ -1599,6 +1614,15 @@ ${scripts.map((src) => `<script src="${v(String(src))}" defer></script>`).join("
 
 const ORACLE_MODES = Object.freeze(["on", "quiet"]);
 
+const SIDE_BODY = '<body class="flows-body has-rail"';
+
+export function sideShell(html, cookie) {
+  const text = String(html);
+  const kept = /(?:^|;\s*)fx_side=([01])\s*(?:;|$)/.exec(String(cookie || ""));
+  if (!kept || text.split(SIDE_BODY).length !== 2) return text;
+  return text.replace(SIDE_BODY, () => '<body class="flows-body has-rail ' + (kept[1] === "1" ? "has-side-open" : "is-side-collapsed") + '"');
+}
+
 export function oracleShell(html, mode, slug) {
   if (typeof html !== "string" || !ORACLE_MODES.includes(mode)) return html;
   const page = escapeHTML(String(slug || "overview"));
@@ -1617,9 +1641,53 @@ export function oracleShell(html, mode, slug) {
   return out;
 }
 
+const FIRE_BANNER = '<p class="ffx-banner" id="ffxBanner" hidden></p>';
+
+export const FIRE_SHADOW_LINE = "Running in shadow: wires are evaluated, hits are not delivered yet.";
+
+export function firePage({ username = "", shadow = false } = {}) {
+  const body = fireBody(glyph);
+  return flowsDocument({
+    title: "Fire", description: FIRE_DESCRIPTION, active: "fire", username, chrome: false, styles: FIRE_STYLES, scripts: FIRE_SCRIPTS,
+    body: shadow ? body.replace(FIRE_BANNER, () => `<p class="ffx-banner" id="ffxBanner" data-ff-mode="shadow">${FIRE_SHADOW_LINE}</p>`) : body,
+  });
+}
+
+export const FF_PENDING_PAGES = Object.freeze({
+  inbox: Object.freeze({ title: "Inbox", name: "the Inbox", description: "The hits your wires and the house wires wrote." }),
+  digest: Object.freeze({ title: "Digest", name: "the Digest", description: "A session's hits and receipts, side by side." }),
+  wires: Object.freeze({ title: "Wires", name: "the Wires page", description: "Your wires, their versions and their receipts." }),
+});
+
+export function ffPendingPage({ username = "", page = "inbox", shadow = false } = {}) {
+  const slug = Object.hasOwn(FF_PENDING_PAGES, page) ? page : "inbox";
+  const spec = FF_PENDING_PAGES[slug];
+  return flowsDocument({
+    title: spec.title, description: spec.description, active: slug, username,
+    body: `
+  <section class="ui-card ui-mod" data-ff-page="${slug}" aria-labelledby="ffxPendingT">
+    <header class="ui-mod-h"><h2 class="ui-mod-t" id="ffxPendingT">Not released yet</h2></header>
+    <div class="ui-silent" data-state="unavailable" data-ff-absent="not_released">${glyph("unavailable")}
+      <span class="ui-silent-t">— unavailable: ${spec.name} is not released yet.</span>
+      <span class="ui-silent-t">${shadow ? FIRE_SHADOW_LINE : "A wire armed on Fire is stored and evaluated."}</span>
+      <a class="ds-btn" href="/flows/fire/">Open Fire</a>
+    </div>
+  </section>`,
+  });
+}
+
+const FIRE_NAV_ANCHOR = '<a href="/flows/strategy/"';
+const FIRE_NAV_ITEM = `<a href="/flows/fire/" data-ff-nav>${glyph("fire")}<span class="rail-label">Fire</span></a>`;
+
+export function fireNav(html, on, slug) {
+  if (typeof html !== "string" || on !== true || slug === "fire") return html;
+  if (html.includes("data-ff-nav") || !html.includes(FIRE_NAV_ANCHOR)) return html;
+  return html.replace(FIRE_NAV_ANCHOR, () => FIRE_NAV_ITEM + "\n      " + FIRE_NAV_ANCHOR);
+}
+
 export const FLOWS_PAGES = {
   loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, networkPage, nowPage, deskPage,
-  politicalPage,
-  tickerPage, unusualPage, movesPage, flowlabPage, ledgerPage, macroPage, statusPage, eventsPage, strategyPage, ASSET_VERSION,
+  politicalPage, positioningPage,
+  tickerPage, unusualPage, movesPage, flowlabPage, ledgerPage, macroPage, statusPage, eventsPage, strategyPage, firePage, ffPendingPage, ASSET_VERSION,
 };
 

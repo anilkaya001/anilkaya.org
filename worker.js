@@ -2,7 +2,7 @@ import { signSession, verifySession, getCookie, cookie } from "./shared/session.
 import {
   FLOWS_COOKIE, FLOWS_SESSION_TTL_SECONDS, LEARN_AUDIENCE, THROTTLE_SHARED_BUCKET,
   parseCredentials, readMembers, memberOf, throttleBucket, throttleAddress, loginNameKey, staleFailureCutoff, verifyCredential,
-  signFlowsSession, verifyFlowsSession, isLearnAudience, isLocked, nextFailureState, sessionEpoch,
+  signFlowsSession, verifyFlowsSession, isLearnAudience, isLocked, nextFailureState, sessionEpoch, timingSafeEqual,
 } from "./shared/flows-auth.js";
 import { FLOWS_PAGES, modelName, neuronProvenance, notFoundPage } from "./shared/flows-pages.js";
 import * as FLOWS_ASK from "./shared/flows-ask.js";
@@ -26,7 +26,7 @@ import {
 } from "./shared/flows-premium.js";
 import { stateOf, printOf, coherence } from "./shared/flows-basis.js";
 import { etDayOf } from "./shared/flows-quant-time.js";
-import { isRefreshWindow, freshHeaders, pendingHeaders, phaseAt, easternDay, sessionOpen } from "./shared/flows-freshness.js";
+import { FRESH_CLASSES, isRefreshWindow, freshHeaders, pendingHeaders, phaseAt, easternDay, sessionOpen, shiftDay } from "./shared/flows-freshness.js";
 import * as FLOWS_LIVE from "./shared/flows-live-worker.js";
 import * as FLOWS_DOSSIER from "./shared/flows-dossier-worker.js";
 import { TICKER_RE } from "./shared/flows-live.js";
@@ -42,6 +42,8 @@ import { flowsFlowlabRows } from "./server/routes/flows-flowlab.js";
 import { createFlowlab } from "./server/flowlab.js";
 import { flowsAiRows } from "./server/routes/flows-ai.js";
 import { flowsReadyRows } from "./server/routes/flows-ready.js";
+import { flowsPositioningRows } from "./server/routes/flows-positioning.js";
+import { positioningMode } from "./shared/flows-pos-switch.js";
 import { flowsOracleRows } from "./server/routes/flows-oracle.js";
 import { flowsLedgerRows } from "./server/routes/flows-ledger.js";
 import { flowsMacroRows } from "./server/routes/flows-macro.js";
@@ -53,10 +55,21 @@ import { flowsDispatchRows } from "./server/routes/flows-dispatch.js";
 import { flowsPipelineRows } from "./server/routes/flows-pipeline.js";
 import { createCallMeter, summarize as summarizeCalls } from "./shared/flows-call-meter.js";
 import { flowsOpsRows } from "./server/routes/flows-ops.js";
+import { flowsVoldeskRows } from "./server/routes/flows-voldesk.js";
 import { flowsIngestRows } from "./server/routes/flows-ingest.js";
 import { flowsPageRows } from "./server/routes/flows-pages.js";
 import { flowsFilmRows } from "./server/routes/flows-film.js";
 import { flowsRtRows } from "./server/routes/flows-rt.js";
+import { flowsFfRows } from "./server/routes/flows-ff.js";
+import { bootstrapFf, createFfStore } from "./server/ff-store.js";
+import { EVAL_LIMITS, createEvaluator, liveSnapshot, nightlySnapshot } from "./server/ff-eval.js";
+import { modeOf as ffMode } from "./server/ff-health.js";
+import { PREVIEW as FF_PREVIEW } from "./server/ff-preview.js";
+import { compileWire, prepareVersion } from "./shared/ff-grammar.js";
+import { prepare as ffPrepare, preview as ffPreview } from "./shared/ff-engine.js";
+import { clauseHash as ffClauseHash, memberWireId } from "./shared/ff-ids.js";
+import { effectiveSession as ffEffective, firstCheck as ffFirstCheck, nightlyFinal, sessionOf as ffSessionOf } from "./shared/ff-session.js";
+import { BUDGET as FF_BUDGET, HEALTH_RULES as FF_HEALTH_RULES, LIMITS as FF_LIMITS, TEMPLATES as FF_TEMPLATES } from "./shared/ff-contract.js";
 import { aiCall, pruneAiOutcomes } from "./server/ai.js";
 import { applySchema } from "./server/schema.js";
 import { chainFor } from "./shared/flows-ai-broker.js";
@@ -94,6 +107,11 @@ function createState() {
     scFlights: new Map(),
     scRefreshes: new Map(),
     fundsFill: null,
+    flowlabFlights: new Map(),
+    flowlabLogged: new Map(),
+    ffReady: false,
+    ffFlight: null,
+    ffCache: new Map(),
   };
 }
 const state = createState();
@@ -956,6 +974,179 @@ const FLOWS_STORE = createFlowsStore({ ensureFlowsTables: (env) => ensureFlowsTa
 const MEMBER_STORE = createMemberStore({ schemaSql: MEMBER_STATE_SCHEMA_SQL });
 const readFlowsPayload = (env, key, trace) => FLOWS_STORE.read(env, key, trace);
 
+async function ensureFf(env) {
+  if (state.ffReady || !env.DB) return;
+  const flight = state.ffFlight || (state.ffFlight = bootstrapFf(env.DB)
+    .then(() => { state.ffReady = true; }, (error) => logFailure("warn", "ff schema bootstrap failed", {}, error))
+    .finally(() => { if (state.ffFlight === flight) state.ffFlight = null; }));
+  if (!(await FLOWS_LIVE.settledWithin(flight, FLOWS_LIVE.FLIGHT_WAIT_MS)) && state.ffFlight === flight) state.ffFlight = null;
+}
+
+const FF_TABLES = createFfStore({ ensureFf });
+const ffEffectiveOf = (spec) => ({ ...spec, effectiveSession: spec.version.effective_session || spec.effectiveSession });
+const FF_STORE = Object.freeze({
+  ...FF_TABLES,
+  createWire: (env, member, spec, at) => FF_TABLES.createWire(env, member, ffEffectiveOf(spec), at),
+  adjustWire: (env, member, spec, at) => FF_TABLES.adjustWire(env, member, ffEffectiveOf(spec), at),
+});
+const FF_EVAL = createEvaluator({ store: FF_STORE, flowsStore: FLOWS_STORE, mode: ffMode });
+
+function ffAlerts(text) {
+  let body = null;
+  try { body = JSON.parse(text); } catch { body = null; }
+  return body !== null && typeof body === "object" && !Array.isArray(body) ? { ...body, day: body.sessionDate } : null;
+}
+
+function ffTemplate(hint, clauses) {
+  const template = typeof hint === "string" ? FF_TEMPLATES.find((t) => t.id === hint && t.ast) : null;
+  if (!template) return null;
+  const mine = ffClauseHash(clauses);
+  return [template.ast.all, ...(template.variants || []).map((v) => v.clauses)].some((all) => ffClauseHash(all) === mine) ? template.id : null;
+}
+
+function ffSubjects(prepared, wire, out) {
+  const figures = (values) => wire.clauses.map((c, i) => ({ m: c.m, op: c.op, x: c.x, value: values[i].value, ok: true }));
+  const hits = out.rows.map((r) => ({ subject: r.subject, symbol: r.symbol || r.sector || null, verdict: "true", reason: null, clauses: figures(r.values) }));
+  const lost = wire.subjectKind !== "c" ? "not_carded" : wire.cadence === "live" ? "not_in_live_set" : "missing";
+  if (wire.scope.kind !== "names") {
+    const fill = (n, verdict, reason = null) => Array.from({ length: Math.max(0, n) }, () => ({ verdict, reason, clauses: [] }));
+    const reasons = Object.entries(out.reasons);
+    return [...hits, ...fill(out.wouldHit - hits.length, "true"), ...fill(out.evaluated - out.wouldHit, "false"),
+      ...reasons.flatMap(([reason, n]) => fill(n, "unknown", reason)),
+      ...fill(out.unknown - reasons.reduce((sum, [, n]) => sum + n, 0), "unknown", lost)];
+  }
+  const held = new Map();
+  for (const hit of hits) if (!held.has(hit.symbol)) held.set(hit.symbol, hit);
+  return wire.scope.symbols.map((symbol) => {
+    if (held.has(symbol)) return held.get(symbol);
+    const one = ffPreview(prepared, { ...wire, scope: { kind: "names", symbols: [symbol] } }, { limit: 1 });
+    if (one.evaluated > 0) return { subject: "n:" + symbol, symbol, verdict: "false", reason: null, clauses: [] };
+    return { subject: "n:" + symbol, symbol, verdict: "unknown", reason: Object.keys(one.reasons)[0] || lost, clauses: [] };
+  });
+}
+
+const FF_CORE = Object.freeze({
+  compile({ body, templateHint, universe, now }) {
+    const plain = body !== null && typeof body === "object" && !Array.isArray(body);
+    const ast = plain && body.cooldown === undefined && Object.hasOwn(FF_LIMITS.cooldownDefault, body.cadence)
+      ? { ...body, cooldown: { unit: FF_LIMITS.cooldownUnit, n: FF_LIMITS.cooldownDefault[body.cadence] } } : body;
+    const scope = plain && ast.scope !== null && typeof ast.scope === "object" ? ast.scope : {};
+    const out = prepareVersion(ast, {
+      universe: universe.symbols, sectors: universe.sectors, universeSize: universe.symbols.size, now,
+      sectorSizes: scope.kind === "sector" && typeof scope.sector === "string" ? { [scope.sector]: universe.symbols.size } : undefined,
+    });
+    if (!out.ok) return out;
+    if (out.version.control === "bh" && out.version.exp_week === null) {
+      return { ok: false, code: "ff_metric_unavailable", detail: "the family this wire is tested in has no size" };
+    }
+    const template = ffTemplate(templateHint, ast.all);
+    return template ? { ...out, version: { ...out.version, template } } : out;
+  },
+  effectiveSession: (now) => ffEffective("nightly", now),
+  newWireId: () => memberWireId(),
+  async preview({ compiled, snapshot, now }) {
+    const version = compiled.version;
+    const nightly = version.cadence === "nightly";
+    try {
+      const wire = compileWire({ id: "w-preview", layer: "member", memberId: "preview", version: 1, body: JSON.parse(version.ast_json), sentence: version.sentence });
+      if (nightly && wire.subjectKind === "c" && !wire.clauses.some((c) => c.m === "contract.oi_confirm")) {
+        return { status: "unavailable", reason: "source_missing", subjects: [] };
+      }
+      const metrics = snapshot.metrics;
+      const row = nightly ? null : (snapshot.live || []).find((r) => r && r.id === "live:alerts");
+      const alerts = row ? ffAlerts(row.payload) : null;
+      const prepared = ffPrepare(nightly
+        ? nightlySnapshot({ session: metrics.sessionDate, now, metrics, flowalerts: null })
+        : liveSnapshot({ session: ffSessionOf(now), now, alerts, look: 0 }));
+      const out = ffPreview(prepared, wire, { limit: wire.scope.kind === "names" ? Number.MAX_SAFE_INTEGER : FF_PREVIEW.listMax });
+      return {
+        status: "ok", sessionDate: nightly ? metrics.sessionDate : alerts ? alerts.day : null,
+        generatedAt: nightly ? metrics.generatedAt : alerts ? alerts.readAt : null, subjects: ffSubjects(prepared, wire, out),
+      };
+    } catch (error) {
+      logFailure("warn", "ff preview failed", { route: "/api/ff/preview" }, error);
+      return { status: "unavailable", reason: "evaluator_error", subjects: [] };
+    }
+  },
+});
+
+const ffFirstCheckAt = ({ cadence, now }) => {
+  const check = ffFirstCheck(cadence, now, { periodMin: FRESH_CLASSES.breadth.cadenceS / 60 });
+  return check ? { at: check.at, scheduled: true } : null;
+};
+
+async function ffRunAuth(request, env, url) {
+  const offered = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
+  const kind = FLOWS_LIVE.tokenKind(offered, env, timingSafeEqual, url);
+  if (kind || !FLOWS_LIVE.looksLikeJwt(offered)) return kind;
+  return (await FLOWS_LIVE.oidcKind(offered, env)).kind;
+}
+
+async function ffLiveTick(env, at) {
+  const phase = phaseAt(at, null);
+  if (!phase || phase.phase !== "rth") return { status: "closed", reason: "market_closed" };
+  if (!env.DB) return { status: "off", reason: "no_store" };
+  await ensureFf(env);
+  const row = await FLOWS_LIVE.readLive(env.DB, "live:alerts");
+  const alerts = row ? ffAlerts(row.payload) : null;
+  const read = alerts ? Date.parse(alerts.readAt) : NaN;
+  const look = Number.isFinite(read) && read >= phase.open ? Math.floor((read - phase.open) / (FF_HEALTH_RULES.liveCadenceS * 1000)) : 0;
+  return FF_EVAL.live(env, { at, alerts, look, slot: "t" + look });
+}
+
+async function ffNightlyHeld(env, session) {
+  const held = env.DB ? await FLOWS_STORE.metadata(env, ["ff-metrics"]) : null;
+  const metrics = held ? held["ff-metrics"] : null;
+  return Boolean(metrics && metrics.present && metrics.sessionDate === session);
+}
+
+async function ffEvaluate({ env, cadence, session, kind, now }) {
+  if (cadence === "nightly" && kind !== "nightly") throw HttpError.of("forbidden");
+  if (cadence === "nightly" && !(await ffNightlyHeld(env, session))) {
+    return { status: "refused", reason: "source_missing", wires: null, names: null, hits: null, receipts: null, unknown: null, errors: null };
+  }
+  const out = cadence === "nightly" ? await FF_EVAL.nightly(env, { session, at: now }) : await ffLiveTick(env, now);
+  if (out.status === "failed") {
+    logFailure("error", "ff run failed", { route: "/api/ff/run", cadence }, out.error);
+    throw HttpError.of("ff_evaluator_unavailable");
+  }
+  return {
+    status: out.status, reason: out.reason || null, wires: out.wires ?? null, names: out.names ?? null, hits: out.hitsWritten ?? null,
+    receipts: out.receipts ?? null, unknown: out.unknown ?? null, errors: Array.isArray(out.errors) ? out.errors.length : null,
+  };
+}
+
+async function ffHousekeeping(env, at) {
+  if (ffMode(env) === "off" || !env.DB) return null;
+  const phase = phaseAt(at, FLOWS_LIVE.memoizedClock(at));
+  const session = phase ? phase.lastClosed : null;
+  let retried = null;
+  if (session && at < nightlyFinal(session)) {
+    const run = await FF_STORE.runRow(env, "nightly:" + session);
+    const open = !run || run.status === "pending" || run.status === "failed" || (run.status === "running" && !(run.lease_until > at));
+    if (open && (!run || run.attempts < EVAL_LIMITS.attempts) && (await ffNightlyHeld(env, session))) {
+      retried = await FF_EVAL.nightly(env, { session, at });
+      if (retried.status === "failed") logFailure("error", "ff run failed", { route: "housekeeping", cadence: "nightly" }, retried.error);
+    }
+  }
+  const gap = await FF_EVAL.gap(env, { at });
+  if (FLOWS_LIVE.pruneDue(at)) await FF_STORE.pruneRuns(env, shiftDay(easternDay(at), -FF_BUDGET.runRetention));
+  return { retried: retried ? retried.status : null, gap: gap.status };
+}
+
+function ffAfterLive(request, env, url, response, ctx) {
+  try {
+    if (url.pathname !== "/api/flows/ingest" || request.method !== "POST" || response.status !== 200) return;
+    if (url.searchParams.get("key") !== "live:alerts" || ffMode(env) === "off") return;
+    const failed = (error) => logFailure("error", "ff live tick failed", { route: url.pathname }, error);
+    keepAlive(ctx, ffLiveTick(env, Date.now()).then((out) => {
+      if (out && out.status === "failed") failed(out.error);
+    }, failed));
+  } catch (error) {
+    logFailure("error", "ff live tick failed", { route: url.pathname }, error);
+  }
+}
+
 function nightlyFreshHeaders(stored) {
   if (!stored || !stored.fresh) return {};
   return freshHeaders(stored.fresh, Date.now(), FLOWS_LIVE.memoizedClock()).headers;
@@ -999,7 +1190,7 @@ const LAST_GOOD_REFRESH_MS = 10 * 60 * 1000;
 const LAST_GOOD_MAX_KEYS = 256;
 const LAST_GOOD_PATHS = new Set(["board", "market", "events", "scoretrack", "calib", "dispersion", "meta", "flowalerts", "pulse", "political", "unusual",
   "movers", "sectors", "sector-premium", "universe", "regime", "ideas", "focus", "roster", "news", "record", "card", "card-x",
-  "hist", "macro"].map((name) => "/api/flows/" + name));
+  "hist", "macro", "voldesk"].map((name) => "/api/flows/" + name));
 
 function lastGoodKey(request, url) {
   if (request.method !== "GET" || !LAST_GOOD_PATHS.has(url.pathname)) return null;
@@ -2195,6 +2386,16 @@ function tickVendor(env) {
   };
 }
 
+const METER_KIND = Object.freeze({ timeout: "timeout", network: "network", too_large: "size", unparsable: "parse" });
+
+function meterOf(error) {
+  const upstream = Number.isInteger(error && error.upstream) ? error.upstream : 0;
+  const kind = error && error.cause && typeof error.cause === "object" ? METER_KIND[error.cause.kind] : undefined;
+  if (kind === "size" || kind === "parse") return { status: 200, kind };
+  if (upstream) return { status: upstream };
+  return { status: 0, kind: kind || (error && error.code === "chain_timeout" ? "timeout" : "network") };
+}
+
 async function uwFetch(env, path, params, opts) {
   if (!meterOn(env)) return uwFetchUnmetered(env, path, params, opts);
   const started = Date.now();
@@ -2204,21 +2405,44 @@ async function uwFetch(env, path, params, opts) {
     return body;
   } catch (error) {
     if (!(error instanceof HttpError && error.code === "chain_unconfigured")) {
-      const upstream = Number.isInteger(error && error.upstream) ? error.upstream : 0;
-      state.vendorMeter.record({ path, ms: Date.now() - started, status: upstream, kind: error && error.code === "chain_timeout" ? "timeout" : upstream ? undefined : "network" });
+      state.vendorMeter.record({ path, ms: Date.now() - started, ...meterOf(error) });
     }
     throw error;
   }
 }
 
+async function readCapped(response, maxBytes) {
+  if (!response.body) return { text: "", bytes: 0 };
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      reader.cancel().catch(() => {});
+      return { over: total };
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) { bytes.set(chunk, at); at += chunk.byteLength; }
+  return { text: new TextDecoder().decode(bytes), bytes: total };
+}
+
 async function uwFetchUnmetered(env, path, params, opts) {
-  if (!env.UW_API_KEY) throw new HttpError(503, "chain_unconfigured", "Live chain lookup is not configured");
+  const began = Date.now();
+  const maxBytes = opts && Number.isFinite(opts.maxBytes) && opts.maxBytes > 0 ? opts.maxBytes : null;
+  const tag = (error, kind, extra) => Object.assign(error, { cause: { kind, status: null, bytes: null, cap: maxBytes, ms: Date.now() - began, ...extra } });
+  if (!env.UW_API_KEY) throw tag(new HttpError(503, "chain_unconfigured", "Live chain lookup is not configured"), "unconfigured");
   const url = vendorUrl(vendorBase(env), path, params);
   const deadlineMs = opts && Number.isFinite(opts.deadlineMs) && opts.deadlineMs > 0 ? opts.deadlineMs : UW_DEADLINE_MS;
   const signal = AbortSignal.timeout(deadlineMs);
-  const failed = (message) => signal.aborted
-    ? new HttpError(504, "chain_timeout", "Market data provider did not answer within " + deadlineMs + " ms")
-    : new HttpError(502, "chain_upstream", message);
+  const failed = (message, kind, extra) => signal.aborted
+    ? tag(new HttpError(504, "chain_timeout", "Market data provider did not answer within " + deadlineMs + " ms"), "timeout", extra)
+    : tag(new HttpError(502, "chain_upstream", message), kind, extra);
   let response;
   try {
     response = await fetch(url, {
@@ -2226,41 +2450,46 @@ async function uwFetchUnmetered(env, path, params, opts) {
       signal,
     });
   } catch {
-    throw failed("Market data provider unreachable");
+    throw failed("Market data provider unreachable", "network");
   }
   const seen = vendorMeter(response.headers, Date.now());
   if (seen) {
     state.keyCounter = newerMeter(state.keyCounter, seen);
     if (opts && typeof opts.onMeter === "function") opts.onMeter(seen);
   }
-  if (response.status === 429) throw Object.assign(new HttpError(429, "chain_rate_limited", "Market data provider is rate limiting"), { upstream: 429 });
-  if (!response.ok) throw Object.assign(new HttpError(502, "chain_upstream", "Market data provider returned an error"), { upstream: response.status });
+  if (response.status === 429) {
+    if (response.body) response.body.cancel().catch(() => {});
+    throw tag(Object.assign(new HttpError(429, "chain_rate_limited", "Market data provider is rate limiting"), { upstream: 429 }), "limited", { status: 429 });
+  }
+  if (!response.ok) {
+    if (response.body) response.body.cancel().catch(() => {});
+    throw tag(Object.assign(new HttpError(502, "chain_upstream", "Market data provider returned an error"), { upstream: response.status }), "status", { status: response.status });
+  }
 
-  const maxBytes = opts && Number.isFinite(opts.maxBytes) && opts.maxBytes > 0 ? opts.maxBytes : null;
-  const tooLarge = () => new HttpError(502, "chain_too_large", "Market data provider body is over the parse ceiling");
+  const tooLarge = (bytes) => tag(new HttpError(502, "chain_too_large", "Market data provider body is over the parse ceiling"), "too_large", { status: response.status, bytes });
   if (maxBytes !== null) {
     const declared = Number(response.headers.get("content-length"));
     if (Number.isFinite(declared) && declared > maxBytes) {
       if (response.body) response.body.cancel().catch(() => {});
-      throw tooLarge();
+      throw tooLarge(declared);
     }
-    let text;
+    let read;
     try {
-      text = await response.text();
+      read = await readCapped(response, maxBytes);
     } catch {
-      throw failed("Market data provider returned malformed data");
+      throw failed("Market data provider returned malformed data", "network", { status: response.status });
     }
-    if (text.length > maxBytes) throw tooLarge();
+    if (typeof read.text !== "string") throw tooLarge(read.over);
     try {
-      return JSON.parse(text);
+      return JSON.parse(read.text);
     } catch {
-      throw new HttpError(502, "chain_upstream", "Market data provider returned malformed data");
+      throw tag(new HttpError(502, "chain_upstream", "Market data provider returned malformed data"), "unparsable", { status: response.status, bytes: read.bytes });
     }
   }
   try {
     return await response.json();
   } catch {
-    throw failed("Market data provider returned malformed data");
+    throw failed("Market data provider returned malformed data", "unparsable", { status: response.status });
   }
 }
 
@@ -2362,7 +2591,11 @@ async function buildLivePayload(env, ticker) {
   };
 }
 
-async function serveCachedVendorRead({ env, ctx, cacheKey, wantsRefresh, build, ttlSeconds, gate }) {
+const FLIGHT_JOIN_MS = 18000;
+
+const readClassOf = (error) => (error && error.details && error.details.read && typeof error.details.read.class === "string" ? error.details.read.class : null);
+
+async function serveCachedVendorRead({ env, ctx, cacheKey, wantsRefresh, build, ttlSeconds, gate, ttlOf = null, failKey = null, failTtlSeconds = 0, flights = null }) {
   const ttl = Number.isFinite(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds : CHAIN_TTL_SECONDS;
   const keep = Math.max(ttl, VENDOR_COPY_KEEP_SECONDS);
   const cache = edgeCache.handle();
@@ -2371,8 +2604,10 @@ async function serveCachedVendorRead({ env, ctx, cacheKey, wantsRefresh, build, 
   const storedAt = match ? Number(match.headers.get("X-Chain-Stored")) : NaN;
   const ageSeconds = Number.isFinite(storedAt) ? (Date.now() / 1000) - storedAt : Infinity;
   const hit = match && ageSeconds < keep ? match : null;
+  const ownTtl = hit ? Number(hit.headers.get("X-Chain-Ttl")) : NaN;
+  const fresh = Number.isFinite(ownTtl) && ownTtl > 0 ? Math.min(ttl, ownTtl) : ttl;
 
-  const serveCached = hit && ageSeconds < (wantsRefresh ? CHAIN_REFRESH_FLOOR_SECONDS : ttl);
+  const serveCached = hit && ageSeconds < (wantsRefresh ? CHAIN_REFRESH_FLOOR_SECONDS : fresh);
   if (serveCached) {
     const out = new Response(hit.body, hit);
     out.headers.set("X-Chain-Cache", wantsRefresh ? "throttled" : "hit");
@@ -2382,40 +2617,94 @@ async function serveCachedVendorRead({ env, ctx, cacheKey, wantsRefresh, build, 
     return out;
   }
 
-  const refuse = () => {
-    if (!hit) {
-      throw new HttpError(429, "rate_limited", "Too many market data reads in the last minute; try again shortly.",
-        { "Retry-After": String(MEMBER_VENDOR_PERIOD_S) });
-    }
+  const kept = (reason) => {
     const out = new Response(hit.body, hit);
     out.headers.set("X-Chain-Cache", "throttled");
     out.headers.set("X-Chain-Age", String(Math.max(0, Math.round(ageSeconds))));
     out.headers.set("Cache-Control", "no-store");
     out.headers.set("X-Fresh-State", "stale");
-    out.headers.set("X-Fresh-Reason", "throttled");
+    out.headers.set("X-Fresh-Reason", reason);
+    return out;
+  };
+
+  const refuse = () => {
+    if (!hit) {
+      throw new HttpError(429, "rate_limited", "Too many market data reads in the last minute; try again shortly.",
+        { "Retry-After": String(MEMBER_VENDOR_PERIOD_S) });
+    }
+    const out = kept("throttled");
     out.headers.set("X-Fresh-Throttled", "1");
     return out;
   };
 
-  if (gate && !(await gate.member())) return refuse();
-
-  let payload;
-  try {
-    payload = await build(gate ? chargedFetch(env, gate) : (path, params, opts) => uwFetch(env, path, params, opts));
-  } catch (error) {
-    if (error instanceof VendorRefused) return refuse();
+  const failure = (error) => {
+    if (failKey && hit) return kept(readClassOf(error) || error.code);
     throw error;
+  };
+
+  if (failKey && cache) {
+    const mark = await cache.match(failKey).catch(() => null);
+    const held = mark ? await mark.json().catch(() => null) : null;
+    if (held && held.error && typeof held.error.code === "string" && Number.isInteger(held.status)) {
+      return failure(new HttpError(held.status, held.error.code, held.error.message, undefined, held.read ? { read: held.read } : undefined));
+    }
   }
+
+  const key = cacheKey.url;
+  if (flights && flights.has(key)) {
+    const joined = flights.get(key);
+    const since = Date.now();
+    if (await FLOWS_LIVE.settledWithin(joined, FLIGHT_JOIN_MS) !== "settled") {
+      FLOWS_LIVE.flightAbandoned("vendor-read", since, 1, false);
+      return failure(HttpError.of("chain_timeout"));
+    }
+    const out = await joined;
+    if (out.payload !== undefined) return json(out.payload, 200, { "Cache-Control": "no-store", "X-Chain-Cache": "joined", "X-Chain-Age": "0" });
+    if (out.error instanceof HttpError) return failure(out.error);
+    if (!out.refused) throw out.error;
+  }
+
+  const flight = (async () => {
+    if (gate && !(await gate.member())) return { refused: true };
+    try {
+      return { payload: await build(gate ? chargedFetch(env, gate) : (path, params, opts) => uwFetch(env, path, params, opts)) };
+    } catch (error) {
+      return error instanceof VendorRefused ? { refused: true } : { error };
+    }
+  })();
+  if (flights) {
+    flights.set(key, flight);
+    flight.then(() => { if (flights.get(key) === flight) flights.delete(key); });
+    if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(flight);
+  }
+  const done = await flight;
+  if (done.refused) return refuse();
+  if (done.error) {
+    const error = done.error;
+    if (!(error instanceof HttpError)) throw error;
+    if (failKey && cache && failTtlSeconds > 0) {
+      const read = error.details && error.details.read ? error.details.read : null;
+      const body = JSON.stringify({ status: error.status, error: { code: error.code, message: error.message }, ...(read ? { read } : {}) });
+      const put = edgeCache.put(failKey, new Response(body, {
+        headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": `max-age=${Math.round(failTtlSeconds)}` },
+      }));
+      if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(put);
+      else await put;
+    }
+    return failure(error);
+  }
+  const payload = done.payload;
   const body = JSON.stringify(payload);
+  const own = typeof ttlOf === "function" ? Number(ttlOf(payload)) : NaN;
 
   if (cache) {
-    const store = new Response(body, {
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "Cache-Control": `max-age=${keep}`,
-        "X-Chain-Stored": String(Math.floor(Date.now() / 1000)),
-      },
-    });
+    const headers = {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": `max-age=${keep}`,
+      "X-Chain-Stored": String(Math.floor(Date.now() / 1000)),
+    };
+    if (Number.isFinite(own) && own > 0) headers["X-Chain-Ttl"] = String(Math.round(own));
+    const store = new Response(body, { headers });
 
     if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(edgeCache.put(cacheKey, store));
     else await edgeCache.put(cacheKey, store);
@@ -3108,7 +3397,17 @@ async function renderCourse(request, env, url, meta, ctx) {
 
 const rtServe = (request, env, url) => serveRt(request, env, url, { json, HttpError, requireSameOrigin, getSession: () => currentFlowsUser(request, env) });
 
-const FLOWLAB_BUILDERS = createFlowlab({ isRefusal: (error) => error instanceof VendorRefused });
+const FLOWLAB_LOG_EVERY_MS = 600000;
+
+function reportFlowlabRead(read) {
+  const key = read.op + "/" + read.class;
+  const at = Date.now();
+  if (at - (state.flowlabLogged.get(key) || 0) < FLOWLAB_LOG_EVERY_MS) return;
+  state.flowlabLogged.set(key, at);
+  logFailure("warn", "flowlab read failed", { route: "/api/flows/flowlab", code: read.class, op: read.op, status: read.status, bytes: read.bytes, cap: read.cap });
+}
+
+const FLOWLAB_BUILDERS = createFlowlab({ isRefusal: (error) => error instanceof VendorRefused, report: reportFlowlabRead });
 
 const UW_MACRO_DEADLINE_MS = 6000;
 
@@ -3179,15 +3478,19 @@ async function buildMacroNow(env, vf, { part, pair, symbols }) {
 }
 
 const ROUTER = createRouter(flowsReadRows({ readServed, readFlowsPayload, readWithOverlay, passthrough, recallLastGood, storeGone,
-  absentKey, cardWithEngine, briefWithLive, briefFeedsAhead, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK }),
+  absentKey, cardWithEngine, briefWithLive, briefFeedsAhead, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK,
+  positioningOpen: (env, session) => positioningMode(env, Boolean(session) && rtIsOwner(rtSwitches(env), session.username)) }),
 flowsDeskRows({ scRefreshAllowed, vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }),
-flowsFlowlabRows({ vendorGate, serveCachedVendorRead, readServed, passthrough, builders: FLOWLAB_BUILDERS, now: chainReadMs,
+flowsFfRows({ store: FF_STORE, flowsStore: FLOWS_STORE, core: FF_CORE, readClock: (db) => FLOWS_LIVE.cachedClock({ DB: db }), readLiveRows: FLOWS_LIVE.readLiveRows,
+  cache: state.ffCache, runAuth: ffRunAuth, evaluate: ffEvaluate, firstCheck: ffFirstCheckAt }),
+flowsFlowlabRows({ vendorGate, serveCachedVendorRead, readServed, passthrough, builders: FLOWLAB_BUILDERS, now: chainReadMs, flights: state.flowlabFlights,
   isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsAiRows({ askSpend, summaryResponse, readFlowsSummary, neuronProvenance, ensureFlowsTables, dossierResponse, askQuestion, askAnswer,
   readFlowsPayload, briefWithLive, askFloodPeriodS: ASK_FLOOD_PERIOD_S, aiCap: FLOWS_READING.aiCapOf }),
 flowsIngestRows({ store: FLOWS_STORE, ensureFlowsTables, storeGone, passthrough }),
 flowsReadyRows({ store: FLOWS_STORE, ensureFlowsTables, readClock: FLOWS_LIVE.readClock, railReadiness,
   isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
+flowsPositioningRows({ readServed, passthrough, storeGone, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsDispatchRows({ ensureFlowsTables, check: FLOWS_LIVE.checkDispatchCredential, record: FLOWS_LIVE.recordDispatchWhy,
   isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
   claim: (at) => {
@@ -3200,6 +3503,7 @@ flowsPipelineRows({ store: FLOWS_STORE, ensureFlowsTables, readClock: FLOWS_LIVE
   vendorCalls: (env) => (meterOn(env) ? summarizeCalls(state.vendorMeter.snapshot()) : null) }),
 flowsOpsRows({ ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), meter: () => state.keyCounter }),
 flowsOracleRows({ store: FLOWS_STORE, ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), nightlyFreshHeaders, recallLastGood }),
+flowsVoldeskRows({ store: FLOWS_STORE, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), passthrough, recallLastGood, storeGone }),
 flowsLedgerRows({ store: FLOWS_STORE, ensureFlowsTables, readLiveRows: FLOWS_LIVE.readLiveRows, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsMeRows({ store: MEMBER_STORE, flowsStore: FLOWS_STORE, readLiveRows: FLOWS_LIVE.readLiveRows, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsMacroRows({ readServed, passthrough, macroOn, macroLiveOn, serveCachedVendorRead, vendorGate, buildNow: buildMacroNow, nightlyFreshHeaders, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
@@ -3207,6 +3511,10 @@ flowsFilmRows(),
 flowsPageRows({ currentFlowsUser, readFlowsSummary: readHomeSummary, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), macroOn, macroLiveOn,
   scenesOn: (env, username) => {
     const mode = String((env && env.FLOWS_SCENES) || "").trim().toLowerCase();
+    return mode === "on" || (mode === "owner" && rtIsOwner(rtSwitches(env), username));
+  },
+  voldeskOn: (env, username) => {
+    const mode = env && typeof env.FLOWS_VOLDESK === "string" ? env.FLOWS_VOLDESK : "";
     return mode === "on" || (mode === "owner" && rtIsOwner(rtSwitches(env), username));
   } }),
 flowsRtRows({ serveRt: rtServe }));
@@ -3970,6 +4278,8 @@ export default {
       return FLOWS_LIVE.premarketNewsTick(env, at, { fetchVendor: (p, params) => uwFetch(env, p, params, { deadlineMs: LIVE_BUDGET.tier1TimeoutMs }) });
     })());
 
+    guard("ff housekeeping failed", ffHousekeeping(env, at));
+
     guard("flows nightly dispatch failed", (async () => {
       await ensureFlowsTables(env);
       await FLOWS_LIVE.nightlyTick(env, at);
@@ -3995,6 +4305,7 @@ export default {
     try {
       const response = await route(request, env, url, ctx);
       rememberLastGood(request, url, response, ctx);
+      ffAfterLive(request, env, url, response, ctx);
       return done(response);
     } catch (error) {
       if (error instanceof HttpError) {

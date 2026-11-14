@@ -3,7 +3,7 @@
 import { nextTradingDay } from "../shared/flows-freshness.js";
 import {
   runLive, runLiveLoop, chainDispatch, chainWithRetry, dryLiveTicks, readLiveClock, LIVE_READ_PACE_MS, passOutcome,
-  liveRunVerdict,
+  liveRunVerdict, universeReader,
 } from "./flows-legs/live.mjs";
 import { createWatch, witnessDrill } from "./flows-legs/watch.mjs";
 import { dryLiveDay } from "./flows-legs/live-day.mjs";
@@ -30,12 +30,16 @@ import { runCards } from "./flows-nightly/sections/cards.mjs";
 import { runClose } from "./flows-nightly/sections/close.mjs";
 import { runContext } from "./flows-nightly/sections/context.mjs";
 import { runFocus } from "./flows-nightly/sections/focus.mjs";
+import { runPositioning } from "./flows-nightly/sections/positioning.mjs";
 import { runDeepenLedger, runDeepenPlan } from "./flows-nightly/sections/deepen.mjs";
 import { pathFor } from "../shared/flows-vendor-ops.js";
 import { processCpuMs, runCompute } from "./flows-nightly/sections/compute.mjs";
 import { runOraclePrep, runOraclePublish } from "./flows-nightly/sections/oracle.mjs";
 import { runMacroStage, runPmNames, runPmSectors } from "./flows-nightly/sections/macro.mjs";
+import { runVolAuditSection, runVoldeskStage, volAuditFailed } from "./flows-nightly/sections/voldesk.mjs";
+import { voldeskBuildOn } from "../shared/flows-voldesk.js";
 import { runFlowlab } from "./flows-nightly/sections/flowlab.mjs";
+import { runFf } from "./flows-nightly/sections/ff.mjs";
 
 export {
   CALL_BUDGET, CALL_COST, CALL_OVERRUN_MARGIN, CHAIN_RESERVE_MS, DEADLINE_MS, DEEP_NAMES, DEEP_RULE,
@@ -147,6 +151,7 @@ async function runLiveMode() {
   };
   let clockBody = null;
   const readClock = () => readLiveClock(readStoredOnce, { seen: (body) => { clockBody = body; } });
+  const universe = universeReader(readStored);
   const settle = (loop) => {
     const verdict = liveRunVerdict(loop);
     if (loop && loop.watch) {
@@ -161,7 +166,7 @@ async function runLiveMode() {
   };
   if (force || process.env.FLOWS_LIVE_LOOP !== "1") {
     const clock = force ? null : await readClock();
-    const result = await runLive({ uw, publish, readStored, shapeNews, origin, force, clock });
+    const result = await runLive({ uw, publish, readStored, shapeNews, origin, force, clock, universe });
     settle({ passes: [reportErrors(result)] });
     return result;
   }
@@ -181,7 +186,7 @@ async function runLiveMode() {
       resetPublishRetryBudget();
       const timedOutBefore = stats.timedOut;
       timedOutAtPass = timedOutBefore;
-      const result = await runLive({ uw, publish, readStored, shapeNews, origin, skipRecent: first, clock });
+      const result = await runLive({ uw, publish, readStored, shapeNews, origin, skipRecent: first, clock, universe });
       const outcome = reportErrors(result);
       const timedOut = stats.timedOut - timedOutBefore;
       if (timedOut) console.warn(`live: ${timedOut} vendor request(s) timed out after ${vendorTimeoutMs() / 1000} s`);
@@ -271,6 +276,7 @@ async function main() {
   }
 
   const ctx = { stages, sessionDate, intraday, gateOrigin, gate };
+  ctx.auditHooks = { on: voldeskBuildOn(process.env), run: () => runVolAuditSection(ctx), failed: (error) => volAuditFailed(ctx, error) };
   await runUniverse(ctx);
   await runBoards(ctx);
   await stages.run("deepen-plan", () => runDeepenPlan(ctx), (error) => {
@@ -287,14 +293,17 @@ async function main() {
     await runPmNames(ctx);
   };
   await runFocus(ctx);
+  await runPositioning(ctx);
   await runOraclePrep(ctx);
   await runCompute(ctx);
   await runOraclePublish(ctx);
   await runPmSectors(ctx);
+  await runVoldeskStage(ctx);
   await stages.run("deepen-ledger", () => runDeepenLedger(ctx), (error) => {
     console.warn(`  deepen ledger: ${error.message} — the next run re-reads what the store holds`);
   });
   await runFlowlab(ctx);
+  await runFf(ctx);
   await runClose(ctx);
 }
 

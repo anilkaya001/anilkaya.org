@@ -85,8 +85,9 @@ export const TIER2 = Object.freeze({
   passesPerWeekday: 84,
   pass: Object.freeze({ trips: 11, read: 0, written: 13 }),
   storedReadsPerPass: 5,
+  runReadsPerWeekday: 8,
   watchReadsPerWeekday: 520,
-  source: "W02 section 2.5: 84 passes a weekday; scripts/flows-legs/live.mjs reads board:long, board:short, board:watch, focus and live:heartbeat once a pass; watch.mjs at most 5 reads a 5-minute tick in session",
+  source: "W02 section 2.5: 84 passes a weekday; scripts/flows-legs/live.mjs reads board:long, board:short, board:watch, focus and live:heartbeat once a pass, and the universe once a run for the cap-weighted tide's ticker list (a weekday is five runs; priced at eight); watch.mjs at most 5 reads a 5-minute tick in session",
 });
 
 export const NIGHTLY = Object.freeze({
@@ -121,7 +122,10 @@ export const PLANNED = Object.freeze([
   Object.freeze({ id: "audit.log", row: "P2-26", written: 10, read: 0, source: "PLAN.final.md 5.3" }),
   Object.freeze({ id: "ops.views", row: "P1-27, P2-03", written: 0, read: 4800, source: "24 rows a minute for 2.5 hours of owner viewing plus ten AI-block reads of 280 plus thirty coverage reads of 48" }),
   Object.freeze({ id: "coverage.view", row: "B1", written: 0, read: 6000, source: "B1 of the pipeline design: the owner's coverage read costs the 2,001-row listing ceiling at worst and about 500 rows in production (167 cards, 167 card-x, about 150 hist, 26 metadata ids), held 60 s in the Cache API, so a dozen reads a day is under 6,000" }),
+  Object.freeze({ id: "positioning.view", row: "WP4", written: 0, read: 300, source: "WP4 section 13: the Positioning page reads one stored key (one row) a load, a drill reads one card-x row, and an owner opens the page about 300 times a day at most; the nightly adds one payload key to the posts already counted and card-x writes are unchanged in number" }),
   Object.freeze({ id: "lab.active-at", row: "P1-71", written: 0, read: 3, source: "PLAN.final.md 5.3: at most 3 rows after the scans are removed" }),
+  Object.freeze({ id: "voldesk.view", row: "WP3", written: 4, read: 800, source: "docs/packages/WP3-volatility-structure.md: two nightly posts (voldesk and voldesk-stance) each add one manifest row through the door trigger; the route reads one primary-key row, 12 members a day opening the tab about 40 times, and the nightly reads the two prior payloads and up to 250 prior card-x rows by primary key" }),
+  Object.freeze({ id: "ff.mount", row: "FF lane G", written: 4, read: 137, source: "docs/ff/contract.md section 2 and DEPLOY.md 10.7: the nightly's ff stage posts ff-metrics and ff-carry, each adding one manifest row through the door trigger (written 2 x 2) and, in warn mode, reading two rows for its tuple (4); the run request reads the ff-metrics metadata row before it claims the night (1); a housekeeping firing that finds no finished run for the last closed session reads that metadata row before it retries (1 row, on every one of 48 firings in the worst case of a night that never ran: 48); the hook behind a landed live:alerts write reads that one live row on each of the 84 Tier 2 passes (84); the first-use probe of the ff_ tables reads no row; the two run rows a steady firing reads are ff.housekeeping's" }),
   Object.freeze({ id: "door.v2", row: "B3", written: 9212, read: 96800, source: "DESIGN.md 2.1 and 12 (B3, warn mode): 2,303 nightly posts (a full deepening night) add one manifest row each through the trigger and read two rows (the key's stored tuple and the universe's name list); the quarantine ring is priced at 2,303 would-have-refused events, each an insert plus its prune and body-clear rows (3), and a brake count of at most 40 rows read" }),
 ]);
 
@@ -130,8 +134,10 @@ export const AI_CAP_WORST_WRITES = 5000;
 export const MEASURED_CEILINGS = Object.freeze({ nightlyPostWritten: 1, rosterRead: 190 });
 
 export const D1_USERS = Object.freeze({
-  "worker.js": ["engines", "members.pages", "nightly.ingest", "tier2.ingest", "ops.views", "ai.counters"],
+  "worker.js": ["engines", "members.pages", "nightly.ingest", "tier2.ingest", "ops.views", "ai.counters", "ff.mount"],
   "server/ai.js": ["ai.counters"],
+  "server/ff-eval.js": ["ff.nightly", "ff.live", "ff.housekeeping"],
+  "server/ff-store.js": ["ff"],
   "server/member-store.js": ["member.state"],
   "server/ops.js": ["ops.views"],
   "server/schema.js": ["engines"],
@@ -162,7 +168,7 @@ export function ledger(counts, measured = MEASURED_CEILINGS) {
   const rows = [
     ...engines,
     { id: "tier2.ingest", kind: "engine", written: t2 * p.written,
-      read: t2 * (p.read + UPSERT_READS_PER_WRITE * p.written + TIER2.storedReadsPerPass) + TIER2.watchReadsPerWeekday },
+      read: t2 * (p.read + UPSERT_READS_PER_WRITE * p.written + TIER2.storedReadsPerPass) + TIER2.runReadsPerWeekday + TIER2.watchReadsPerWeekday },
     { id: "nightly.ingest", kind: "engine", written: posts * measured.nightlyPostWritten + 1,
       read: NIGHTLY.readRows + UPSERT_READS_PER_WRITE * posts },
     { id: "rail.roster", kind: "reader", written: 0, read: railLoads() * measured.rosterRead },

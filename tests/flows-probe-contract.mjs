@@ -16,7 +16,8 @@ import { LIVE_BUDGET } from "../shared/flows-live.js";
 import { PREMARKET_NEWS } from "../shared/flows-live-worker.js";
 import { FUNDS_FILL } from "../shared/flows-floor-funds-live.js";
 import { RT_LIMITS } from "../shared/flows-rt.js";
-import { RATE as NIGHTLY_RATE } from "../scripts/flows-nightly/vendor-params.mjs";
+import { RATE as NIGHTLY_RATE, CALL_COST } from "../scripts/flows-nightly/vendor-params.mjs";
+import * as VD from "../shared/flows-voldesk.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -38,16 +39,17 @@ const list = probe.loadList();
 const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.yaml"), "utf8"));
 
 {
-  const byTier = { used: new Set(), 1: new Set(), 2: new Set() };
+  const byTier = { used: new Set(), planned: new Set(), 1: new Set(), 2: new Set() };
   const opTier = new Map();
   for (const p of list.probes) {
     byTier[p.tier].add(p.op);
     if (opTier.has(p.op)) eq(opTier.get(p.op), p.tier, `${p.op} carries one tier across its probes`);
     opTier.set(p.op, p.tier);
   }
-  eq(byTier.used.size, 136, "every one of the 136 operations a production call site reads is probed and labelled used: the 79 read before the two packages, the 21 the Flow Lab and the fund reads added, and the 36 macro and private-markets operations");
-  eq(byTier["1"].size, 2, "the Tier 1 operation of the adoption plan that no code reads yet is probed, and the VIX term structure, which the nightly dropped and this probe keeps watching for the add-on");
-  eq(byTier["2"].size, 6, "six Tier 2 operations are probed: the ones no code reads yet and the entitlement probes left once the futures stats became a used read and the Flow Lab began to read the lit-flow, strike-flow and stock price-level routes; Tier 3 is left out");
+  eq(byTier.used.size, 111, "every one of the 111 operations a production call site reads is probed and labelled used: the sixteen the Flow Lab reads of the eighteen it registered (the recent flows read and the exact stock levels were retired when the Flow Lab moved to the per-expiry totals and the off-exchange levels), the 38 labelled before, the 37 the nightly legs read that were still filed under Tiers 1 and 2, the unusual-activity leg's one, the four the extras leg reads (dividends, splits, interpolated implied volatility, ETF exposure) and the thirteen the volatility desk reads, the VIX term structure among them");
+  eq(byTier["1"].size, 0, "no Tier 1 operation is left unread: the volatility desk reads the last one, and the VIX term structure is read again");
+  eq(byTier["2"].size, 4, "Tier 2 holds only the four entitlement probes (order flow, quote, volatility context and futures): the greeks and the trade-stance ranking moved to used with the volatility desk, the unusual congressional trades became a planned read with the positioning package, and Tier 3 is left out");
+  eq(byTier.planned.size, 26, "the 26 operations the positioning package reads are probed as planned: their shapes are recorded, their fields are not yet held strict");
   for (const [op, names] of Object.entries(list.expect)) {
     eq(new Set(names).size, names.length, `${op}: the documented names are listed once each`);
   }
@@ -119,6 +121,10 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
     for (const m of text.matchAll(/\b(?:pathFor|opById)\(([^,)]*)/g)) {
       for (const q of m[1].matchAll(/"([a-z0-9-]+)"/g)) refs.set(q[1], [...(refs.get(q[1]) || []), f]);
     }
+    for (const m of text.matchAll(/\bask\(\s*"([a-z0-9-]+)"/g)) {
+      bad.push([f, m[1]]);
+      refs.set(m[1], [...(refs.get(m[1]) || []), f]);
+    }
     for (const m of text.matchAll(/\bsourceOf\(\s*"[^"]*"\s*,\s*"([^"]*)"/g)) {
       bad.push([f, m[1]]);
       refs.set(m[1], [...(refs.get(m[1]) || []), f]);
@@ -130,11 +136,11 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
   deep(bad.filter(([, id]) => !ids.has(id)), [], "and every id a call site names is in the registry");
   const registered = new Set(OPS.map((e) => e.op));
   const tierOf = new Map(list.probes.map((p) => [p.op, p.tier]));
-  deep([...registered].filter((op) => tierOf.get(op) !== "used"), [], "USED IS TRUE: every registered operation has a probe labelled used");
+  deep([...registered].filter((op) => !["used", "planned"].includes(tierOf.get(op))), [], "USED IS TRUE: every registered operation has a probe labelled used, or planned for the positioning package's 26");
   deep(listOps.filter((op) => tierOf.get(op) === "used" && !registered.has(op)), [],
     "and no operation is labelled used that the registry does not carry");
-  eq(registered.size, 136, "136 operations are registered and read in production");
-  eq(OPS.length, 137, "one entry for each, the economy entry sharing the treasury yield's operation");
+  eq(registered.size, 137, "137 operations are registered: the 111 read in production and the 26 the positioning package plans");
+  eq(OPS.length, 137, "one entry for each");
   const dossierIds = new Set([...Object.values(DOSSIER_OPS), ...SOURCES.map((s) => s.op)]);
   const read = new Set([...refs.keys(), ...dossierIds]);
   deep(OPS.filter((e) => !read.has(e.id)).map((e) => e.id), [], "READ IS TRUE: every registered id is named by a production call site or a dossier source");
@@ -143,19 +149,26 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
 
   const specText = fs.readFileSync(path.join(ROOT, "docs/uw-openapi.yaml"), "utf8");
   const blocks = new Map();
+  const readsAllowed = (entry, block) => entry.reads === null || (Array.isArray(entry.reads) && new Set(entry.reads).size === entry.reads.length &&
+    (entry.reads.length > 0 || block.includes("'#/components/schemas/Volatility Result'")));
   {
     const heads = [...specText.matchAll(/^ {2}(\/api\/[^\s:]+):$/gm)];
     heads.forEach((m, i) => blocks.set(m[1], specText.slice(m.index, i + 1 < heads.length ? heads[i + 1].index : specText.length)));
   }
+  ok(OPS.filter((e) => e.reads && e.reads.length === 0).map((e) => e.id).join(",") === "vix-term,vol-character-top", "EMPTY READS: exactly the two operations whose spec response is a free-form Volatility Result carry an empty read list");
+  ok(!readsAllowed({ reads: [] }, blocks.get(opById("greeks").op)), "an empty read list on an operation whose spec states a schema is refused");
+  ok(!readsAllowed({ reads: [] }, ""), "an empty read list on an operation the spec lacks is refused");
+  ok(readsAllowed({ reads: [] }, blocks.get(opById("vix-term").op)), "and accepted for a Volatility Result");
+  ok(!readsAllowed({ reads: ["a", "a"] }, ""), "duplicate read names are refused");
   for (const e of OPS) {
     ok(e.path.startsWith("/api/") && e.method === "GET" && e.envelope === "data", `${e.id}: a GET under /api/ with the data envelope`);
     ok(LICENCES.includes(e.licence) && PLANS.includes(e.plan) && Object.hasOwn(PACKET_CLASSES, e.klass), `${e.id}: licence, plan and freshness class come from the declared sets`);
     ok(e.limiter === null || LIMITERS.includes(e.limiter), `${e.id}: exactly one limiter class (${e.limiter})`);
     ok(e.maxBytes === null || (Number.isInteger(e.maxBytes) && e.maxBytes > 0), `${e.id}: a byte cap is a positive integer or absent`);
-    ok(e.reads === null || (Array.isArray(e.reads) && e.reads.length > 0 && new Set(e.reads).size === e.reads.length), `${e.id}: reads are absent or distinct names`);
+    ok(readsAllowed(e, blocks.get(e.op) || ""), `${e.id}: reads are absent or distinct names, or empty for a response the spec leaves unschemed`);
     const inSpec = blocks.has(e.op);
     eq(e.liveOnly, !inSpec, `${e.id}: ${e.op} is liveOnly exactly when the committed spec lacks it`);
-    if (inSpec) ok(specDigest.ops[`GET ${e.op}`] && !specDigest.ops[`GET ${e.op}`].deprecated, `${e.id}: ${e.op} is in the committed spec and not deprecated`);
+    if (inSpec) ok(specDigest.ops[`GET ${e.op}`] && (e.deprecated || !specDigest.ops[`GET ${e.op}`].deprecated), `${e.id}: ${e.op} is in the committed spec and not deprecated`);
     const tokens = (e.path.match(/\{[a-z_]+\}/g) || []);
     const opTokens = (e.op.match(/\{[a-z_]+\}/g) || []);
     ok(e.path === e.op || e.path.split("/").every((seg, i) => seg === e.op.split("/")[i] || /^\{[a-z_]+\}$/.test(e.op.split("/")[i])),
@@ -232,9 +245,10 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
 
   eq(Object.hasOwn(JSON.parse(fs.readFileSync(probe.LIST_PATH, "utf8")), "reads"), false, "the probe list file carries no reads of its own");
   const derived = {};
-  for (const e of OPS) if (e.reads) derived[e.op] = [...e.reads];
+  const liveOps = new Set(list.probes.filter((p) => p.tier !== "planned").map((p) => p.op));
+  for (const e of OPS) if (e.reads && e.reads.length && liveOps.has(e.op)) derived[e.op] = [...e.reads];
   deep(list.reads, derived, "THE PROBE DERIVES ITS STRICT READ LIST FROM THE REGISTRY: loadList returns exactly the registry's reads");
-  eq(Object.keys(list.reads).length, 89, "for the 89 operations whose fields the code reads: the 68 with the macro and private-markets reads, and the sixteen the Flow Lab reads and the five fund reads");
+  eq(Object.keys(list.reads).length, 63, "for the 63 operations whose fields the code reads: the Flow Lab's reads (the per-strike and per-expiry flow and the off-exchange levels among them, the recent flows read and the exact stock levels retired), the five fund reads and the eleven volatility desk reads among them, the two unschemed volatility reads aside");
   deep(probe.SESSION_PROBE.path, pathFor("ohlc-1d", { ticker: "SPY" }), "and the session probe is the registry's daily candle for SPY");
   eq(probe.SESSION_PROBE.op, opById("ohlc-1d").op, "under the spec's operation");
 
@@ -255,29 +269,37 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
   eq(BUDGETS.premarketNews.everyMin, PREMARKET_NEWS.everyMin, "BUDGETS: the pre-market news cadence is the Worker's");
   eq(BUDGETS.premarketNews.callsPerFiring, PREMARKET_NEWS.callsPerFiring, "and its calls a firing");
   eq(BUDGETS.premarketNews.maxFiringsPerDay, PREMARKET_NEWS.maxFiringsPerDay, "and its firings a day");
+  eq(BUDGETS.voldesk.maxCalls, CALL_COST.voldesk, "BUDGETS: the Vol desk's calls a night are the pipeline's CALL_COST.voldesk");
+  eq(BUDGETS.voldesk.maxCalls, VD.marketCalls(VD.VOLAUDIT_CAP).max, "and follow from 17 market calls and eight a name over the four funds and the rotation cap");
+  eq(BUDGETS.voldesk.perName, VD.AUDIT_CALLS_PER_NAME, "BUDGETS: eight reads a name");
+  eq(BUDGETS.voldesk.marketCalls, VD.MARKET_CALLS, "and seventeen market-level reads");
+  eq(BUDGETS.voldesk.names, VD.FUND_TICKERS.length + VD.VOLAUDIT_CAP, "and the four funds plus the rotation cap of names");
   eq(BUDGETS.rail.perMinute, RT_LIMITS.callsPerMinute, "BUDGETS: the rail's calls a minute are the hub's");
   const flowlabServer = await import("../server/flowlab.js");
   const flowlabLeg = await import("../scripts/flows-legs/flowlab.mjs");
   deep({ ...BUDGETS.flowlab.memberCallsPerRead }, { ...flowlabServer.FLOWLAB_CALLS }, "BUDGETS: the Flow Lab's calls a member read are the server module's");
   eq(BUDGETS.flowlab.nightlyMax, flowlabLeg.NIGHTLY_MAX, "BUDGETS: the Flow Lab's nightly ceiling is the leg's");
-  eq(Object.values(flowlabLeg.SECTION_COST).reduce((a, b) => a + b, 0) - flowlabLeg.SECTION_COST.analytics, 31, "and the sections it runs with the analytics switch off cost 31 calls, under the ceiling");
+  eq(Object.values(flowlabLeg.SECTION_COST).reduce((a, b) => a + b, 0) - flowlabLeg.SECTION_COST.analytics, 30, "and the sections it runs with the analytics switch off cost 30 calls, under the ceiling");
   ok(Object.hasOwn(PLAN, PLAN.selected) && PLAN.selected === "observed", "PLAN selects the observed key, whose per-minute line is the vendor's header value");
   eq(PLAN.observed.perMinute, 1000000, "x-uw-req-per-minute-remaining as measured on 2026-10-04");
   eq(PLAN.startup.perMinute, 500, "the Startup plan's documented minute line");
   eq(PLAN.startup.perDay, 80000, "and its day line");
 
   const entitled = list.entitlement;
-  deep(entitled.slice().sort(), ["/api/congress/unusual-trades",
-    "/api/option-trades", "/api/stock/{ticker}/option-stance", "/api/stock/{ticker}/quote", "/api/stock/{ticker}/volatility/context"],
-    "ENTITLEMENT: the order-flow, quote, trade-stance, volatility-context and unusual-congress routes are asked, not assumed; the futures stats became a used read, and the lit-flow, strike-flow and stock price-level routes moved to used when the Flow Lab began to read them");
+  deep(entitled.slice().sort(), ["/api/futures/{contract}/stats",
+    "/api/option-trades", "/api/stock/{ticker}/quote", "/api/stock/{ticker}/volatility/context"],
+    "ENTITLEMENT: the order-flow, quote, volatility-context and futures routes are asked, not assumed; the unusual congressional trades became a planned read, the lit-flow, strike-flow and stock price-level routes moved to used when the Flow Lab began to read them, and the trade-stance ranking when the volatility desk did");
+  deep(list.probes.filter((p) => p.op === "/api/stock/{ticker}/flow-recent" || p.op === "/api/stock/{ticker}/stock-volume-price-levels").map((p) => p.id), [],
+    "RETIRED: the per-name recent flow and the stock volume levels the Flow Lab stopped reading are not probed, since no code reads them");
+  ok(!OPS.some((e) => e.op === "/api/stock/{ticker}/flow-recent" || e.op === "/api/stock/{ticker}/stock-volume-price-levels"), "and not registered; docs/vendor-coverage.md says why");
   const tickers = ["AAPL", "NVDA"];
   const expanded = probe.expandProbes(list, tickers);
   const asked = expanded.filter((p) => entitled.includes(p.op)).map((p) => p.id);
-  deep(asked, ["option-trades:AAPL", "option-trades:NVDA", "quote:AAPL", "quote:NVDA", "option-stance:AAPL", "option-stance:NVDA", "volatility-context:AAPL", "volatility-context:NVDA", "congress-unusual"],
-    "each per-name route is asked for AAPL and NVDA and the unusual congressional trades once");
+  deep(asked, ["option-trades:AAPL", "option-trades:NVDA", "quote:AAPL", "quote:NVDA", "volatility-context:AAPL", "volatility-context:NVDA", "futures-stats"],
+    "each per-name route is asked for AAPL and NVDA, the gold future once");
   ok(expanded.filter((p) => entitled.includes(p.op)).every((p) => p.entitlement && !p.gated),
     "and each carries the entitlement mark into its run");
-  eq(expanded.length + 1, 241, "a weekly strict run is 240 list calls plus the session call: the 179 before, the 25 the Flow Lab and the fund probes added, and the 36 macro and private-markets operations, each once");
+  eq(expanded.length + 1, 247, "a weekly strict run is 246 list calls plus the session call: the volatility desk's and the Flow Lab's probes beside the positioning package's planned ones, five of them per name for AAPL and NVDA");
   ok(list.enums["/api/option-trades"].report_flags.includes("intermarket_sweep") &&
      list.enums["/api/option-trades"].upstream_condition_detail.includes("isoi"),
     "the sweep question is asked of both encodings the spec documents: report_flags and the OPRA code isoi");
@@ -844,6 +866,13 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
     strictList);
   ok(planned.failures.length === 0 && /the plan changed/.test(planned.notes[0]),
     "an expected-gated call that starts answering is noted as a plan change, not a failure");
+  const heavy = probe.strictVerdict([{ id: "strikes:NVDA", op: "/api/stock/{ticker}/flow-per-strike-intraday", cls: "ok", status: 200, bytes: 4194305 }], strictList);
+  ok(heavy.failures.length === 0 && heavy.notes.some((n) => n.startsWith("OVERSIZE strikes:NVDA: 4194305 bytes, over the 4194304 byte cap")),
+    "A BODY OVER THE REGISTRY'S BYTE CAP IS NAMED IN THE STRICT NOTES: the page would refuse it as too large, so the Sunday run says which operation outgrew its cap");
+  ok(probe.strictVerdict([{ id: "strikes:NVDA", op: "/api/stock/{ticker}/flow-per-strike-intraday", cls: "ok", status: 200, bytes: 4194304 }], strictList).notes.length === 0,
+    "and a body at the cap is not");
+  eq(probe.registryCap("/api/option-trades/exchange-breakdown/{date}"), 524288, "the cap is the registry's for that operation");
+  eq(probe.registryCap("/api/market/market-tide"), null, "and an operation with no cap has none");
   const proving = probe.strictVerdict([{ id: "dividends:AAPL", op: "/api/companies/{ticker}/dividends", cls: "empty", status: 200 }], { ...strictList, proveRows: ["/api/companies/{ticker}/dividends"] });
   ok(proving.failures.length === 1 && /^UNPROVEN dividends:AAPL/.test(proving.failures[0]),
     "AN OPERATION THAT MUST ARRIVE WITH ROWS FAILS THE STRICT RUN WHEN IT ANSWERS EMPTY: the fields the code reads were not checked, which is not a pass");
@@ -1286,75 +1315,19 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
   }
   deep(valueShaped, [], "it holds snake-case names and the probe's type tokens, nothing that is a value");
   ok(!/\d{4}/.test(JSON.stringify({ ...committed, observed: null, run: null })), "VALUE-FREE: no run of four digits anywhere but the day and the run it records");
-  const registryOps = new Set(OPS.map((e) => e.op));
+  const registryOps = new Set(OPS.filter((e) => list.probes.some((p) => p.op === e.op && p.tier !== "planned")).map((e) => e.op));
   const unrecorded = [...registryOps].filter((o) => !committed.ops[o]).sort();
-  deep(unrecorded, [
-    "/api/analytics/sliding",
-    "/api/analytics/window",
-    "/api/commodities/{name}",
-    "/api/companies/{ticker}/dividends",
-    "/api/companies/{ticker}/splits",
-    "/api/crypto/whale-transactions",
-    "/api/crypto/whales/recent",
-    "/api/crypto/{pair}/ohlc/{candle_size}",
-    "/api/crypto/{pair}/state",
-    "/api/digital-currencies/history",
-    "/api/digital-currencies/intraday",
-    "/api/earnings/afterhours",
-    "/api/earnings/premarket",
-    "/api/etfs/{ticker}/exposure",
-    "/api/etfs/{ticker}/info",
-    "/api/etfs/{ticker}/weights",
-    "/api/forex/history",
-    "/api/forex/intraday",
-    "/api/forex/rate",
-    "/api/futures/contracts",
-    "/api/futures/flow",
-    "/api/futures/{contract}/candles",
-    "/api/futures/{contract}/stats",
-    "/api/futures/{contract}/trades",
-    "/api/group-flow/{flow_group}/greek-flow/{expiry}",
-    "/api/lit-flow/recent",
-    "/api/lit-flow/{ticker}",
-    "/api/market/movers",
-    "/api/net-flow/expiry",
-    "/api/option-contract/{id}/flow",
-    "/api/option-contract/{id}/intraday",
-    "/api/option-contract/{id}/volume-profile",
-    "/api/option-trades/exchange-breakdown/{date}",
-    "/api/option-trades/flow-alerts/{id}",
-    "/api/option-trades/multi-leg/{id}/legs",
-    "/api/option-trades/optionable-tickers",
-    "/api/politician-portfolios/holders/{ticker}",
-    "/api/predictions/insiders",
-    "/api/predictions/market/{asset_id}",
-    "/api/predictions/market/{asset_id}/liquidity",
-    "/api/predictions/market/{asset_id}/positions",
-    "/api/predictions/smart-money",
-    "/api/predictions/unusual",
-    "/api/predictions/user/{user_id}",
-    "/api/predictions/whales",
-    "/api/private-markets/companies",
-    "/api/private-markets/companies/{npm_ticker}",
-    "/api/private-markets/companies/{npm_ticker}/funding",
-    "/api/private-markets/companies/{npm_ticker}/investors",
-    "/api/private-markets/companies/{npm_ticker}/management",
-    "/api/private-markets/companies/{npm_ticker}/pricing",
-    "/api/private-markets/investors",
-    "/api/private-markets/investors/{name}",
-    "/api/private-markets/search",
-    "/api/seasonality/{month}/performers",
-    "/api/seasonality/{ticker}/monthly",
-    "/api/seasonality/{ticker}/year-month",
-    "/api/stock-directory/ticker-exchanges",
-    "/api/stock/{ticker}/flow-per-strike-intraday",
-    "/api/stock/{ticker}/flow-recent",
-    "/api/stock/{ticker}/greek-flow/{expiry}",
-    "/api/stock/{ticker}/interpolated-iv",
-    "/api/stock/{ticker}/option/stock-price-levels",
-    "/api/stock/{ticker}/stock-volume-price-levels",
-  ],
-    "every operation the code reads has a recorded shape, bar the two earnings calendars and the net flow, which answered without rows on 2026-10-04, the one the plan refuses (422), the four the extras leg reads, the three fund reads, the seventeen the Flow Lab reads and the macro and private-markets operations, which no weekly run has answered yet: their reducers fail by name until the first Sunday probe records them");
+  deep(unrecorded, ["/api/analytics/sliding", "/api/analytics/window", "/api/companies/{ticker}/dividends", "/api/companies/{ticker}/splits", "/api/earnings/afterhours", "/api/earnings/premarket", "/api/etfs/{ticker}/exposure",
+    "/api/etfs/{ticker}/info", "/api/etfs/{ticker}/weights",
+    "/api/group-flow/{flow_group}/greek-flow/{expiry}", "/api/lit-flow/recent", "/api/lit-flow/{ticker}", "/api/market/correlations", "/api/net-flow/expiry",
+    "/api/option-contract/{id}/flow", "/api/option-contract/{id}/intraday", "/api/option-contract/{id}/volume-profile",
+    "/api/option-trades/exchange-breakdown/{date}", "/api/option-trades/flow-alerts/{id}", "/api/option-trades/multi-leg/{id}/legs",
+    "/api/option-trades/optionable-tickers", "/api/politician-portfolios/holders/{ticker}", "/api/stock-directory/ticker-exchanges", "/api/stock/{ticker}/atm-chains",
+    "/api/stock/{ticker}/flow-per-strike-intraday", "/api/stock/{ticker}/greek-exposure/strike", "/api/stock/{ticker}/greek-exposure/strike-expiry",
+    "/api/stock/{ticker}/greek-flow/{expiry}", "/api/stock/{ticker}/interpolated-iv", "/api/stock/{ticker}/oi-per-expiry", "/api/stock/{ticker}/option-stance",
+    "/api/stock/{ticker}/option/stock-price-levels", "/api/stock/{ticker}/option/volume-oi-expiry",
+    "/api/stock/{ticker}/volatility/realized", "/api/stock/{ticker}/volatility/stats", "/api/volatility/character/top", "/api/volatility/vix-term-structure"],
+    "every operation the code reads has a recorded shape, bar the two earnings calendars and the net flow, which answered without rows on 2026-10-04, the one the plan refuses (422), the four the extras leg reads and the three fund reads that no weekly run has answered yet, the fifteen the Flow Lab reads and the eleven the volatility desk reads: their reducers fail by name until the first Sunday probe records them");
   const own = committed.ops["/api/institution/{ticker}/ownership"];
   deep([own.unseen, own.undocumented], [["units_change"], ["cik", "units_changed"]], "the ownership route's wire name: units_changed arrives, the documented units_change does not (weekly run 37223455933)");
   deep(own.renames, { units_change: "units_changed" }, "declared as a rename of the spec's name");
