@@ -313,11 +313,19 @@ export async function previews(c, build) {
   const forged = await api.call("POST", "/api/ff/preview", { body: { ast: { ...astOf(), d: { control: "fact" } } }, user: alice });
   c.eq(forged.error && forged.error.code, "ff_grammar_invalid", "preview: a client-derived field is refused");
 
+  const windows = await api.call("POST", "/api/ff/preview", { body: { ast: astOf({ scope: { kind: "universe" }, all: [{ m: "contract.premium", op: ">=", x: 1000000 }] }) }, user: alice });
+  const wv = windows.body.preview;
+  c.eq([wv.status, wv.reason, wv.detail], ["unavailable", "source_missing", "windows_unread"], "preview: a nightly window wire without the open-interest confirmation is unavailable, never a list of nothing");
+  c.ok(typeof wv.reasonText === "string" && wv.reasonText.startsWith("— source missing: ") && /flagged windows/.test(wv.reasonText) && /open interest confirmed/.test(wv.reasonText), "preview: and says why and what would let it preview", wv.reasonText);
+
   const seen = [];
-  const limited = build({ world: { env: { FF_HEAVY: limiter(6, seen) } } });
+  const limited = build({ world: { env: { FF_PREVIEW: limiter(30, seen), FF_HEAVY: limiter(0) } } });
   const codes = [];
-  for (let i = 0; i < 8; i++) codes.push((await limited.call("POST", "/api/ff/preview", { body: { ast: astOf() }, user: alice })).status);
-  c.eq(codes, [200, 200, 200, 200, 200, 200, 429, 429], "preview: six a minute through the heavy limiter");
+  for (let i = 0; i < 32; i++) codes.push((await limited.call("POST", "/api/ff/preview", { body: { ast: astOf() }, user: alice })).status);
+  c.eq([codes.filter((x) => x === 200).length, codes.slice(30)], [30, [429, 429]], "preview: thirty a minute through its own limiter, with the heavy budget spent");
+  c.ok(seen.length === 32 && seen.every((k) => k === "alice.one"), "preview: every preview is counted against the preview budget of the session member", seen.length);
+  const exp = await limited.call("GET", "/api/ff/export?from=2026-10-20&to=2026-10-27", { user: alice });
+  c.eq([exp.status, exp.error && exp.error.code], [429, "rate_limited"], "preview: the export still answers to the heavy budget the preview no longer spends");
   const prod = build({ host: "https://anilkaya.org" });
   const fixture = await prod.call("POST", "/api/ff/preview", { body: { ast: astOf() }, user: alice });
   c.eq([fixture.status, fixture.error && fixture.error.code], [400, "invalid_ticker"], "preview: a fixture name is refused on the production host");

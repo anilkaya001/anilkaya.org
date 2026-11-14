@@ -1,5 +1,5 @@
 import { HttpError, redirect } from "../http.js";
-import { FLOWS_PAGES, fireNav, ownerNav, macroNav, oracleShell, positioningNav, sideShell } from "../../shared/flows-pages.js";
+import { FLOWS_PAGES, ffSlots, fireNav, ownerNav, macroNav, oracleShell, positioningNav, sideShell } from "../../shared/flows-pages.js";
 import { ROUTE_FLAGS, flagOn, modeOf as ffMode } from "../ff-health.js";
 import { memberShell } from "../../shared/flows-member-shell.js";
 import { modeOf } from "../../shared/flows-member-state.js";
@@ -65,7 +65,7 @@ const PAGES = Object.freeze([
   { slug: "fire", ff: "fire", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.firePage({ username, shadow: ffMode(env) === "shadow" }) },
   { slug: "inbox", ff: "inbox", render: ffPending("inbox") },
   { slug: "digest", ff: "inbox", render: ffPending("digest") },
-  { slug: "wires", ff: "wires", render: ffPending("wires") },
+  { slug: "wires", ff: "wires", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.wiresPage({ username, shadow: ffMode(env) === "shadow" }) },
 ]);
 
 const PUBLIC_PAGES = Object.freeze([
@@ -139,7 +139,8 @@ export function flowsPageRows(deps) {
         const shown = memberShell(oracleShell(flowlabShell(page.render(session.username, summary, owner, scenesOn(env, session.username), env, voldeskOn(env, session.username), { macroOn, macroLiveOn }), slug, labOn), oracleMode(env, owner), slug), memberOptions(env, owner, slug));
         const shelled = macroOn(env, owner) ? macroNav(shown) : shown;
         const rendered = fireNav(shelled, ffPageOpen(env, "fire"), slug);
-        const railed = positioningNav(rendered, positioningMode(env, owner), slug);
+        const marked = ffSlots(rendered, { mark: ffPageOpen(env, "wires"), panel: ffPageOpen(env, "inbox"), slug });
+        const railed = positioningNav(marked, positioningMode(env, owner), slug);
         return html(sideShell(owner ? ownerNav(railed) : railed, request.headers.get("Cookie")));
       },
     });

@@ -24,7 +24,7 @@ export const RETRY_AFTER_S = 60;
 export const SWITCH_TTL_MS = 30000;
 export const HITS_PAGE = Object.freeze({ default: 12, max: 30 });
 export const COMPILE_CODES = Object.freeze(["ff_grammar_invalid", "ff_grammar_precision", "ff_metric_unavailable", "ff_symbol_outside_universe", "ff_scope_reserved"]);
-export const LIMITER_BINDINGS = Object.freeze({ write: "FF_WRITE", heavy: "FF_HEAVY", health: "FF_HEALTH" });
+export const LIMITER_BINDINGS = Object.freeze({ write: "FF_WRITE", heavy: "FF_HEAVY", health: "FF_HEALTH", preview: "FF_PREVIEW" });
 
 const E = (code, message, details, headers) => HttpError.of(code, message, headers, details);
 
@@ -454,7 +454,7 @@ export function flowsFfRows(deps) {
   };
 
   const preview = async (ctx) => {
-    const { at } = await enter(ctx, { flags: ["fire"], limiter: LIMITER_BINDINGS.heavy, mutate: true });
+    const { at } = await enter(ctx, { flags: ["fire"], limiter: LIMITER_BINDINGS.preview, mutate: true });
     warm(ctx, ["ff-metrics"]);
     const body = await readJSON(ctx.request);
     only(body, ["ast", "template"]);

@@ -3754,10 +3754,12 @@ with a not-released page. The Fire page says so in one sentence.
 EXISTS` statements once per isolate before its first Fire statement
 (`ensureFf`), so a database that has not had the migration still works; the
 migration is the reviewed path and the first-use DDL the fallback. No secret
-is added. Three rate-limit bindings are new in both configurations:
+is added. Four rate-limit bindings are new in both configurations:
 `FF_WRITE` (namespace 1131, staging 2131, 10 a minute), `FF_HEAVY` (1132,
-2132, 6 a minute, shared by preview and export) and `FF_HEALTH` (1133, 2133,
-4 a minute). They are flood brakes that fail open.
+2132, 6 a minute, the export and the heavy reads), `FF_HEALTH` (1133, 2133,
+4 a minute) and `FF_PREVIEW` (1134, 2134, 30 a minute, the composer's
+preview alone, so an editor who changes a wire quickly never spends the
+export's budget). They are flood brakes that fail open.
 
 **Switches** (`wrangler.toml` [vars]; a deploy overwrites the dashboard's
 list, so the file is what the next deploy runs):

@@ -30,7 +30,7 @@ Nothing here is registered in `worker.js` yet. The integration lane adds:
    - `evaluate({ env, ctx, cadence, session, kind, now })`: lane A's evaluator entry; absent, `/api/ff/run` answers `ff_evaluator_unavailable`;
    - `firstCheck({ cadence, now, effectiveSession, clockRow })`: the first-check rule; absent, the preview prints the first check as absent with its reason;
    - `now`: defaults to `Date.now`.
-2. The three rate-limit bindings `FF_WRITE` (10 a minute), `FF_HEAVY` (6 a minute) and `FF_HEALTH` (4 a minute) in `wrangler.toml`, with namespace ids that no other binding uses. The limiters are flood brakes and fail open, as `memberAllowed` does; the quotas below are the real limits.
+2. The four rate-limit bindings `FF_WRITE` (10 a minute), `FF_HEAVY` (6 a minute), `FF_HEALTH` (4 a minute) and `FF_PREVIEW` (30 a minute, the preview's own budget, so it never shares a token with the export) in `wrangler.toml`, with namespace ids that no other binding uses. The limiters are flood brakes and fail open, as `memberAllowed` does; the quotas below are the real limits.
 3. `FF_MODE` (`on`, `shadow`, anything else is off), `FF_ROUTE_WIRES`, `FF_ROUTE_INBOX`, `FF_ROUTE_FIRE` and `FF_ROUTE_EXPORT` (`on`, anything else is off) in `[vars]`. Every switch fails closed.
 4. `D1_USERS` rows in `tests/lib/d1-budget.mjs` for `server/ff-store.js` and `server/ff-health.js`, so `flows-d1-budget` prices the new statements.
 5. A call to `evaluate` from the live and nightly firings if the evaluator is to run in the Worker; lane B only stores what it writes (`hitWrite`, `stateWrite`, `receiptWrite`, `recordWrite`, `startRun`, `finishRun`, all fenced by the run's attempt token).

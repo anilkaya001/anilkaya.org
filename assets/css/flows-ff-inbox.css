@@ -1,0 +1,78 @@
+.flows-body[data-flows-page="wires"] .flows-main {
+  height: 100vh;
+  height: 100svh;
+  height: 100dvh;
+  padding-bottom: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.flows-body[data-flows-page="wires"] .flows-main > * { max-width: none; }
+.flows-body[data-flows-page="wires"] .flows-main > dialog.ffx-dlg { width: min(720px, calc(100vw - 24px)); max-width: calc(100vw - 24px); margin: auto; }
+.flows-body[data-flows-page="wires"] .flows-main > dialog.ffx-sheet { width: min(980px, calc(100vw - 24px)); }
+.flows-body[data-flows-page="wires"] .flows-main > .visually-hidden { width: 1px; max-width: 1px; margin: -1px; }
+
+.ffx-wr-new { display: inline-flex; align-items: center; flex: none; text-decoration: none; }
+.ffx-wr-stage { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(260px, 0.9fr) minmax(0, 1.6fr); gap: 12px; }
+.ffx-wr-filters { margin: 2px 12px 6px; align-self: flex-start; }
+.ffx-wr-filters button { min-height: 36px; }
+.ffx-wr-filters button[aria-selected="true"] { background: var(--fill-1); color: var(--label-1); box-shadow: var(--mat-edge); }
+.ffx-wr-list { list-style: none; margin: 0; padding: 0 6px; flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 2px; }
+.ffx-wr-list-all { overflow: auto; max-height: min(60vh, 520px); flex: none; }
+.ffx-wr-li { flex: none; display: flex; min-width: 0; }
+.ffx-wr-row { flex: 1; min-width: 0; min-height: 52px; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 4px 8px; border-radius: var(--r-sm); }
+.ffx-wr-row:hover { background: var(--fill-4); }
+.ffx-wr-row[aria-current="true"] { background: var(--fill-3); box-shadow: var(--mat-edge); }
+.ffx-wr-rt { font: 500 13px / 1.25 var(--font-text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ffx-wr-rm { display: flex; align-items: center; gap: 6px; min-width: 0; font: var(--t-caption); color: var(--label-2); }
+.ffx-wr-rs { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ff-ink-dim, var(--label-2)); }
+.ffx-wr-st[data-status="armed"], .ffx-wr-st[data-status="following"] { background: var(--accent-fill); color: var(--accent-ink); }
+.ffx-wr-st[data-status="retired"], .ffx-wr-st[data-status="off"] { color: var(--label-3); }
+.ffx-wr-state { flex: none; }
+.ffx-wr-state[hidden] { display: none; }
+.ffx-wr-lfoot { display: flex; align-items: center; gap: 8px; flex: none; min-height: 36px; padding: 0 12px 6px; font: var(--t-caption); color: var(--label-3); }
+.ffx-wr-lfoot [hidden] { display: none; }
+.ffx-wr-detail { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 2px 12px 10px; overflow: hidden; }
+.ffx-wr-dh { display: flex; align-items: center; gap: 8px; flex: none; min-width: 0; }
+.ffx-wr-dt { margin: 0; min-width: 0; flex: 0 1 auto; font: 600 17px / 1.25 var(--font-text); letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ffx-wr-sentence { min-height: 0; }
+.ffx-wr-facts dd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
+.ffx-wr-acts { margin-top: 0; }
+.ffx-wr-acts .ffx-btn[aria-disabled="true"] { background: var(--fill-3); color: var(--label-3); box-shadow: none; cursor: default; filter: none; }
+.ffx-wr-out { flex: 1 1 100%; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; color: var(--label-2); }
+.ffx-wr-out[data-ff-absent] { color: var(--label-1); }
+.ffx-wr-out:empty { display: none; }
+.ffx-wr-vbox { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 4px; }
+.ffx-wr-vers { list-style: none; margin: 0; padding: 0; flex: 0 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.ffx-wr-vers-all { overflow: auto; max-height: min(60vh, 520px); flex: none; }
+.ffx-wr-v { flex: none; display: flex; flex-direction: column; gap: 1px; padding: 5px 0; border-top: 1px solid var(--sep); min-width: 0; }
+.ffx-wr-v[aria-current="true"] .ffx-wr-vh { color: var(--label-1); }
+.ffx-wr-vh { font: var(--t-caption); color: var(--label-3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ffx-wr-vs { font: var(--t-footnote); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ffx-wr-vers-all .ffx-wr-vs, .ffx-wr-vers-all .ffx-wr-vh { white-space: normal; }
+.ffx-wr-vall { align-self: flex-start; flex: none; }
+.ffx-wr-vall[hidden] { display: none; }
+
+@media (max-width: 1099.98px) {
+  .ffx-wr-stage { grid-template-columns: minmax(0, 1fr); }
+  .ffx-wr[data-view="list"] .ffx-wr-dp, .ffx-wr[data-view="wire"] .ffx-wr-lp { display: none; }
+}
+@media (pointer: coarse) {
+  .ffx-wr-filters button, .ffx-wr-lfoot .ffx-link, .ffx-wr-vall { min-height: 44px; }
+}
+@media (max-width: 767.98px) {
+  .flows-body[data-flows-page="wires"] .flows-main { padding-bottom: calc(var(--tab-h) + var(--safe-b) + var(--sp-3)); }
+}
+@media (max-width: 599.98px) {
+  .ffx-wr-new { min-height: 40px; padding: 0 12px; font-size: 13px; }
+  .ffx-wr .ffx-title { flex-wrap: wrap; row-gap: 2px; }
+  .ffx-wr .ffx-cap { order: 5; flex-basis: 100%; }
+  .ffx-wr-acts .ffx-btn { min-height: 40px; padding: 0 12px; }
+}
+@media (max-height: 700px) {
+  .ffx-wr-sentence { -webkit-line-clamp: 2; }
+  .ffx-wr-row { min-height: 44px; }
+}
+@media (forced-colors: active) {
+  .ffx-wr-row[aria-current="true"] { border: 1px solid CanvasText; }
+}

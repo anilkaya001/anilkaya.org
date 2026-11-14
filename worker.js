@@ -1050,7 +1050,7 @@ const FF_CORE = Object.freeze({
     try {
       const wire = compileWire({ id: "w-preview", layer: "member", memberId: "preview", version: 1, body: JSON.parse(version.ast_json), sentence: version.sentence });
       if (nightly && wire.subjectKind === "c" && !wire.clauses.some((c) => c.m === "contract.oi_confirm")) {
-        return { status: "unavailable", reason: "source_missing", subjects: [] };
+        return { status: "unavailable", reason: "source_missing", detail: "windows_unread", subjects: [] };
       }
       const metrics = snapshot.metrics;
       const row = nightly ? null : (snapshot.live || []).find((r) => r && r.id === "live:alerts");
