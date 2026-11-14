@@ -6,7 +6,7 @@ import { LEDGER_LIMITS } from "../../shared/flows-ledger.js";
 import { ledgerSum, LEDGER_TIERS } from "../../shared/flows-neuron-coverage.js";
 import { LIVE_LOOP } from "./live.mjs";
 import { fixtureNameIn } from "../../shared/flows-fixture-names.js";
-import { HEALTH_LINES as EXTRAS_LINES } from "../../shared/flows-vendor-extras.js";
+import { HEALTH_LINES as EXTRAS_LINES, reasonsSaid } from "../../shared/flows-vendor-extras.js";
 
 export const HEALTH = Object.freeze({
   focusCron: "3-58/5 13-21 * * MON-FRI",
@@ -459,7 +459,10 @@ export function extrasChecks(extras) {
   if (!extras || typeof extras !== "object" || !extras.health || typeof extras.health !== "object") return { failures, warnings, notes };
   const rows = Object.entries(extras.health);
   const pct = (e) => `${Math.round(Number(e.rate) * 1000) / 10}%`;
-  const line = (id, e) => `${id} ${Number(e.bad)} of ${Number(e.attempted)} (${pct(e)})`;
+  const line = (id, e) => {
+    const why = reasonsSaid(extras.reasons, id);
+    return `${id} ${Number(e.bad)} of ${Number(e.attempted)} (${pct(e)})` + (why ? ` [${why}]` : "");
+  };
   const failing = rows.filter(([, e]) => e && e.state === "fail");
   const eligible = new Set(Array.isArray(extras.eligible) ? extras.eligible : []);
   const bad = failing.filter(([id]) => eligible.has(id));

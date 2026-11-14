@@ -668,7 +668,8 @@ eq(MUTANTS.length, 27, "twenty-seven planted wrong builds, the package's twenty-
   const cards = new Map();
   const fakeCard = clone(FX.worlds.agree.input.card);
   cards.set("SYX101", fakeCard);
-  const chain = FX.worlds.agree.input.chain.rows.map((r) => ({ ...r, symbol: "SYX101X" + r.expiry + r.type + r.K }));
+  const occ = (r) => "SYX101" + r.expiry.slice(2).replace(/-/g, "") + r.type + String(Math.round(r.K * 1000)).padStart(8, "0");
+  const chain = FX.worlds.agree.input.chain.rows.map((r) => ({ ...r, symbol: occ(r) }));
   const vendor = makeVoldeskFake({ sessionDate: SESSION, cardOf: (t) => cards.get(t) || null, chainOf: () => ({ rows: chain, truncated: false }) });
   const run = await runVolAudit({
     uw: vendor, session: SESSION, now: "2026-10-23T21:45:00Z", funds: [], names: ["SYX101"], cardOf: (t) => cards.get(t) || null,
@@ -677,6 +678,30 @@ eq(MUTANTS.length, 27, "twenty-seven planted wrong builds, the package's twenty-
   eq(run.vas.size, 1, "the leg audits a name through the fake");
   eq(run.calls, 8, "in eight calls");
   eq(run.vas.get("SYX101").v, "agree", "and the fake feed agrees with the engine");
+  const legRow = (r, id) => r.vas.get("SYX101").rows.find((x) => x[0] === id);
+  eq(legRow(run, "spot")[5], "agree", "THE WEEKLY PROBE OF 2026-11-08: the at-the-money rows carry no expiry, strike or type on the wire, so the spot row is found by the expiry inside each row's option symbol and is compared");
+  eq(legRow(run, "chainSelf")[5], "agree", "and the chain is asked for with greeks=true, without which the feed sends bare symbol strings and the feed-against-feed row has no open interest to compare");
+  eq(V.symbolExpiry("SYX101261122C00250000"), "2026-11-22", "an option symbol gives its expiry");
+  same([V.symbolExpiry("BRK.B261122P00450000"), V.symbolExpiry("SYX101"), V.symbolExpiry("SYX101261340C00250000"), V.symbolExpiry(null)], ["2026-11-22", null, null, null], "with a dotted root, and never from a symbol that holds no real date");
+  const runWith = async (file, transforms, salt) => {
+    const mod = await loadMutated(file, transforms, { salt });
+    const fake = makeVoldeskFake({ sessionDate: SESSION, cardOf: (t) => cards.get(t) || null, chainOf: () => ({ rows: chain, truncated: false }) });
+    const audit = file === LEG ? mod.runVolAudit : runVolAudit;
+    return audit({ uw: fake, session: SESSION, now: "2026-10-23T21:45:00Z", funds: [], names: ["SYX101"], cardOf: (t) => cards.get(t) || null, chainOf: () => ({ rows: chain, truncated: false }), cap: 5 });
+  };
+  const LEG = "scripts/flows-legs/voldesk.mjs";
+  const bare = await runWith(LEG, [["{ greeks: true, ...day }", "{ ...day }"]], checks);
+  eq(legRow(bare, "chainSelf")[5], "nc", "PLANTED WRONG BUILD, a leg that asks for the chain without greeks: the feed-against-feed row is not compared, which the real leg's is");
+  const byField = await loadMutated(LEAF, [["symbolExpiry(r.option_symbol) === chosen.expiry", "r.expiry === chosen.expiry"]], { salt: checks + 1 });
+  const atmWire = FX.worlds.agree.input.atm.map(({ expiry, strike, option_type, ...r }) => r);
+  eq(byField.auditName({ ...FX.worlds.agree.input, atm: atmWire }).rows.find((x) => x[0] === "spot")[5], "nc", "PLANTED WRONG BUILD, an audit that looks for an expiry field the wire does not carry: the spot row is not compared");
+  eq(V.auditName({ ...FX.worlds.agree.input, atm: atmWire }).rows.find((x) => x[0] === "spot")[5], "agree", "which the real audit compares on the same rows");
+  const bareBody = await vendor("/api/stock/SYX101/option-chains", { date: SESSION }, { envelope: true });
+  ok(bareBody.data.length > 0 && bareBody.data.every((x) => typeof x === "string"), "the fake answers as the feed does: bare symbol strings unless greeks is asked for");
+  const atmBody = await vendor("/api/stock/SYX101/atm-chains", {}, { envelope: true });
+  ok(atmBody.data.length > 0 && atmBody.data.every((r) => !("expiry" in r) && !("strike" in r) && !("option_type" in r)), "and its at-the-money rows carry no expiry, strike or type, as the wire does not");
+  same([opById("option-chains").reads, opById("atm-chains").reads], [["option_symbol", "open_interest"], ["option_symbol", "open_interest", "stock_price"]],
+    "the registry lists for both operations exactly the fields the audit reads, which is what the weekly probe holds strict");
   ok(run.stance.get("SYX101").rows.length > 0, "the stance rows are kept for the ring");
   const desk = await runVolDesk({ uw: vendor, session: SESSION, shapes: SHAPES_REAL });
   eq(desk.calls, 17, "seventeen market calls");

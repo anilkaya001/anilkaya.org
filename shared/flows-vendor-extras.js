@@ -155,9 +155,16 @@ export function reduceDividends(raw, { today = null } = {}) {
   const events = [];
   const seen = new Set();
   let bad = 0;
+  let mistyped = 0;
+  let undated = 0;
   for (const r of rows) {
     const ex = dayWithin(r.ex_date, t);
-    if (!ex) { bad++; continue; }
+    if (!ex) {
+      bad++;
+      if (r.ex_date === null || r.ex_date === undefined) undated++;
+      else if (!(typeof r.ex_date === "string" && isoDay(r.ex_date))) mistyped++;
+      continue;
+    }
     if (seen.has(ex)) continue;
     seen.add(ex);
     const amount = vnum(r.amount);
@@ -169,7 +176,7 @@ export function reduceDividends(raw, { today = null } = {}) {
       raw: amount,
     });
   }
-  if (rows.length && !events.length) return fail("type:ex_date");
+  if (rows.length && !events.length && mistyped) return fail("type:ex_date");
   events.sort((a, b) => (a.ex < b.ex ? -1 : a.ex > b.ex ? 1 : 0));
   const past = t ? events.filter((e) => e.ex <= t) : events;
   const declared = t ? events.filter((e) => e.ex > t) : [];
@@ -184,7 +191,7 @@ export function reduceDividends(raw, { today = null } = {}) {
   const x = {
     ok: true,
     rv: PARTS.dividends.rv,
-    none: events.length === 0,
+    none: rows.length === 0,
     n: events.length,
     lastEx,
     nextEx: declared.length ? declared[0].ex : null,
@@ -197,6 +204,7 @@ export function reduceDividends(raw, { today = null } = {}) {
     rawAmounts: past.slice(-4).reverse().map((e) => e.raw),
   };
   if (bad) x.bad = bad;
+  if (undated) x.undated = undated;
   return x;
 }
 
@@ -615,6 +623,29 @@ export function outcomeTally(rows) {
     else e.failed++;
   }
   return out;
+}
+
+export const REASON_KINDS = 6;
+
+export function reasonTally(rows, kinds = REASON_KINDS) {
+  const out = {};
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r || r.skipped) continue;
+    const why = String(r.why || "ok");
+    if (!(why === "unshaped" || why.startsWith("missing") || why.startsWith("type"))) continue;
+    const e = out[r.id] || (out[r.id] = {});
+    const key = /^[a-z]+(:[a-z_]{1,32})?$/.test(why) ? why : why.startsWith("type") ? "type" : why.startsWith("missing") ? "missing" : "unshaped";
+    if (!Object.hasOwn(e, key) && Object.keys(e).length >= kinds) continue;
+    e[key] = (e[key] || 0) + 1;
+  }
+  return out;
+}
+
+export function reasonsSaid(reasons, id) {
+  const e = isObj(reasons) && isObj(reasons[id]) ? reasons[id] : null;
+  if (!e) return "";
+  const parts = Object.entries(e).filter(([, n]) => Number.isInteger(n) && n > 0).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+  return parts.length ? parts.map(([k, n]) => `${k} ${n}`).join(", ") : "";
 }
 
 export const HEALTH_LINES = Object.freeze({ warn: 0.05, fail: 0.2, minAttempted: 50, matureNights: 7 });
