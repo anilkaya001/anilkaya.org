@@ -1,0 +1,1 @@
+{"name": "ff-e-inbox-plants-b", "class": "N", "group": "shard", "timing": false, "medianS": 140, "shard": 12, "command": "node ff-e-inbox-plants-b.mjs", "files": ["ff-e-inbox-plants-b.mjs"], "covers": ["assets/css/flows-ff-inbox.css","assets/js/flows-ff-evidence.js","assets/js/flows-ff-inbox.js"]}
