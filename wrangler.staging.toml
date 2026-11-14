@@ -83,6 +83,11 @@ name = "FF_HEALTH"
 namespace_id = "2133"
 simple = { limit = 4, period = 60 }
 
+[[ratelimits]]
+name = "FF_PREVIEW"
+namespace_id = "2134"
+simple = { limit = 30, period = 60 }
+
 [[durable_objects.bindings]]
 name = "PULSE"
 class_name = "Pulse"

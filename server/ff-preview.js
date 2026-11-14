@@ -48,6 +48,17 @@ export function firstCheck({ cadence, now, effectiveSession, clockRow = null }) 
 
 const reasonTextOf = (reason) => (reason ? ABSENT_MARK + " " + String(reason).replace(/_/g, " ") : ABSENT_MARK);
 
+export const PREVIEW_DETAIL = Object.freeze({
+  windows_unread: "the nightly run reads this wire from the session's flagged windows, which the preview does not hold; add open interest confirmed to preview it here",
+});
+
+const detailOf = (result) => (result && typeof result.detail === "string" && Object.hasOwn(PREVIEW_DETAIL, result.detail) ? result.detail : null);
+
+const unavailableText = (result) => {
+  const detail = detailOf(result);
+  return reasonTextOf(result.reason || "missing") + (detail ? ": " + PREVIEW_DETAIL[detail] : "");
+};
+
 export function previewView({ compiled, result, now, effectiveSession, clockRow = null, firstCheckAt = null }) {
   const v = compiled.version;
   const check = firstCheckAt || firstCheck({ cadence: v.cadence, now, effectiveSession, clockRow });
@@ -89,7 +100,8 @@ export function previewView({ compiled, result, now, effectiveSession, clockRow 
     serverNow: now,
     status: result.status === "ok" ? "ok" : "unavailable",
     reason: result.status === "ok" ? null : result.reason || "missing",
-    reasonText: result.status === "ok" ? null : reasonTextOf(result.reason || "missing"),
+    reasonText: result.status === "ok" ? null : unavailableText(result),
+    ...(result.status !== "ok" && detailOf(result) ? { detail: detailOf(result) } : {}),
     sentence: v.sentence,
     template: v.template,
     cadence: v.cadence,

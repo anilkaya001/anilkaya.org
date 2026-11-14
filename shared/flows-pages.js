@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "431";
+export const ASSET_VERSION = "432";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -10,7 +10,8 @@ import { HORIZON_SESSIONS } from "./flows-horizon.js";
 import { macroBody, MACRO_DESCRIPTION, MACRO_STYLES, MACRO_SCRIPTS, MACRO_DEFER } from "./flows-page-macro.js";
 import { COPY as VD_COPY } from "./flows-voldesk-copy.js";
 import { flowlabBody, FLOWLAB_DESCRIPTION, FLOWLAB_STYLES, FLOWLAB_SCRIPTS } from "./flows-page-flowlab.js";
-import { FIRE_DESCRIPTION, FIRE_SCRIPTS, FIRE_STYLES, fireBody } from "./ff-pages-fire.js";
+import { FIRE_DESCRIPTION, FIRE_SCRIPTS, FIRE_STYLES, dataBlock as fireDataBlock, fireBody } from "./ff-pages-fire.js";
+import { WIRES_DESCRIPTION, WIRES_SCRIPTS, WIRES_STYLES, wiresBody } from "./ff-pages-inbox.js";
 
 export const CALENDAR_BACK_DAYS = 14;
 export const CALENDAR_SESSIONS = 60;
@@ -1685,6 +1686,39 @@ export function ffPendingPage({ username = "", page = "inbox", shadow = false } 
   });
 }
 
+export function wiresPage({ username = "", shadow = false } = {}) {
+  return flowsDocument({
+    title: "Wires", description: WIRES_DESCRIPTION, active: "wires", username, chrome: false, styles: WIRES_STYLES, scripts: WIRES_SCRIPTS,
+    body: wiresBody(glyph, { shadow: shadow === true, v, data: fireDataBlock() }),
+  });
+}
+
+const FF_MARK_ANCHOR = '\n    <div class="fx-who">';
+const FF_PANEL_ANCHOR = '<span class="ft-flags" id="ftHeroFlags"></span>';
+const FF_KIT = ["/assets/js/flows-ff-kernel.js", "/assets/js/flows-ff-client.js"];
+
+const ffOnce = (html, anchor) => {
+  const i = html.indexOf(anchor);
+  return i !== -1 && i === html.lastIndexOf(anchor);
+};
+
+export function ffSlots(html, { mark = false, panel = false, slug = "" } = {}) {
+  if (typeof html !== "string" || html.includes('data-ff-slot="mark"') || html.includes('data-ff-slot="name-panel"')) return html;
+  const wantMark = mark === true && ffOnce(html, FF_MARK_ANCHOR) && ffOnce(html, "</body>");
+  const wantPanel = wantMark && panel === true && slug === "ticker" && ffOnce(html, FF_PANEL_ANCHOR);
+  if (!wantMark) return html;
+  let out = html.replace(FF_MARK_ANCHOR, () => '\n    <div class="ffx-mark-slot" data-ff-slot="mark" style="min-height:36px"></div>' + FF_MARK_ANCHOR);
+  if (wantPanel) out = out.replace(FF_PANEL_ANCHOR, (m) => m + '<span class="ffx-np-slot" data-ff-slot="name-panel"></span>');
+  const kit = FF_KIT.filter((f) => !out.includes(f + "?v=")).map((f) => `<i hidden data-defer="ff-kit" data-src="${v(f)}"></i>`);
+  const tail = [
+    ...kit,
+    `<i hidden data-defer="ff-mark" data-css="${v("/assets/css/flows-ff-mark.css")}"></i>`,
+    `<script src="${v("/assets/js/flows-ff-mark.js")}" defer></script>`,
+    ...(wantPanel ? [`<script src="${v("/assets/js/flows-ff-name-panel.js")}" defer></script>`] : []),
+  ].join("\n");
+  return out.replace("</body>", () => tail + "\n</body>");
+}
+
 const FIRE_NAV_ANCHOR = '<a href="/flows/strategy/"';
 const FIRE_NAV_ITEM = `<a href="/flows/fire/" data-ff-nav>${glyph("fire")}<span class="rail-label">Fire</span></a>`;
 
@@ -1706,6 +1740,6 @@ export function positioningNav(html, on, slug) {
 export const FLOWS_PAGES = {
   loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, networkPage, nowPage, deskPage,
   politicalPage, positioningPage,
-  tickerPage, unusualPage, movesPage, flowlabPage, ledgerPage, macroPage, statusPage, eventsPage, strategyPage, firePage, ffPendingPage, ASSET_VERSION,
+  tickerPage, unusualPage, movesPage, flowlabPage, ledgerPage, macroPage, statusPage, eventsPage, strategyPage, firePage, wiresPage, ffPendingPage, ASSET_VERSION,
 };
 

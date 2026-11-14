@@ -573,5 +573,28 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 0
+ },
+ "wires@320": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0,
+  "targetsUnder44": 2
+ },
+ "wires@390": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0,
+  "targetsUnder44": 1
+ },
+ "wires@1440": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0
  }
 }

@@ -109,6 +109,9 @@ export function coreDouble({ session = TEST_SESSION_DAY, ids = null } = {}) {
       const m = snapshot && snapshot.metrics;
       if (!m || !Array.isArray(m.t)) return { status: "unavailable", reason: "missing", subjects: [] };
       const body = JSON.parse(compiled.version.ast_json);
+      if (body.cadence === "nightly" && body.all.some((c) => c.m.startsWith("contract.")) && !body.all.some((c) => c.m === "contract.oi_confirm")) {
+        return { status: "unavailable", reason: "source_missing", detail: "windows_unread", subjects: [] };
+      }
       const names = body.scope.kind === "names" ? body.scope.symbols : m.t;
       const subjects = [];
       for (const sym of names) {

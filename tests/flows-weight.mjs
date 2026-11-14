@@ -49,6 +49,7 @@ const DESK_FORWARD = { bytes: 9900, gzip: 3350, why: "Premium Desk decisions 1 a
 const STRATEGY_BUNDLE = { gzip: 250, why: "Premium Desk decisions 1 and 2: the strategy page loads the same flows-quant.bundle.js as the desk, which gained carryOf, deltaBand, lineCompare, winRange and outsideRange (+2.5 KB raw, +1.1 KB gzip); raw JavaScript stayed inside its ceiling and only the gzip ceiling had less than 1.1 KB of room, measured against 8b47e40; the early-exercise correction (the slope t-statistic, the ramp, the flag) then added another 0.15 KB of gzip to the same bundle" };
 const DESK_CALLS = { bytes: 2500, why: "Premium Desk decisions 1 and 2: the deferred short-call chunk reads the server's cut and forward records (the lazy engine for cut rows, the bands in the Net delta and Win % cells, the neighbouring-quote range and its information line, the delta floor in the formula, the EV label and the band column of the export), 2.5 KB raw over 8b47e40; it adds nothing to the eager JavaScript" };
 const FF_FIRE_PAGE = { bytes: 73998, gzip: 21515, cssBytes: 15129, cssGzip: 3352, why: "Fire & Forget, the Fire page is a new route: lane U's kernel and client (flows-ff-kernel.js 5,567 B, flows-ff-client.js 5,755 B), lane D's composer, preview and controller (flows-ff-composer.js 38,638 B, flows-ff-preview.js 8,306 B, flows-ff-fire.js 15,732 B) and its two sheets (flows-ff-tokens.css 469 B, flows-ff-fire.css 14,660 B) are the whole cost of it above the shared kernel (flows-ui.js, flows-dock.js, base.css, flows.css); it defers nothing but the dock's Ask file. The Inbox, Digest and Wires pages are one page function that says they are not released and ships the kernel alone" };
+const FF_WIRES_PAGE = { bytes: 35500, gzip: 10600, cssBytes: 20800, cssGzip: 4900, sheet: 63000, why: "Fire & Forget, the Wires page replaces its not-released placeholder: lane U's kernel and client (flows-ff-kernel.js, flows-ff-client.js), lane E's controller (flows-ff-wires.js) and three sheets (flows-ff-tokens.css, flows-ff-fire.css for the shared panel and sheet classes, flows-ff-inbox.css) above the shared kernel; the Fire sheet that Adjust opens (flows-ff-composer.js, flows-ff-preview.js, flows-ff-fire.js) is the deferred group ff-sheet, and the page carries the Fire registry block the sheet reads" };
 const FF_KERNEL_BASE = { raw: 75.7, gzip: 24.1, css: 86.7, cssGzip: 18.7, why: "the shared kernel as measured when the Fire & Forget routes landed (flows-dock.js 4,914 B and flows-ui.js 74,680 B; base.css 10,813 B and flows.css 78,986 B), less what the loops below add for every route, plus 1.5 KiB of raw headroom so the routes sit above the 1 KiB floor" };
 const GLASS_BYTES_PLAIN = (GLASS_V3.bytes + GLASS_LENS.bytes + GLASS_SITE.bytes) / 1024;
 const GLASS_BYTES = (GLASS_V3.bytes + GLASS_LENS.bytes + GLASS_SITE.bytes + GLASS_REBASE.bytes) / 1024;
@@ -80,6 +81,7 @@ const CEILING_KIB = {
   notFoundPage: 5,
   statusPage: 80 + 1792 / 1024 + 24.5 + 9 + 442 / 1024 + STATUS_RAISE.bytes / 1024 + NN_KERNEL.bytes / 1024,
   firePage: FF_KERNEL_BASE.raw + FF_FIRE_PAGE.bytes / 1024,
+  wiresPage: FF_KERNEL_BASE.raw + FF_WIRES_PAGE.bytes / 1024,
   ffPendingPage: FF_KERNEL_BASE.raw,
 };
 
@@ -107,6 +109,7 @@ const GZIP_KIB = {
   notFoundPage: 3,
   statusPage: 27 + 9.5 + NN_KERNEL.gzip / 1024,
   firePage: FF_KERNEL_BASE.gzip + FF_FIRE_PAGE.gzip / 1024,
+  wiresPage: FF_KERNEL_BASE.gzip + FF_WIRES_PAGE.gzip / 1024,
   ffPendingPage: FF_KERNEL_BASE.gzip,
 };
 
@@ -134,6 +137,7 @@ const CSS_KIB = {
   notFoundPage: 81 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   statusPage: 82 + 7.5 + 5.5 + 1700 / 1024 + GLASS_BYTES_PLAIN + NN_FLOWS_CSS.bytes / 1024,
   firePage: FF_KERNEL_BASE.css + FF_FIRE_PAGE.cssBytes / 1024,
+  wiresPage: FF_KERNEL_BASE.css + FF_WIRES_PAGE.cssBytes / 1024,
   ffPendingPage: FF_KERNEL_BASE.css,
 };
 
@@ -161,6 +165,7 @@ const CSS_GZIP_KIB = {
   notFoundPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   statusPage: 18 + 4 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   firePage: FF_KERNEL_BASE.cssGzip + FF_FIRE_PAGE.cssGzip / 1024,
+  wiresPage: FF_KERNEL_BASE.cssGzip + FF_WIRES_PAGE.cssGzip / 1024,
   ffPendingPage: FF_KERNEL_BASE.cssGzip,
 };
 
@@ -288,6 +293,7 @@ const DEFERRED = {
   marketPage: { groups: { voldesk: "/assets/js/flows-voldesk.js", floor: "/assets/js/flows-market-floor.js", river: "/assets/js/flows-market-river.js", "market-below": "/assets/js/flows-market-below.js", net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" }, modules: ["mkSectorsCard", "mkGroupsCard", "mkExpiryCard", "mkVolCard", "mkRadarCard", "mkAdvCard", "mkVolumeCard", "mkAgainstCard", "mkMoversCard", "mkOiCard", "mkDarkCard", "mkImpactCard", "mkInsidersCard", "mkSeasonCard"] },
   networkPage: { groups: { net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" } },
   deskPage: { groups: { "desk-calls": "/assets/js/flows-desk-calls.js" } },
+  wiresPage: { groups: { "ff-sheet": ["/assets/js/flows-ff-composer.js", "/assets/js/flows-ff-preview.js", "/assets/js/flows-ff-fire.js"] } },
   macroPage: { groups: { "macro-charts": ["/assets/js/flows-macro-charts.js"] } },
   ledgerPage: { groups: { "ledger-live": ["/assets/js/flows-rt.js", "/assets/js/flows-ledger.bundle.js", "/assets/js/flows-sfc-live.js"] } },
   statusPage: { groups: { "status-panels": ["/assets/js/flows-chart.js", "/assets/js/flows-status-latency.js", "/assets/js/flows-status-capacity.js", "/assets/js/flows-status-coverage.js"] } },
@@ -311,7 +317,7 @@ const ORACLE_DEFERRED_KIB = 60 + NEURON_RESTORE.bytes / 1024;
 const ORACLE_MARKUP_BYTES = 720;
 const DEFERRED_KIB = {
   tickerPage: 80 + 7.3 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + NETWORK_GROUP.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + (260 + 848) / 1024 + HOME_FIT.deferred / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024 + DESK_CALLS.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024 + (2240 + 627) / 1024 + HOME_FIT.deferred / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
-  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + (26400 + 745) / 1024 + HOME_FIT.deferred / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024 + LEDGER_LIVE.bytes / 1024, macroPage: 80 + 15.4 + NN_ASK.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, firePage: 80 + NN_ASK.bytes / 1024, ffPendingPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024 + FLOWLAB_HEATMAP.bytes / 1024,
+  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + (26400 + 745) / 1024 + HOME_FIT.deferred / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024 + LEDGER_LIVE.bytes / 1024, macroPage: 80 + 15.4 + NN_ASK.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, firePage: 80 + NN_ASK.bytes / 1024, wiresPage: 80 + NN_ASK.bytes / 1024 + FF_WIRES_PAGE.sheet / 1024, ffPendingPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024 + FLOWLAB_HEATMAP.bytes / 1024,
 };
 const DARK_POOL_TIME = { bytes: 107, why: "lane 2 math audit: the Market page's dark-pool list drops canceled prints, prints its times in TRT through F.time and its prices through F.px, and says how many canceled prints it left out, measured as 58,946 to 59,053 B raw in the deferred flows-market-below.js" };
 DEFERRED_KIB.marketPage += DARK_POOL_TIME.bytes / 1024;
