@@ -47,7 +47,7 @@ const ALLOWED = [
   ["scripts/flows-nightly/sections/record.mjs", 1, "record"],
   ["scripts/flows-quant-pipeline.mjs", 2, "month"],
   ["shared/ff-contract.js", 2, "dte"],
-  ["shared/ff-feed-templates.js", 1, "dte"],
+  ["shared/flows-er-feed-templates.js", 1, "dte"],
   ["shared/flows-card.js", 3, "month"],
   ["shared/flows-catalysts.js", 1, "clock"],
   ["shared/flows-dispersion.js", 1, "month"],

@@ -18,14 +18,14 @@ const real = {
   pulse: await import("../shared/flows-er-pulse.js"),
   policy: await import("../shared/flows-er-policy.js"),
   feed: await import("../shared/flows-er-feed.js"),
-  tpl: await import("../shared/ff-feed-templates.js"),
+  tpl: await import("../shared/flows-er-feed-templates.js"),
   payload: await import("../shared/flows-er-payload.js"),
   ops: await import("../shared/flows-vendor-ops.js"),
 };
 
 const FILES = {
   eps: "shared/flows-er-eps.js", score: "shared/flows-er-score.js", cal: "shared/flows-er-calendar.js", pulse: "shared/flows-er-pulse.js",
-  policy: "shared/flows-er-policy.js", feed: "shared/flows-er-feed.js", tpl: "shared/ff-feed-templates.js", payload: "shared/flows-er-payload.js",
+  policy: "shared/flows-er-policy.js", feed: "shared/flows-er-feed.js", tpl: "shared/flows-er-feed-templates.js", payload: "shared/flows-er-payload.js",
   ops: "shared/flows-vendor-ops.js",
 };
 
@@ -450,7 +450,7 @@ for (const [name, over, expectFail] of PLANTS) {
 
 const NEW = [
   "shared/flows-er-switch.js", "shared/flows-er-eps.js", "shared/flows-er-score.js", "shared/flows-er-calendar.js", "shared/flows-er-pulse.js",
-  "shared/flows-er-policy.js", "shared/flows-er-feed.js", "shared/flows-er-payload.js", "shared/flows-er-copy.js", "shared/ff-feed-templates.js",
+  "shared/flows-er-policy.js", "shared/flows-er-feed.js", "shared/flows-er-payload.js", "shared/flows-er-copy.js", "shared/flows-er-feed-templates.js",
   "scripts/flows-legs/eventrisk.mjs", "scripts/flows-legs/eventrisk-fake.mjs", "scripts/flows-nightly/sections/eventrisk.mjs",
   "server/routes/flows-eventrisk.js", "assets/js/flows-er.js", "assets/js/flows-ff-feed.js", "assets/css/flows-er.css",
   "tests/fixtures-eventrisk.json", "tests/fixtures-er.json",
