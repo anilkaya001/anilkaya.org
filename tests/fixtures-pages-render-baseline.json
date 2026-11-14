@@ -458,5 +458,51 @@
   "structure": 0,
   "overflowPx": 0,
   "targetsUnder24": 18
+ },
+ "fire@320": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0,
+  "targetsUnder44": 1
+ },
+ "fire@390": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0,
+  "targetsUnder44": 0
+ },
+ "fire@1440": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0
+ },
+ "inbox@320": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0,
+  "targetsUnder44": 1
+ },
+ "inbox@390": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0,
+  "targetsUnder44": 0
+ },
+ "inbox@1440": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 0
  }
 }

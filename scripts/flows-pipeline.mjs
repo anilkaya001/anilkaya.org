@@ -37,6 +37,7 @@ import { runOraclePrep, runOraclePublish } from "./flows-nightly/sections/oracle
 import { runVolAuditSection, runVoldeskStage, volAuditFailed } from "./flows-nightly/sections/voldesk.mjs";
 import { voldeskBuildOn } from "../shared/flows-voldesk.js";
 import { runFlowlab } from "./flows-nightly/sections/flowlab.mjs";
+import { runFf } from "./flows-nightly/sections/ff.mjs";
 
 export {
   CALL_BUDGET, CALL_COST, CALL_OVERRUN_MARGIN, CHAIN_RESERVE_MS, DEADLINE_MS, DEEP_NAMES, DEEP_RULE,
@@ -294,6 +295,7 @@ async function main() {
     console.warn(`  deepen ledger: ${error.message} — the next run re-reads what the store holds`);
   });
   await runFlowlab(ctx);
+  await runFf(ctx);
   await runClose(ctx);
 }
 
