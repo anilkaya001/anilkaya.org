@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "430";
+export const ASSET_VERSION = "431";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -11,6 +11,7 @@ import { macroBody, MACRO_DESCRIPTION, MACRO_STYLES, MACRO_SCRIPTS, MACRO_DEFER 
 import { COPY as VD_COPY } from "./flows-voldesk-copy.js";
 import { flowlabBody, FLOWLAB_DESCRIPTION, FLOWLAB_STYLES, FLOWLAB_SCRIPTS } from "./flows-page-flowlab.js";
 import { FIRE_DESCRIPTION, FIRE_SCRIPTS, FIRE_STYLES, fireBody } from "./ff-pages-fire.js";
+import { INBOX_DESCRIPTION, INBOX_SCRIPTS, INBOX_STYLES, inboxBody } from "./ff-pages-inbox.js";
 
 export const CALENDAR_BACK_DAYS = 14;
 export const CALENDAR_SESSIONS = 60;
@@ -1656,6 +1657,13 @@ export function firePage({ username = "", shadow = false } = {}) {
   });
 }
 
+export function inboxPage({ username = "", shadow = false } = {}) {
+  return flowsDocument({
+    title: "Inbox", description: INBOX_DESCRIPTION, active: "inbox", username, chrome: false, styles: INBOX_STYLES, scripts: INBOX_SCRIPTS,
+    body: inboxBody(glyph, { shadow: shadow === true }),
+  });
+}
+
 export const FF_PENDING_PAGES = Object.freeze({
   inbox: Object.freeze({ title: "Inbox", name: "the Inbox", description: "The hits your wires and the house wires wrote." }),
   digest: Object.freeze({ title: "Digest", name: "the Digest", description: "A session's hits and receipts, side by side." }),
@@ -1691,6 +1699,6 @@ export function fireNav(html, on, slug) {
 export const FLOWS_PAGES = {
   loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, networkPage, nowPage, deskPage,
   politicalPage, positioningPage,
-  tickerPage, unusualPage, movesPage, flowlabPage, ledgerPage, macroPage, statusPage, eventsPage, strategyPage, firePage, ffPendingPage, ASSET_VERSION,
+  tickerPage, unusualPage, movesPage, flowlabPage, ledgerPage, macroPage, statusPage, eventsPage, strategyPage, firePage, inboxPage, ffPendingPage, ASSET_VERSION,
 };
 

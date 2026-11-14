@@ -3,6 +3,7 @@ import * as K from "../server/http.js";
 import { createRouter } from "../server/router.js";
 import { flowsPageRows, FLOWS_PAGE_SLUGS, FLOWS_PUBLIC_SLUGS, FLOWS_GONE_SLUGS } from "../server/routes/flows-pages.js";
 import { FLOWS_PAGES, FIRE_SHADOW_LINE, ownerNav } from "../shared/flows-pages.js";
+import { INBOX_SHADOW_LINE } from "../shared/ff-pages-inbox.js";
 import { positioningMode } from "../shared/flows-pos-switch.js";
 import { workerSource, expect, absent, moduleSource } from "./lib/source-scan.mjs";
 
@@ -91,7 +92,7 @@ function oldChain(path, rc, d) {
       "/flows/positioning/": (u) => FLOWS_PAGES.positioningPage({ username: u }),
       "/flows/status/": (u) => FLOWS_PAGES.statusPage({ username: u }),
       "/flows/fire/": (u, summary, owner, e) => FLOWS_PAGES.firePage({ username: u, shadow: ffModeOf(e) === "shadow" }),
-      "/flows/inbox/": (u, summary, owner, e) => FLOWS_PAGES.ffPendingPage({ username: u, page: "inbox", shadow: ffModeOf(e) === "shadow" }),
+      "/flows/inbox/": (u, summary, owner, e) => FLOWS_PAGES.inboxPage({ username: u, shadow: ffModeOf(e) === "shadow" }),
       "/flows/digest/": (u, summary, owner, e) => FLOWS_PAGES.ffPendingPage({ username: u, page: "digest", shadow: ffModeOf(e) === "shadow" }),
       "/flows/wires/": (u, summary, owner, e) => FLOWS_PAGES.ffPendingPage({ username: u, page: "wires", shadow: ffModeOf(e) === "shadow" }),
     };
@@ -316,7 +317,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
       const [status, kind, text] = await ffAs(slug, member, { ...FF_ON, FF_MODE: mode });
       eq([status, kind], [200, "page"], slug + ": open to every member under FF_MODE " + mode.trim());
       const shadow = mode.trim().toLowerCase() === "shadow";
-      eq(text.split(FIRE_SHADOW_LINE).length - 1, shadow ? 1 : 0, slug + ": the shadow sentence is on the page exactly when the mode is shadow");
+      eq(text.split(slug === "inbox" ? INBOX_SHADOW_LINE : FIRE_SHADOW_LINE).length - 1, shadow ? 1 : 0, slug + ": the shadow sentence is on the page exactly when the mode is shadow");
       ok(text.includes('data-ff-page="' + slug + '"'), slug + ": the page carries its data-ff-page hook");
     }
   }
@@ -329,7 +330,11 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     ok(banner && !/\bhidden\b/.test(banner[1]) && banner[2] === FIRE_SHADOW_LINE, "in shadow the Fire page's banner is shown and says so");
     const live = /<p class="ffx-banner" id="ffxBanner"([^>]*)>([^<]*)<\/p>/.exec((await ffAs("fire", member, FF_ON))[2]);
     ok(live && /\bhidden\b/.test(live[1]) && live[2] === "", "and with FF_MODE on the banner is hidden and empty");
-    for (const slug of ["inbox", "digest", "wires"]) {
+    {
+      const text = (await ffAs("inbox", member, FF_ON))[2];
+      ok(!text.includes("not_released") && text.includes('id="ffxInbox"') && text.includes("/assets/js/flows-ff-inbox.js"), "inbox: the Inbox is the built page, not the not-released placeholder");
+    }
+    for (const slug of ["digest", "wires"]) {
       const text = (await ffAs(slug, member, FF_ON))[2];
       ok(/— unavailable: the [A-Za-z ]+ is not released yet\./.test(text) && text.includes('data-ff-absent="not_released"'), slug + ": a page that is not built says so as an em dash with its reason, never an empty list");
       ok(text.includes('<a class="ds-btn" href="/flows/fire/">Open Fire</a>'), slug + ": and links to Fire");
@@ -368,7 +373,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     absent(text, new RegExp('path === "' + p.replace(/[-/]/g, "\\$&") + '"'), { anchor: /path === "\/flows\/login"/, why: p + " is a table row and no longer a branch of the chain" });
   }
   absent(text, /\bFLOWS_ROUTES\b|\bFLOWS_READER_FROM\b/, { anchor: /path === "\/flows\/logout"/, why: "the page table moved out of the Worker" });
-  absent(text, /FLOWS_PAGES\.(overviewPage|sidePage|watchPage|marketPage|networkPage|nowPage|deskPage|strategyPage|tickerPage|unusualPage|movesPage|ledgerPage|macroPage|eventsPage|politicalPage|positioningPage|statusPage|firePage|ffPendingPage)/, { anchor: /FLOWS_PAGES\.loginPage\(/, why: "the Worker renders only the sign-in page itself" });
+  absent(text, /FLOWS_PAGES\.(overviewPage|sidePage|watchPage|marketPage|networkPage|nowPage|deskPage|strategyPage|tickerPage|unusualPage|movesPage|ledgerPage|macroPage|eventsPage|politicalPage|positioningPage|statusPage|firePage|inboxPage|ffPendingPage)/, { anchor: /FLOWS_PAGES\.loginPage\(/, why: "the Worker renders only the sign-in page itself" });
   const src = moduleSource("server/routes/flows-pages.js");
   ok(!/from "\.\.\/\.\.\/worker\.js"|cloudflare:|\bfetch\(|\benv\.DB\b/.test(src), "the family imports neither the Worker nor the platform and reads no store: the session and the summary are injected");
   ok(!/\bsetCookie\b|Set-Cookie|\.json\(/.test(src), "and sets no cookie and answers no JSON");
