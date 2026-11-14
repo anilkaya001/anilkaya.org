@@ -37,12 +37,13 @@
   const usdS = F.unit.of("moneyCompact", { dp: "short", signed: true });
 
   let tideOpts = null;
+  const TIDE_MIN = 64;
+  const tideRoom = (plot) => {
+    const cs = getComputedStyle(plot), key = plot.querySelector(".ui-legend");
+    return plot.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0) - ((key ? key.offsetHeight : 18) + (parseFloat(cs.rowGap) || 0));
+  };
   const tideHeight = (plot) => {
-    if (fitOf() !== "flat") {
-      const cs = getComputedStyle(plot), key = plot.querySelector(".ui-legend");
-      const inner = plot.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0) - ((key ? key.offsetHeight : 18) + (parseFloat(cs.rowGap) || 0));
-      return Math.min(440, Math.max(64, Math.floor(inner)));
-    }
+    if (fitOf() !== "flat") return Math.min(440, Math.max(TIDE_MIN, Math.floor(tideRoom(plot))));
     const room = plot.clientHeight - 30;
     return room > 190 ? Math.min(room, 440) : [190, 220, 236];
   };
@@ -682,6 +683,38 @@
     return past ? ["last", "Closed \u00b7 last session", day] : ["closed", "Closed", day];
   }
 
+  const CAP_COPY = [
+    "Each stock's net premium over its total premium, averaged by market value.",
+    "Index options and funds have no market value and are outside it.",
+  ];
+  const CAP_WHY = {
+    thin: ["Too few names", "Too few names carry a full reading."],
+    coverage: ["Low coverage", "The names read cover under half the market value."],
+    unavailable: ["No universe", "No universe row was read."],
+    "not-read": ["Not read yet", "The live read has not run this session."],
+    "vendor-failed": ["Read failed", "The live read failed on this pass."],
+    "vendor-prior-session": ["Prior session", "The feed still holds the previous session."],
+  };
+  function capOf(S) {
+    const m = ans(S.market), lb = ans(S.liveBreadth);
+    const night = m && m.capTide && typeof m.capTide === "object" ? m.capTide : null;
+    const live = lb && lb.cap && typeof lb.cap === "object" ? lb.cap : null;
+    const ff = live && lb.__ff && typeof lb.__ff.stateAt === "function" ? lb.__ff : null;
+    const on = Boolean(ff && ff.stateAt() === "live" && (!m || !m.sessionDate || (Boolean(lb.session) && lb.session >= m.sessionDate)));
+    const pick = (c, src) => ({
+      src, value: isNum(c.value), coverage: isNum(c.coverage), n: isNum(c.n), of: isNum(c.of), reason: typeof c.reason === "string" ? c.reason : null,
+      at: src === "live" ? c.at || (lb.fresh && lb.fresh.readAt) || null : null, session: src === "live" ? lb.session || null : m.sessionDate || null,
+      until: src === "live" && typeof ff.nextAt === "function" ? ff.nextAt() : null,
+    });
+    if (on && isNum(live.value) !== null) return pick(live, "live");
+    if (night && isNum(night.value) !== null) return pick(night, "nightly");
+    if (on) return pick(live, "live");
+    return night ? pick(night, "nightly") : null;
+  }
+  const capShown = (c) => (c.src === "live" ? "Live read" + (F.time(c.at) === DASH ? "" : " at " + F.time(c.at)) : "Nightly figure" + (c.session ? " for " + F.day(c.session) : ""));
+  const capCover = (c) => (c.n === null || c.of === null ? null : c.n + " of " + c.of + " names" + (c.coverage === null ? "" : ", " + F.pct(c.coverage, 0) + " of market value"));
+  const capHeld = (c) => (!c ? ["Not published", "The nightly build has not published this figure yet."] : c.value === null ? CAP_WHY[c.reason] || ["Withheld", "The figure was withheld."] : null);
+
   function paintPill(tide) {
     const pill = $("hmTideState");
     if (!pill) return "pending";
@@ -689,14 +722,20 @@
     const def = UI.STATES[state === "last" ? "fresh" : state] || UI.STATES.closed;
     pill.replaceChildren(h("button", {
       class: "hm-pill", type: "button", "data-state": state, ...POP,
-      "data-info": UI.info(() => ({
-        title: "Market tide", state: UI.STATES[state] ? state : "closed",
-        lead: !tide ? "No tide is published yet." : tide.live ? "Read live during the session." : "The nightly record of this session; no live read is newer.",
-        facts: [["Source", !tide ? DASH : tide.live ? "live:market" : "pulse"], ["Session", tide && tide.session],
-          ["Read", tide && tide.readAt ? fmtStamp(tide.readAt) : null], ["Points", tide ? String(tide.t.length) : null]],
-        notes: ["Net premium is net call premium minus net put premium, cumulative over the session; positive is bullish premium.",
-          tide && tide.t.length < 2 ? "The river draws from the second read." : null],
-      })),
+      "data-info": UI.info(() => {
+        const c = capOf(S), held = capHeld(c);
+        return {
+          title: "Market tide", state: UI.STATES[state] ? state : "closed",
+          lead: !tide ? "No tide is published yet." : tide.live ? "Read live during the session." : "The nightly record of this session; no live read is newer.",
+          facts: [["Source", !tide ? DASH : tide.live ? "live:market" : "pulse"], ["Session", tide && tide.session],
+            ["Read", tide && tide.readAt ? fmtStamp(tide.readAt) : null], ["Points", tide ? String(tide.t.length) : null],
+            ["Cap-weighted tide", !c ? null : c.value === null ? DASH : F.pct(c.value, 1, true)], ["Cap-weighted from", c ? capShown(c) : null],
+            ["Cap-weighted names", c ? capCover(c) : null]],
+          notes: ["Net premium is net call premium minus net put premium, cumulative over the session; positive is bullish premium.",
+            tide && tide.t.length < 2 ? "The river draws from the second read." : null,
+            "Cap-weighted tide: " + CAP_COPY[0], held ? held[1] : null, CAP_COPY[1]],
+        };
+      }),
     }, glyph(def.g), h("span", null, word), when ? h("span", { class: "hm-pill-when" }, "· " + when) : null));
     return state;
   }
@@ -704,9 +743,45 @@
   let tideChart = null;
   let tideShown = null;
   let heroTide = null;
-  const S = { pulse: null, regime: null, liveMkt: null, liveBreadth: null, boardsDay: null };
+  const S = { pulse: null, regime: null, liveMkt: null, liveBreadth: null, boardsDay: null, market: null };
+  const capLine = $("hmTideCw"), heroId = capLine && capLine.closest(".hm-hero-id");
+  let capTimer = 0;
+  function capFit() {
+    if (!heroId) return;
+    heroId.removeAttribute("data-cw");
+    const f = fitOf(), plot = $("hmTide"), row = capLine.previousElementSibling;
+    if (capLine.hidden || f === "flat" || !plot || heroId.closest("[data-sheet]")) return;
+    const wrapped = () => !row || !row.offsetHeight || capLine.offsetTop >= row.offsetTop + row.offsetHeight;
+    const over = f === "s"
+      ? () => wrapped() && plot.clientHeight > 0 && tideRoom(plot) < TIDE_MIN
+      : () => {
+        const last = [...heroId.children].filter((e) => e.offsetHeight > 0).pop();
+        return Boolean(last) && wrapped() &&
+          last.getBoundingClientRect().bottom > heroId.getBoundingClientRect().bottom - (parseFloat(getComputedStyle(heroId).paddingBottom) || 0) + 0.5;
+      };
+    if (!over()) return;
+    heroId.setAttribute("data-cw", f === "s" ? "short" : "tight");
+    if (over()) heroId.setAttribute("data-cw", "off");
+  }
+  function paintCap() {
+    if (!capLine) return;
+    const c = capOf(S);
+    clearTimeout(capTimer);
+    if (c && c.until !== null && c.until > Date.now()) capTimer = setTimeout(paintCap, Math.min(c.until - Date.now() + 250, 2147483000));
+    const held = capHeld(c);
+    const cover = c ? capCover(c) : null;
+    capLine.replaceChildren(
+      h("span", { class: "hm-cw-k" }, "Cap-weighted"),
+      h("b", { class: "hm-cw-v", "data-tone": c && c.value !== null ? toneOf(c.value) || "flat" : "silent" }, c && c.value !== null ? F.pct(c.value, 1, true) : DASH),
+      held ? h("span", { class: "hm-cw-s" }, held[0]) : h("span", { class: "hm-cw-s", "data-src": c.src }, c.src === "live" ? "Live" : "Nightly"));
+    capLine.dataset.src = c ? c.src : "none";
+    capLine.title = [c ? capShown(c) + "." : null, cover ? cover + "." : null, held ? held[1] : null, CAP_COPY[0], CAP_COPY[1]].filter(Boolean).join(" ");
+    capLine.hidden = false;
+    capFit();
+  }
   const hero = () => {
     paintHero(heroTide = tideOf(S));
+    paintCap();
     const was = pageDay();
     DAY.tide = heroTide ? isoDayOf(heroTide.session) : null;
     titleFor();
@@ -1523,7 +1598,7 @@
     UI.heartbeat({
       keys: ["market", "breadth", "strips", "focus", "news"], nightly: ["pulse", "focus"], page: "overview",
       onBeat() { if (heroTide && heroTide.live) paintPill(heroTide); for (const k in FOCUS.pills) whenPill(k, ...FOCUS.pills[k]); },
-      onChange(changed) {
+      onChange(changed, fresh) {
         if (!Array.isArray(changed)) return;
         const has = (re) => changed.some((k) => re.test(String(k)));
         const st = has(/strips/), fo = has(/^focus/), lf = has(/:focus/), mk = has(/market/), br = has(/breadth/), pu = has(/pulse/), nw = has(/news/);
@@ -1537,7 +1612,11 @@
           if (l.focus) FOCUS.live = l.focus;
           if (st || fo || lf) paintFocus();
           if (l.market) S.liveMkt = UI.rt && UI.rt.feeds("mk") ? UI.rt.market(l.market) : l.market;
-          if (l.breadth) { S.liveBreadth = l.breadth; paintVolLater(S.regime, liveVol, l.breadth); }
+          if (l.breadth) {
+            if (!l.breadth.__ff && fresh && fresh["live:breadth"]) l.breadth.__ff = fresh["live:breadth"];
+            S.liveBreadth = l.breadth;
+            paintVolLater(S.regime, liveVol, l.breadth);
+          }
           if (p) S.pulse = p;
           if (l.market || l.breadth || p) hero();
         });
@@ -1682,6 +1761,12 @@
   const heroOpen = h("button", { type: "button", class: "hm-open hm-hero-open", "aria-haspopup": "dialog", "aria-label": "Open Market tide" }, "Open");
   heroOpen.addEventListener("click", () => openSheet($("hmHero")));
   $("hmHero").append(heroOpen);
+
+  if (heroId && typeof ResizeObserver === "function") {
+    let asked = 0;
+    new ResizeObserver(() => { if (!asked) asked = requestAnimationFrame(() => { asked = 0; capFit(); }); }).observe(heroId);
+  }
+  if (heroId && document.fonts && document.fonts.ready) document.fonts.ready.then(capFit);
 
   const tidePlot = $("hmTide");
   if (tidePlot && typeof ResizeObserver === "function") {
@@ -1974,8 +2059,8 @@
     neuronComputed(ans(market));
   });
   when(["market", "alerts", "pulse"], ({ lng, sht, market, alerts, pulse }) => paintVerdict(verdictHost, lng, sht, market, alerts, pulse));
-  when(["pulse", "regime", "lk"], ({ lng, sht, pulse, regime, lk }) => {
-    Object.assign(S, { pulse, regime, liveMkt: lk.market, liveBreadth: lk.breadth, boardsDay: boardsRead(lng, sht).date });
+  when(["pulse", "regime", "lk", "market"], ({ lng, sht, pulse, regime, lk, market }) => {
+    Object.assign(S, { pulse, regime, liveMkt: lk.market, liveBreadth: lk.breadth, boardsDay: boardsRead(lng, sht).date, market });
     hero();
     paintVolLater(regime, lk.vol, lk.breadth);
   });

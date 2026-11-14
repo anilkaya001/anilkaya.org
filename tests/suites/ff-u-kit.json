@@ -1,0 +1,1 @@
+{"name": "ff-u-kit", "class": "N", "group": "shard", "timing": false, "medianS": 20, "shard": 2, "command": "node ff-u-kit.mjs", "files": ["ff-u-kit.mjs"], "covers": ["assets/css/base.css","assets/css/flows.css","assets/js/flows-ff-client.js","assets/js/flows-ff-kernel.js"]}

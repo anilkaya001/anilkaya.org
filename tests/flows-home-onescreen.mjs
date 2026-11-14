@@ -4,6 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launch } from "./lib/browser.mjs";
 import { openHome, openDock, FITS, PAGES } from "./lib/home-fixtures.mjs";
+import { richAnswer } from "./lib/market-fixtures.mjs";
+import { nightlyEmit, emitRead } from "./lib/nightly-emit.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const COMPOSITION = JSON.parse(fs.readFileSync(path.join(ROOT, "tests/fixtures-approval/home-composition.json"), "utf8"));
@@ -694,6 +696,145 @@ if (want("mutants")) {
   for (const triples of results) for (const [a, b, m] of triples) eq(a, b, m);
 }
 
+const CAP_DEFINE = "Each stock's net premium over its total premium, averaged by market value.";
+const CAP_OUTSIDE = "Index options and funds have no market value and are outside it.";
+const signedPct = (v) => (v < 0 ? "\u2212" : v > 0 ? "+" : "") + (Math.round(Math.abs(v) * 1000) / 10).toFixed(1) + "%";
+const CAP_FACTS = () => {
+  const line = document.getElementById("hmTideCw");
+  const id = line.closest(".hm-hero-id");
+  const cs = getComputedStyle(id);
+  const box = id.getBoundingClientRect();
+  const inner = { l: box.left + parseFloat(cs.paddingLeft), r: box.right - parseFloat(cs.paddingRight), b: box.bottom - parseFloat(cs.paddingBottom) };
+  const rect = (e) => { const r = e.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom, h: r.height }; };
+  const shown = (e) => Boolean(e) && e.getBoundingClientRect().height > 0 && getComputedStyle(e).display !== "none";
+  const part = (sel) => { const e = line.querySelector(sel); return shown(e) ? e.textContent : null; };
+  const kids = [...id.children].filter((e) => e.offsetHeight > 0);
+  const tail = line.querySelector(".hm-cw-s"), fig = line.querySelector(".hm-cw-v"), legs = document.getElementById("hmTideLegs");
+  return {
+    shown: !line.hidden && shown(line), mode: id.dataset.cw || "line", src: line.dataset.src || null, k: part(".hm-cw-k"), v: part(".hm-cw-v"), tail: part(".hm-cw-s"), tailAll: tail ? tail.textContent : null,
+    tone: fig ? fig.dataset.tone : null, title: line.title, line: rect(line), inner, cap: rect(document.getElementById("hmTideCap")), legs: shown(legs) ? rect(legs) : null, fig: rect(document.getElementById("hmTideV")),
+    over: kids.length ? kids[kids.length - 1].getBoundingClientRect().bottom - inner.b : 0, cut: shown(tail) ? tail.scrollWidth - tail.clientWidth : 0,
+    targets: line.matches("a, button, [role=button], [tabindex]") || Boolean(line.querySelector("a, button, [role=button], [tabindex]")),
+  };
+};
+function capBad(f, want, { fit, w, h }) {
+  const bad = [];
+  const at = `${w}x${h}`;
+  if (!f.shown) return [`${at}: the cap-weighted line is not shown`];
+  if (f.k !== "Cap-weighted") bad.push(`${at}: the line is labelled ${f.k}`);
+  if (f.v !== want.v) bad.push(`${at}: the line prints ${f.v}, the fixture says ${want.v}`);
+  if (f.src !== want.src) bad.push(`${at}: the line is marked ${f.src}, not ${want.src}`);
+  if (f.tailAll !== want.tail) bad.push(`${at}: the line says ${f.tailAll}, not ${want.tail}`);
+  if (f.tail !== want.tail && !(w === 375 || w === 320)) bad.push(`${at}: the source word is not on screen (${f.tail})`);
+  if (f.tone !== (want.v === DASH ? "silent" : want.v[0] === "+" ? "up" : want.v[0] === "\u2212" ? "down" : "flat")) bad.push(`${at}: the figure is toned ${f.tone}`);
+  if (!f.title.includes(CAP_DEFINE) || !f.title.includes(CAP_OUTSIDE)) bad.push(`${at}: the title does not define the measure and say what is outside it`);
+  if (want.src === "live" && !/ at \d\d:\d\d TRT\./.test(f.title)) bad.push(`${at}: a live figure does not name its read time in TRT (${f.title})`);
+  if (/UTC|GMT|\bET\b|Eastern|\btape\b/i.test(f.title)) bad.push(`${at}: the title names another zone or the banned word`);
+  if (want.why && !f.title.includes(want.why)) bad.push(`${at}: a withheld figure does not give its reason (${f.title})`);
+  if (f.targets) bad.push(`${at}: the line adds a control`);
+  if (f.line.l < f.inner.l - 0.5 || f.line.r > f.inner.r + 0.5) bad.push(`${at}: the line leaves its column sideways`);
+  if (f.cut > 0) bad.push(`${at}: the source word is cut by ${f.cut} px`);
+  if (f.line.t < f.fig.b - 0.5) bad.push(`${at}: the line is not under the net tide figure`);
+  if (f.legs && f.line.b > f.legs.t + 0.5) bad.push(`${at}: the line runs into the legs`);
+  const below = f.line.t >= f.cap.b - 0.5, beside = f.line.l >= f.cap.r - 0.5;
+  if (!below && !beside) bad.push(`${at}: the line overlaps the capsule`);
+  if (fit !== "s" && f.over > 0.5) bad.push(`${at}: the identity column overflows by ${f.over.toFixed(1)} px`);
+  if (w === 390 && !beside) bad.push(`${at}: on the phone the line takes a row of its own from the chart`);
+  if (w === 1280 && h === 720 && f.mode !== "tight") bad.push(`${at}: the tight column is in mode ${f.mode}`);
+  if ((w === 1920 || w === 1440 || w === 1024) && f.mode !== "line") bad.push(`${at}: a column with room is in mode ${f.mode}`);
+  return bad;
+}
+const CAP_SIZES = [[1920, 1080, "xl"], [1440, 820, "l"], [1280, 720, "m"], [1024, 768, "m"], [390, 844, "s"], [375, 667, "s"]];
+const breadthOf = (body) => (body && body.keys && body.keys.breadth && body.keys.breadth.payload ? body.keys.breadth : null);
+const CAP_WORLDS = [
+  ["the live read is live and of the newest session", null, (n, l) => ({ v: signedPct(l.value), tail: "Live", src: "live" }), CAP_SIZES],
+  ["the live key has gone stale", (route, body) => { const b = route === "lk" && breadthOf(body); if (b) Object.assign(b.fresh, { state: "stale", liveUntil: null, staleAt: null }); },
+    (n) => ({ v: signedPct(n.value), tail: "Nightly", src: "nightly" }), CAP_SIZES],
+  ["the live key is fresh but no longer live", (route, body) => { const b = route === "lk" && breadthOf(body); if (b) Object.assign(b.fresh, { state: "fresh", liveUntil: body.serverNow - 1000 }); },
+    (n) => ({ v: signedPct(n.value), tail: "Nightly", src: "nightly" }), [[1440, 820, "l"]]],
+  ["the live session is older than the nightly's", (route, body) => { const b = route === "lk" && breadthOf(body); if (b) b.payload.session = "2026-08-21"; },
+    (n) => ({ v: signedPct(n.value), tail: "Nightly", src: "nightly" }), [[1440, 820, "l"]]],
+  ["the live read was withheld and the nightly stands", (route, body) => { const b = route === "lk" && breadthOf(body); if (b) Object.assign(b.payload.cap, { value: null, reason: "thin", equal: null }); },
+    (n) => ({ v: signedPct(n.value), tail: "Nightly", src: "nightly" }), [[1440, 820, "l"]]],
+  ["a large positive nightly figure", (route, body) => { const b = route === "lk" && breadthOf(body); if (b) delete b.payload.cap; if (route === "market") body.capTide.value = 0.14382; },
+    () => ({ v: "+14.4%", tail: "Nightly", src: "nightly" }), [[1280, 720, "m"], [1024, 768, "m"], [390, 844, "s"]]],
+  ["both are withheld", (route, body) => {
+    const b = route === "lk" && breadthOf(body);
+    if (b) Object.assign(b.payload.cap, { value: null, reason: "vendor-failed", n: 0, coverage: null, equal: null, effN: null, dollarNet: null });
+    if (route === "market") Object.assign(body.capTide, { value: null, reason: "coverage", coverage: 0.31, equal: null, top: [] });
+  }, () => ({ v: DASH, tail: "Read failed", src: "live", why: "The live read failed on this pass." }), [[1440, 820, "l"], [1280, 720, "m"], [390, 844, "s"]]],
+  ["only the nightly exists and it is withheld", (route, body) => {
+    const b = route === "lk" && breadthOf(body);
+    if (b) delete b.payload.cap;
+    if (route === "market") Object.assign(body.capTide, { value: null, reason: "thin", n: 12, equal: null, top: [] });
+  }, () => ({ v: DASH, tail: "Too few names", src: "nightly", why: "Too few names carry a full reading." }), [[1440, 820, "l"], [1024, 768, "m"]]],
+  ["neither payload carries the figure", (route, body) => { const b = route === "lk" && breadthOf(body); if (b) delete b.payload.cap; if (route === "market") delete body.capTide; },
+    () => ({ v: DASH, tail: "Not published", src: "none", why: "The nightly build has not published this figure yet." }), [[1440, 820, "l"], [390, 844, "s"]]],
+];
+async function capVisit(world, spec, patch = null) {
+  const [, tweak, expect] = world;
+  const [w, h, fit] = spec;
+  const dir = nightlyEmit();
+  const want = expect(emitRead(dir, "market").capTide, emitRead(dir, "live-breadth").cap);
+  const onRoute = !tweak ? null : async (route, u) => {
+    const name = u.pathname.slice("/api/flows/".length);
+    if (name !== "lk" && name !== "market") return false;
+    const body = structuredClone(richAnswer(dir, name, u));
+    tweak(name, body);
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
+    return true;
+  };
+  const { context, page, errors } = await openHome(browser, { viewport: { width: w, height: h }, rich: true, coarse: w < 500, onRoute, patch });
+  let bad;
+  try {
+    await page.waitForSelector("#hmTideCw:not([hidden])", { state: "attached", timeout: 12000 }).catch(() => {});
+    await page.waitForTimeout(1800);
+    const f = await page.evaluate(CAP_FACTS);
+    bad = capBad(f, want, { fit, w, h });
+    if (!patch && w === 1440) {
+      await page.click("#hmTideState .hm-pill");
+      await page.waitForTimeout(350);
+      const pop = await page.evaluate(() => document.getElementById("fxPop").innerText.replace(/\s+/g, " "));
+      if (!pop.includes("Cap-weighted tide: " + CAP_DEFINE) || !pop.includes(CAP_OUTSIDE)) bad.push("the tide pill's disclosure does not define the measure and say what is outside it");
+      if (want.src !== "none" && !pop.includes("Cap-weighted tide " + want.v)) bad.push(`the tide pill's disclosure does not carry the figure ${want.v} (${pop.slice(0, 400)})`);
+      if (want.why && !pop.includes(want.why)) bad.push("the tide pill's disclosure does not give the reason a figure is withheld");
+    }
+    if (errors.length) bad.push("page error " + errors[0]);
+  } catch (error) {
+    bad = ["threw: " + String(error && error.message).split("\n")[0]];
+  }
+  await context.close();
+  return bad;
+}
+const CAP_MUTANTS = [
+  ["the nightly figure stands while the live read is live", [["if (on && isNum(live.value) !== null) return pick(live, \"live\");", ""]], 0, [1440, 820, "l"]],
+  ["a stale live key still counts as live", [["ff && ff.stateAt() === \"live\" && (!m", "ff && (!m"]], 1, [1440, 820, "l"]],
+  ["a key that is fresh but not live counts as live", [["ff.stateAt() === \"live\" && (!m", "ff.stateAt() !== \"stale\" && (!m"]], 2, [1440, 820, "l"]],
+  ["an older live session outranks the nightly", [["(Boolean(lb.session) && lb.session >= m.sessionDate)", "true"]], 3, [1440, 820, "l"]],
+  ["a withheld live read is shown ahead of a nightly figure", [["if (night && isNum(night.value) !== null) return pick(night, \"nightly\");\n    if (on) return pick(live, \"live\");", "if (on) return pick(live, \"live\");\n    if (night && isNum(night.value) !== null) return pick(night, \"nightly\");"]], 4, [1440, 820, "l"]],
+  ["a withheld figure is painted as zero", [["c && c.value !== null ? F.pct(c.value, 1, true) : DASH)", "F.pct(c && c.value !== null ? c.value : 0, 1, true))"]], 7, [1440, 820, "l"]],
+  ["the sign is dropped", [["c && c.value !== null ? F.pct(c.value, 1, true) : DASH)", "c && c.value !== null ? F.pct(Math.abs(c.value), 1) : DASH)"]], 1, [1440, 820, "l"]],
+  ["the fraction is printed as if it were the percent", [["c && c.value !== null ? F.pct(c.value, 1, true) : DASH)", "c && c.value !== null ? F.pct(c.value / 100, 1, true) : DASH)"]], 0, [1440, 820, "l"]],
+  ["the line is never fitted to a tight column", [["heroId.setAttribute(\"data-cw\", f === \"s\" ? \"short\" : \"tight\");", ""], ["if (over()) heroId.setAttribute(\"data-cw\", \"off\");", ""]], 0, [1280, 720, "m"]],
+  ["the tight column keeps its roomy padding", [[CSS, ".hm-stage .hm-hero-id[data-cw=\"tight\"] { padding-top: 8px; padding-bottom: 8px; }", ""]], 0, [1280, 720, "m"]],
+  ["the phone line always takes its own row", [[CSS, ".hm-hero-sub { display: flex; flex-wrap: wrap;", ".hm-hero-sub { display: flex; flex-direction: column; flex-wrap: nowrap;"]], 0, [390, 844, "s"]],
+  ["a withheld figure gives no reason", [["cover ? cover + \".\" : null, held ? held[1] : null, CAP_COPY[0]", "cover ? cover + \".\" : null, null, CAP_COPY[0]"]], 7, [1440, 820, "l"]],
+  ["the title does not say what is outside the measure", [["held ? held[1] : null, CAP_COPY[0], CAP_COPY[1]].filter(Boolean)", "held ? held[1] : null, CAP_COPY[0]].filter(Boolean)"]], 0, [1440, 820, "l"]],
+];
+if (want("cap")) {
+  const capJobs = [];
+  for (const world of CAP_WORLDS) for (const spec of world[3]) capJobs.push(async () => [[await capVisit(world, spec), [], `THE CAP-WEIGHTED LINE AT ${spec[0]}x${spec[1]} WHEN ${world[0].toUpperCase()}: the figure, its sign and its source are the fixture's, a withheld figure is a dash with its reason, and the line fits its column`]]);
+  for (const triples of await pool(capJobs, (j) => j())) for (const [a, b, m] of triples) eq(a, b, m);
+  const results = await pool(CAP_MUTANTS, async ([name, edits, world, spec]) => {
+    const patch = {};
+    for (const e of edits) { const [file, from, to] = e.length === 3 ? e : [JS, e[0], e[1]]; (patch[file] = patch[file] || []).push([from, to]); }
+    const why = await capVisit(CAP_WORLDS[world], spec, patch);
+    if (process.env.ONESCREEN_WHY) console.log("WHY", name, JSON.stringify(why));
+    return [[why.length > 0, true, `PLANTED WRONG BUILD IS CAUGHT BY THE CAP-WEIGHTED LINE'S CHECKS: ${name}`]];
+  });
+  for (const triples of results) for (const [a, b, m] of triples) eq(a, b, m);
+}
+
 await browser.close();
 if (soft) console.log(`flows-home-onescreen: ${soft} soft failures`);
-console.log(`flows-home-onescreen: ${checks} checks, ${TABLE.length} viewports, the pager, the sheet, the dock and ${MUTANTS.length} planted wrong builds`);
+console.log(`flows-home-onescreen: ${checks} checks, ${TABLE.length} viewports, the pager, the sheet, the dock, the cap-weighted line in ${CAP_WORLDS.length} worlds and ${MUTANTS.length + CAP_MUTANTS.length} planted wrong builds`);

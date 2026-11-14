@@ -2,11 +2,11 @@ import {
   LIVE_KEYS, LIVE_BUDGET, SECTOR_TIDES, shapeBreadth, shapeStrips, appendStripSeries, shapeVol,
   indexRows, shapeMovers, mergeLiveAlerts, shapeAlertsHead, alertsPagePlan,
   oldestCreated, stripNames, rowsOf, failed, freshEnvelope, timeMs, isoSec, anyAnswered, BREADTH_ETFS, VERDICT,
-  nightlySources, priorCloseBase,
+  nightlySources, priorCloseBase, capUniverse, capChunks, shapeCapTide,
 } from "../../shared/flows-live.js";
 import { FOCUS_STRIP_FALLBACK, focusStripNames as focusNamesOf } from "../../shared/flows-focus.js";
 import { phaseAt, closeMinutes, inferredEarlyClose, PHASE_MINUTES, LIVE_CLOCK, easternInstant, prevTradingDay } from "../../shared/flows-freshness.js";
-import { fakeLiveVendor, fakeBoards } from "./live-fake.mjs";
+import { fakeLiveVendor, fakeBoards, fakeUniverse } from "./live-fake.mjs";
 import { pathFor } from "../../shared/flows-vendor-ops.js";
 import { fundsNote } from "../../shared/flows-floor-funds-live.js";
 
@@ -93,6 +93,26 @@ export function boardPlan(boards, focusRead = null) {
     watch: watch.length, focus: focus.names.length } };
 }
 
+export function universeReader(readStored) {
+  let held = null;
+  return async () => {
+    if (held) return held;
+    let read = null;
+    try {
+      read = await readStored("universe");
+    } catch {
+      read = null;
+    }
+    const list = capUniverse(read && read.payload);
+    const why = list.names.length ? null
+      : !read || read.failed ? "the stored universe could not be read" + (read && read.status ? ` (HTTP ${read.status})` : "")
+        : read.absent || !read.payload ? "no universe is stored yet" : "the stored universe lists no name";
+    const out = { ...list, why };
+    if (list.names.length) held = out;
+    return out;
+  };
+}
+
 function firstRowKeys(raw) {
   const rows = rowsOf(raw);
   const inner = rows[0] && Array.isArray(rows[0].data) ? rows[0].data : rows;
@@ -102,7 +122,7 @@ function firstRowKeys(raw) {
 
 export async function runLive({
   uw, publish, readStored, now = () => Date.now(), log = console.log, warn = console.warn, shapeNews = null,
-  origin = null, force = false, writer = LIVE_WRITER, skipRecent = true, clock = null,
+  origin = null, force = false, writer = LIVE_WRITER, skipRecent = true, clock = null, universe = null,
 } = {}) {
   const startedAt = now();
   const window = liveWindow(startedAt, clock);
@@ -128,8 +148,12 @@ export async function runLive({
     boards: Object.fromEntries(Object.entries(boards).map(([side, read]) => [side, read && read.payload])),
     focus: focusRead && focusRead.payload,
   }), session, clock);
+  const held = typeof universe === "function" ? await universe() : universe;
+  const capList = held && Array.isArray(held.names) ? held : { names: [], asked: [], caps: {}, why: "no universe list was handed to the pass" };
+  const capAsk = capChunks(Array.isArray(capList.asked) ? capList.asked : capList.names);
   log(`live: session ${session}, ${plan.names.length} strip name(s): ${plan.counts.focus} focus (${plan.focus.source}), ` +
-    `boards ${plan.counts.long}/${plan.counts.short}/${plan.counts.watch}`);
+    `boards ${plan.counts.long}/${plan.counts.short}/${plan.counts.watch}; cap tide over ${capList.names.length} universe name(s) ` +
+    `in ${capAsk.length} screener call(s)`);
 
   const ledger = { calls: 0, failed: 0 };
   const read = async (path, params = {}) => {
@@ -160,6 +184,10 @@ export async function runLive({
     read(pathFor("net-flow-expiry"), { expiration: "zero_dte", moneyness: "all", tide_type: "all" }),
     read(pathFor("net-flow-expiry"), { expiration: "weekly", moneyness: "all", tide_type: "all" }),
   ]);
+  const capRaws = new Array(capAsk.length).fill(null);
+  await Promise.all(capAsk.map(async (chunk, i) => {
+    capRaws[i] = await read(pathFor("screener-stocks"), { ticker: chunk.join(","), limit: 500 });
+  }));
   const breadthAt = now();
   const strip = await read(pathFor("screener-stocks"), { ticker: plan.names.join(","), limit: 500 });
   const stripAt = now();
@@ -217,7 +245,21 @@ export async function runLive({
     }
   };
 
-  const breadth = shapeBreadth({ sectors: sectorRaws, etf: etfRaws, zeroDte, weekly }, { at: breadthAt, session, writer });
+  const capRead = shapeCapTide(capRaws, { at: breadthAt, session, universe: capList });
+  const breadth = shapeBreadth({ sectors: sectorRaws, etf: etfRaws, zeroDte, weekly }, { at: breadthAt, session, writer,
+    cap: capRead.cap });
+  {
+    const c = capRead.cap;
+    const x = capRead.excluded;
+    const asked = capAsk.reduce((n, chunk) => n + chunk.length, 0);
+    note(!capList.names.length ? `cap tide: not read — ${capList.why || "no universe list"}`
+      : `cap tide: ${c.value === null ? "withheld (" + c.reason + ")" : c.value} over ${c.n} of ${c.of} name(s), coverage ` +
+        `${c.coverage === null ? "unknown" : (c.coverage * 100).toFixed(1) + "%"}; ${capRead.returned} of ${asked} asked name(s) ` +
+        `returned in ${capRead.calls} call(s), ${capRead.failed} failed` +
+        (asked < capList.names.length ? `; ${capList.names.length - asked} name(s) past the call cap were not asked` : "") +
+        (capRead.off ? `; ${capRead.off} row(s) dated before the session held out` : "") +
+        (x ? `; no cap ${x.noCap}, missing ${x.missing}, inconsistent ${x.inconsistent}, quiet ${x.quiet}` : ""));
+  }
   for (const [sector, s] of Object.entries(breadth.sectors.rows)) unshaped(`sector-tide ${sector}`, sectorRaws[sector], s.status);
   for (const [name, s] of Object.entries({ "net-flow zero_dte": breadth.dte.zero, "net-flow weekly": breadth.dte.weekly,
     ...Object.fromEntries(BREADTH_ETFS.map((t) => ["etf-tide " + t, breadth.etf[t]])) })) {
@@ -293,6 +335,8 @@ export async function runLive({
     alerts: { mode: merged.mode, read: merged.read, pages: pages.length },
     quoteLag: strips.lag || null,
     quoteAhead: strips.ahead || null,
+    capTide: { n: capRead.cap.n, of: capRead.cap.of, coverage: capRead.cap.coverage, reason: capRead.cap.reason, calls: capRead.calls,
+      failed: capRead.failed },
     prevFill: strips.prevFill ? { date: strips.prevFill.date, n: strips.prevFill.n ?? 0, declined: strips.prevFill.declined || null,
       from: strips.prevFill.from || null } : null,
   };
@@ -663,9 +707,10 @@ export async function dryLiveTicks({ publish, store, shapeNews, log = console.lo
   const boards = fakeBoards({ sessionDate: prevTradingDay(session, null), session });
   const readStored = async (key) => {
     if (key.startsWith("board:")) return { payload: boards[key.slice(6)] || null };
-    const payload = store[key];
+    const payload = store[key] || (key === "universe" ? fakeUniverse({ boards }) : null);
     return payload ? { payload } : { payload: null, absent: true };
   };
+  const universe = universeReader(readStored);
   const results = [];
   for (const m of minutes) {
     const at = easternInstant(session, m);
@@ -673,7 +718,7 @@ export async function dryLiveTicks({ publish, store, shapeNews, log = console.lo
     const now = () => (clock += 250);
     const uw = fakeLiveVendor({ now, session, nullPrev: true });
     log(`live (dry run): tick at ${isoSec(at)} (${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")} ET)`);
-    results.push(await runLive({ uw, publish, readStored, now, log, warn, shapeNews, origin: "dry-run", force: true }));
+    results.push(await runLive({ uw, publish, readStored, now, log, warn, shapeNews, origin: "dry-run", force: true, universe }));
   }
   return results;
 }
