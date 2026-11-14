@@ -84,7 +84,7 @@
 
   --ink:       #ece8d8;
   --ink-dim:   #b7b298;
-  --ink-faint: #8a8571;
+  --ink-faint: #9c9783;
   --hairline:  rgba(201, 198, 172, 0.14);
 
   --font-ui:    "Inter", system-ui, -apple-system, "Segoe UI", Roboto,
@@ -112,15 +112,18 @@
 
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
 
-  --site-ground:
-    linear-gradient(180deg,
-      rgba(8, 8, 10, 0.42) 0%,
-      rgba(8, 8, 10, 0.50) 34%,
-      rgba(8, 8, 10, 0.72) 52%,
-      rgba(9, 8, 7, 0.88) 68%,
-      rgba(9, 8, 7, 0.94) 100%),
-    radial-gradient(62% 48% at 8% 0%, rgba(122, 170, 214, 0.07), transparent 70%),
-    url("/assets/img/atmosphere.svg?v=426") center / cover no-repeat,
+  --ground-base: #07090e;
+  --ground-sky: url("/assets/img/atmosphere.svg?v=427") center / cover no-repeat;
+  --aur-1: rgba(64, 120, 255, 0.16);
+  --aur-2: rgba(150, 100, 255, 0.11);
+  --aur-3: rgba(60, 200, 240, 0.07);
+  --ground:
+    radial-gradient(42% 38% at 18% 6%, var(--aur-1), transparent 72%),
+    radial-gradient(36% 32% at 84% 10%, var(--aur-2), transparent 72%),
+    radial-gradient(48% 40% at 60% 102%, var(--aur-3), transparent 74%),
+    linear-gradient(180deg, rgba(6, 8, 12, 0.50) 0%, rgba(6, 8, 12, 0.70) 26%, rgba(7, 8, 10, 0.88) 42%, rgba(8, 8, 9, 0.94) 60%, rgba(7, 7, 8, 0.97) 100%),
+    radial-gradient(70% 50% at 12% 0%, rgba(64, 132, 230, 0.10), transparent 70%),
+    var(--ground-sky),
     linear-gradient(180deg, #0a1020 0%, #101c33 34%, #2a2416 56%, #100e0b 100%);
 
   --fs-micro: 0.64rem;
@@ -147,6 +150,9 @@ html {
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
 }
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root { --ground: var(--ground-base); }
+}
 
 body {
   font-family: var(--font-ui);
@@ -155,10 +161,9 @@ body {
   line-height: 1.65;
   color: var(--ink);
 
-  background: var(--site-ground);
+  background: var(--ground);
   background-attachment: fixed;
-
-  background-color: var(--bg);
+  background-color: var(--ground-base);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;

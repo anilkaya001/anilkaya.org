@@ -172,6 +172,12 @@ for (const name of Object.keys(CEILING_KIB)) {
   if (name !== "eventsPage") CEILING_KIB[name] += HORIZON_CORE.bytes / 1024;
   GZIP_KIB[name] += HORIZON_CORE.gzip / 1024;
 }
+const SIDE_KEEP = { bytes: 298, gzip: 158, why: "owner request of 2026-11-14 (the navigation stays open while switching pages): the shell in flows-ui.js keeps the sidebar's state in the fx_side preference cookie (read, write and clear, one state for the drawer and the rail, aria-expanded and inert from it, focus on the current link of a kept drawer), 74,680 to 74,932 B raw and 23,672 to 23,810 B gzip, on every route that loads the kernel" };
+for (const name of Object.keys(CEILING_KIB)) {
+  if (NO_UI_ROUTES.has(name)) continue;
+  if (name !== "eventsPage") CEILING_KIB[name] += SIDE_KEEP.bytes / 1024;
+  GZIP_KIB[name] += SIDE_KEEP.gzip / 1024;
+}
 const CALIB_READ = { od: "MATH-2", bytes: 331, gzip: 72, why: "second math audit: FlowsUI.calibTag, drawn with no payload at every call site, reads /api/flows/calib once and removes the tag at 100 effective outcomes, 74,680 to 75,011 B, so the Not yet calibrated tag can clear" };
 for (const name of Object.keys(CEILING_KIB)) {
   if (NO_UI_ROUTES.has(name)) continue;

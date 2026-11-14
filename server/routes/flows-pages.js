@@ -1,5 +1,5 @@
 import { HttpError, redirect } from "../http.js";
-import { FLOWS_PAGES, fireNav, ownerNav, oracleShell } from "../../shared/flows-pages.js";
+import { FLOWS_PAGES, fireNav, ownerNav, oracleShell, sideShell } from "../../shared/flows-pages.js";
 import { ROUTE_FLAGS, flagOn, modeOf as ffMode } from "../ff-health.js";
 import { memberShell } from "../../shared/flows-member-shell.js";
 import { modeOf } from "../../shared/flows-member-state.js";
@@ -134,7 +134,7 @@ export function flowsPageRows(deps) {
         if (page.flowlab && !labOn) throw HttpError.of("not_found");
         const shelled = memberShell(oracleShell(flowlabShell(page.render(session.username, summary, owner, scenesOn(env, session.username), env, voldeskOn(env, session.username)), slug, labOn), oracleMode(env, owner), slug), memberOptions(env, owner, slug));
         const rendered = fireNav(shelled, ffPageOpen(env, "fire"), slug);
-        return html(owner ? ownerNav(rendered) : rendered);
+        return html(sideShell(owner ? ownerNav(rendered) : rendered, request.headers.get("Cookie")));
       },
     });
     if (page.slug !== "") {

@@ -1271,37 +1271,28 @@
     const side = $("fxSide");
     const btn = $("fxSideBtn");
     const scrim = $("fxScrim");
-    const syncBtn = () => {
-      if (!btn) return;
-      const shown = WIDE.matches ? !body.classList.contains("is-side-collapsed") : body.classList.contains("has-side-open");
-      btn.setAttribute("aria-expanded", String(shown));
-    };
+    const sideKeep = (v) => { try { if (v === undefined) { const m = /(?:^|; )fx_side=([01])/.exec(document.cookie); return m ? m[1] === "1" : null; } document.cookie = "fx_side=" + (v === null ? "; Max-Age=0" : +v + "; Max-Age=31536000") + "; Path=/flows; SameSite=Lax"; } catch (_) { } return null; };
+    let sidePref = sideKeep();
     const behind = ["fxBar", "flowsMain", "fxTabs", "askDock"].map($).filter(Boolean);
-    const setDrawer = (open) => {
-      body.classList.toggle("has-side-open", open);
-      for (const n of behind) n.inert = open;
-      syncBtn();
+    const sideOn = () => sidePref ?? WIDE.matches;
+    const sidePaint = () => {
+      const on = sideOn(), drawer = on && !WIDE.matches;
+      body.classList.toggle("has-side-open", drawer);
+      body.classList.toggle("is-side-collapsed", !on && WIDE.matches);
+      if (drawer !== body.fxDrawer) for (const n of behind) n.inert = body.fxDrawer = drawer;
+      if (btn) btn.setAttribute("aria-expanded", on);
     };
-    const closeDrawer = (focus) => {
-      if (!body.classList.contains("has-side-open")) return;
-      setDrawer(false);
-      if (focus && btn) btn.focus();
-    };
+    const sideSet = (on, kept) => { sidePref = on === WIDE.matches ? null : on; if (kept) sideKeep(sidePref); sidePaint(); };
+    const sideFocus = () => { const a = side.querySelector(".flows-rail a.is-on") || side.querySelector("a"); if (a) a.focus({ preventScroll: true }); };
+    const closeDrawer = (focus, kept) => { if (WIDE.matches || !sideOn()) return; sideSet(false, kept); if (focus && btn) btn.focus(); };
     drawerClose = closeDrawer;
     if (btn && side) {
-      btn.addEventListener("click", () => {
-        if (WIDE.matches) { body.classList.toggle("is-side-collapsed"); syncBtn(); return; }
-        const open = !body.classList.contains("has-side-open");
-        setDrawer(open);
-        if (open) {
-          const first = side.querySelector(".flows-rail a.is-on") || side.querySelector("a");
-          if (first) setTimeout(() => first.focus({ preventScroll: true }), 30);
-        }
-      });
-      if (scrim) scrim.addEventListener("click", () => closeDrawer(true));
-      onDoc("keydown", (e) => { if (e.key === "Escape" && body.classList.contains("has-side-open")) closeDrawer(true); });
-      WIDE.addEventListener("change", () => { closeDrawer(false); syncBtn(); });
-      syncBtn();
+      btn.addEventListener("click", () => { const on = !sideOn(); sideSet(on, true); if (on && !WIDE.matches) setTimeout(sideFocus, 30); });
+      if (scrim) scrim.addEventListener("click", () => closeDrawer(true, true));
+      onDoc("keydown", (e) => { if (e.key === "Escape") closeDrawer(true, true); });
+      WIDE.addEventListener("change", sidePaint);
+      sidePaint();
+      if (sidePref && !WIDE.matches) sideFocus();
     }
 
     const title = $("fxBarT");
