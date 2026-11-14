@@ -18,6 +18,7 @@ export const TRANSPORT = Object.freeze({
     dirty: 0.02,
     slowClean: 0.08,
     slowDirty: 0.25,
+    slowRefusals: 10,
     evidenceCalls: 5000,
     evidenceUse: 0.6,
     settle: 1.15,
@@ -135,11 +136,17 @@ export function stepLine(state, night, { working = null, cfg = TRANSPORT.line } 
   const slowed = Math.min(calls, whole(n.slowed));
   const share = calls > 0 ? refused / calls : null;
   const slow = calls > 0 ? slowed / calls : null;
+  const slowCounts = refused >= cfg.slowRefusals;
+  const last = history.length ? history[history.length - 1] : null;
+  if (last && last.v === "ease" && whole(last.r) < cfg.slowRefusals && last.c > 0 && whole(last.r) / last.c <= cfg.clean && bad === last.l) {
+    bad = null;
+    avoid = false;
+  }
   let next = used;
   let verdict = "hold";
   if (calls < cfg.evidenceCalls) {
     verdict = state ? "thin" : "start";
-  } else if (share >= cfg.dirty || slow >= cfg.slowDirty) {
+  } else if (share >= cfg.dirty || (slowCounts && slow >= cfg.slowDirty)) {
     bad = bad === null ? used : Math.min(bad, used);
     if (good !== null && good < used) {
       next = good;
@@ -150,7 +157,7 @@ export function stepLine(state, night, { working = null, cfg = TRANSPORT.line } 
     avoid = true;
     since = 0;
     verdict = "cut";
-  } else if (share > cfg.clean || slow > cfg.slowClean) {
+  } else if (share > cfg.clean || (slowCounts && slow > cfg.slowClean)) {
     if (good !== null && good < used) {
       bad = bad === null ? used : Math.min(bad, used);
       next = good;

@@ -1,5 +1,6 @@
 import { HttpError, redirect } from "../http.js";
-import { FLOWS_PAGES, ownerNav, oracleShell } from "../../shared/flows-pages.js";
+import { FLOWS_PAGES, fireNav, ownerNav, oracleShell } from "../../shared/flows-pages.js";
+import { ROUTE_FLAGS, flagOn, modeOf as ffMode } from "../ff-health.js";
 import { memberShell } from "../../shared/flows-member-shell.js";
 import { modeOf } from "../../shared/flows-member-state.js";
 import { EXPORT_PAGES, pageHold } from "../../shared/flows-export-build.js";
@@ -36,6 +37,10 @@ export const memberOptions = (env, owner, slug) => {
   };
 };
 
+export const ffPageOpen = (env, part) => ffMode(env) !== "off" && flagOn(env, ROUTE_FLAGS[part]);
+
+const ffPending = (page) => (username, summary, owner, scenes, env) => FLOWS_PAGES.ffPendingPage({ username, page, shadow: ffMode(env) === "shadow" });
+
 const PAGES = Object.freeze([
   { slug: "", from: "overview", summary: true, render: (username, summary, owner, scenes, env) => FLOWS_PAGES.overviewPage({ username, summary, net: homeNet(env, owner) }) },
   { slug: "long", from: "long", render: (username) => FLOWS_PAGES.sidePage({ username, side: "long" }) },
@@ -54,6 +59,10 @@ const PAGES = Object.freeze([
   { slug: "events", render: (username) => FLOWS_PAGES.eventsPage({ username }) },
   { slug: "political", render: (username) => FLOWS_PAGES.politicalPage({ username }) },
   { slug: "status", ownerOnly: true, render: (username) => FLOWS_PAGES.statusPage({ username }) },
+  { slug: "fire", ff: "fire", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.firePage({ username, shadow: ffMode(env) === "shadow" }) },
+  { slug: "inbox", ff: "inbox", render: ffPending("inbox") },
+  { slug: "digest", ff: "inbox", render: ffPending("digest") },
+  { slug: "wires", ff: "wires", render: ffPending("wires") },
 ]);
 
 const PUBLIC_PAGES = Object.freeze([
@@ -115,6 +124,7 @@ export function flowsPageRows(deps) {
           const mode = String(env[page.gate] || "owner").trim().toLowerCase();
           if (mode === "off" || (mode !== "on" && !isOwner(env, session.username))) throw HttpError.of("not_found");
         }
+        if (session && page.ff && !ffPageOpen(env, page.ff)) throw HttpError.of("not_found");
         const summary = session && page.summary ? await readFlowsSummary(env, "board") : null;
         if (!session) return html(FLOWS_PAGES.loginPage());
         const owner = isOwner(env, session.username);
@@ -122,7 +132,8 @@ export function flowsPageRows(deps) {
         const slug = page.slug || "overview";
         const labOn = flowlabMode(env, owner) === "on";
         if (page.flowlab && !labOn) throw HttpError.of("not_found");
-        const rendered = memberShell(oracleShell(flowlabShell(page.render(session.username, summary, owner, scenesOn(env, session.username), env, voldeskOn(env, session.username)), slug, labOn), oracleMode(env, owner), slug), memberOptions(env, owner, slug));
+        const shelled = memberShell(oracleShell(flowlabShell(page.render(session.username, summary, owner, scenesOn(env, session.username), env, voldeskOn(env, session.username)), slug, labOn), oracleMode(env, owner), slug), memberOptions(env, owner, slug));
+        const rendered = fireNav(shelled, ffPageOpen(env, "fire"), slug);
         return html(owner ? ownerNav(rendered) : rendered);
       },
     });

@@ -48,6 +48,8 @@ const ASK_RULE = { bytes: 215, why: "lane 4 audit: the ticker printed its alert 
 const DESK_FORWARD = { bytes: 9900, gzip: 3350, why: "Premium Desk decisions 1 and 2: flows-desk.js reads the server's forward records and cut (bandOf and winHalf, the delta and Win % bands, the forward sentences, the cut note: 6.5 KB raw, 1.9 KB gzip) and the browser bundle gains carryOf, deltaBand, lineCompare, winRange and outsideRange with the card's forward-aware frame (2.5 KB raw, 1.1 KB gzip), measured against 8b47e40, plus the 1 KiB of headroom the floor requires; the early-exercise correction then added the slope t-statistic, the ramp and the flag to the bundle and one forward sentence to flows-desk.js, 150 B of gzip over the first measure, and the visible note on how the short-call list was cut (one status line, 0.7 KB raw, 0.2 KB gzip, so the phone keeps its first line in view); the short-call chunk is deferred and adds nothing to the eager JavaScript" };
 const STRATEGY_BUNDLE = { gzip: 250, why: "Premium Desk decisions 1 and 2: the strategy page loads the same flows-quant.bundle.js as the desk, which gained carryOf, deltaBand, lineCompare, winRange and outsideRange (+2.5 KB raw, +1.1 KB gzip); raw JavaScript stayed inside its ceiling and only the gzip ceiling had less than 1.1 KB of room, measured against 8b47e40; the early-exercise correction (the slope t-statistic, the ramp, the flag) then added another 0.15 KB of gzip to the same bundle" };
 const DESK_CALLS = { bytes: 2500, why: "Premium Desk decisions 1 and 2: the deferred short-call chunk reads the server's cut and forward records (the lazy engine for cut rows, the bands in the Net delta and Win % cells, the neighbouring-quote range and its information line, the delta floor in the formula, the EV label and the band column of the export), 2.5 KB raw over 8b47e40; it adds nothing to the eager JavaScript" };
+const FF_FIRE_PAGE = { bytes: 73998, gzip: 21515, cssBytes: 15129, cssGzip: 3352, why: "Fire & Forget, the Fire page is a new route: lane U's kernel and client (flows-ff-kernel.js 5,567 B, flows-ff-client.js 5,755 B), lane D's composer, preview and controller (flows-ff-composer.js 38,638 B, flows-ff-preview.js 8,306 B, flows-ff-fire.js 15,732 B) and its two sheets (flows-ff-tokens.css 469 B, flows-ff-fire.css 14,660 B) are the whole cost of it above the shared kernel (flows-ui.js, flows-dock.js, base.css, flows.css); it defers nothing but the dock's Ask file. The Inbox, Digest and Wires pages are one page function that says they are not released and ships the kernel alone" };
+const FF_KERNEL_BASE = { raw: 75.7, gzip: 24.1, css: 86.7, cssGzip: 18.7, why: "the shared kernel as measured when the Fire & Forget routes landed (flows-dock.js 4,914 B and flows-ui.js 74,680 B; base.css 10,813 B and flows.css 78,986 B), less what the loops below add for every route, plus 1.5 KiB of raw headroom so the routes sit above the 1 KiB floor" };
 const GLASS_BYTES_PLAIN = (GLASS_V3.bytes + GLASS_LENS.bytes + GLASS_SITE.bytes) / 1024;
 const GLASS_BYTES = (GLASS_V3.bytes + GLASS_LENS.bytes + GLASS_SITE.bytes + GLASS_REBASE.bytes) / 1024;
 const GLASS_GZIP = (GLASS_V3.gzip + GLASS_LENS.gzip + GLASS_SITE.gzip) / 1024;
@@ -75,6 +77,8 @@ const CEILING_KIB = {
   glossaryPage: 5,
   notFoundPage: 5,
   statusPage: 80 + 1792 / 1024 + 24.5 + 9 + 442 / 1024 + STATUS_RAISE.bytes / 1024 + NN_KERNEL.bytes / 1024,
+  firePage: FF_KERNEL_BASE.raw + FF_FIRE_PAGE.bytes / 1024,
+  ffPendingPage: FF_KERNEL_BASE.raw,
 };
 
 const GZIP_KIB = {
@@ -98,6 +102,8 @@ const GZIP_KIB = {
   glossaryPage: 3,
   notFoundPage: 3,
   statusPage: 27 + 9.5 + NN_KERNEL.gzip / 1024,
+  firePage: FF_KERNEL_BASE.gzip + FF_FIRE_PAGE.gzip / 1024,
+  ffPendingPage: FF_KERNEL_BASE.gzip,
 };
 
 const CSS_KIB = {
@@ -121,6 +127,8 @@ const CSS_KIB = {
   glossaryPage: 81 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   notFoundPage: 81 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   statusPage: 82 + 7.5 + 5.5 + 1700 / 1024 + GLASS_BYTES_PLAIN + NN_FLOWS_CSS.bytes / 1024,
+  firePage: FF_KERNEL_BASE.css + FF_FIRE_PAGE.cssBytes / 1024,
+  ffPendingPage: FF_KERNEL_BASE.css,
 };
 
 const CSS_GZIP_KIB = {
@@ -144,6 +152,8 @@ const CSS_GZIP_KIB = {
   glossaryPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   notFoundPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   statusPage: 18 + 4 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
+  firePage: FF_KERNEL_BASE.cssGzip + FF_FIRE_PAGE.cssGzip / 1024,
+  ffPendingPage: FF_KERNEL_BASE.cssGzip,
 };
 
 const FORMAT_CORE = { od: "MATH-1", bytes: 1737, gzip: 543, why: "lane 2 math audit: flows-ui.js carries the one rounding rule of shared/flows-display-round.js (fixedHalfUp, formatFixed, formatScaled and the unit floors, 1,344 B), F.strike and F.etDay (228 B) and the guards that make an unreadable number throw or answer null instead of printing a zero (165 B), measured as 71,076 to 72,813 B raw and 22,524 to 23,067 B gzip, so every route that ships flows-ui.js grows by it; the browser imports nothing, so the copy is the price of one rounding rule that tests/math-format.mjs holds equal to the leaf" };
@@ -269,7 +279,7 @@ const ORACLE_DEFERRED_KIB = 60 + NEURON_RESTORE.bytes / 1024;
 const ORACLE_MARKUP_BYTES = 720;
 const DEFERRED_KIB = {
   tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + NETWORK_GROUP.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + (260 + 848) / 1024 + HOME_FIT.deferred / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024 + DESK_CALLS.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024 + (2240 + 627) / 1024 + HOME_FIT.deferred / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
-  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + (26400 + 745) / 1024 + HOME_FIT.deferred / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024 + LEDGER_LIVE.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024 + FLOWLAB_HEATMAP.bytes / 1024,
+  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + (26400 + 745) / 1024 + HOME_FIT.deferred / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024 + LEDGER_LIVE.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, firePage: 80 + NN_ASK.bytes / 1024, ffPendingPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024 + FLOWLAB_HEATMAP.bytes / 1024,
 };
 const DARK_POOL_TIME = { bytes: 107, why: "lane 2 math audit: the Market page's dark-pool list drops canceled prints, prints its times in TRT through F.time and its prices through F.px, and says how many canceled prints it left out, measured as 58,946 to 59,053 B raw in the deferred flows-market-below.js" };
 DEFERRED_KIB.marketPage += DARK_POOL_TIME.bytes / 1024;

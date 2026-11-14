@@ -1,0 +1,16 @@
+:root {
+  --ff-live: var(--up);
+  --ff-resting: var(--label-2);
+  --ff-degraded: var(--warn);
+  --ff-down: var(--down);
+  --ff-unknown: var(--label-3);
+  --ff-hit: var(--accent-ink);
+  --ff-absent: var(--label-3);
+  --ff-ink: var(--label-1);
+  --ff-ink-dim: var(--label-2);
+  --ff-rule: var(--sep);
+  --ff-surface: var(--mat-regular);
+}
+
+.ffx-clip { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ffx-cut { display: none !important; }

@@ -167,6 +167,14 @@ const lineBattery = (T) => {
   t("two per cent refused cuts the line to seven tenths", dirty.verdict === "cut" && dirty.next === 350 && dirty.state.bad === 500 && dirty.state.avoid === true);
   const slowed = T.stepLine(null, night({ refused: 30, slowed: 10000 }), { working: 500 });
   t("a quarter of the calls issued while backed off is a cut too", slowed.verdict === "cut" && slowed.next === 350);
+  const heldAt = { perMinute: 562, good: 500, bad: null, avoid: false, since: 3, history: [] };
+  const two = T.stepLine(heldAt, night({ calls: 26579, refused: 2, slowed: 2392, alloc: 462, peak: 462 }), { working: 500 });
+  t("two refusals do not ease the line, however long the pacer stayed backed off", two.verdict !== "ease" && two.verdict !== "cut" && two.next >= 562);
+  const ten = T.stepLine(heldAt, night({ calls: 26579, refused: 10, slowed: 2392, alloc: 462, peak: 462 }), { working: 500 });
+  t("ten refusals with the same slowed share do ease it", ten.verdict === "ease" && ten.next === 500);
+  const wrong = { perMinute: 500, good: 500, bad: 562, avoid: true, since: 0, history: [{ d: "2026-11-13", l: 562, a: 462, c: 26579, r: 2, s: 2392, p: 462, v: "ease" }] };
+  const mend = T.stepLine(wrong, night({ calls: 26000, refused: 0, slowed: 0, alloc: 400, peak: 400 }), { working: 500 });
+  t("an ease recorded on under ten refusals is taken back on the next night", mend.verdict === "raise" && mend.next === 625);
   const edgeUnder = T.stepLine(null, night({ refused: 799 }), { working: 500 });
   t("just under two per cent is not a cut", edgeUnder.verdict !== "cut");
   const back = T.stepLine(clean.state, night({ refused: 900, alloc: 525, peak: 520 }), { working: 500 });
@@ -469,13 +477,15 @@ const leafMutants = [
   ["the share helper lets a higher class take everything", [["demand[c.id] = c.id === id ? Infinity : c.rank <= rank ? whole(c.floor) : 0;", "demand[c.id] = c.rank <= rank ? Infinity : 0;"]], allocBattery, "the share helper gives the nightly 400 of 500 and 525 of 625"],
   ["a thin night raises the line", [["if (calls < cfg.evidenceCalls) {", "if (calls < 0) {"]], lineBattery, "a night under the evidence count changes nothing"],
   ["an idle night raises the line", [["if (!(alloc > 0) || peak < cfg.evidenceUse * alloc) {", "if (false) {"]], lineBattery, "a clean night that never ran near its share is no evidence"],
-  ["a refused night is not cut", [["} else if (share >= cfg.dirty || slow >= cfg.slowDirty) {", "} else if (false) {"]], lineBattery, "two per cent refused cuts the line to seven tenths"],
-  ["calls issued while backed off are ignored", [["share >= cfg.dirty || slow >= cfg.slowDirty", "share >= cfg.dirty"]], lineBattery, "a quarter of the calls issued while backed off is a cut too"],
+  ["a refused night is not cut", [["} else if (share >= cfg.dirty || (slowCounts && slow >= cfg.slowDirty)) {", "} else if (false) {"]], lineBattery, "two per cent refused cuts the line to seven tenths"],
+  ["calls issued while backed off are ignored", [["share >= cfg.dirty || (slowCounts && slow >= cfg.slowDirty)", "share >= cfg.dirty"]], lineBattery, "a quarter of the calls issued while backed off is a cut too"],
   ["the ceiling is not applied", [["next = Math.min(cfg.max, Math.max(used, target));", "next = Math.max(used, target);"]], lineBattery, "the line never passes its ceiling"],
   ["the floor is not applied", [["next = Math.max(cfg.min, Math.floor(used * cfg.cut));", "next = Math.floor(used * cfg.cut);"]], lineBattery, "nor falls under its floor"],
   ["after a cut the line still jumps by a quarter", [["if (!avoid) {", "if (true) {"]], lineBattery, "the next clean night tries halfway between the line that held and the one that did not"],
   ["a cut forgets the line that held", [["if (good !== null && good < used) {\n      next = good;\n    } else {", "if (false) {\n      next = good;\n    } else {"]], lineBattery, "a refused night above a line that held returns to that line"],
-  ["some refusals are read as clean", [["} else if (share > cfg.clean || slow > cfg.slowClean) {", "} else if (false) {"]], lineBattery, "a probe that draws some refusals goes back to the line that held"],
+  ["the slowed share eases on any refusal count", [["const slowCounts = refused >= cfg.slowRefusals;", "const slowCounts = true;"]], lineBattery, "two refusals do not ease the line, however long the pacer stayed backed off"],
+  ["a mistaken ease is never taken back", [["    bad = null;\n    avoid = false;\n  }\n  let next = used;", "  }\n  let next = used;"]], lineBattery, "an ease recorded on under ten refusals is taken back on the next night"],
+  ["some refusals are read as clean", [["} else if (share > cfg.clean || (slowCounts && slow > cfg.slowClean)) {", "} else if (false) {"]], lineBattery, "a probe that draws some refusals goes back to the line that held"],
   ["the record is never trimmed", [["history: history.slice(-cfg.history) },", "history },"]], lineBattery, "the record keeps the last fourteen nights"],
   ["a stored line of any version is read", [["|| s.v !== TRANSPORT.v) return null;", ") return null;"]], lineBattery, "a line of another version, out of range or malformed is not read"],
   ["dated keys are reconciled", [["return !DATED_RE.test(k);", "return true;"]], leafReconcileBattery, "live keys, the run record and dated archive keys are not reconciled"],
