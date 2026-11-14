@@ -719,22 +719,50 @@ const sdSample = (xs) => { const m = mean(xs); return Math.sqrt(xs.reduce((a, b)
   }
 
   let calls = 0;
-  const mlRead = (sizes) => async (path, params) => {
-    calls++;
-    return { data: Array.from({ length: sizes[(params.offset || 0) / 500] || 0 }, (_, i) => ({ id: `${params.offset}-${i}` })) };
+  const asked = [];
+  const mlWorld = (n, { sameStamp = 0, micro = false } = {}) => {
+    const all = Array.from({ length: n }, (_, i) => {
+      const at = WIN.close - 1000 - (i < sameStamp ? 0 : (i - sameStamp + 1) * 1000);
+      const iso = new Date(at).toISOString();
+      return { id: "ml" + i, executed_at: micro ? iso.replace("Z", String(999 - (i % 1000)).padStart(3, "0") + "Z") : iso, at };
+    });
+    return async (path, params) => {
+      calls++;
+      asked.push({ ...params });
+      const lo = Date.parse(params.newer_than), hi = Date.parse(params.older_than);
+      const rows = all.filter((r) => r.at >= lo && r.at <= hi);
+      return { data: rows.slice(0, params.limit).map(({ at, ...r }) => r) };
+    };
   };
-  calls = 0;
-  const two = await readMultiLeg(mlRead([500, 120]), "AAA", WIN);
-  eq(two.rows.length, 620, "offset paging reads past the first 500 structures");
-  eq(two.truncated, false, "and a short second page is complete");
+  calls = 0; asked.length = 0;
+  const two = await readMultiLeg(mlWorld(620), "AAA", WIN);
+  eq(new Set(two.rows.map((r) => r.id)).size, 620, "the time cursor reads past the first 500 structures and loses none between pages");
+  eq(two.rows.length, 620, "and the row the two pages share is kept once");
+  eq(two.truncated, false, "a short second page ends the walk and is complete");
   eq(calls, 2, "in two calls");
-  const full = await readMultiLeg(mlRead([500, 500]), "AAA", WIN);
-  eq(full.truncated, true, "two full pages hit the documented offset ceiling and say so");
+  ok(asked.every((p) => !("offset" in p)), "NO PAGE CARRIES AN OFFSET: the feed refuses offset 500 with HTTP 422, so the walk moves older_than instead");
+  eq(asked[0].older_than, WIN.closeIso, "the first page asks up to the close");
+  eq(Date.parse(asked[1].older_than), Date.parse(two.rows[499].executed_at) + 1, "the second asks at or before the oldest stamp of the first, a millisecond on so a stamp finer than a millisecond is not lost");
+  eq(asked[1].newer_than, WIN.openIso, "and still from the open");
+  calls = 0;
+  const short = await readMultiLeg(mlWorld(120), "AAA", WIN);
+  assert.deepEqual([short.rows.length, short.truncated, short.full, short.failedAt, calls], [120, false, false, null, 1], "A SHORT FIRST PAGE ENDS THE WALK: no second call is made"); checks++;
+  calls = 0;
+  const exact = await readMultiLeg(mlWorld(500), "AAA", WIN);
+  assert.deepEqual([exact.rows.length, exact.truncated, exact.full, exact.failedAt, calls], [500, false, true, null, 2], "a first page of exactly the limit is followed by one page that holds nothing new, which ends the walk complete"); checks++;
+  const micro = await readMultiLeg(mlWorld(700, { micro: true }), "AAA", WIN);
+  eq(new Set(micro.rows.map((r) => r.id)).size, 700, "stamps with microseconds lose no row at the page boundary");
+  const full = await readMultiLeg(mlWorld(1400), "AAA", WIN);
+  eq(full.truncated, true, "two full pages hit the page ceiling and say so");
+  eq(new Set(full.rows.map((r) => r.id)).size, full.rows.length, "with no row twice");
   assert.deepEqual([two.full, two.failedAt, full.failedAt], [true, null, null], "a full first page is marked, and no page failed"); checks++;
-  const cut = await readMultiLeg(async (path, params) => (params.offset ? { __failed: "refused" } : { data: Array.from({ length: 500 }, (_, i) => ({ id: "c" + i })) }), "AAA", WIN);
-  assert.deepEqual([cut.rows.length, cut.truncated, cut.full, cut.failedAt, cut.calls], [500, true, true, 500, 2], "a refused second page keeps the first, says so and names the offset that failed"); checks++;
+  calls = 0;
+  const stuck = await readMultiLeg(mlWorld(900, { sameStamp: 900 }), "AAA", WIN);
+  assert.deepEqual([stuck.rows.length, stuck.truncated, calls], [500, true, 2], "more rows on one stamp than a page holds cannot be walked: the walk stops when a page brings nothing new and says the read is cut"); checks++;
+  const cut = await readMultiLeg(async (path, params) => (params.older_than !== WIN.closeIso ? { __failed: "refused" } : { data: Array.from({ length: 500 }, (_, i) => ({ id: "c" + i, executed_at: new Date(WIN.close - 1000 - i).toISOString() })) }), "AAA", WIN);
+  assert.deepEqual([cut.rows.length, cut.truncated, cut.full, cut.failedAt, cut.calls], [500, true, true, 1, 2], "a refused second page keeps the first, says so and names the page that failed"); checks++;
   const none = await readMultiLeg(async () => ({ __failed: "failed" }), "AAA", WIN);
-  assert.deepEqual([none.rows.__failed, none.failedAt, none.full], ["failed", 0, false], "a failed first page is the section's failure, at offset 0"); checks++;
+  assert.deepEqual([none.rows.__failed, none.failedAt, none.full], ["failed", 0, false], "a failed first page is the section's failure, at page 0"); checks++;
 }
 
 {

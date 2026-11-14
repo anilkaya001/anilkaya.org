@@ -152,19 +152,32 @@ export function reduceFinancials(raw) {
   return { ok: true, currency, newest, q, a, eps };
 }
 
+export const BREAKDOWN_GROUPS = Object.freeze(["revenue", "rewards", "locations", "memberships", "product"]);
+
 export function reduceBreakdown(raw) {
   const d = unwrap(raw);
   if (!isObj(d)) return fail("unshaped");
-  const rows = arr(d.rev_breakdown).filter(isObj)
+  if (d.rev_breakdown !== undefined && d.rev_breakdown !== null && !Array.isArray(d.rev_breakdown)) return fail("unshaped");
+  const listed = arr(d.rev_breakdown);
+  const read = listed.filter(isObj)
     .map((r) => ({
       date: isoDay(typeof r.report_date === "string" ? r.report_date : ""),
-      group: pick(r.rev_group, ["revenue", "rewards", "locations", "memberships", "product"]),
+      group: pick(r.rev_group, BREAKDOWN_GROUPS),
       field: str(r.field, 120),
       member: arr(r.members).map((m) => cleanLabel(m, 40)).filter(Boolean).join(" / ") || null,
       value: vnum(r.value),
-    }))
-    .filter((r) => r.date && r.group && r.member && r.value !== null && r.value > 0);
-  if (!rows.length) return fail(arr(d.rev_breakdown).length ? "unshaped" : "empty");
+      whole: r.members === undefined || r.members === null || (Array.isArray(r.members) && r.members.length === 0),
+    }));
+  const rows = read.filter((r) => r.date && r.group && r.member && r.value !== null && r.value > 0);
+  if (!rows.length) {
+    if (!listed.length) return fail("empty");
+    if (read.length < listed.length) return fail("unshaped");
+    for (const [field, bad] of [["report_date", (r) => !r.date], ["rev_group", (r) => !r.group], ["value", (r) => r.value === null]]) {
+      if (read.some(bad)) return fail("type:" + field);
+    }
+    if (read.some((r) => !r.member && !r.whole)) return fail("type:members");
+    return fail("empty");
+  }
   const latest = rows.map((r) => r.date).sort().pop();
   const at = rows.filter((r) => r.date === latest);
   const groups = [];
