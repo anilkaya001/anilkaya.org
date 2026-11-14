@@ -79,6 +79,7 @@ All in the first `:root` of `assets/css/flows.css`.
 | `--glass-solid`, `--glass-solid-thick`, `--glass-solid-chrome` | The opaque colours the materials fall back to where `backdrop-filter` is not supported. |
 | `--mask-on`, `--mask-mid` | Mask stops for the rim ring, so no colour literal sits inside a `mask` function. |
 | `--aur-1`, `--aur-2`, `--aur-3` | The three static aurora pools (blue, violet, cyan) painted on top of the ground, under the overlay; they never move. |
+| `--ground-base`, `--ground-sky`, `--ground` | The page ground. With the three pools it is defined once, in `assets/css/base.css`, and every page of the site paints it: `body` on the landing page, the Lab, Articles and the 404, `.flows-body::before` in Flows. |
 | `--num-ice-a`, `--num-ice-b` | The resting `.ui-num` gradient: white to a light blue. |
 | `--num-up-a`, `--num-up-b`, `--num-down-a`, `--num-down-b` | The `.ui-num` gradients for `data-tone` `up`/`long` and `down`/`short`. |
 | `--r-tile` | The bento tile radius, 22 px. |

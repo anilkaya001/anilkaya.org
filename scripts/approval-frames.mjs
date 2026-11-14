@@ -133,7 +133,7 @@ function tideStrip(W) {
   const pts = [0, 6, 14, 10, 22, 30, 26, 40, 52, 47, 61, 70, 66, 78, 90];
   const x = (i) => 8 + (i / (pts.length - 1)) * (W - 16), y = (v) => 52 - v * 0.5;
   const d = pts.map((v, i) => (i ? "L" : "M") + r1(x(i)) + " " + r1(y(v))).join("");
-  return `<svg class="tide" viewBox="0 0 ${W} 70" width="100%" role="img" aria-label="Market tide over the session; the network holds data from 10:02" xmlns="http://www.w3.org/2000/svg" font-family="Inter,system-ui,sans-serif"><defs><pattern id="h" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="rgba(255,255,255,.35)" stroke-width="1.2"/></pattern></defs><rect x="8" y="6" width="${r1(x(2) - 8)}" height="48" fill="url(#h)" opacity=".7"/><path d="${d}" fill="none" stroke="#388cf0" stroke-width="2"/><text x="${r1(x(2) + 8)}" y="20" font-size="11.5" fill="#b4b6c4">network data held since 10:02</text><text x="8" y="66" font-size="10.5" fill="#9a9cad">09:30</text><text x="${W - 8}" y="66" text-anchor="end" font-size="10.5" fill="#9a9cad">15:41</text></svg>`;
+  return `<svg class="tide" viewBox="0 0 ${W} 70" width="100%" role="img" aria-label="Market tide over the session; the network holds data from 10:02" xmlns="http://www.w3.org/2000/svg" font-family="Google Sans,system-ui,sans-serif"><defs><pattern id="h" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="rgba(255,255,255,.35)" stroke-width="1.2"/></pattern></defs><rect x="8" y="6" width="${r1(x(2) - 8)}" height="48" fill="url(#h)" opacity=".7"/><path d="${d}" fill="none" stroke="#388cf0" stroke-width="2"/><text x="${r1(x(2) + 8)}" y="20" font-size="11.5" fill="#b4b6c4">network data held since 10:02</text><text x="8" y="66" font-size="10.5" fill="#9a9cad">09:30</text><text x="${W - 8}" y="66" text-anchor="end" font-size="10.5" fill="#9a9cad">15:41</text></svg>`;
 }
 
 export function homeFrame(fx, vp, state) {
@@ -344,6 +344,8 @@ ${sections}
 <section class="card" id="superseded"><div class="card-h"><h2>Superseded frames</h2></div><p class="caption">These ${fx.superseded.frames.length} frames predate the 19:20 direction and show what it rejected. They are not what is asked of you.</p><ul class="note" style="columns:2">${sup}</ul></section></main></div></body></html>`;
 }
 
+const SHOT_RETRIES = 1;
+
 export async function renderApproval({ out, chromium, capture = false, log = () => {} }) {
   const fx = loadFixtures();
   mkdirSync(out, { recursive: true });
@@ -353,16 +355,26 @@ export async function renderApproval({ out, chromium, capture = false, log = () 
   try {
     for (const f of frames) {
       const v = VIEWPORTS[f.vp];
-      const ctx = await browser.newContext({ viewport: { width: v.w, height: v.h }, deviceScaleFactor: 1, reducedMotion: "reduce" });
-      const page = await ctx.newPage();
       const errs = [];
-      page.on("pageerror", (e) => errs.push(String(e)));
-      await page.setContent(f.html);
-      await page.screenshot({ path: path.join(out, f.id + ".png"), fullPage: true });
+      for (let attempt = 0; ; attempt++) {
+        const ctx = await browser.newContext({ viewport: { width: v.w, height: v.h }, deviceScaleFactor: 1, reducedMotion: "reduce" });
+        try {
+          const page = await ctx.newPage();
+          errs.length = 0;
+          page.on("pageerror", (e) => errs.push(String(e)));
+          await page.setContent(f.html);
+          await page.screenshot({ path: path.join(out, f.id + ".png"), fullPage: true });
+          break;
+        } catch (error) {
+          if (attempt >= SHOT_RETRIES) throw error;
+          log(`${f.id}: the capture failed (${String(error && error.message).split("\n")[0]}), taken again on a fresh page`);
+        } finally {
+          await ctx.close();
+        }
+      }
       writeFileSync(path.join(out, f.id + ".html"), f.html);
       info.push({ id: f.id, errors: errs });
       log(f.id);
-      await ctx.close();
     }
     writeFileSync(path.join(out, "capture-live-ambient.html"), captureHtml(fx));
     if (capture) {

@@ -317,7 +317,7 @@ export const MUTANTS = {
   "the rim visible under forced colours": [["  .ui-card::before, .ft-strip::before, .ft-rail::before, .ft-gchart::before { display: none; }\n", ""]],
   "a sheen of 0.08 reaching 60%": [[SHEEN, "rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 60%"]],
 };
-export const patchOf = (name) => ({ "/assets/css/flows.css": MUTANTS[name] });
+export const patchOf = (name) => ({ [name === "aurora alphas doubled" ? "/assets/css/base.css" : "/assets/css/flows.css"]: MUTANTS[name] });
 
 export const PROBE_INKS = [["label-1", "--label-1"], ["label-2", "--label-2"], ["label-3", "--label-3"], ["down", "--down"], ["accent", "--accent-ink"], ["up", "--up"]];
 export const PROBE_NUMS = [["ice", null], ["num-up", "up"], ["num-down", "down"]];
@@ -331,7 +331,7 @@ const mountProbe = ({ inks, nums }) => {
   host.id = "glassProbeHost";
   const style = document.createElement("style");
   style.id = "glassProbeHostStyle";
-  style.textContent = "#glassProbeHost { position: fixed; inset: 0; z-index: 2147483000; pointer-events: none; } #glassProbeHost .ui-card { position: absolute; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; padding: 4px 10px 8px; font: 400 13px / 1.3 var(--font-text); } #glassProbeHost .gp-row { display: flex; gap: 10px; white-space: nowrap; } #glassProbeHost .gp-num { font-weight: 600; } body > :not(#glassProbeHost) { display: none !important; }";
+  style.textContent = "#glassProbeHost { position: fixed; inset: 0; z-index: 2147483000; pointer-events: none; } #glassProbeHost .ui-card { position: absolute; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; padding: 4px 18px 8px; font: 400 13px / 1.3 var(--font-text); } #glassProbeHost .gp-row { display: flex; gap: 10px; white-space: nowrap; } #glassProbeHost .gp-num { font-weight: 600; } body > :not(#glassProbeHost) { display: none !important; }";
   document.head.append(style);
   const row = (cls) => {
     const r = document.createElement("div");
@@ -392,7 +392,7 @@ export async function measureMaterial(page) {
   return { pools, runs: judged.map((j) => ({ ...j, probe: true })), tiles };
 }
 
-const LENS_RIG_CSS = "#lensRig { position: fixed; left: 24px; top: 24px; z-index: 2147483000; display: grid; gap: 24px; padding: 20px; background: #07090e; } #lensRig[data-lens='off'] { --glass-lens: none; } #lensRig[data-lens='on'] { --glass-lens: url(\"#fx-lens\"); } #lensRig .ui-seg { background-color: #000; background-image: repeating-linear-gradient(90deg, #fff 0 1px, transparent 1px 10px); } #lensRig .ui-seg-i { color: transparent; } #lensRig .ui-seg-knob { transition: none; } #lensGrid { position: relative; width: 220px; height: 70px; background-image: repeating-linear-gradient(90deg, #fff 0 1px, transparent 1px 10px); } #lensProbe { position: absolute; inset: 5px 30px; } #lensRig[data-lens='on'] #lensProbe { -webkit-backdrop-filter: url(#lensProbeFx); backdrop-filter: url(#lensProbeFx); }";
+const LENS_RIG_CSS = "#lensRig { position: fixed; left: 24px; top: 24px; z-index: 2147483000; display: grid; gap: 24px; padding: 20px; background: #07090e; } #lensRig .ui-seg-i:first-of-type { box-sizing: border-box; width: 139px; padding-inline: 0; text-align: center; } #lensRig[data-lens='off'] { --glass-lens: none; } #lensRig[data-lens='on'] { --glass-lens: url(\"#fx-lens\"); } #lensRig .ui-seg { background-color: #000; background-image: repeating-linear-gradient(90deg, #fff 0 1px, transparent 1px 10px); } #lensRig .ui-seg-i { color: transparent; } #lensRig .ui-seg-knob { transition: none; } #lensGrid { position: relative; width: 220px; height: 70px; background-image: repeating-linear-gradient(90deg, #fff 0 1px, transparent 1px 10px); } #lensProbe { position: absolute; inset: 5px 30px; } #lensRig[data-lens='on'] #lensProbe { -webkit-backdrop-filter: url(#lensProbeFx); backdrop-filter: url(#lensProbeFx); }";
 
 const buildLensRig = (css) => {
   const host = document.createElement("div");

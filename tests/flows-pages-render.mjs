@@ -9,6 +9,7 @@ import { chromium } from "playwright";
 import * as PAGES from "../shared/flows-pages.js";
 import { liveEntry, phaseView } from "../shared/flows-live-worker.js";
 import { phaseAt, expectedNightlySession, freshHeaders } from "../shared/flows-freshness.js";
+import { fulfilFf } from "./lib/ff-u-world.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, "..");
@@ -78,7 +79,7 @@ function answer(route, u) {
   switch (route) {
     case "board": return emitted("board-" + (q.get("side") || "long"));
     case "market": case "events": case "scoretrack": case "meta": case "flowalerts": case "pulse": case "news":
-    case "political": case "unusual": case "movers": case "universe": case "regime": case "ideas": case "focus": case "roster": case "record": case "brief":
+    case "political": case "positioning": case "unusual": case "movers": case "universe": case "regime": case "ideas": case "focus": case "roster": case "record": case "brief":
       return emitted(route) || { status: "pending" };
     case "sectors": return emitted("sector-trix") || { status: "pending", rows: [] };
     case "sector-premium": return emitted("sector-premium") || { status: "pending", sectors: [] };
@@ -131,10 +132,14 @@ const SPECS = [
   { id: "events", fn: "eventsPage", url: "/flows/events/" },
   { id: "moves", fn: "movesPage", url: "/flows/moves/" },
   { id: "political", fn: "politicalPage", url: "/flows/political/" },
+  { id: "political-layers", fn: "politicalPage", args: { layers: true }, url: "/flows/political/" },
+  { id: "positioning", fn: "positioningPage", url: "/flows/positioning/" },
   { id: "strategy", fn: "strategyPage", url: "/flows/strategy/?t=NVDA" },
   { id: "desk", fn: "deskPage", url: "/flows/desk/" },
   { id: "ticker", fn: "tickerPage", url: "/flows/ticker/?t=NVDA" },
   { id: "status", fn: "statusPage", url: "/flows/status/" },
+  { id: "fire", fn: "firePage", args: { shadow: true }, url: "/flows/fire/" },
+  { id: "inbox", fn: "ffPendingPage", args: { page: "inbox", shadow: true }, url: "/flows/inbox/" },
 ];
 
 const pageFunctions = Object.keys(PAGES.FLOWS_PAGES).filter((k) => typeof PAGES.FLOWS_PAGES[k] === "function").sort();
@@ -159,6 +164,7 @@ async function mount(page, html, url) {
       return route.fulfill({ path: f, contentType: MIME[path.extname(f)] || "application/octet-stream" });
     }
     if (u.pathname.startsWith("/api/rt/")) return route.fulfill({ status: 404, contentType: "application/json", body: '{"error":{"code":"rt_off"}}' });
+    if (u.pathname.startsWith("/api/ff/")) return fulfilFf(route, NOW);
     if (u.pathname.startsWith("/api/flows/")) {
       const r = u.pathname.slice("/api/flows/".length);
       asked.push(r);

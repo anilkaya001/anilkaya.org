@@ -1645,3 +1645,6 @@
 @media (scripting: enabled) and (max-width: 359px) {
   .today[aria-busy="true"] .dashboard-grid:empty { min-height: 10.25rem; }
 }
+@media (max-width: 359px) {
+  .today .dashboard-resume > div > p:not(.academy-kicker) { min-height: 3.3em; }
+}

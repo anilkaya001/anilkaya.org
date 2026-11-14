@@ -410,7 +410,76 @@
   let tideChart = null;
   let tideLabel = null;
 
-  const HERO = { m: null, tide: null, etf: null, iv: {} };
+  const CAP_SCALE = 0.25;
+  const CAP_COPY = {
+    define: "Each stock's net premium over its total premium, averaged by market value.",
+    net: "Net premium is net calls minus net puts.",
+    outside: "Index options and funds have no market value and are outside it.",
+    scope: "So it is not an index of the whole options market.",
+    withheld: "It is withheld under 30 names or under half the market value.",
+  };
+  const CAP_WHY = {
+    thin: ["Too few names", "Too few names carry a full reading."],
+    coverage: ["Under half the market value", "The names read cover under half the market value."],
+    unavailable: ["No universe read", "No universe row was read."],
+    "not-read": ["Live read not run", "The live read has not run this session."],
+    "vendor-failed": ["Live read failed", "The live read failed on this pass."],
+    "vendor-prior-session": ["Feed on the prior session", "The feed still holds the previous session."],
+  };
+  function capTideOf(m, lb) {
+    const night = m && m.capTide && typeof m.capTide === "object" ? m.capTide : null;
+    const live = okFeed(lb) && lb.cap && typeof lb.cap === "object" ? lb.cap : null;
+    const state = live && lb.__ff && typeof lb.__ff.stateAt === "function" ? lb.__ff.stateAt() : null;
+    const on = Boolean(live && state === "live" && newer(lb.session, m));
+    const pick = (c, src) => ({
+      src, value: isNum(c.value), coverage: isNum(c.coverage), n: isNum(c.n), of: isNum(c.of), effN: isNum(c.effN), equal: isNum(c.equal),
+      dollarNet: isNum(c.dollarNet), reason: typeof c.reason === "string" ? c.reason : null,
+      at: src === "live" ? c.at || readAtOf(lb) : null, session: src === "live" ? lb.session : m.sessionDate || null,
+      until: src === "live" && typeof lb.__ff.nextAt === "function" ? lb.__ff.nextAt() : null,
+    });
+    if (on && isNum(live.value) !== null) return pick(live, "live");
+    if (night && isNum(night.value) !== null) return Object.assign(pick(night, "nightly"), { liveWhy: on ? live.reason : null, liveHeld: Boolean(live && !on) });
+    if (on) return pick(live, "live");
+    return night ? pick(night, "nightly") : null;
+  }
+  const capShown = (c) => (c.src === "live" ? "Live read" + (F.time(c.at) === DASH ? "" : " at " + F.time(c.at)) : "Nightly figure" + (c.session ? " for " + F.day(c.session) : ""));
+  const capCover = (c) => (c.n === null || c.of === null ? null : [c.n + " of " + c.of, " names", c.coverage === null ? "" : ", " + F.pct(c.coverage, 0) + " of market value"]);
+  let capTimer = 0;
+  function capCell(cell) {
+    const c = capTideOf(HERO.m, HERO.lb);
+    clearTimeout(capTimer);
+    if (c && c.until !== null && c.until > Date.now()) capTimer = setTimeout(paintHero, Math.min(c.until - Date.now() + 250, 2147483000));
+    const head = [h("span", null, "Cap-weighted"), h("span", { class: "mk-cw-t" }, " tide")];
+    if (!c) {
+      return cell({ k: head, v: DASH, cls: "is-cw", s: "Not published yet", src: null, title: "The nightly build has not published this figure yet.",
+        info: disclose("Cap-weighted tide", CAP_COPY.define, { state: "pending", notes: ["The nightly build has not published this figure yet.", CAP_COPY.net, CAP_COPY.outside, CAP_COPY.scope] }) });
+    }
+    const cover = capCover(c);
+    const word = c.src === "live" ? "Live" : "Nightly";
+    const held = c.value === null ? CAP_WHY[c.reason] || ["Withheld", "The figure was withheld."] : null;
+    const why = held ? held[1] : null;
+    const frac = c.value === null ? null : Math.min(Math.abs(c.value) / CAP_SCALE, 1);
+    const scale = "zero at the centre, scale " + F.pct(-CAP_SCALE, 0) + " to " + F.pct(CAP_SCALE, 0, true);
+    return cell({
+      k: head, v: c.value === null ? DASH : F.pct(c.value, 1, true), tone: toneOf(c.value), cls: "is-cw", src: c.src,
+      tag: h("span", { class: "mk-hc-src", "data-src": c.src }, word),
+      s: held ? held[0] : [h("span", { class: "mk-cw-w" }, word + " \u00b7 "),
+        cover ? [h("span", null, cover[0]), h("span", { class: "mk-cw-n" }, cover[1]), h("span", { class: "mk-cw-x" }, cover[2])] : null],
+      title: capShown(c) + "." + (cover ? " " + cover.join("") + "." : "") + (why ? " " + why : ""),
+      node: frac === null ? null : h("span", { class: "mk-mt mk-mt-z", role: "img", "aria-label": "Cap-weighted tide " + F.pct(c.value, 1, true) + ", " + scale, title: cap1(scale) },
+        h("i", { class: "mk-mt-b " + barClass(c.value), style: { width: (frac * 50) + "%", left: c.value >= 0 ? "50%" : (50 - frac * 50) + "%" } }), h("i", { class: "mk-mt-m", style: { left: "50%" } })),
+      info: disclose("Cap-weighted tide", CAP_COPY.define, {
+        state: c.value === null ? "withheld" : c.src === "live" ? "live" : null,
+        facts: [["Showing", capShown(c)], ["Names", c.n === null || c.of === null ? null : c.n + " of " + c.of],
+          ["Market value covered", c.coverage === null ? null : F.pct(c.coverage, 0)], ["Effective names", c.effN === null ? null : F.num(c.effN, false, 1)],
+          ["Equal weights", c.equal === null ? null : F.pct(c.equal, 1, true)], ["Net premium, these names", c.dollarNet === null ? null : usdS(c.dollarNet)]],
+        notes: [why, c.liveWhy ? "The live read was withheld, so the nightly figure stands." : c.liveHeld ? "The live read is not current, so the nightly figure stands." : null,
+          CAP_COPY.net, CAP_COPY.outside, CAP_COPY.scope, CAP_COPY.withheld],
+      }),
+    });
+  }
+
+  const HERO = { m: null, lb: null, tide: null, etf: null, iv: {} };
   function paintHero() {
     const host = $("mkHero");
     if (!host) return;
@@ -420,8 +489,9 @@
     const lastNum = (arr) => lastOf(nums(arr));
     const jobs = [];
     const cell = (o) => {
-      const el = h(o.href ? "a" : "div", { class: "mk-hc" + (o.cls ? " " + o.cls : ""), href: o.href || null, "data-tone": o.tone || null, title: o.title || null },
-        h("span", { class: "mk-hc-k" }, o.k), h("b", { class: "mk-hc-v" }, o.v), h("span", { class: "mk-hc-s" }, o.s || ""));
+      const el = h(o.href ? "a" : o.info ? "button" : "div", { class: "mk-hc" + (o.cls ? " " + o.cls : ""), href: o.href || null, type: o.info ? "button" : null,
+        "data-tone": o.tone || null, "data-src": o.src || null, title: o.title || null, ...(o.info ? { ...POP, "aria-expanded": "false", "data-info": o.info } : {}) },
+      h("span", { class: "mk-hc-k" }, o.k), h("b", { class: "mk-hc-v" }, o.v), o.tag || null, h("span", { class: "mk-hc-s" }, o.s || ""));
       if (o.node) el.append(o.node);
       if (o.vals && drawn(nums(o.vals)) >= 2) {
         const sp = h("span", { class: "mk-hc-p", "aria-hidden": "true" });
@@ -438,6 +508,7 @@
       cell({ k: tv && tideNet !== null ? "Net tide" : "Net premium", v: usdS(net), tone: toneOf(net),
         s: tv && tideNet !== null ? "Calls " + usdS(lastNum(tv.call)) + " \u00b7 Puts " + usdS(lastNum(tv.put)) : "Session total, all screened names",
         vals: tv && tideNet !== null ? tv.net : null, title: net === null ? "No net premium was carried this session." : null }),
+      capCell(cell),
     ];
     const bull = isNum(br.bull), bear = isNum(br.bear), flat = isNum(br.flat);
     const bt = bull === null || bear === null || flat === null ? 0 : bull + bear + flat;
@@ -906,6 +977,14 @@
   }
   syncPop();
 
+  let vdOpened = false;
+  function openVoldesk() {
+    if (vdOpened || !$("mkVdTerm")) return;
+    vdOpened = true;
+    Promise.all([optional("/api/flows/voldesk"), UI.defer("voldesk", { when: "visible", el: $("mkVdTermCard"), label: "The Vol desk" })])
+      .then(([payload]) => window.FlowsUI.volDesk.ready.then(() => window.FlowsUI.volDesk.mount(null, payload)));
+  }
+
   const TABS = [...document.querySelectorAll("#mkTabs [role=tab]")];
   const stage = $("mkStage"), subBar = $("mkSub");
   const subPick = {};
@@ -923,7 +1002,7 @@
       m.inert = NARROW.matches && i !== pick;
       if (mods.length < 2) return;
       const title = m.querySelector(".ui-mod-t");
-      subBar.append(h("button", { type: "button", role: "tab", "aria-selected": String(i === pick), "aria-controls": m.id, onclick: () => { subPick[key] = i; buildSub(key); } }, title ? title.textContent : "View " + (i + 1)));
+      subBar.append(h("button", { type: "button", role: "tab", "aria-selected": String(i === pick), "aria-controls": m.id, "aria-label": m.dataset.short && title ? title.textContent : null, onclick: () => { subPick[key] = i; buildSub(key); } }, m.dataset.short || (title ? title.textContent : "View " + (i + 1))));
     });
   }
   function showTab(key, focus, quiet) {
@@ -934,6 +1013,7 @@
     for (const p of document.querySelectorAll(".mk-panel")) p.inert = p.dataset.panel !== key;
     buildSub(key);
     if (key === "network") syncPop();
+    if (key === "voldesk") openVoldesk();
     if (focus) t.focus();
     if (!quiet) { try { history.replaceState(null, "", "#view=" + key + (key === "floor" ? (/&basis=[a-z]+/.exec(location.hash) || [""])[0] : "")); } catch (error) { void error; } }
   }
@@ -963,6 +1043,7 @@
   ]).then((all) => {
     const [m, sectors, movers, pulse, boardLong, boardShort, regime, universe, lk] = all;
     let live = lk.market, breadth = lk.breadth;
+    HERO.lb = breadth;
     const liveVol = lk.vol;
     if (!m) return;
     if (typeof m === "object") m.__updatedAt = marketUpdatedAt;
@@ -1083,7 +1164,7 @@
     if (typeof UI.heartbeat === "function") {
       const fundsBeat = Boolean($("mk") && $("mk").dataset.funds === "on");
       const beat = (withStrips) => UI.heartbeat({ keys: [...(withStrips ? ["market", "breadth", "strips"] : ["market", "breadth"]), ...(fundsBeat ? ["funds"] : [])], nightly: ["pulse"], page: "market",
-        onChange(changed) {
+        onChange(changed, fresh) {
           const keys = Array.isArray(changed) ? changed.map(String) : [];
           if (LENS.on && !(UI.rt && UI.rt.feeds("px")) && keys.some((c) => /live:strips(?!:)/.test(c))) {
             getLive(["strips"]).then((lk) => {
@@ -1100,7 +1181,11 @@
             const m = okFeed(lk.market), b = okFeed(lk.breadth);
             if (!m && !b) return;
             if (m) live = UI.rt && UI.rt.feeds("mk") ? UI.rt.market(m) : m;
-            if (b) breadth = b;
+            if (b) {
+              if (!b.__ff && fresh && fresh["live:breadth"]) b.__ff = fresh["live:breadth"];
+              breadth = b;
+              HERO.lb = b;
+            }
             paintSectorTides(regime, breadth);
             later("expiry", (b) => b.paintExpiry(regime, breadth));
             paintEtfs(regime, live, breadth);

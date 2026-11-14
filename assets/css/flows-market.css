@@ -324,7 +324,7 @@
 .mk-stage { flex: 1; min-height: 0; position: relative; }
 .mk-panel { position: absolute; inset: 0; display: grid; gap: 12px; visibility: hidden; min-height: 0; min-width: 0; }
 .mk-stage[data-view="floor"] > #mkP-floor, .mk-stage[data-view="session"] > #mkP-session, .mk-stage[data-view="tide"] > #mkP-tide, .mk-stage[data-view="sectors"] > #mkP-sectors, .mk-stage[data-view="indices"] > #mkP-indices,
-.mk-stage[data-view="network"] > #mkP-network, .mk-stage[data-view="extremes"] > #mkP-extremes, .mk-stage[data-view="relations"] > #mkP-relations,
+.mk-stage[data-view="voldesk"] > #mkP-voldesk, .mk-stage[data-view="network"] > #mkP-network, .mk-stage[data-view="extremes"] > #mkP-extremes, .mk-stage[data-view="relations"] > #mkP-relations,
 .mk-stage[data-view="prints"] > #mkP-prints, .mk-stage[data-view="context"] > #mkP-context { visibility: visible; }
 .mk-panel > .mk-mod { min-height: 0; min-width: 0; overflow: hidden; padding: 12px 14px 10px; gap: 8px; }
 .mk-panel > .mk-mod > .mk-body { flex: 1; min-height: 0; overflow: hidden; }
@@ -370,9 +370,16 @@
 @media (max-width: 1199.98px) {
   .mk-tabs button { padding: 0 6px; font-size: 12.5px; }
 }
+@media (min-width: 900px) {
+  .mk-dn button { padding: 0 7px; font-size: 12.5px; }
+}
+@media (min-width: 900px) and (max-width: 1199.98px) {
+  .mk-dn button { padding: 0 5px; font-size: 12px; }
+}
 @media (max-width: 899px) {
   .flows-body[data-flows-page="market"] .flows-main { --mk-pad-b: var(--sp-3); }
   .mk-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-self: stretch; }
+  .mk-tabs:has(> :nth-child(11)) { grid-template-columns: repeat(6, minmax(0, 1fr)); }
   .mk-tabs button { padding: 0 4px; font-size: 12.5px; }
   .mk-sub { display: flex; flex: none; gap: 2px; background: var(--fill-3); border-radius: var(--r-sm); padding: 2px; margin: 0 0 var(--sp-3); overflow: hidden; }
   .mk-sub[hidden] { display: none; }
@@ -405,7 +412,7 @@
 .mk-hero {
   flex: none;
   display: grid;
-  grid-template-columns: minmax(0, 1.8fr) minmax(0, 1.2fr) minmax(0, 1fr) repeat(3, minmax(0, 1.1fr)) minmax(0, 1fr);
+  grid-template-columns: minmax(222px, 1.6fr) minmax(166px, 1.4fr) minmax(154px, 1fr) minmax(112px, 0.78fr) repeat(3, minmax(114px, 0.95fr)) minmax(120px, 0.85fr);
   gap: 1px;
   margin: 0 0 var(--sp-3);
   overflow: hidden;
@@ -429,11 +436,13 @@
   color: inherit;
   text-decoration: none;
   background: linear-gradient(160deg, color-mix(in srgb, var(--tone, var(--label-3)) 10%, var(--surface-1)), var(--surface-1) 72%);
+  container: hc / inline-size;
 }
 .mk-hc.is-etf:hover { background: color-mix(in srgb, var(--tone, var(--label-3)) 16%, var(--surface-2)); }
 .mk-hc.is-etf:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
 .mk-hc-k { grid-column: 1 / -1; color: var(--label-2); font: 600 11px / 1.2 var(--font-text); letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mk-hc-v { grid-column: 1; margin-top: 2px; color: var(--tone, var(--label-1)); font: 650 24px / 1.1 var(--font-text); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+:where(.mk-hc.is-cw) .mk-hc-v { font-size: 22px; }
 .mk-hc-s { grid-column: 1 / -1; margin-top: 2px; color: var(--label-2); font: 400 12px / 1.25 var(--font-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .mk-panel > .mk-mod > .mk-body[id]:empty::before { content: "Loading\2026"; display: block; padding: var(--sp-2) 0; color: var(--label-3); font: var(--t-footnote); }
 .flows-body[data-flows-page="market"]:has(#fxOracle:not([hidden])) .mk-stage { margin-right: max(0px, calc(84px - max(var(--gutter), var(--safe-r)))); }
@@ -541,9 +550,11 @@
   .mk-gt { gap: var(--sp-3); padding: 10px 12px; }
   .mk-gt .ui-metric-v { font-size: 22px; }
 }
-@media (max-width: 1180px) and (min-width: 900px) {
-  .mk-hero { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+@media (max-width: 1439.98px) and (min-width: 900px) {
+  .mk-hero { grid-template-columns: minmax(124px, 1.5fr) minmax(166px, 1.3fr) minmax(94px, 1.1fr) minmax(86px, 0.85fr) repeat(3, minmax(114px, 0.95fr)); }
   .mk-hc.is-vol { display: none; }
+}
+@media (max-width: 1180px) and (min-width: 900px) {
   .mk-hc-v, .mk-hc:first-child .mk-hc-v { font-size: 20px; }
   .mk-gts { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
@@ -570,6 +581,25 @@
 }
 .mk-hc.is-etf .mk-hc-v { font-size: 20px; }
 .mk-hc.is-etf .mk-hc-p { width: 34px; }
+button.mk-hc { width: 100%; margin: 0; border: 0; border-radius: 0; font: inherit; text-align: left; cursor: pointer; -webkit-appearance: none; appearance: none; }
+.mk-hc.is-cw:hover { background: color-mix(in srgb, var(--tone, var(--label-3)) 16%, var(--surface-2)); }
+.mk-hc.is-cw:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+.mk-hc-src { grid-column: 2; align-self: center; margin-top: 2px; color: var(--label-2); font: 600 10px / 1.2 var(--font-text); letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; }
+.mk-hc-src[data-src="live"] { color: var(--up); }
+.mk-cw-w { display: none; }
+@container hc (max-width: 227.98px) { .mk-cw-x { display: none; } }
+@container hc (max-width: 211.98px) { .mk-hc:first-child .mk-hc-p { width: 66px; } }
+@container hc (max-width: 193.98px) { .mk-hc:first-child .mk-hc-p { visibility: hidden; } }
+@container hc (max-width: 129.98px) { .mk-hc.is-etf .mk-hc-p { visibility: hidden; } }
+@container hc (max-width: 119.98px) {
+  .mk-hc-src, .mk-cw-t, .mk-cw-n { display: none; }
+  .mk-cw-w { display: inline; }
+}
+.mk-mt-z { overflow: hidden; }
+.mk-mt-b { position: absolute; top: 0; bottom: 0; min-width: 2px; border-radius: inherit; background: var(--label-3); }
+.mk-mt-b.is-pos { background: var(--up-mark); }
+.mk-mt-b.is-neg { background: var(--down-mark); }
+.mk-mt-z .mk-mt-m { top: 0; bottom: 0; }
 
 .mk-fl-sub { color: var(--label-2); font: var(--t-footnote); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #mkFloorCard > .mk-body { display: flex; flex-direction: column; min-height: 0; }

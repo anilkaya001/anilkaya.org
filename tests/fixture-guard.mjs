@@ -239,7 +239,12 @@ async function exerciseStore(root) {
   const env = { token: process.env.FLOWS_INGEST_TOKEN, url: process.env.FLOWS_INGEST_URL, exit: process.exitCode };
   const realFetch = globalThis.fetch;
   const sent = [];
-  globalThis.fetch = async (url, init) => { sent.push([String(url), init && init.method]); return new Response('{"ok":true}', { status: 200, headers: { "content-type": "application/json" } }); };
+  globalThis.fetch = async (url, init) => {
+    sent.push([String(url), init && init.method]);
+    const batch = /[?&]op=batch\b/.test(String(url)) ? JSON.parse(init.body).items : null;
+    const answer = batch ? { ok: true, results: batch.map((i) => ({ key: i.key, ok: true })) } : { ok: true };
+    return new Response(JSON.stringify(answer), { status: 200, headers: { "content-type": "application/json" } });
+  };
   const quiet = console.log;
   const quietWarn = console.warn;
   console.log = () => {};
@@ -371,7 +376,7 @@ async function exerciseStages(root) {
     "every ingest host waived": [[S, "if (fixtureHost(ingestHost(env))) return null;", "return null;"]],
     "the refusal only logged": [[S, "throw fixtureLeakError(leak, `publish ${key}`);", "console.warn(String(leak));"]],
     "the whole check removed": [[S, "const leak = publishRefusal(key, body);\n  if (leak) {\n    process.exitCode = 1;\n    throw fixtureLeakError(leak, `publish ${key}`);\n  }\n", ""]],
-    "the check after the network": [[S, "const leak = publishRefusal(key, body);\n  if (leak) {\n    process.exitCode = 1;\n    throw fixtureLeakError(leak, `publish ${key}`);\n  }\n", ""], [S, "  landedKeys.add(key);\n  console.log(`  published", "  const leak = publishRefusal(key, body);\n  if (leak) throw fixtureLeakError(leak, `publish ${key}`);\n  landedKeys.add(key);\n  console.log(`  published"]],
+    "the check after the network": [[S, "const leak = publishRefusal(key, body);\n  if (leak) {\n    process.exitCode = 1;\n    throw fixtureLeakError(leak, `publish ${key}`);\n  }\n", ""], [S, "  noteLanded(key, body);\n  console.log(`  published", "  const leak = publishRefusal(key, body);\n  if (leak) throw fixtureLeakError(leak, `publish ${key}`);\n  noteLanded(key, body);\n  console.log(`  published"]],
     "the preflight waiving every vendor base": [[S, 'if (vendor.status !== "redirect" && vendor.status !== "invalid") return null;', "return null;"]],
     "the preflight waiving an unset ingest": [[S, 'return new URL(env.FLOWS_INGEST_URL || "https://anilkaya.org/api/flows/ingest").hostname;', 'return new URL(env.FLOWS_INGEST_URL || "http://127.0.0.1/api/flows/ingest").hostname;']],
   };

@@ -19,6 +19,9 @@ export const RATE = {
   floorCeilingMs: 400,
 
   errorBackoffX: 4,
+
+  recoverAfter: 600,
+  recoverX: 1.25,
 };
 
 export const CALL_COST = Object.freeze({
@@ -46,7 +49,10 @@ export const CALL_COST = Object.freeze({
   sigmaLedger: 240,
   ivp: 1,
   funds: 1 + 1 + 24 + 12 * 3 + 1,
+  flowlab: 1 + 1 + 3 + 25 + 2,
   slow: 1500,
+  voldesk: 337,
+  positioning: 720,
   misc: 67,
   eventrisk: 40,
   eventriskNames: 100,
@@ -72,7 +78,10 @@ export function callModel({ enriched = 0, deep = 0, cross = 0, dossiers = 0, ear
     sigmaLedger: cost.sigmaLedger,
     ivp: cost.ivp * carded,
     funds: cost.funds,
+    flowlab: cost.flowlab,
     slow: cost.slow,
+    voldesk: cost.voldesk,
+    positioning: cost.positioning,
     misc: cost.misc,
   };
   return { legs, total: Object.values(legs).reduce((a, b) => a + b, 0) };
@@ -110,7 +119,7 @@ export function deepNames(published, limit = DEEP_NAMES) {
   return rows.slice(0, Math.max(0, limit));
 }
 
-export const DEADLINE_MS = 90 * 60 * 1000;
+export const DEADLINE_MS = 165 * 60 * 1000;
 
 export const CHAIN_RESERVE_MS = 6 * 60 * 1000;
 

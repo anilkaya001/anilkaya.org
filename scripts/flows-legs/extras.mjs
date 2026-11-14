@@ -1,9 +1,10 @@
 import { read, pastDeadline } from "./common.mjs";
+import { addDays } from "../../shared/flows-cross.js";
 import { pathFor } from "../../shared/flows-vendor-ops.js";
 import { REDUCERS } from "../../shared/flows-dossier-vendor.js";
 import { sanitizeText } from "../../shared/flows-dossier.js";
 import {
-  PARTS, NIGHTLY_IDS, SLOW_CAP, REDUCERS_X, ER_IDS, planSlow, partState, mergeParts, sectionOf, fitSection, outcomeTally, shapeHealth, usableX,
+  PARTS, NIGHTLY_IDS, PS_IDS, SLOW_CAP, REDUCERS_X, REDUCERS_PS, ER_IDS, planSlow, partState, mergeParts, sectionOf, fitSection, outcomeTally, shapeHealth, usableX,
 } from "../../shared/flows-vendor-extras.js";
 import { reduceStockEarnings, reduceFin } from "../../shared/flows-er-eps.js";
 import { sessionsBetween } from "../../shared/flows-calendar.js";
@@ -26,6 +27,10 @@ export const SOURCES = Object.freeze({
   splits: Object.freeze({ path: (t) => pathFor("splits", { ticker: t }), params: () => ({}), reduce: (body, t, o) => REDUCERS_X.splits(body, { today: o.sessionDate }) }),
   etf: Object.freeze({ path: (t) => pathFor("etf-exposure", { ticker: t }), params: () => ({}), reduce: (body) => REDUCERS_X.etf(body) }),
   ivp: Object.freeze({ path: (t) => pathFor("interpolated-iv", { ticker: t }), params: (t, o) => (o.sessionDate ? { date: o.sessionDate } : {}), reduce: (body) => REDUCERS_X.ivp(body) }),
+  ftd: Object.freeze({ path: (t) => pathFor("ftds", { ticker: t }), params: () => ({}), reduce: (body) => REDUCERS_PS.ftd(body) }),
+  svx: Object.freeze({ path: (t) => pathFor("short-venues", { ticker: t }), params: (t, o) => (o.sessionDate ? { newer_than: addDays(o.sessionDate, -14) } : {}), reduce: (body) => REDUCERS_PS.svx(body) }),
+  ibs: Object.freeze({ path: (t) => pathFor("insider-bs", { ticker: t }), params: () => ({}), reduce: (body) => REDUCERS_PS.ibs(body) }),
+  ins: Object.freeze({ path: (t) => pathFor("insiders", { ticker: t }), params: () => ({}), reduce: (body) => REDUCERS_PS.ins(body) }),
   eps: Object.freeze({ path: (t) => pathFor("stock-earnings", { ticker: t }), params: () => ({}), reduce: (body) => erX(reduceStockEarnings(body)) }),
   fin: Object.freeze({ path: (t) => pathFor("income-statements", { ticker: t }), params: () => ({}), reduce: (body) => erX(reduceFin(body, null, null)), multi: true }),
 });
@@ -87,10 +92,10 @@ export async function readPriors(names, { readPrior, pool = null, width = PRIOR_
     if (res && res.payload && typeof res.payload === "object") {
       const p = res.payload;
       priors.set(t, {
-        dx: p.dx && typeof p.dx === "object" ? p.dx : null, vx: p.vx && typeof p.vx === "object" ? p.vx : null,
+        dx: p.dx && typeof p.dx === "object" ? p.dx : null, vx: p.vx && typeof p.vx === "object" ? p.vx : null, ps: p.ps && typeof p.ps === "object" ? p.ps : null,
         ...(withEr ? { er: p.er && typeof p.er === "object" ? p.er : null, earnings: p.earnings && typeof p.earnings === "object" ? p.earnings : null } : {}),
       });
-    } else if (res && res.absent) priors.set(t, { dx: null, vx: null, ...(withEr ? { er: null, earnings: null } : {}) });
+    } else if (res && res.absent) priors.set(t, { dx: null, vx: null, ps: null, ...(withEr ? { er: null, earnings: null } : {}) });
     else failed.add(t);
   };
   const list = [...new Set(names)];
@@ -102,7 +107,7 @@ export async function readPriors(names, { readPrior, pool = null, width = PRIOR_
 
 export async function runExtras({
   uw, names = [], sessionDate = null, now = Date.now(), deadline = null, pool = null, width = 1, cap = SLOW_CAP,
-  readPrior = null, priorWidth = PRIOR_WIDTH, log = () => {}, only = null, er = null,
+  readPrior = null, priorWidth = PRIOR_WIDTH, log = () => {}, only = null, positioning = null, er = null,
 } = {}) {
   const list = [...new Set(names)].sort();
   const erList = er ? [...new Set([...list, ...(Array.isArray(er.names) ? er.names : [])])].sort() : list;
@@ -115,7 +120,11 @@ export async function runExtras({
     const part = sec && sec[PARTS[id].group] && sec[PARTS[id].group].parts ? sec[PARTS[id].group].parts[id] : null;
     return partState(part, id, now) !== "fresh";
   }).map((t) => ({ t, id })));
-  const jobs = [...plan.picked.map((p) => ({ t: p.t, id: p.id })), ...nightly];
+  const deep = positioning && positioning.deep instanceof Set ? positioning.deep : null;
+  const psPlan = positioning
+    ? planSlow({ names: list, priors, now, cap: positioning.cap, ids: PS_IDS, scopeOf: (id, t) => id !== "svx" || (deep !== null && deep.has(t)) })
+    : { picked: [], deferred: 0, due: 0, fresh: 0 };
+  const jobs = [...plan.picked.map((p) => ({ t: p.t, id: p.id })), ...psPlan.picked.map((p) => ({ t: p.t, id: p.id })), ...nightly];
   const got = new Map();
   const miss = new Map();
   const rows = [];
@@ -175,14 +184,15 @@ export async function runExtras({
   const sections = new Map();
   const own = new Set(list);
   for (const t of erList) {
-    const prior = priors.get(t) || { dx: null, vx: null };
+    const prior = priors.get(t) || { dx: null, vx: null, ps: null };
     const out = {};
-    for (const group of er ? (own.has(t) ? ["dx", "vx", "er"] : ["er"]) : ["dx", "vx"]) {
+    const base = positioning ? ["dx", "vx", "ps"] : ["dx", "vx"];
+    for (const group of er ? (own.has(t) ? [...base, "er"] : ["er"]) : base) {
       const merged = mergeParts({ prior: prior[group], got: got.get(t) || {}, miss: miss.get(t) || {}, group, now });
       if (!Object.keys(merged.parts).length && !Object.keys(merged.miss).length) continue;
       out[group] = fitSection(sectionOf({ ...merged, group }), group);
     }
-    if (out.dx || out.vx || out.er) sections.set(t, out);
+    if (out.dx || out.vx || out.ps || out.er) sections.set(t, out);
   }
   const health = shapeHealth(tally);
   const failing = Object.entries(health).filter(([, h]) => h.state === "fail").map(([id]) => id);
@@ -190,6 +200,6 @@ export async function runExtras({
     (plan.deferred ? `, ${plan.deferred} deferred by the ${cap}-call cap` : "") + `, ${nightly.length} implied-volatility read(s)` +
     (priorFailed.size ? `, ${priorFailed.size} prior card-x unread` : "") +
     (failing.length ? `; SHAPE FAILING ${failing.join(", ")}` : ""));
-  return { sections, tally, health, calls, ...(erPlan ? { er: { due: erPlan.due, picked: erPlan.picked.length, deferred: erPlan.deferred, spent: erPlan.spent } } : {}), plan: { due: plan.due, picked: plan.picked.length, deferred: plan.deferred, fresh: plan.fresh }, priorFailed: priorFailed.size, failing };
+  return { sections, tally, health, calls, ...(erPlan ? { er: { due: erPlan.due, picked: erPlan.picked.length, deferred: erPlan.deferred, spent: erPlan.spent } } : {}), plan: { due: plan.due, picked: plan.picked.length, deferred: plan.deferred, fresh: plan.fresh }, psPlan: positioning ? { due: psPlan.due, picked: psPlan.picked.length, deferred: psPlan.deferred, fresh: psPlan.fresh } : null, priorFailed: priorFailed.size, failing };
 }
 

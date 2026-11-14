@@ -105,6 +105,7 @@ for (const [w, h] of VIEWS) {
   await flow(quiet.page, surgeRows("SYO001"));
   await settle(quiet.page, 400);
   await flow(quiet.page, []);
+  await quiet.page.waitForFunction(() => !document.querySelector(".orc-badge").hidden, null, { timeout: 15000 }).catch(() => {});
   await settle(quiet.page, 400);
   const s = await quiet.page.evaluate(() => ({ pill: document.querySelector("#fxOracle").classList.contains("has-pill"), badge: document.querySelector(".orc-badge").hidden, count: document.querySelector(".orc-badge").textContent }));
   eq([s.pill, s.badge], [false, false], "the count-only preference shows the count and no pill");

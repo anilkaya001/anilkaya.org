@@ -83,6 +83,7 @@ for (const [route, name] of [["/flows/about/", "about"], ["/flows/glossary/", "g
     overview: "<strong>Home.</strong>", watch: "(the Watchlist)", long: "<strong>Boards.</strong>", short: "<strong>Boards.</strong>",
     market: "<strong>Market.</strong>", moves: "<strong>Moves.</strong>", unusual: "<strong>Unusual.</strong>", flowlab: "<strong>Flow Lab.</strong>", ledger: "<strong>Ledger.</strong>", events: "<strong>Events.</strong>",
     political: "<strong>Political.</strong>", strategy: "<strong>Strategy, Premium desk and Ask.</strong>", desk: "<strong>Strategy, Premium desk and Ask.</strong>",
+    fire: "<strong>Fire.</strong>",
   };
   const members = FLOWS_NAV.filter((g) => !g.only).flatMap((g) => g.items.map((i) => i.key)).sort();
   eq(Object.keys(NEEDLE).sort().join(","), members.join(","), "the about page's table names every page the members' sidebar links, so a new page cannot ship unlisted");
@@ -133,6 +134,7 @@ for (const [route, name] of [["/flows/about/", "about"], ["/flows/glossary/", "g
   ok(!/each page/.test(lede), "the lede does not claim every page");
   const covered = new Set(GLOSSARY.map((g) => g.href).filter(Boolean));
   for (const href of ["/flows/market/", "/flows/political/", "/flows/moves/", "/flows/unusual/", "/flows/long/", "/flows/", "/flows/events/"]) ok(covered.has(href), `the glossary holds the information-button lines of ${href}`);
+  for (const key of ["contango", "backwardation", "roll-per-30-days", "implied-against-realised", "correlation-window", "volatility-half-life", "engine-cross-check"]) ok(GLOSSARY.some((g) => g.key === key) && html.includes(`id="${key}"`), `the glossary holds the Vol desk term ${key}`);
   ok(!/<(?:img|iframe|style)|<script(?![^>]*src=)/i.test(html), "no markup of that kind reaches the page");
   ok(html.includes("expected P&amp;L") && !html.includes("expected P&L"), "ampersands in the strings are escaped");
   ok(html.includes("members&#39; own variances"), "and so are apostrophes");

@@ -486,6 +486,54 @@ export function extrasChecks(extras) {
   return { failures, warnings, notes };
 }
 
+export const VOLAUDIT_LINES = Object.freeze({ warn: 0.10, fail: 0.25, minCompared: 50, shapeRate: 0.20, shapeMin: 20, matureNights: 7 });
+
+export function volAuditGap(v) {
+  const compared = Number(v && v.agree) + Number(v && v.differs);
+  return compared > 0 ? Number(v.differs) / compared : null;
+}
+
+export function volAuditState(v) {
+  const gap = volAuditGap(v);
+  if (gap === null || Number(v.agree) + Number(v.differs) < VOLAUDIT_LINES.minCompared) return "report";
+  if (gap > VOLAUDIT_LINES.fail) return "fail";
+  if (gap > VOLAUDIT_LINES.warn) return "warn";
+  return "ok";
+}
+
+export function volAuditStanding(state, prior, lines = VOLAUDIT_LINES) {
+  const before = prior && Number.isInteger(prior.clean) && prior.clean > 0 ? prior.clean : 0;
+  const wasFailing = Boolean(prior && prior.state === "fail");
+  const clean = state === "ok" ? Math.min(before + 1, 99) : state === "report" ? Math.min(before, 99) : 0;
+  return { state, clean, eligible: state === "fail" && before >= lines.matureNights && !wasFailing };
+}
+
+export function volAuditChecks(volaudit) {
+  const failures = [], warnings = [], notes = [];
+  if (!volaudit || typeof volaudit !== "object") return { failures, warnings, notes };
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const compared = n(volaudit.agree) + n(volaudit.differs);
+  const gap = volAuditGap(volaudit);
+  const state = volAuditState(volaudit);
+  const pct = gap === null ? "n/a" : `${Math.round(gap * 1000) / 10}%`;
+  if (state === "report") {
+    notes.push(`engine cross-check under ${VOLAUDIT_LINES.minCompared} compared checks (${compared}), reported not judged`);
+  } else if (state === "fail" && volaudit.eligible) {
+    failures.push(`HEALTH: the engine cross-check differs on ${pct} of ${compared} compared checks (${n(volaudit.differs)}), past the ${Math.round(VOLAUDIT_LINES.fail * 100)}% line: ` +
+      "the feed's own figures and the site's engine disagree, so one of them has moved");
+  } else if (state === "fail" || state === "warn") {
+    warnings.push(`WARNING: engine cross-check differs on ${pct} of ${compared} compared checks (${n(volaudit.differs)})` +
+      (state === "fail" ? `: past the ${Math.round(VOLAUDIT_LINES.fail * 100)}% line but not failed tonight, because it has not had ${VOLAUDIT_LINES.matureNights} clean nights or it failed the night before` : ""));
+  }
+  const shape = volaudit.shape && typeof volaudit.shape === "object" ? volaudit.shape : {};
+  const bad = Object.entries(shape).filter(([, o]) => o && n(o.n) >= VOLAUDIT_LINES.shapeMin && n(o.bad) / n(o.n) > VOLAUDIT_LINES.shapeRate);
+  if (bad.length) {
+    warnings.push(`WARNING: engine cross-check shape: ${bad.map(([id, o]) => `${id} ${n(o.bad)} of ${n(o.n)}`).join(", ")} answered in a shape the reducer does not read`);
+  }
+  notes.push(`engine cross-check: ${n(volaudit.names)} name(s), ${n(volaudit.agree)} agree, ${n(volaudit.differs)} differ, ${n(volaudit.nc)} not compared, ${n(volaudit.calls)} call(s)`);
+  return { failures, warnings, notes };
+}
+
 export function ledgerChecks({ ledger, sessionDate, clock = null } = {}) {
   const failures = [], warnings = [], notes = [];
   const days = ledger && Array.isArray(ledger.days) ? ledger.days : null;
@@ -573,6 +621,10 @@ export function healthChecks({ sessionDate, now = Date.now(), clockRead = null, 
   failures.push(...extras.failures);
   warnings.push(...extras.warnings);
   notes.push(...extras.notes);
+  const volaudit = volAuditChecks(night && night.volaudit);
+  failures.push(...volaudit.failures);
+  warnings.push(...volaudit.warnings);
+  notes.push(...volaudit.notes);
   const lab = labCheck(clockRead, now);
   if (lab.failure) failures.push(lab.failure);
   if (lab.warning) warnings.push(lab.warning);
@@ -732,13 +784,15 @@ export async function runHealthGate({ sessionDate, read, now = () => Date.now(),
     log("health gate: skipped in a dry run, which reads no store");
     const neuron = neuronChecks(night && night.neuron);
     const extras = extrasChecks(night && night.extras);
-    const failures = [...runChecks(night), ...neuron.failures, ...extras.failures];
+    const volaudit = volAuditChecks(night && night.volaudit);
+    const failures = [...runChecks(night), ...neuron.failures, ...extras.failures, ...volaudit.failures];
     if (night) log(`  run facts: ${night.planned} planned, ${night.rostered} rostered, ${night.cardsFailed} failed, ${night.deadlineSkipped} skipped; ${failures.length} failure(s)`);
     if (night && night.neuron) for (const line of neuron.notes) log("  " + line);
     for (const line of neuron.warnings) warn(line);
     for (const line of extras.warnings) warn(line);
+    for (const line of volaudit.warnings) warn(line);
     for (const line of failures) warn(line);
-    return { applies: false, failures, warnings: [...neuron.warnings, ...extras.warnings], notes: [...neuron.notes, ...extras.notes] };
+    return { applies: false, failures, warnings: [...neuron.warnings, ...extras.warnings, ...volaudit.warnings], notes: [...neuron.notes, ...extras.notes, ...volaudit.notes] };
   }
   const safe = async (key) => {
     try { return await read(key); } catch (error) {
@@ -753,7 +807,7 @@ export async function runHealthGate({ sessionDate, read, now = () => Date.now(),
   log(`health gate: ${verdict.applies ? "checked" : "live checks skipped — " + verdict.why}; ` +
     `${verdict.failures.length} failure(s)` + (verdict.warnings.length ? `, ${verdict.warnings.length} warning(s)` : ""));
   for (const n of verdict.notes) log("  " + n);
-  for (const line of verdict.warnings) warn(annotate ? `::warning title=${/^WARNING: Neuron/.test(line) ? "Neuron coverage" : /^WARNING: vendor extras/.test(line) ? "Vendor extras" : "Lab sign-in"}::${line}` : line);
+  for (const line of verdict.warnings) warn(annotate ? `::warning title=${/^WARNING: Neuron/.test(line) ? "Neuron coverage" : /^WARNING: vendor extras/.test(line) ? "Vendor extras" : /^WARNING: engine cross-check/.test(line) ? "Engine cross-check" : "Lab sign-in"}::${line}` : line);
   for (const line of verdict.failures) warn(line);
   return verdict;
 }
@@ -782,6 +836,8 @@ export const HEALTH_CODES = Object.freeze([
   ["neuron-ledger", /coverage ledger does not add up/, "the Neuron coverage ledger does not add up"],
   ["neuron-missing", /have no Neuron reading tonight/, "universe names have no Neuron reading"],
   ["extras-shape", /vendor extras came back in a shape/, "a vendor extras part came back in a shape the reducers do not read"],
+  ["volaudit-gap", /engine cross-check differs on/, "the engine cross-check differs from the feed on too many checks"],
+  ["volaudit-shape", /engine cross-check shape/, "a cross-check feed answered in a shape the reducer does not read"],
   ["ledger-empty", /session ledger holds/, "the session ledger has no row for the session"],
   ["ledger-rth", /rth cron did not tick/, "the Worker's rth cron missed ticks inside the session"],
   ["ledger-tier1", /without writing live:market/, "Tier 1 went too long without writing live:market"],
