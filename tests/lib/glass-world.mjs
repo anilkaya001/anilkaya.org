@@ -317,7 +317,7 @@ export const MUTANTS = {
   "the rim visible under forced colours": [["  .ui-card::before, .ft-strip::before, .ft-rail::before, .ft-gchart::before { display: none; }\n", ""]],
   "a sheen of 0.08 reaching 60%": [[SHEEN, "rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 60%"]],
 };
-export const patchOf = (name) => ({ "/assets/css/flows.css": MUTANTS[name] });
+export const patchOf = (name) => ({ [name === "aurora alphas doubled" ? "/assets/css/base.css" : "/assets/css/flows.css"]: MUTANTS[name] });
 
 export const PROBE_INKS = [["label-1", "--label-1"], ["label-2", "--label-2"], ["label-3", "--label-3"], ["down", "--down"], ["accent", "--accent-ink"], ["up", "--up"]];
 export const PROBE_NUMS = [["ice", null], ["num-up", "up"], ["num-down", "down"]];

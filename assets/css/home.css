@@ -5,7 +5,7 @@
   position: relative;
   isolation: isolate;
   background: none;
-  background-color: var(--bg);
+  background-color: var(--ground-base);
 }
 .home::before {
   content: "";
@@ -13,17 +13,7 @@
   inset: 0;
   z-index: -1;
   pointer-events: none;
-  background:
-    radial-gradient(120% 90% at 50% 50%,
-      color-mix(in srgb, var(--gold-mystic) 12%, transparent) 0%,
-      transparent 55%),
-    radial-gradient(140% 120% at 50% 120%,
-      color-mix(in srgb, var(--gold-harvest) 10%, transparent) 0%,
-      transparent 60%),
-
-    var(--site-ground);
-
-  background-color: var(--bg);
+  background: var(--ground);
 }
 @media (prefers-reduced-motion: reduce) {
   .home {
@@ -60,16 +50,6 @@
 }
 @supports not (mix-blend-mode: overlay) {
   .grain { mix-blend-mode: normal; opacity: 0.12; }
-}
-
-.home::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 2;
-  pointer-events: none;
-  background: radial-gradient(78% 62% at 50% 42%,
-    transparent 0%, transparent 42%, rgba(0, 0, 0, 0.42) 100%);
 }
 
 .hero {

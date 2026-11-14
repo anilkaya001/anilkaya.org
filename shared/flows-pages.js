@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "423";
+export const ASSET_VERSION = "424";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -1566,6 +1566,15 @@ ${scripts.map((src) => `<script src="${v(String(src))}" defer></script>`).join("
 }
 
 const ORACLE_MODES = Object.freeze(["on", "quiet"]);
+
+const SIDE_BODY = '<body class="flows-body has-rail"';
+
+export function sideShell(html, cookie) {
+  const text = String(html);
+  const kept = /(?:^|;\s*)fx_side=([01])\s*(?:;|$)/.exec(String(cookie || ""));
+  if (!kept || text.split(SIDE_BODY).length !== 2) return text;
+  return text.replace(SIDE_BODY, () => '<body class="flows-body has-rail ' + (kept[1] === "1" ? "has-side-open" : "is-side-collapsed") + '"');
+}
 
 export function oracleShell(html, mode, slug) {
   if (typeof html !== "string" || !ORACLE_MODES.includes(mode)) return html;

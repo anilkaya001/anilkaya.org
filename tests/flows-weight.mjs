@@ -162,6 +162,12 @@ for (const name of Object.keys(CEILING_KIB)) {
   if (name !== "eventsPage") CEILING_KIB[name] += HORIZON_CORE.bytes / 1024;
   GZIP_KIB[name] += HORIZON_CORE.gzip / 1024;
 }
+const SIDE_KEEP = { bytes: 252, gzip: 138, why: "owner request of 2026-11-14 (the navigation stays open while switching pages): the shell in flows-ui.js keeps the sidebar's state in the fx_side preference cookie (read, write and clear, one state for the drawer and the rail, aria-expanded and inert from it, focus on the current link of a kept drawer), 74,680 to 74,932 B raw and 23,672 to 23,810 B gzip, on every route that loads the kernel" };
+for (const name of Object.keys(CEILING_KIB)) {
+  if (NO_UI_ROUTES.has(name)) continue;
+  if (name !== "eventsPage") CEILING_KIB[name] += SIDE_KEEP.bytes / 1024;
+  GZIP_KIB[name] += SIDE_KEEP.gzip / 1024;
+}
 const EVENTS_RECENT = { od: "LANE-4", bytes: 4498, gzip: 1127, cssBytes: 379, cssGzip: 46, why: "lane 4: the Events page counts the names whose report moved the price on the reaction session and the one before and the names whose report time is not stated, lists the largest movers among those that reacted on the nightly's session in typical days, names those that reacted two to five sessions ago, says why when the report column is withheld, pending or empty, cut or has no window, and prints its window in sessions through a date (flows-events.js 49,488 to 53,986 B raw and 14,009 to 15,136 B gzip, flows-feeds.css 31,209 to 31,588 B raw and 6,129 to 6,175 B gzip); the raw JavaScript ceiling is held by HELD_RAW_KIB, so only gzip and the sheet rise" };
 GZIP_KIB.eventsPage += EVENTS_RECENT.gzip / 1024;
 CSS_KIB.eventsPage += EVENTS_RECENT.cssBytes / 1024;

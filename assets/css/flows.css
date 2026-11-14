@@ -7,20 +7,6 @@
   --font-figure: var(--font-text);
   --font-ui: var(--font-figure);
 
-  --ground-base: #07090e;
-  --ground-sky: url("/assets/img/atmosphere.svg?v=423") center / cover no-repeat;
-  --aur-1: rgba(64, 120, 255, 0.16);
-  --aur-2: rgba(150, 100, 255, 0.11);
-  --aur-3: rgba(60, 200, 240, 0.07);
-  --ground:
-    radial-gradient(42% 38% at 18% 6%, var(--aur-1), transparent 72%),
-    radial-gradient(36% 32% at 84% 10%, var(--aur-2), transparent 72%),
-    radial-gradient(48% 40% at 60% 102%, var(--aur-3), transparent 74%),
-    linear-gradient(180deg, rgba(6, 8, 12, 0.50) 0%, rgba(6, 8, 12, 0.70) 26%, rgba(7, 8, 10, 0.88) 42%, rgba(8, 8, 9, 0.94) 60%, rgba(7, 7, 8, 0.97) 100%),
-    radial-gradient(70% 50% at 12% 0%, rgba(64, 132, 230, 0.10), transparent 70%),
-    var(--ground-sky),
-    linear-gradient(180deg, #0a1020 0%, #101c33 34%, #2a2416 56%, #100e0b 100%);
-
   --label-1: #f5f5f7;
   --label-2: rgba(235, 235, 245, 0.64);
   --label-3: rgba(235, 235, 245, 0.58);
@@ -723,6 +709,7 @@ td.c-num { white-space: nowrap; }
     visibility: visible;
     transform: none;
     transition: none;
+    box-shadow: var(--glass-chrome-edge), inset -1px 0 0 var(--sep);
   }
   .flows-body.has-rail.is-side-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
   .flows-body.has-rail.is-side-collapsed > .fx-side { visibility: hidden; transform: translateX(-100%); }
