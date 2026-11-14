@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { FRESH_CLASSES, easternInstant, liveStalled } from "../shared/flows-freshness.js";
 import {
   runLiveLoop, chainDispatch, chainWithRetry, githubTarget, readLiveClock, liveRunVerdict, transientRefusal, LIVE_LOOP, createProgress,
-  liveWindow,
+  liveWindow, universeReader,
 } from "../scripts/flows-legs/live.mjs";
 import { etTime } from "../scripts/flows-legs/health.mjs";
 import {
@@ -1241,9 +1241,10 @@ const MIN = 60 * 1000;
       const env = world.env();
       const watch = createWatch({ readOnce: world.readOnce, latestClock: () => body, env, fetchImpl: world.github.fetchImpl, log() {}, warn() {} });
       const started = world.now();
+      const universe = universeReader(world.readOnce);
       const loop = await runLiveLoop({ now: world.now, sleep: world.sleep, budgetMs: LIVE_LOOP.budgetMs, log() {}, warn() {}, watch,
         readClock: () => readLiveClock(world.readOnce, { seen: (b) => { body = b; } }),
-        pass: async () => { world.advance(20000); return { skipped: null, answered: 38, landed: 10 }; },
+        pass: async () => { await universe(); world.advance(20000); return { skipped: null, answered: 38, landed: 10 }; },
         chain: ({ at: when }) => chainWithRetry(() => chainDispatch({ env, fetchImpl: world.github.fetchImpl, at: when }), { sleep: world.sleep }) });
       runs.push({ started, ended: world.now(), exit: loop.exit, chained: loop.chained && loop.chained.sent, passes: loop.passes.length });
     }
@@ -1258,10 +1259,14 @@ const MIN = 60 * 1000;
   eq(weekday.runs.reduce((n, r) => n + r.passes, 0), 85, "with a Tier 2 pass on every slot from 09:31 to 16:25 ET (85, the count of 2026-09-28)");
   const kinds = {};
   for (const r of weekday.reads) kinds[r.key] = (kinds[r.key] || 0) + 1;
-  ok(weekday.reads.length <= 410 && kinds["live:market"] === kinds["live:focus"] && kinds["live:market"] <= 82 && kinds.meta <= 10 &&
+  const passRuns = weekday.runs.filter((r) => r.passes > 0).length;
+  ok(weekday.reads.length <= 410 + passRuns && kinds["live:market"] === kinds["live:focus"] && kinds["live:market"] <= 82 && kinds.meta <= 10 &&
      kinds["live:breadth"] >= 70 && kinds["live:breadth"] <= 76,
   `and it costs the Worker ${weekday.reads.length} ingest reads (${JSON.stringify(kinds)}), ${(weekday.reads.length / 1000).toFixed(2)}% of the Free plan's 100,000 requests a day, ` +
     "of which the breadth read is one a tick from 10:15 (45 minutes after the open) to 16:25 ET");
+  ok(kinds.universe === passRuns && passRuns >= 1 && passRuns <= weekday.runs.length,
+    `THE CAP-WEIGHTED TIDE'S TICKER LIST COSTS ONE UNIVERSE READ A RUN THAT MAKES A PASS, not one a pass: ${kinds.universe} reads for ` +
+    `${weekday.runs.reduce((n, r) => n + r.passes, 0)} passes over ${weekday.runs.length} runs, which is all that the ceiling rises by`);
   const standbys = (d) => d.world.github.record.dispatches.filter((x) => x.workflow === "flows-live.yml" && x.inputs && x.inputs.origin === "standby");
   const weekdayStandbys = standbys(weekday);
   ok(weekday.calls.length <= 12 + 5 && weekday.calls.length - weekdayStandbys.length <= 12 && weekdayStandbys.length <= weekday.runs.length,

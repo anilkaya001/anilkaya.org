@@ -23,11 +23,12 @@ const VOLDESK_EAGER = { bytes: 503, why: "WP3: the eager market script opens the
 const LOWER = ["mktSectors", "mktMovers", "mktAgainst", "mkVolume", "mkOi", "mkImpact", "mkInsiders", "mkDark", "mkSeason", "mkAdv", "mkExpiry", "mkVol", "mkRadar", "mkGroups"];
 const UPPER = ["mktTilt", "mktBreadth", "mktTape", "mkTide", "mkEtfSPY", "mkEtfQQQ", "mkEtfIWM", "mkSecTides"];
 
+const CAP_TIDE_EAGER = { bytes: 5795, why: "the cap-weighted tide is a first-paint figure of the hero: the live or nightly rule, the withheld reasons and the painter stay in the first-paint file, and the lower modules handed to the chunk are unchanged" };
 {
   const eager = fs.statSync(path.join(ROOT, "assets/js/flows-market.js")).size;
   const chunk = fs.statSync(path.join(ROOT, "assets/js/flows-market-below.js")).size;
-  ok(SINGLE_FILE_BYTES - eager >= 36 * 1024 - VOLDESK_EAGER.bytes, `THE FIRST-PAINT FILE IS AT LEAST 36 KB SMALLER THAN THE SINGLE FILE IT REPLACED, LESS THE VOL DESK OPENER: ${eager} B against ${SINGLE_FILE_BYTES} B (${SINGLE_FILE_BYTES - eager} B freed)`);
-  ok(chunk + eager < SINGLE_FILE_BYTES + 21504 + HORIZON_ALLOWANCE.bytes + FLOOR_FUNDS_ALLOWANCE.bytes, `and the two files together are within 22 KB of it (${chunk + eager} B): the tab controller and the fitter are the only addition`);
+  ok(SINGLE_FILE_BYTES - eager >= 36 * 1024 - VOLDESK_EAGER.bytes - CAP_TIDE_EAGER.bytes, `THE FIRST-PAINT FILE IS AT LEAST 36 KB SMALLER THAN THE SINGLE FILE IT REPLACED, LESS THE VOL DESK OPENER AND THE HERO'S CAP-WEIGHTED CELL: ${eager} B against ${SINGLE_FILE_BYTES} B (${SINGLE_FILE_BYTES - eager} B freed)`);
+  ok(chunk + eager < SINGLE_FILE_BYTES + 21504 + HORIZON_ALLOWANCE.bytes + FLOOR_FUNDS_ALLOWANCE.bytes + CAP_TIDE_EAGER.bytes, `and the two files together are within 22 KB of it and the named allowances (${chunk + eager} B): the tab controller and the fitter are the only other addition`);
   ok(!new RegExp(`<script[^>]+${CHUNK.replace(/\./g, "\\.")}`).test(HTML), "the chunk is not a script src of the page");
   eq(HTML.match(/<i\b[^>]*data-defer="market-below"[^>]*>/g).length, 1, "the page declares the market-below group once");
   const first = read("assets/js/flows-market.js");

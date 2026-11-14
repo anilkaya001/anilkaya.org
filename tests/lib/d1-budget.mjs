@@ -85,8 +85,9 @@ export const TIER2 = Object.freeze({
   passesPerWeekday: 84,
   pass: Object.freeze({ trips: 11, read: 0, written: 13 }),
   storedReadsPerPass: 5,
+  runReadsPerWeekday: 8,
   watchReadsPerWeekday: 520,
-  source: "W02 section 2.5: 84 passes a weekday; scripts/flows-legs/live.mjs reads board:long, board:short, board:watch, focus and live:heartbeat once a pass; watch.mjs at most 5 reads a 5-minute tick in session",
+  source: "W02 section 2.5: 84 passes a weekday; scripts/flows-legs/live.mjs reads board:long, board:short, board:watch, focus and live:heartbeat once a pass, and the universe once a run for the cap-weighted tide's ticker list (a weekday is five runs; priced at eight); watch.mjs at most 5 reads a 5-minute tick in session",
 });
 
 export const NIGHTLY = Object.freeze({
@@ -163,7 +164,7 @@ export function ledger(counts, measured = MEASURED_CEILINGS) {
   const rows = [
     ...engines,
     { id: "tier2.ingest", kind: "engine", written: t2 * p.written,
-      read: t2 * (p.read + UPSERT_READS_PER_WRITE * p.written + TIER2.storedReadsPerPass) + TIER2.watchReadsPerWeekday },
+      read: t2 * (p.read + UPSERT_READS_PER_WRITE * p.written + TIER2.storedReadsPerPass) + TIER2.runReadsPerWeekday + TIER2.watchReadsPerWeekday },
     { id: "nightly.ingest", kind: "engine", written: posts * measured.nightlyPostWritten + 1,
       read: NIGHTLY.readRows + UPSERT_READS_PER_WRITE * posts },
     { id: "rail.roster", kind: "reader", written: 0, read: railLoads() * measured.rosterRead },
