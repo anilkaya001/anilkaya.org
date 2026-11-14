@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "431";
+export const ASSET_VERSION = "432";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -21,6 +21,16 @@ export function sessionCalendar(now = Date.now()) {
   const out = [];
   for (let d = shiftDay(today, -CALENDAR_BACK_DAYS); d && out.length < CALENDAR_SESSIONS; d = shiftDay(d, 1)) if (isSession(d)) out.push(d);
   return out;
+}
+
+export const PAST_SESSIONS = 60;
+
+export function pastSessions(now = Date.now()) {
+  const today = Number.isFinite(now) ? etDayOf(now) : null;
+  if (!today) return [];
+  const out = [];
+  for (let d = shiftDay(today, -1), guard = 0; d && out.length < PAST_SESSIONS && guard < 200; d = shiftDay(d, -1), guard++) if (isSession(d)) out.push(d);
+  return out.reverse();
 }
 
 export const FONTS_VERSION = "428";
@@ -1295,7 +1305,7 @@ export function tickerPage({ username = "", scenes = false, xcheck = false, priv
     scripts: ["/assets/js/flows-fresh.js", "/assets/js/flows-rt.js", "/assets/js/flows-quant-read.bundle.js", "/assets/js/flows-ticker-glance.js", "/assets/js/flows-ticker.js", "/assets/js/flows-index.js"],
     body: `
   <i hidden data-defer="nn-orb" data-src="${v("/assets/js/flows-nn-orb.js")}"></i>
-  <i hidden id="ftCal" data-sessions="${sessionCalendar(now).join(",")}"></i>
+  <i hidden id="ftCal" data-sessions="${sessionCalendar(now).join(",")}" data-past="${pastSessions(now).join(",")}"></i>
   <div class="visually-hidden ft-status" id="ftStatus" role="status">Loading the name…</div>
   <div class="ft-glance" id="ftGlance" data-glance="off">
   <section class="ft-hero is-loading" id="ftHero" data-fx-hero aria-labelledby="ftHeroT"><div class="ft-hero-in">
