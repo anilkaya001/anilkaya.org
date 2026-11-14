@@ -214,6 +214,13 @@ CSS_KIB.tickerPage += MEMBER_TICKER_CSS.bytes / 1024;
 CSS_GZIP_KIB.tickerPage += MEMBER_TICKER_CSS.gzip / 1024;
 const RAIL_FIT = { bytes: 790, gzip: 141, why: "shell follow-ups: flows.css sizes the sidebar's rows to the height the rail has (a grid of 26 to 34 px rows per group, a :has floor per group size, tighter headings under 900 px and again under 800 px), 78,168 to 78,958 B raw; every Flows route links flows.css" };
 for (const name of Object.keys(CSS_KIB)) { CSS_KIB[name] += RAIL_FIT.bytes / 1024; CSS_GZIP_KIB[name] += RAIL_FIT.gzip / 1024; }
+const PULSE_BEAT = { bytes: 1535, gzip: 411, cssBytes: 783, cssGzip: 74, why: "the pulse: flows-ui.js beats the freshness pill and the Fire & Forget flame once only when a committed key's write stamp advances (the per-source stamps, the beat counter, the Pulse sentence in the pill's details and freshness.pulse), 75,300 to 76,835 B raw and 24,012 to 24,423 B gzip; flows.css replaces the timer-driven breathing with two one-shot beat animations on the flame, its halo and the pill and puts the flame out while the pill is stale or pending, 78,958 to 79,741 B raw and 15,732 to 15,806 B gzip" };
+for (const name of Object.keys(CEILING_KIB)) {
+  if (NO_UI_ROUTES.has(name)) continue;
+  if (name !== "eventsPage") CEILING_KIB[name] += PULSE_BEAT.bytes / 1024;
+  GZIP_KIB[name] += PULSE_BEAT.gzip / 1024;
+}
+for (const name of Object.keys(CSS_KIB)) { CSS_KIB[name] += PULSE_BEAT.cssBytes / 1024; CSS_GZIP_KIB[name] += PULSE_BEAT.cssGzip / 1024; }
 for (const name of ["deskPage", "sidePage", "watchPage"]) {
   CEILING_KIB[name] += MEMBER_EXPORT_JS.bytes / 1024;
   GZIP_KIB[name] += MEMBER_EXPORT_JS.gzip / 1024;
@@ -486,7 +493,7 @@ for (const m of measured) {
 }
 
 {
-  const base = { name: "marketPage", raw: 240782, gzip: 72969, css: 137186, cssGzip: 28551 };
+  const base = { name: "marketPage", raw: 242317, gzip: 73380, css: 137969, cssGzip: 28625 };
   eq(judge(base).join("; "), "", "the ledger judge passes today's market route");
   ok(judge({ ...base, gzip: base.gzip + 8 * 1024 }).length > 0,
      "the judge fails a route inflated by 8 KiB of gzip");
@@ -498,7 +505,7 @@ for (const m of measured) {
   ok(judge({ ...base, raw: base.raw - 13 * 1024 }).length > 0,
      "the ratchet fails a route that saved 13 KiB raw and left its ceiling where it was");
   ok(judge({ ...base, name: "nowhere" }).length === 4, "a route with no ceilings fails on all four bases");
-  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 40627 + NN_KERNEL.gzip, css: 119045 + NN_FLOWS_CSS.bytes + RAIL_FIT.bytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip + RAIL_FIT.gzip };
+  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 40627 + NN_KERNEL.gzip + PULSE_BEAT.gzip, css: 119045 + NN_FLOWS_CSS.bytes + RAIL_FIT.bytes + PULSE_BEAT.cssBytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip + RAIL_FIT.gzip + PULSE_BEAT.cssGzip };
   eq(judge(events).join("; "), "", "events, whose ceiling is held for the earnings strip, passes with its wide raw headroom");
   eq(Object.keys(HELD_RAW_KIB).join(", "), "eventsPage", "events is the only route whose raw ceiling is held above the ratchet");
 }
@@ -600,7 +607,7 @@ for (const name of Object.keys(CEILING_KIB)) {
     }
     const core = sizeOf("/assets/js/flows-ui.js"), lib = sizeOf("/assets/js/flows-chart.js");
     console.log("  flows-ui.js " + core + " B, flows-chart.js " + lib + " B");
-    ok(core < 71000 + NN_KERNEL.uiBytes + 64 + FORMAT_CORE.bytes + HORIZON_CORE.bytes + CALIB_READ.bytes, `flows-ui.js is the core alone (${core} B): the chart library is not in it`);
+    ok(core < 71000 + NN_KERNEL.uiBytes + 64 + FORMAT_CORE.bytes + HORIZON_CORE.bytes + CALIB_READ.bytes + PULSE_BEAT.bytes, `flows-ui.js is the core alone (${core} B): the chart library is not in it`);
     ok(!/const chart = Object\.freeze|function (drawLine|diverging|heatmap|payoff|sparkline)\(/.test(readFileSync(new URL("assets/js/flows-ui.js", REPO), "utf8")),
        "and none of the chart drawing functions is left behind in the core");
   }
