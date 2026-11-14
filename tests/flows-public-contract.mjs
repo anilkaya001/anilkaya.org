@@ -78,12 +78,17 @@ for (const [route, name] of [["/flows/about/", "about"], ["/flows/glossary/", "g
 }
 
 {
-  const html = await (await call("/flows/about/")).text();
+  const html = await (await call("/flows/about/", {}, { FLOWS_POSITIONING: "on" })).text();
+  for (const env of [{}, { FLOWS_POSITIONING: "owner" }, { FLOWS_POSITIONING: "off" }, { FLOWS_POSITIONING: "yes" }]) {
+    const shut = await (await call("/flows/about/", {}, env)).text();
+    ok(!shut.includes("Positioning.</strong>"), "the about page does not describe Positioning while the page is not open to members (" + JSON.stringify(env) + ")");
+    eq(html.replace(/\n      <li><strong>Positioning\.<\/strong>.*?<\/li>/, ""), shut, "and that line is the only difference the switch makes");
+  }
   const NEEDLE = {
     overview: "<strong>Home.</strong>", watch: "(the Watchlist)", long: "<strong>Boards.</strong>", short: "<strong>Boards.</strong>",
     market: "<strong>Market.</strong>", moves: "<strong>Moves.</strong>", unusual: "<strong>Unusual.</strong>", flowlab: "<strong>Flow Lab.</strong>", ledger: "<strong>Ledger.</strong>", macro: "<strong>Macro.</strong>", events: "<strong>Events.</strong>",
     political: "<strong>Political.</strong>", strategy: "<strong>Strategy, Premium desk and Ask.</strong>", desk: "<strong>Strategy, Premium desk and Ask.</strong>",
-    fire: "<strong>Fire.</strong>",
+    fire: "<strong>Fire.</strong>", positioning: "<strong>Positioning.</strong>",
   };
   const members = FLOWS_NAV.filter((g) => !g.only).flatMap((g) => g.items.map((i) => i.key)).sort();
   eq(Object.keys(NEEDLE).sort().join(","), members.join(","), "the about page's table names every page the members' sidebar links, so a new page cannot ship unlisted");

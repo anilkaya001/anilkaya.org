@@ -1,11 +1,11 @@
 import { HttpError, redirect } from "../http.js";
-import { FLOWS_PAGES, fireNav, ownerNav, macroNav, oracleShell, sideShell } from "../../shared/flows-pages.js";
+import { FLOWS_PAGES, fireNav, ownerNav, macroNav, oracleShell, positioningNav, sideShell } from "../../shared/flows-pages.js";
 import { ROUTE_FLAGS, flagOn, modeOf as ffMode } from "../ff-health.js";
 import { memberShell } from "../../shared/flows-member-shell.js";
 import { modeOf } from "../../shared/flows-member-state.js";
 import { EXPORT_PAGES, pageHold } from "../../shared/flows-export-build.js";
 import { ledgerLiveOn } from "../../shared/flows-ledger-live.js";
-import { positioningMode } from "../../shared/flows-pos-switch.js";
+import { positioningMode, positioningWord } from "../../shared/flows-pos-switch.js";
 import { flowlabMode } from "../../shared/flows-flowlab.js";
 import { flowlabShell } from "../../shared/flows-flowlab-shell.js";
 import { floorFundsMode } from "../../shared/flows-floor-funds.js";
@@ -69,7 +69,7 @@ const PAGES = Object.freeze([
 ]);
 
 const PUBLIC_PAGES = Object.freeze([
-  { slug: "about", render: () => FLOWS_PAGES.aboutPage() },
+  { slug: "about", render: (env) => FLOWS_PAGES.aboutPage({ positioning: positioningWord(env) === "on" }) },
   { slug: "glossary", render: () => FLOWS_PAGES.glossaryPage() },
 ]);
 
@@ -139,7 +139,8 @@ export function flowsPageRows(deps) {
         const shown = memberShell(oracleShell(flowlabShell(page.render(session.username, summary, owner, scenesOn(env, session.username), env, voldeskOn(env, session.username), { macroOn, macroLiveOn }), slug, labOn), oracleMode(env, owner), slug), memberOptions(env, owner, slug));
         const shelled = macroOn(env, owner) ? macroNav(shown) : shown;
         const rendered = fireNav(shelled, ffPageOpen(env, "fire"), slug);
-        return html(sideShell(owner ? ownerNav(rendered) : rendered, request.headers.get("Cookie")));
+        const railed = positioningNav(rendered, positioningMode(env, owner), slug);
+        return html(sideShell(owner ? ownerNav(railed) : railed, request.headers.get("Cookie")));
       },
     });
     if (page.slug !== "") {
@@ -162,7 +163,7 @@ export function flowsPageRows(deps) {
       auth: "none",
       handler: ({ env }) => {
         if (String(env.FLOWS_FRONT_DOOR || "on").trim().toLowerCase() === "off") throw HttpError.of("not_found");
-        return html(page.render());
+        return html(page.render(env));
       },
     });
     rows.push({

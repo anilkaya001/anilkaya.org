@@ -212,6 +212,8 @@ for (const name of Object.keys(CSS_KIB)) {
 }
 CSS_KIB.tickerPage += MEMBER_TICKER_CSS.bytes / 1024;
 CSS_GZIP_KIB.tickerPage += MEMBER_TICKER_CSS.gzip / 1024;
+const RAIL_FIT = { bytes: 790, gzip: 141, why: "shell follow-ups: flows.css sizes the sidebar's rows to the height the rail has (a grid of 26 to 34 px rows per group, a :has floor per group size, tighter headings under 900 px and again under 800 px), 78,168 to 78,958 B raw; every Flows route links flows.css" };
+for (const name of Object.keys(CSS_KIB)) { CSS_KIB[name] += RAIL_FIT.bytes / 1024; CSS_GZIP_KIB[name] += RAIL_FIT.gzip / 1024; }
 for (const name of ["deskPage", "sidePage", "watchPage"]) {
   CEILING_KIB[name] += MEMBER_EXPORT_JS.bytes / 1024;
   GZIP_KIB[name] += MEMBER_EXPORT_JS.gzip / 1024;
@@ -322,6 +324,8 @@ DEFERRED_KIB.marketPage += HORIZON_DEFERRED.marketBytes / 1024;
 const VOLDESK_DEFERRED = { od: "WP3", tickerBytes: 12000, marketBytes: 37700, why: "WP3 volatility structure: the Vol desk controller (flows-voldesk.js) and the ticker's engine cross-check strip (flows-ticker-xcheck.js) are deferred groups, requested on the first open of the Vol desk tab and when the Surface tab opens" };
 DEFERRED_KIB.tickerPage += VOLDESK_DEFERRED.tickerBytes / 1024;
 DEFERRED_KIB.marketPage += VOLDESK_DEFERRED.marketBytes / 1024;
+const NETMAP_FOCUS = { bytes: 596, why: "shell follow-ups: flows-net-map.js finds the focused chip again by id after every repaint, falls back to the selected chip and keeps the phone layer switch focused (25,222 to 25,818 B raw); a deferred group on every page that draws the condensed map" };
+for (const name of Object.keys(DEFERRED_KIB)) if (DEFERRED[name] && JSON.stringify(DEFERRED[name]).includes("flows-net-map.js")) DEFERRED_KIB[name] += NETMAP_FOCUS.bytes / 1024;
 DEFERRED_KIB.tickerPage += FLOWLAB_LINK.networkBytes / 1024;
 DEFERRED_KIB.unusualPage += FLOWLAB_LINK.belowBytes / 1024;
 DEFERRED_KIB.flowlabPage = 80 + NN_ASK.bytes / 1024;
@@ -494,7 +498,7 @@ for (const m of measured) {
   ok(judge({ ...base, raw: base.raw - 13 * 1024 }).length > 0,
      "the ratchet fails a route that saved 13 KiB raw and left its ceiling where it was");
   ok(judge({ ...base, name: "nowhere" }).length === 4, "a route with no ceilings fails on all four bases");
-  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 40627 + NN_KERNEL.gzip, css: 119045 + NN_FLOWS_CSS.bytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip };
+  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 40627 + NN_KERNEL.gzip, css: 119045 + NN_FLOWS_CSS.bytes + RAIL_FIT.bytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip + RAIL_FIT.gzip };
   eq(judge(events).join("; "), "", "events, whose ceiling is held for the earnings strip, passes with its wide raw headroom");
   eq(Object.keys(HELD_RAW_KIB).join(", "), "eventsPage", "events is the only route whose raw ceiling is held above the ratchet");
 }
