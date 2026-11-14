@@ -13,7 +13,11 @@ They are subsets of the upstream variable files
 cut with fontTools: the glyphs are subset first, then the `GRAD` axis is
 pinned to 0 and the `opsz` axis to 18 (both the upstream defaults), and the
 weight axis is kept whole (400 to 700). Keeping `opsz` (17 to 18) made the
-Latin file 68.8 KB instead of 44.6 KB, so it is not kept. Hinting is dropped.
+Latin file 68.8 KB instead of 44.7 KB, so it is not kept. The upstream `prep`
+and `gasp` tables are kept: the glyphs carry no instructions, and without
+that `prep` Chromium 149 on Linux, which sets whole-pixel advances, drew one
+31-character line at 12 px 174 px wide against 169 px with it (166.6 px is
+the unrounded width).
 The layout features kept are `kern`, `mark`, `mkmk`, `ccmp`, `locl`, `liga`,
 `calt`, `tnum`, `pnum`, `lnum`, `case`, `zero`, `frac`, `numr`, `dnom`,
 `sups`, `subs`, `sinf` and `ordn`.
