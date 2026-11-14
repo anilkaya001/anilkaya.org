@@ -1279,7 +1279,7 @@
       const on = sideOn(), drawer = on && !WIDE.matches;
       body.classList.toggle("has-side-open", drawer);
       body.classList.toggle("is-side-collapsed", !on && WIDE.matches);
-      for (const n of behind) n.inert = drawer;
+      if (drawer !== body.fxDrawer) for (const n of behind) n.inert = body.fxDrawer = drawer;
       if (btn) btn.setAttribute("aria-expanded", on);
     };
     const sideSet = (on, kept) => { sidePref = on === WIDE.matches ? null : on; if (kept) sideKeep(sidePref); sidePaint(); };
