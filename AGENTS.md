@@ -1241,20 +1241,20 @@ merge. A bump gives such a reference its token, and refuses, writing nothing,
 when the reference runs on past `.css`, `.js` or `.woff2` (a `.json` the
 pattern reads as `.js`).
 
-A blanket rewrite of `?v=<old>` to `?v=<new>` also catches the sixteen woff2
-references (eight `@font-face` URLs in `base.css`, one Inter preload in each
+A blanket rewrite of `?v=<old>` to `?v=<new>` also catches the fourteen woff2
+references (six `@font-face` URLs in `base.css`, one Google Sans preload in each
 of the eight pages that preload it). The Flows pages preload the same file
 from `head()` in `shared/flows-pages.js`, whose `FONTS_VERSION` constant
 (deliberately not `ASSET_VERSION` and not read through `v()`) is held equal to
 `assets/fonts-version.txt` by `tests/flows-features.mjs`; `contracts.mjs` does
-not scan that file, so those references are not in the sixteen, and
+not scan that file, so those references are not in the fourteen, and
 `bump-assets` never moves the constant. A merge takes such a rewrite from
 another branch silently, because this branch's font lines are unchanged.
 The contract test fails on the first moved font reference, naming the file
 and the expected token. After a bump and after any merge, run
 `grep -rn 'woff2?v=' --include=*.html --include=*.css .` from the repository
 root and set every hit back to the integer in `assets/fonts-version.txt`;
-the contract test's summary line then reports sixteen font references at
+the contract test's summary line then reports fourteen font references at
 that token.
 
 When a font under `assets/fonts/` changes:
@@ -2078,9 +2078,11 @@ invoke it; it can be retired once that dashboard field is confirmed clear.
   payload. `globalThis.__FlowsDeskTest` and `globalThis.__IEWTPlacementTest` are
   test hooks that exist only so a `vm` context or Chromium can reach pure
   functions. `lesson-redirect.js` is an IIFE and declares no global.
-- Design tokens live in `base.css`; typography is self-hosted subset Latin
-  Modern. Re-subset from upstream for new glyph coverage rather than editing
-  WOFF2 files.
+- Design tokens live in `base.css`; typography is self-hosted subset Google
+  Sans (upright and italic, variable from 400 to 700, tabular figures under
+  `tnum`) on every page, with JetBrains Mono for code alone;
+  `assets/fonts/NOTICE.md` holds the recipe. Re-subset from upstream for new
+  glyph coverage rather than editing WOFF2 files.
 - Matplotlib uses a Computer Modern-style, gridless theme; figures appear in
   the guide column.
 - The course page has one topic `h1` followed by stage `h2` content without

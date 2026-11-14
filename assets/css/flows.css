@@ -1,8 +1,8 @@
 :root {
   color-scheme: dark;
 
-  --font-text: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", "Helvetica Neue", system-ui, sans-serif;
-  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", system-ui, sans-serif;
+  --font-text: "Google Sans", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  --font-display: "Google Sans", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", monospace;
   --font-figure: var(--font-text);
   --font-ui: var(--font-figure);
@@ -607,7 +607,7 @@ td.c-num { white-space: nowrap; }
   font: var(--t-body);
   letter-spacing: var(--t-body-track);
   font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum" 1, "cv05" 1, "ss03" 1;
+  font-feature-settings: "tnum" 1;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -1954,7 +1954,7 @@ a.ui-row:hover { background: var(--fill-4); }
 
 .flows-body :is(.ui-metric-v, .ui-metric-d, .ui-metric-s, .ui-chip-v, .ui-row, .ui-tile-v, .ui-readout, .ui-num, .tl-num, .ui-roll, .rail-count, .ui-fresh, .ui-legend, .ui-pal-opt, .ui-capsule, .ui-tag, .fx-bar-t, .ui-title, .ui-chart, .ui-svg) {
   font-variant-numeric: tabular-nums;
-  font-feature-settings: "tnum" 1, "cv05" 1, "ss03" 1;
+  font-feature-settings: "tnum" 1;
 }
 .ui-roll-s > span { text-align: center; }
 @media (max-width: 480px) {
