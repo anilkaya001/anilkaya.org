@@ -1582,7 +1582,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 260 suites: 206 that need only Node (N), 39 that also
+`tests/suites/` registers 261 suites: 207 that need only Node (N), 39 that also
 need Playwright's Chromium (C) and 15 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1636,13 +1636,13 @@ flows-variation           flows-vendor-budget       flows-vendor-extras       fl
 flows-vol                 flows-voldesk             flows-voldesk-render      flows-warnings
 flows-weight              flows-write-batch         flows-ws-probe            flows-xcheck-render
 lab-write                 launch-readiness          markets                   mastery
-math-darkpool             math-dealer               math-duplicates           math-format
-math-print                math-short                math-sigma                math-time
-math-units                math-vol                  pipeline                  route-matrix
-server-ai                 server-desk               server-desk-sc            server-flowlab
-server-ingest             server-kernel             server-log                server-ops
-server-oracle             server-pages              server-router             server-rt
-server-voldesk            staging
+math-darkpool             math-dealer               math-duplicates           math-flow
+math-format               math-print                math-short                math-sigma
+math-time                 math-units                math-vol                  pipeline
+route-matrix              server-ai                 server-desk               server-desk-sc
+server-flowlab            server-ingest             server-kernel             server-log
+server-ops                server-oracle             server-pages              server-router
+server-rt                 server-voldesk            staging
 ```
 
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):
