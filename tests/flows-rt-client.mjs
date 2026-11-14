@@ -321,7 +321,7 @@ try {
     const { ctx, page, R } = await mount(browser, { html: coreHtml() });
     eq(await rt(page, "typeof window.FlowsUI.rt"), "object", "FlowsUI.rt is attached to the allowlisted global, no new global");
     deep(await rt(page, "Object.keys(window.FlowsUI.rt).sort()"),
-      ["alerts", "connect", "feeds", "fresh", "gex", "market", "measure", "news", "on", "quote", "status", "strips", "transport"],
+      ["alerts", "connect", "feeds", "fresh", "gex", "halts", "market", "measure", "news", "on", "quote", "status", "strips", "transport"],
       "and offers connect, on and transport with the adapters the pages read");
     eq(await transport(page), "off", "before any page asks for a topic the rail is off and nothing is opened");
     eq(R.conns.length, 0, "no socket without a connect");
@@ -366,6 +366,44 @@ try {
     eq((await page.evaluate(() => window.__ch)).length, 1, "a row that differs only in its read lag (qa) is not a change and wakes nobody");
     eq(R.messages(c1).filter((m) => m.t === "rs").length, 0, "no resync was asked for on a clean run");
     deep(page.errors, [], "nothing threw");
+    await ctx.close();
+  }
+
+  if (want("halts")) {
+    const { ctx, page, R } = await mount(browser, { html: coreHtml() });
+    R.sq.ht = 0;
+    eq(await rt(page, "window.FlowsUI.rt.halts()"), null, "HALTS: before a page asks for the channel the adapter has nothing to say");
+    await connect(page, { topics: ["ht"], primary: [] });
+    const c = await R.nextConn();
+    eq(new URL(c.url).searchParams.get("k"), "ht", "a page that asks for halts names ht alone, so no polled topic is woken for it");
+    const since = new Date(R.now - 3600000).toISOString();
+    const down = RT.socketOnlyStream("ht", DAY);
+    R.send(c, RT.ctlFrame("hello", { ep: R.ep, at: R.now, meta: { transport: "ws", upstream: "socket", mode: "on", audience: "members", topics: ["ht"], hbS: 5, cold: false, phase: "rth", session: DAY, f: null },
+      rows: [RT.frame("ht", { ep: R.ep, sq: 0, at: R.now, snap: true, fresh: down, meta: { since, dropped: 0 }, rows: [] })] }));
+    await R.pump();
+    eq(await rt(page, "window.FlowsUI.rt.halts()"), null, "SOCKET-ONLY: while the hub says the channel is down the adapter answers null, which a page prints as not connected and never as no halts");
+    ok(!(await rt(page, "JSON.stringify(window.FlowsUI.rt.status().topics.ht)")).includes("\"state\":\"live\""), "and the topic is not called live");
+    R.send(c, R.ctl("hb", { upstream: "up", phase: "rth", sockets: 1, degraded: null, topics: { ht: { sq: 0, readAt: R.now, lagMs: null, fresh: R.fresh("ht") } } }));
+    await R.pump();
+    deep(await rt(page, "(() => { const h = window.FlowsUI.rt.halts(); return h && { n: h.length, since: h.since }; })()"), { n: 0, since },
+      "LIVE: a heartbeat that says the channel is live turns the adapter to an empty list with the epoch's start");
+    ok((await rt(page, "window.__ch.filter((c) => c.k === 'ht').length")) >= 2, "and tells the page's listener the state turned, though no row came");
+    const T = R.now - 5000;
+    const first = { id: "SYH101|" + T + "|halted", ts: T, t: "SYH101", state: "halted", reason: "LUDP" };
+    R.send(c, R.delta("ht", [first]));
+    await R.pump();
+    deep(await rt(page, "window.FlowsUI.rt.halts().map((r) => [r.id, r.t, r.state, r.reason, r.at])"), [[first.id, "SYH101", "halted", "LUDP", new Date(T).toISOString()]],
+      "a streamed halt is read back with its own time as an instant");
+    R.send(c, R.delta("ht", [first]));
+    const later = { id: "SYH101|" + (T + 3000) + "|resumed", ts: T + 3000, t: "SYH101", state: "resumed", reason: null };
+    R.send(c, R.delta("ht", [later]));
+    await R.pump();
+    deep(await rt(page, "window.FlowsUI.rt.halts().map((r) => r.state)"), ["resumed", "halted"], "a halt sent again is held once, and the list is newest first");
+    R.send(c, R.ctl("hb", { upstream: "up", phase: "rth", sockets: 1, degraded: null, topics: { ht: { sq: R.sq.ht, readAt: null, lagMs: null, fresh: down } } }));
+    await R.pump();
+    eq(await rt(page, "window.FlowsUI.rt.halts()"), null, "when the channel goes down again the adapter says so rather than keep showing the old list as current");
+    deep(await rt(page, "window.__html.filter((h) => /SYH/.test(h)).length"), 0, "no halt row ever reaches innerHTML");
+    eq(page.errors.length, 0, "no page error");
     await ctx.close();
   }
 

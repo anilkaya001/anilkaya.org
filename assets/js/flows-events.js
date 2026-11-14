@@ -668,7 +668,8 @@
     const stale = h("button", { class: "fd-pill", type: "button", id: "evStale", hidden: S.staleText ? null : true,
       "aria-haspopup": "dialog", "aria-controls": "fxPop",
       "data-info": UI.info(() => ({ title: "Stale calendar", state: "stale", lead: S.staleText })) }, UI.glyph("clock"), S.staleDays === null ? "Behind" : S.staleDays + "d old");
-    host.meta.replaceChildren(...bits.flatMap((b, i) => (i ? [h("span", { ...HIDE }, MID), b] : [b])), stale);
+    const chip = host.meta.querySelector(".er-chip");
+    host.meta.replaceChildren(...bits.flatMap((b, i) => (i ? [h("span", { ...HIDE }, MID), b] : [b])), stale, ...(chip ? [chip] : []));
   }
 
   function aboutInfo() {
