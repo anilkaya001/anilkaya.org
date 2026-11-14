@@ -75,7 +75,7 @@ Stylesheets of the articles and the landing page.
 | File | Exports | Suites |
 |---|---|---|
 | `assets/css/article.css` |  | flows-glass-render, flows-layout-sweep |
-| `assets/css/home.css` |  | flows-glass-render, flows-layout-sweep |
+| `assets/css/home.css` |  | flows-glass-render, flows-layout-sweep, landing-motion |
 
 ### `assets/fonts/*`
 
@@ -113,7 +113,7 @@ Open Graph images, favicon and the atmosphere backdrop.
 
 ### `assets/js/nav.js`, `assets/js/particles.js`, `assets/js/year.js`, `assets/js/market-clock.js`
 
-Site-wide scripts: navigation, the landing particle field, the footer year and the market clock.
+Site-wide scripts: navigation, the footer year, the market clock and the landing field (`particles.js`): a Canvas 2D cloud drawn from one sheet of pre-rendered glow sprites with depth of field and fog, trails, a camera that dollies in once, answers the pointer, a touch drag and the page scroll through springs, and the cloud's own least-squares plane (`fitPlane`, the 3x3 normal equations solved directly) drawn as a perspective grid with residual lines from the brightest particles; one still frame under reduced motion, no frame while hidden or off screen; composited source-over because a software canvas pays several times more for screen.
 
 | File | Exports | Suites |
 |---|---|---|
@@ -2671,7 +2671,7 @@ The Yahoo parse against dated five-day responses (weekend, Tokyo morning, null t
 
 ### `tests/landing-motion.mjs`
 
-The landing page's motion in Chromium with no server: under reduced motion the particle field draws one still frame (eight passes, as bright as the settled trail the old loop built; a single pass measures 0.56 of it), draws it once at load and once per viewport change, redraws it at the device scale after a context restore, and fires no animation frame after the first second; the marquee's Pause button (WCAG 2.2.2) is reached by Tab, toggled by Enter, Space and a click whether or not it keeps focus, holds after focus leaves, and stays under reduced motion because the prices still auto-update; a refresh that lands while paused is held until Play in both views, a Pause and Play with nothing held leaves the bar and its focused control in place, and a refresh while playing renders at once; the bar stays below the footer at 320, 390 and 1280 px.
+The landing page's motion in Chromium with no server: under reduced motion the particle field draws one still frame (eight passes, as bright as the settled trail the old loop built; a single pass measures 0.56 of it), draws it once at load and once per viewport change, redraws it at the device scale after a context restore, and fires no animation frame after the first second; the marquee's Pause button (WCAG 2.2.2) is reached by Tab, toggled by Enter, Space and a click whether or not it keeps focus, holds after focus leaves, and stays under reduced motion because the prices still auto-update; a refresh that lands while paused is held until Play in both views, a Pause and Play with nothing held leaves the bar and its focused control in place, and a refresh while playing renders at once; the bar stays below the footer at 320, 390 and 1280 px. The deep field (`assets/js/particles.js`, `assets/css/home.css`): `__FieldTest.fitPlane`, bound only where there is no `document`, against an independent Householder QR solve on seeded clouds; the still frame's draw calls read through a served copy (a far or near particle is drawn larger, from a softer sprite and dimmer than one in focus, fog at equal softness, every sprite from one pre-rendered sheet); the grid and the residual lines of the brightest particles on the plane an independent solve fits to the page's own particles; the dolly ending exactly at rest and never run under reduced motion; the scroll camera (tilt and recede, carried by a spring, nothing drawn on scroll under reduced motion); weighted pointer parallax, a horizontal touch drag that orbits and glides while `touch-action: pan-y` leaves vertical swipes to the page; the hold that collapses the cloud onto its plane; no draw while the tab is hidden or the canvas is off screen; script time per frame at 1440x900 as a ratio to a reference canvas workload timed in the same animation frames, and the same with the raster forced to finish; the glass title's states (finite paint-only sweep, still under reduced motion, opaque under reduced transparency, plain in forced colours); hero text contrast of 4.5:1 from screenshots of seeded frames (3:1 across the whole box of the large title); no layout shift; and a planted wrong build for each rule. `LM_SHOW=1` prints what catches each planted build.
 
 | File | Exports | Suites |
 |---|---|---|
