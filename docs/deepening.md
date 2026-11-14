@@ -232,7 +232,7 @@ so the governor's constants moved:
 |---|---|---|
 | calls a rotated name | 38 | 39 (one interpolated implied volatility read a name every night) |
 | milliseconds a rotated name | 6,500 | 6,650 (one more call at the 150 ms pace) |
-| baseline calls | 4,500 | 6,200 (the nominal 4,432, 182 interpolated reads and an expected 1,500 slow reads) |
+| baseline calls | 4,500 | 6,900 (the nominal 4,432, 182 interpolated reads, an expected 1,500 slow reads and 720 positioning reads) |
 | baseline time | 14 minutes | 19 minutes (the slow cap of 2,000 calls at 150 ms is five minutes) |
 | time term, nothing else spent | 535 names | 478 names |
 | default cap | 530 | 470, so the cap still binds on an ordinary night and the night still fits the 72 minute time share (19 + 470 x 6.65 s = 71.1 minutes) |

@@ -86,7 +86,7 @@ def political(rng):
 
 def governor(rng):
     out = []
-    B = dict(hardCap=900, minBatch=4, callsPerName=39, msPerName=6650, baselineCalls=6560, baselineMs=19 * 60000, deadlineMs=165 * 60000)
+    B = dict(hardCap=900, minBatch=4, callsPerName=39, msPerName=6650, baselineCalls=7270, baselineMs=19 * 60000, deadlineMs=165 * 60000)
     for i in range(300):
         cap = rng.choice([860, 470, 100, 24, 3, 2000])
         backlog = rng.randint(0, 900)

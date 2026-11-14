@@ -182,6 +182,8 @@ for (const [w, h] of [[1440, 820], [1024, 768]]) {
   ok(read1.includes(" of $") && new RegExp("\\b" + Math.round((want / EXP.total) * 100) + "%").test(read1), `${w}: with its share of the total, ${Math.round((want / EXP.total) * 100)}%`);
   const lit = await page.evaluate(() => ({ on: document.querySelectorAll("#mkNet .nm-band.is-on").length, off: document.querySelectorAll("#mkNet .nm-band.is-off").length }));
   ok(lit.on > 0 && lit.off > 0, `${w}: the selected node's paths are lit and the rest stepped back`);
+  await page.evaluate(() => document.fonts.ready);
+  await page.waitForTimeout(600);
   await page.focus(`#mkNet .nm-chip[data-id="${pick}"]`);
   await page.keyboard.press("ArrowDown");
   const moved = await page.evaluate(() => document.activeElement && document.activeElement.dataset.id);

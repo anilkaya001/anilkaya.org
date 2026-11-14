@@ -13,7 +13,9 @@ export const cardXWire = () => process.env.FLOWS_CARDX_WIRE === "pack";
 
 export const cardXBytes = (payload) => (cardXWire() ? wireBytes(payload) : servedBytes(payload));
 
-const overSoft = (payload) => cardXBytes(payload) > CARD_X_SOFT_BYTES || servedBytes(payload) > CARD_X_SERVED_BYTES;
+const BYTES_FIELD = 16;
+
+const overSoft = (payload) => cardXBytes(payload) + BYTES_FIELD > CARD_X_SOFT_BYTES || servedBytes(payload) + BYTES_FIELD > CARD_X_SERVED_BYTES;
 
 function fitSoft(payload) {
   while (overSoft(payload)) {
@@ -28,6 +30,7 @@ export const CARD_X_SHED = Object.freeze([
   ["va", (p) => { if (!p.va) return false; delete p.va; return true; }],
   ["dx.parts", (p) => { if (!hasLiveParts(p.dx)) return false; p.dx = stubSection(p.dx, "dx"); return true; }],
   ["vx.parts", (p) => { if (!hasLiveParts(p.vx)) return false; p.vx = stubSection(p.vx, "vx"); return true; }],
+  ["ps.parts", (p) => { if (!hasLiveParts(p.ps)) return false; p.ps = stubSection(p.ps, "ps"); return true; }],
   ["insiders.dots", (p) => { if (p.insiders && p.insiders.dots) p.insiders.dots = p.insiders.dots.slice(-10); }],
   ["earnings.events", (p) => { if (p.earnings && p.earnings.events) p.earnings.events = p.earnings.events.slice(0, 8); }],
   ["short.volume.path", (p) => { if (p.short && p.short.volume) delete p.short.volume.path; }],

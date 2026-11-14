@@ -52,6 +52,7 @@ export const CALL_COST = Object.freeze({
   flowlab: 1 + 1 + 3 + 25 + 2,
   slow: 1500,
   voldesk: 337,
+  positioning: 720,
   misc: 67,
 });
 
@@ -78,6 +79,7 @@ export function callModel({ enriched = 0, deep = 0, cross = 0, dossiers = 0, ear
     flowlab: cost.flowlab,
     slow: cost.slow,
     voldesk: cost.voldesk,
+    positioning: cost.positioning,
     misc: cost.misc,
   };
   return { legs, total: Object.values(legs).reduce((a, b) => a + b, 0) };

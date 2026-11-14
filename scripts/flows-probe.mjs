@@ -25,7 +25,7 @@ export const NOTICE_MARGIN_DAYS = 5;
 export const MIN_BOUND_CHARS = 4;
 export const CLOSE_MINUTES = 16 * 60;
 export const REDACTED = "[redacted]";
-export const TIERS = Object.freeze(["used", "1", "2"]);
+export const TIERS = Object.freeze(["used", "planned", "1", "2"]);
 export const CLASSES = Object.freeze(["ok", "empty", "4xx", "5xx", "network", "other", "skipped"]);
 export const SESSION_PROBE = Object.freeze({
   id: "session:SPY",
@@ -299,7 +299,7 @@ export function registryReads(ops) {
 export function loadList(file = LIST_PATH) {
   const parsed = JSON.parse(readFileSync(file, "utf8"));
   if (isObj(parsed) && Array.isArray(parsed.probes) && parsed.reads === undefined) {
-    const reads = registryReads(new Set(parsed.probes.map((p) => p && p.op)));
+    const reads = registryReads(new Set(parsed.probes.filter((p) => p && p.tier !== "planned").map((p) => p.op)));
     if (Object.keys(reads).length) parsed.reads = reads;
   }
   return validateList(parsed);
@@ -332,7 +332,7 @@ export function expandProbes(list, tickers) {
         reads: (list.reads && list.reads[p.op]) || null,
         gated: (list.gated && list.gated[p.op]) || null,
         liveOnly: (list.liveOnly || []).includes(p.op),
-        entitlement: (list.entitlement || []).includes(p.op),
+        entitlement: p.tier === "planned" || (list.entitlement || []).includes(p.op),
         enums: (list.enums && list.enums[p.op]) || null,
       });
     }

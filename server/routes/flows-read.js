@@ -36,7 +36,23 @@ const row = (name, handler) => ({ id: "flows." + name, path: "/api/flows/" + nam
 
 export function flowsReadRows(deps) {
   const { readServed, readFlowsPayload, readWithOverlay, passthrough, recallLastGood, storeGone, absentKey, cardWithEngine,
-    briefWithLive, briefFeedsAhead, nightlyFreshHeaders, splitEngineMark } = deps;
+    briefWithLive, briefFeedsAhead, nightlyFreshHeaders, splitEngineMark, positioningOpen = null } = deps;
+
+  const strip = (stored, mark, keys) => {
+    if (typeof stored.payload !== "string" || !stored.payload.includes(mark)) return stored;
+    const body = parseObject(stored.payload);
+    if (!body) return stored;
+    for (const key of keys) delete body[key];
+    return { ...stored, payload: JSON.stringify(body) };
+  };
+
+  const gated = (rc) => positioningOpen !== null && !positioningOpen(rc.env, rc.session);
+
+  const political = async (rc) => {
+    const stored = await readServed(rc.env, "political");
+    if (stored === null) return json(PENDING);
+    return passthrough(gated(rc) ? strip(stored, '"late":', ["late", "unusual", "money", "held", "plan"]) : stored);
+  };
 
   const nightly = (key, pending) => async ({ env }) => {
     const stored = await readServed(env, key);
@@ -109,10 +125,12 @@ export function flowsReadRows(deps) {
     return passthrough(stored);
   };
 
-  const card = (kind) => async ({ env, ctx, url, session }) => {
+  const card = (kind) => async (rc) => {
+    const { env, ctx, url, session } = rc;
     const ticker = requireTicker(url);
-    const stored = await readServed(env, kind + ":" + ticker);
+    let stored = await readServed(env, kind + ":" + ticker);
     if (stored === null) return absentKey(env, ctx, kind, ticker, session);
+    if (kind === "card-x" && gated(rc)) stored = strip(stored, '"ps":', ["ps"]);
     if (!stored.payload.includes(splitEngineMark)) return passthrough(stored);
     const trace = {};
     const merged = await cardWithEngine(env, ticker, stored, trace);
@@ -142,7 +160,7 @@ export function flowsReadRows(deps) {
     row("calib", servedView("calib")),
     row("dispersion", servedView("dispersion")),
     ...NIGHTLY.map(([name, key, pending]) => {
-      const plain = nightly(key, pending);
+      const plain = name === "political" ? political : nightly(key, pending);
       return row(name, name === "universe" ? (rc) => (rc.url.searchParams.has("cols") ? universeColumns(rc) : plain(rc)) : plain);
     }),
     ...OVERLAID.map((name) => row(name, overlaid(name))),

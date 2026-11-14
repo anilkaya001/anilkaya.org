@@ -42,7 +42,7 @@ eq(gov({ dailySeen: 1000 }).n, gov().n, "a key count under the run's own spend c
 eq(gov({ dailySeen: null }).n, gov().n, "and an unread counter is not a reading");
 ok(gov({ dailySeen: 9e9 }).n === 0, "a key over its line chooses nothing");
 eq(gov({ cap: 100000 }).limits.time, 1019, "the time term at the shipped deadline is 1,019 names: (132 minutes less the 19 minute baseline) at 6.65 s a name");
-eq(gov({ cap: 100000 }).limits.calls, 1122, "and the day term, with nothing else spent, is 1,122 (the Flow Lab stage's 32 calls are in the baseline)");
+eq(gov({ cap: 100000 }).limits.calls, 1102, "and the day term, with nothing else spent, is 1,102 (the Flow Lab stage and the positioning stages are in the baseline)");
 eq(gov({ cap: 100000, callsSoFar: 0 }).n, 900, "so the hard cap, not the deadline or the day line, bounds an uncapped night");
 eq(gov({ cap: 100000 }).binding, "cap", "and the governor says so");
 eq(gov({ backlog: 10000, cap: 100000, elapsedMs: 24 * 60 * 1000 }).limits.time, 974, "a run 24 minutes in has 974 names of time left");
