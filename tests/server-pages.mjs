@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import * as K from "../server/http.js";
 import { createRouter } from "../server/router.js";
 import { flowsPageRows, FLOWS_PAGE_SLUGS, FLOWS_PUBLIC_SLUGS, FLOWS_GONE_SLUGS } from "../server/routes/flows-pages.js";
-import { FLOWS_PAGES, FIRE_SHADOW_LINE, ownerNav } from "../shared/flows-pages.js";
+import { FLOWS_NAV, FLOWS_PAGES, FLOWS_TABS, FIRE_SHADOW_LINE, ownerNav } from "../shared/flows-pages.js";
 import { positioningMode } from "../shared/flows-pos-switch.js";
 import { workerSource, expect, absent, moduleSource } from "./lib/source-scan.mjs";
 
@@ -44,6 +44,14 @@ const withFireEntry = (page) => {
   return parts.length === 2 ? parts[0] + FIRE_ENTRY + parts[1] : page;
 };
 
+const POSITIONING_ENTRY = '<a href="/flows/positioning/" data-pos-nav><svg class="ui-g" aria-hidden="true" focusable="false"><use href="#g-stack"/></svg><span class="rail-label">Positioning</span></a>';
+const RAIL_TOOLS = '\n    </div>\n    <p class="rail-group" id="railTools">';
+const withPositioningEntry = (page) => {
+  const parts = page.split(RAIL_TOOLS);
+  return parts.length === 2 ? parts[0] + "\n      " + POSITIONING_ENTRY + RAIL_TOOLS + parts[1] : page;
+};
+const posWord = (env) => { const w = ffWord(env.FLOWS_POSITIONING); return w === "on" || w === "off" ? w : "owner"; };
+
 function oldChain(path, rc, d) {
   const { request, env, url } = rc;
   if (path === "/flows") {
@@ -63,7 +71,7 @@ function oldChain(path, rc, d) {
       }
     }
     const FLOWS_PUBLIC = {
-      "/flows/about/": () => FLOWS_PAGES.aboutPage(),
+      "/flows/about/": () => FLOWS_PAGES.aboutPage({ positioning: posWord(env) === "on" }),
       "/flows/glossary/": () => FLOWS_PAGES.glossaryPage(),
     };
     if (Object.hasOwn(FLOWS_PUBLIC, path) && String(env.FLOWS_FRONT_DOOR || "on").trim().toLowerCase() !== "off") {
@@ -113,7 +121,8 @@ function oldChain(path, rc, d) {
       }
       if (session && path === "/flows/status/" && !owner) throw new HttpError(404, "not_found", "Not found");
       const drawn = session ? FLOWS_ROUTES[path](session.username, summary, owner, env) : FLOWS_PAGES.loginPage();
-      const page = session && ffOpen(env, "FF_ROUTE_FIRE") && path !== "/flows/fire/" ? withFireEntry(drawn) : drawn;
+      const fired = session && ffOpen(env, "FF_ROUTE_FIRE") && path !== "/flows/fire/" ? withFireEntry(drawn) : drawn;
+      const page = session && path !== "/flows/positioning/" && (posWord(env) === "on" || (posWord(env) === "owner" && owner)) ? withPositioningEntry(fired) : fired;
       const body = session && owner ? ownerNav(page) : page;
       return new Response(body, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
@@ -161,6 +170,7 @@ const QUERIES = ["", "?t=NVDA", "?t=", "?t=%20", "?t=%20nvda%20", "?t=a%26b", "?
 const METHODS = ["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
 const USERS = [null, { username: "anilkaya" }, { username: "member<x>" }];
 const ENVS = [{ tag: "env" }, { tag: "env", FLOWS_FRONT_DOOR: "off" }, { tag: "env", FLOWS_FRONT_DOOR: " OFF " }, { tag: "env", FLOWS_FRONT_DOOR: "maybe" }, { tag: "env", FLOWS_FRONT_DOOR: "" }, { tag: "env", FLOWS_LEDGER: "on" }, { tag: "env", FLOWS_LEDGER: " OFF " }, { tag: "env", FLOWS_LEDGER: "maybe" },
+  { tag: "env", FLOWS_POSITIONING: " On " }, { tag: "env", FLOWS_POSITIONING: "off", FF_MODE: "on", FF_ROUTE_FIRE: "on" },
   { tag: "env", FF_MODE: "shadow", FF_ROUTE_FIRE: "on", FF_ROUTE_INBOX: "on", FF_ROUTE_WIRES: "on" }, { tag: "env", FF_MODE: " ON ", FF_ROUTE_FIRE: "on", FF_ROUTE_INBOX: "yes" }];
 const isOff = (env) => String(env.FLOWS_FRONT_DOOR || "on").trim().toLowerCase() === "off";
 
@@ -356,6 +366,51 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
       ok(!shut.includes("/flows/fire/") && !shut.includes("data-ff-nav"), path + ": with Fire closed no member page names it");
       eq(open.replace('<a href="/flows/fire/" data-ff-nav><svg class="ui-g" aria-hidden="true" focusable="false"><use href="#g-fire"/></svg><span class="rail-label">Fire</span></a>\n      ', ""), shut, path + ": and the entry is the only difference the switch makes");
     }
+  }
+  {
+    const POS_PAGES = NAV_PAGES.filter((slug) => !FF_FLAG[slug]);
+    const entry = '<a href="/flows/positioning/" data-pos-nav>';
+    for (const slug of POS_PAGES) {
+      const path = "/flows/" + (slug ? slug + "/" : "");
+      const draw = (user, env) => createRouter(flowsPageRows(scenario(user).deps)).find(path).handler({ ...rc(path), env }).then((r) => r.text());
+      const open = await draw(member, { ...navEnv, FLOWS_POSITIONING: "on" });
+      const rail = open.slice(open.indexOf('<nav class="flows-rail"'), open.indexOf('<div class="fx-side-f">'));
+      eq(rail.match(/<a href="\/flows\/positioning\/"[^>]*>/g), [entry], path + ": with Positioning open the sidebar carries one Positioning entry");
+      ok(rail.indexOf('id="railMarket"') < rail.indexOf(entry) && rail.indexOf('<a href="/flows/political/"') < rail.indexOf(entry) && rail.indexOf(entry) < rail.indexOf('id="railTools"'), path + ": last in the Market group, after Political");
+      for (const env of [{ ...navEnv, FLOWS_POSITIONING: "off" }, { ...navEnv, FLOWS_POSITIONING: "owner" }, navEnv, { ...navEnv, FLOWS_POSITIONING: "yes" }]) {
+        const shut = await draw(member, env);
+        ok(!shut.includes("data-pos-nav"), path + ": a member's sidebar has no Positioning entry while the page is not open to members (" + JSON.stringify(env.FLOWS_POSITIONING) + ")");
+        if (slug !== "political") eq(open.replace("\n      " + POSITIONING_ENTRY, ""), shut, path + ": and the entry is the only difference the switch makes");
+      }
+      const owner = { username: "anilkaya" };
+      ok((await draw(owner, { ...navEnv, FLOWS_POSITIONING: "owner" })).includes(entry) && (await draw(owner, navEnv)).includes(entry), path + ": an owner's sidebar has it while the page is open to owners");
+      ok(!(await draw(owner, { ...navEnv, FLOWS_POSITIONING: "off" })).includes("data-pos-nav"), path + ": and nobody's has it while the page is off");
+      ok((withPositioningEntry(open).match(/data-pos-nav/g) || []).length === 2, path + ": PLANTED WRONG BUILD caught: a shell that adds the entry twice is counted as two");
+    }
+    const own = await createRouter(flowsPageRows(scenario(member).deps)).find("/flows/positioning/").handler({ ...rc("/flows/positioning/"), env: { FLOWS_POSITIONING: "on" } }).then((r) => r.text());
+    eq(own.match(/<a href="\/flows\/positioning\/"[^>]*>/g), ['<a href="/flows/positioning/" class="is-on" aria-current="page">'], "the Positioning page marks its own entry as the current page and adds no second one");
+    ok(/^FLOWS_POSITIONING = "on"$/m.test(wrangler), "wrangler.toml ships Positioning open to members, so the entry is in every member's sidebar");
+  }
+  {
+    const groupOf = (id) => FLOWS_NAV.find((g) => g.id === id).items.map((i) => i.key);
+    const tabOf = (key) => FLOWS_TABS.filter((t) => t.keys.includes(key)).map((t) => t.label);
+    eq(FLOWS_TABS.map((t) => t.label), ["Home", "Boards", "Search", "Market"], "the phone tab bar is four sections and Ask: five slots");
+    eq(FLOWS_TABS.find((t) => t.label === "Market").keys, groupOf("railMarket"), "the Market tab stands for exactly the sidebar's Market group, Positioning included");
+    eq(FLOWS_TABS.find((t) => t.label === "Boards").keys, groupOf("railBoards"), "and the Boards tab for exactly the Boards group");
+    for (const key of groupOf("railTools")) eq(tabOf(key), [], key + ": a Tools page has no tab, because the Tools group has none; the drawer is its way in");
+    ok(groupOf("railTools").includes("fire") && groupOf("railMarket").includes("positioning"), "Fire is a Tools page and Positioning a Market page");
+    const lit = (html) => { const bar = html.slice(html.indexOf('<nav class="fx-tabs"'), html.indexOf("</nav>", html.indexOf('<nav class="fx-tabs"'))); return [...bar.matchAll(/<a href="([^"]+)"[^>]*aria-current="true"/g)].map((m) => m[1]); };
+    const pageOf = { overview: () => FLOWS_PAGES.overviewPage({ username: "m" }), long: () => FLOWS_PAGES.sidePage({ username: "m", side: "long" }), short: () => FLOWS_PAGES.sidePage({ username: "m", side: "short" }), watch: () => FLOWS_PAGES.watchPage({ username: "m" }),
+      market: () => FLOWS_PAGES.marketPage({ username: "m" }), moves: () => FLOWS_PAGES.movesPage({ username: "m" }), unusual: () => FLOWS_PAGES.unusualPage({ username: "m" }), flowlab: () => FLOWS_PAGES.flowlabPage({ username: "m" }), ledger: () => FLOWS_PAGES.ledgerPage({ username: "m" }), macro: () => FLOWS_PAGES.macroPage({ username: "m" }),
+      events: () => FLOWS_PAGES.eventsPage({ username: "m" }), political: () => FLOWS_PAGES.politicalPage({ username: "m" }), positioning: () => FLOWS_PAGES.positioningPage({ username: "m" }),
+      fire: () => FLOWS_PAGES.firePage({ username: "m" }), strategy: () => FLOWS_PAGES.strategyPage({ username: "m" }), desk: () => FLOWS_PAGES.deskPage({ username: "m" }) };
+    eq(Object.keys(pageOf).sort(), FLOWS_NAV.flatMap((g) => g.items.map((i) => i.key)).sort(), "every sidebar entry has a page to draw here");
+    for (const [key, draw] of Object.entries(pageOf)) {
+      const want = FLOWS_TABS.filter((t) => t.keys.includes(key)).map((t) => t.href);
+      eq(lit(draw()), want, key + ": the tab bar lights " + (want[0] || "no tab"));
+    }
+    eq(lit(pageOf.positioning()), ["/flows/market/"], "the Positioning page lights the Market tab");
+    ok(lit(pageOf.positioning().replace(/(<a href="\/flows\/market\/") aria-current="true"/, "$1")).length === 0, "PLANTED WRONG BUILD caught: a tab bar that forgot Positioning lights nothing on its page");
   }
   {
     const fire = (await ffAs("fire", member, FF_ON))[2];

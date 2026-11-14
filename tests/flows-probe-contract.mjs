@@ -298,7 +298,7 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
     "each per-name route is asked for AAPL and NVDA");
   ok(expanded.filter((p) => entitled.includes(p.op)).every((p) => p.entitlement && !p.gated),
     "and each carries the entitlement mark into its run");
-  eq(expanded.length + 1, 283, "a weekly strict run is 282 list calls plus the session call: the volatility desk's and the Flow Lab's probes beside the positioning package's planned ones, five of them per name for AAPL and NVDA, and the 36 macro and private-markets operations, each once");
+  eq(expanded.length + 1, 280, "a weekly strict run is 279 list calls plus the session call: the volatility desk's and the Flow Lab's probes beside the positioning package's planned ones, five of them per name for AAPL and NVDA, and the 36 macro and private-markets operations, each once");
   ok(list.enums["/api/option-trades"].report_flags.includes("intermarket_sweep") &&
      list.enums["/api/option-trades"].upstream_condition_detail.includes("isoi"),
     "the sweep question is asked of both encodings the spec documents: report_flags and the OPRA code isoi");
@@ -1392,6 +1392,57 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
   const holders = dossier.bodies.ownership.data;
   ok(holders.length > 0 && holders.every((h) => Object.hasOwn(h, "units_changed") && !Object.hasOwn(h, "units_change")), "the ownership fixture carries the wire's units_changed and not the spec's units_change");
   deep(dossier.renames, { "/api/institution/{ticker}/ownership": { units_change: "units_changed" } }, "and records the rename it applied");
+}
+
+{
+  const { loadMutated } = await import("./truth/mutants.mjs");
+  const here = JSON.stringify(new URL("../scripts/flows-probe.mjs", import.meta.url).href);
+  const planted = (transforms, salt) => loadMutated("scripts/flows-probe.mjs", [
+    ...transforms,
+    ["new URL(\"./flows-probe-list.json\", import.meta.url)", `new URL("./flows-probe-list.json", ${here})`],
+    ["new URL(\"./flows-probe-shapes.json\", import.meta.url)", `new URL("./flows-probe-shapes.json", ${here})`],
+    ["fileURLToPath(import.meta.url) === process.argv[1]", "false"],
+  ], { salt });
+  const script = (statuses) => {
+    const sleeps = [];
+    let n = 0;
+    const deps = {
+      fetchImpl: async () => { const status = statuses[Math.min(n, statuses.length - 1)]; n++; return new Response(status === 200 ? "{\"data\":[{\"a\":1}]}" : "upstream connect error", { status }); },
+      key: "k", pace: async () => {}, now: () => 0, sleep: async (ms) => { sleeps.push(ms); },
+    };
+    return { deps, sleeps, count: () => n };
+  };
+  const once = script([503, 200]);
+  const healed = await probe.callVendor("https://vendor.test/x", once.deps);
+  deep([healed.status, healed.again, once.count(), once.sleeps], [200, 1, 2, [probe.SERVER_RETRY_MS]],
+    "THE WEEKLY PROBE OF 2026-11-08: a single 503 from the feed's edge is asked again once, after two seconds, and the answer is read");
+  const down = script([503]);
+  const dead = await probe.callVendor("https://vendor.test/x", down.deps);
+  deep([dead.status, dead.again, down.count()], [503, 1, 2], "an operation that answers 5xx twice is still a 5xx, asked exactly twice");
+  deep(probe.strictVerdict([{ id: "x", op: "/x", cls: "5xx", status: 503, again: 1 }], {}).failures, ["FAIL x 503"], "and the strict run still fails on it");
+  const refused = script([422]);
+  deep([(await probe.callVendor("https://vendor.test/x", refused.deps)).status, refused.count()], [422, 1], "a 4xx is an answer and is never asked again");
+  const stubborn = await planted([["if (response.status >= 500 && again < MAX_SERVER_RETRIES) {", "if (false) {"]], checks);
+  const one = script([503, 200]);
+  eq((await stubborn.callVendor("https://vendor.test/x", one.deps)).status, 503, "PLANTED WRONG BUILD, a probe that never asks a 5xx again: one upstream reset fails the week, which the real probe reads past");
+  const endless = await planted([["export const MAX_SERVER_RETRIES = 1;", "export const MAX_SERVER_RETRIES = 4;"]], checks + 1);
+  const five = script([503]);
+  await endless.callVendor("https://vendor.test/x", five.deps);
+  ok(five.count() > 2, "PLANTED WRONG BUILD, a probe that keeps asking a failing operation: it spends more than two calls, which the real probe does not");
+
+  const weekly = JSON.parse(fs.readFileSync(new URL("../scripts/flows-probe-list.json", import.meta.url), "utf8"));
+  const used = weekly.probes.filter((p) => p.tier === "used");
+  const of = (op) => used.filter((p) => p.op === op);
+  ok(of("/api/etfs/{ticker}/info").length === 1 && of("/api/etfs/{ticker}/info")[0].path === "/api/etfs/SPY/info" &&
+     of("/api/etfs/{ticker}/weights").length === 1 && of("/api/etfs/{ticker}/weights")[0].path === "/api/etfs/SPY/weights",
+    "the fund routes are probed with a fund: a stock answers data null and empty lists, which proves no field the code reads");
+  ok(of("/api/stock/{ticker}/option-chains").length === 1 && of("/api/stock/{ticker}/option-chains")[0].query.greeks === "true",
+    "the option chain is probed only as the nightly reads it, with greeks=true: without it the feed sends bare symbol strings and no field can arrive");
+  const eb = of("/api/option-trades/exchange-breakdown/{date}");
+  ok(eb.length === 1 && eb[0].query.by_trade_code === "true" && Array.isArray(eb[0].query["ticker[]"]),
+    "the exchange breakdown is probed as the Worker's venue read asks it, by trade code for one name, which is the only form that carries trade_code");
+  ok(/pathFor\("option-chains", \{ ticker: t \}\), \{ greeks: true, \.\.\.day \}/.test(fs.readFileSync(new URL("../scripts/flows-legs/voldesk.mjs", import.meta.url), "utf8")),
+    "and the nightly's audit asks for the chain with greeks=true");
 }
 
 console.log(`✓ flows-probe: ${checks} assertions — a registry that declares each vendor operation once, with no vendor path spelled ` +

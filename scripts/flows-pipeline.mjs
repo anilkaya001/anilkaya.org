@@ -31,7 +31,7 @@ import { runClose } from "./flows-nightly/sections/close.mjs";
 import { runContext } from "./flows-nightly/sections/context.mjs";
 import { runFocus } from "./flows-nightly/sections/focus.mjs";
 import { runPositioning } from "./flows-nightly/sections/positioning.mjs";
-import { runDeepenLedger, runDeepenPlan } from "./flows-nightly/sections/deepen.mjs";
+import { openTransport, runDeepenLedger, runDeepenPlan } from "./flows-nightly/sections/deepen.mjs";
 import { pathFor } from "../shared/flows-vendor-ops.js";
 import { processCpuMs, runCompute } from "./flows-nightly/sections/compute.mjs";
 import { runOraclePrep, runOraclePublish } from "./flows-nightly/sections/oracle.mjs";
@@ -230,6 +230,7 @@ async function main() {
     console.log(`publishing to ${ingestURL()}`);
   }
 
+  const transport = await openTransport();
   const sessionDate = DRY_RUN ? DRY_SESSION_DATE : await resolveSessionDate();
   console.log(`session date: ${sessionDate || "unresolved — falling back to undated calls"}`);
 
@@ -275,7 +276,7 @@ async function main() {
     return;
   }
 
-  const ctx = { stages, sessionDate, intraday, gateOrigin, gate };
+  const ctx = { stages, sessionDate, intraday, gateOrigin, gate, transport };
   ctx.auditHooks = { on: voldeskBuildOn(process.env), run: () => runVolAuditSection(ctx), failed: (error) => volAuditFailed(ctx, error) };
   await runUniverse(ctx);
   await runBoards(ctx);

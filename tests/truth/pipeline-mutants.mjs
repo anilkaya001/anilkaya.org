@@ -116,6 +116,10 @@ plant("flow-write-on-the-lane", "a deep name's lane waits for its card-x and his
   [['    queue(ticker, emit(ticker, "deep", sections, {', '    await queue(ticker, emit(ticker, "deep", sections, {']], "volflowDetector");
 plant("flow-later-page-counted-first", "a failed later multi-leg page is counted as a failed first page", FLOW,
   [["if (ml.failedAt === 0) mlTally.firstBad++;", "if (ml.failedAt !== null) mlTally.firstBad++;"]], "volflowDetector");
+plant("flow-multi-leg-by-offset", "a later multi-leg page is asked for by offset, which the feed refuses, where the walk moves older_than", FLOW,
+  [["ticker_symbol: ticker, limit, newer_than: win.openIso, older_than: olderThan,", "ticker_symbol: ticker, limit, newer_than: win.openIso, older_than: win.closeIso, ...(page ? { offset: page * limit } : {}),"]], "volflowDetector");
+plant("flow-multi-leg-walks-past-short-page", "a short multi-leg page does not end the walk, so a call is spent on a page that cannot exist", FLOW,
+  [["    if (!truncated) break;\n    if (oldest === null || fresh === 0) break;", "    if (oldest === null || fresh === 0) break;"]], "volflowDetector");
 plant("store-held-key-written-at-once", "a held vol payload is written at once and again with the flow sections", STORE,
   [["  heldKeys.set(key, payload);\n", "  heldKeys.set(key, payload);\n  if (key) return send(key, payload);\n"]], "volflowDetector");
 plant("store-flush-drops-unlanded", "a held key whose merged write never landed is dropped instead of written", STORE,

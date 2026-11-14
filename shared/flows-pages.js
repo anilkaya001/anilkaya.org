@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "431";
+export const ASSET_VERSION = "432";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -150,6 +150,7 @@ export const FLOWS_NAV = [
     { key: "macro", href: "/flows/macro/", label: "Macro", glyph: "globe", gate: "macro" },
     { key: "events", href: "/flows/events/", label: "Events", glyph: "cal", count: true },
     { key: "political", href: "/flows/political/", label: "Political", glyph: "hall" },
+    { key: "positioning", href: "/flows/positioning/", label: "Positioning", glyph: "stack", switched: true },
   ] },
   { group: "Tools", id: "railTools", items: [
     { key: "fire", href: "/flows/fire/", label: "Fire", glyph: "fire", switched: true },
@@ -162,12 +163,16 @@ const RAIL_END = `
   </nav>
   <div class="fx-side-f">`;
 
-const TABS = [
+const groupKeys = (id) => FLOWS_NAV.find((g) => g.id === id).items.map((it) => it.key);
+
+export const FLOWS_TABS = Object.freeze([
   { href: "/flows/", label: "Home", glyph: "home", keys: ["overview"] },
-  { href: "/flows/long/", label: "Boards", glyph: "boards", keys: ["long", "short"] },
+  { href: "/flows/long/", label: "Boards", glyph: "boards", group: "railBoards", keys: groupKeys("railBoards") },
   { href: "/flows/ticker/", label: "Search", glyph: "search", keys: ["ticker"], search: true },
-  { href: "/flows/market/", label: "Market", glyph: "market", keys: ["market", "moves", "unusual", "flowlab", "ledger", "macro", "events", "political"] },
-];
+  { href: "/flows/market/", label: "Market", glyph: "market", group: "railMarket", keys: groupKeys("railMarket") },
+].map((tab) => Object.freeze({ ...tab, keys: Object.freeze(tab.keys) })));
+
+const TABS = FLOWS_TABS;
 
 const railItem = (active) => (it) => {
   if ((it.ownerOnly || it.switched || it.gate) && it.key !== active) return "";
@@ -440,7 +445,7 @@ ${body}
 </body>
 </html>`;
 
-export function aboutPage() {
+export function aboutPage({ positioning = false } = {}) {
   return doc("Flows — About", "What Flows is: options-flow research for US equities, what it promises about its figures, and what it is not.", `
   <header class="fx-doc-h">
     <span class="fx-mark" aria-hidden="true">&#949;</span>
@@ -470,7 +475,8 @@ export function aboutPage() {
       <li><strong>Ledger.</strong> The flagged option premium booked as a closed ledger: takers on one side, liquidity providers on the other, so every row and column sums to zero. It sets each sector's share against its market-cap share, with the bounds it can prove.</li>
       <li><strong>Macro.</strong> Rates, currencies, commodities, crypto and futures on one screen, with prediction-market odds beside each scheduled release and seasonality shown with its intervals. A figure the feed does not carry is a dash with its reason.</li>
       <li><strong>Events.</strong> Earnings, economic prints and FDA dates for the coming sessions, with the move each report is priced for.</li>
-      <li><strong>Political.</strong> Stocks that members of Congress disclosed buying or selling, in the dollar ranges the filings give, with how late each filing arrives.</li>
+      <li><strong>Political.</strong> Stocks that members of Congress disclosed buying or selling, in the dollar ranges the filings give, with how late each filing arrives.</li>${positioning ? `
+      <li><strong>Positioning.</strong> How a fixed set of 13F filers moved their book between sectors, what insiders did by sector, and where failures to deliver and short-sale volume sit.</li>` : ""}
       <li><strong>Ticker.</strong> One name's dossier: price against the priced move, the dealer book, volatility, flow and positioning, and a written reading of how they fit together.</li>
       <li><strong>Fire.</strong> A wire is a standing condition a member writes once. Flows reads it on the nightly run or in the live session, records a hit when it first holds, and keeps a receipt for every session it was read or not read.</li>
       <li><strong>Strategy, Premium desk and Ask.</strong> Option structures priced on the name's own smile, and questions answered from what has been published.</li>
@@ -1694,6 +1700,15 @@ export function fireNav(html, on, slug) {
   if (typeof html !== "string" || on !== true || slug === "fire") return html;
   if (html.includes("data-ff-nav") || !html.includes(FIRE_NAV_ANCHOR)) return html;
   return html.replace(FIRE_NAV_ANCHOR, () => FIRE_NAV_ITEM + "\n      " + FIRE_NAV_ANCHOR);
+}
+
+const POSITIONING_NAV_ANCHOR = '\n    </div>\n    <p class="rail-group" id="railTools">';
+const POSITIONING_NAV_ITEM = `<a href="/flows/positioning/" data-pos-nav>${glyph("stack")}<span class="rail-label">Positioning</span></a>`;
+
+export function positioningNav(html, on, slug) {
+  if (typeof html !== "string" || on !== true || slug === "positioning") return html;
+  if (html.includes("data-pos-nav") || !html.includes(POSITIONING_NAV_ANCHOR)) return html;
+  return html.replace(POSITIONING_NAV_ANCHOR, () => "\n      " + POSITIONING_NAV_ITEM + POSITIONING_NAV_ANCHOR);
 }
 
 export const FLOWS_PAGES = {

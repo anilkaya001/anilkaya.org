@@ -270,4 +270,66 @@ ok(/card\.depth === "deepened" \|\| !!engineOf\(card\)/.test(ticker), "the ticke
 ok(/card\.depth === "deepened" \? " Read in full in turn, oldest first: this read is " \+ dayDiff\(card\.sessionDate, m\.expected\) \+ " days old\."/.test(ticker), "and says how old its deep read is");
 ok(/const DEPTH_G = \{ \.\.\.UI\.depths, deep: \["list", "Deep read"\] \}/.test(ticker), "and the name picker lists the new tier");
 
+{
+  const { openTransport } = await import("../scripts/flows-nightly/sections/deepen.mjs");
+  const { noteMinute } = await import("../scripts/flows-nightly/vendor.mjs");
+  const { makePermitQueue } = await import("../shared/flows-permits.js");
+  const { paceOf, shareOf } = await import("../shared/flows-transport.js");
+  const { loadMutated } = await import("./truth/mutants.mjs");
+  const stored = (perMinute) => ({ payload: { line: { v: 1, perMinute, good: null, bad: null, avoid: false, since: 0, history: [] } }, status: 200 });
+  const open = async (read, mod = { openTransport }) => {
+    const raised = [];
+    const said = [];
+    const t = await mod.openTransport({ read: async (key) => { said.push("read " + key); return read; }, raise: (ms) => raised.push(ms), env: {}, log: (l) => said.push(l) });
+    return { t, raised, said };
+  };
+  const learned = await open(stored(562));
+  eq([learned.t.line, learned.t.share, learned.t.pace.spacingMs, learned.raised, learned.t.paced], [562, 462, 130, [130], true],
+    "THE NIGHT OF 2026-11-13: a learned line of 562 a minute gives the nightly 462, and the run's first act is to space its calls 130 ms apart");
+  eq(learned.said[0], "read deepen", "the line is read from the rotation's own ledger");
+  ok(/paced from the first, 130ms apart \(462\/min of a 562\/min line, learned\)/.test(learned.said[1]), "and the run says so");
+  const fresh = await open({ payload: null, absent: true, status: 200 });
+  eq([fresh.t.line, fresh.t.share, fresh.raised, fresh.t.state], [500, 400, [150], null], "with no line on record the working line of 500 a minute sets the pace: 400 a minute, 150 ms");
+  const blind = await open({ payload: null, failed: true, status: 503 });
+  eq([blind.t.line, blind.raised, blind.t.readable], [500, [150], false], "and an unreadable ledger is paced on the working line too, never left unpaced");
+  ok(/could not be read/.test(blind.said[1]), "which the run says");
+  eq(blind.t.stored.failed, true, "the read is handed on, so the rotation does not read the ledger a second time and still protects every card");
+
+  const peakAt = (spacingMs, calls) => {
+    let now = 1_700_000_000_000;
+    const q = makePermitQueue({ delayMs: () => spacingMs, now: () => now, sleep: async (ms) => { now += ms; } });
+    const meter = { peakMinute: 0 };
+    const counts = new Map();
+    return (async () => {
+      for (let i = 0; i < calls; i++) { await q.acquire(); noteMinute(now, meter, counts); }
+      return meter.peakMinute;
+    })();
+  };
+  const share = shareOf(562, "nightly");
+  const paced = await peakAt(paceOf(share).spacingMs, 3000);
+  ok(paced <= share && paced >= share - 2, `a run paced at its share never counts more than the share in one clock minute (${paced} of ${share})`);
+  const unpaced = await peakAt(60, 3000);
+  ok(unpaced > share * 1.5, `while the client's own 60 ms floor, which is what ran before the pace was set, lets ${unpaced} through in a minute: the 710 the night measured was the stages ahead of the rotation plan`);
+
+  const entry = readFileSync(path.join(ROOT, "scripts/flows-pipeline.mjs"), "utf8");
+  const main = entry.slice(entry.indexOf("async function main() {"));
+  const opensFirst = (src) => {
+    const at = src.indexOf("await openTransport()");
+    if (at < 0) return false;
+    const firstFeed = Math.min(...["resolveSessionDate()", "publishPulse(", "runUniverse(", "runBoards(", "runMarket("].map((m) => src.indexOf(m)).filter((i) => i >= 0));
+    return at < firstFeed && src.indexOf("transport }") > at;
+  };
+  ok(opensFirst(main), "the nightly opens its pace before the session read, the unranked refresh and every section, and hands the opened line to the rotation");
+  ok(!opensFirst(main.replace("  const transport = await openTransport();\n", "").replace("  const ctx = {", "  const transport = await openTransport();\n  const ctx = {")),
+    "PLANTED WRONG BUILD, a nightly that sets its pace after the session read: the order check fails");
+  ok(!opensFirst(main.replace("  const transport = await openTransport();\n", "  const transport = null;\n")), "PLANTED WRONG BUILD, a nightly that never opens its pace: the order check fails");
+  const lazy = await loadMutated("scripts/flows-nightly/sections/deepen.mjs", [["  raise(pace.spacingMs);\n", ""]], { salt: checks });
+  eq((await open(stored(562), lazy)).raised, [], "PLANTED WRONG BUILD, an opening that reads the line and never sets the pace: nothing is raised, which the real one does");
+  const deaf = await loadMutated("scripts/flows-nightly/sections/deepen.mjs", [["  const share = shareOf(line, \"nightly\");\n  const pace = paceOf(share);", "  const share = line;\n  const pace = paceOf(share);"]], { salt: checks + 1 });
+  eq((await open(stored(562), deaf)).raised, [107], "PLANTED WRONG BUILD, an opening that takes the whole line and leaves the live leg and the members nothing: it paces at 107 ms, which the real one does not");
+  const src = readFileSync(path.join(ROOT, "scripts/flows-nightly/sections/deepen.mjs"), "utf8");
+  ok(/const read = mode === "off" \? \{ payload: null \} : opened \? opened\.stored : await readStored\(DEEPEN\.key\);/.test(src) && /paced: opened !== null \}/.test(src),
+    "the rotation plan takes the line the run opened with, so the share it reports is the share every call was paced at");
+}
+
 console.log(`flows-deepen: ${checks} checks passed`);

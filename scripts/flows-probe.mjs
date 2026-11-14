@@ -18,6 +18,8 @@ export const MIN_GAP_MS = 250;
 export const SAMPLE_ROWS = 500;
 export const CALL_TIMEOUT_MS = 30_000;
 export const MAX_LIMITED_RETRIES = 3;
+export const MAX_SERVER_RETRIES = 1;
+export const SERVER_RETRY_MS = 2000;
 export const MAX_RETRY_AFTER_MS = 30_000;
 export const MONTHLY_MIN_DAYS = 14;
 export const GOLD_MONTHS = Object.freeze([2, 4, 6, 8, 12]);
@@ -741,7 +743,7 @@ export function analyse(probe, call, redact) {
   const result = {
     id: probe.id, tier: probe.tier, op: probe.op, url: call.url, shown: call.shown || call.url,
     liveOnly: Boolean(probe.liveOnly), entitlement: Boolean(probe.entitlement),
-    status: call.status, ms: call.ms, bytes: call.bytes, limited: call.limited || 0,
+    status: call.status, ms: call.ms, bytes: call.bytes, limited: call.limited || 0, again: call.again || 0,
     error: call.error ? redact(call.error) : null,
     limits: limitHeaders(call.headers, redact),
     headerNames: headerNames(call.headers, redact),
@@ -801,6 +803,7 @@ export function retryAfterMs(value, attempt) {
 
 export async function callVendor(url, { fetchImpl, key, pace, now, sleep }) {
   let limited = 0;
+  let again = 0;
   for (;;) {
     await pace();
     const started = now();
@@ -814,7 +817,7 @@ export async function callVendor(url, { fetchImpl, key, pace, now, sleep }) {
       text = await response.text();
     } catch (error) {
       return {
-        url, status: 0, ms: now() - started, limited,
+        url, status: 0, ms: now() - started, limited, again,
         error: `${(error && error.name) || "Error"}: ${(error && error.message) || String(error)}`,
       };
     }
@@ -824,7 +827,12 @@ export async function callVendor(url, { fetchImpl, key, pace, now, sleep }) {
       await sleep(retryAfterMs(response.headers.get("retry-after"), limited));
       continue;
     }
-    return { url, status: response.status, ms, limited, headers: response.headers, text, bytes: Buffer.byteLength(text) };
+    if (response.status >= 500 && again < MAX_SERVER_RETRIES) {
+      again += 1;
+      await sleep(SERVER_RETRY_MS);
+      continue;
+    }
+    return { url, status: response.status, ms, limited, again, headers: response.headers, text, bytes: Buffer.byteLength(text) };
   }
 }
 
@@ -864,6 +872,7 @@ export function renderBlock(result, { showHeaderNames = false } = {}) {
   head.push(result.status ? String(result.status) : "no response", `${result.ms} ms`);
   if (Number.isFinite(result.bytes)) head.push(formatBytes(result.bytes));
   if (result.limited) head.push(`after ${result.limited} x 429`);
+  if (result.again) head.push(`after ${result.again} x 5xx`);
   const lines = [head.join("  "), `   GET ${displayUrl(result.shown || result.url, { relative: true })}`];
   if (result.cls === "network") return [...lines, `   error ${result.error}`];
   if (result.limits.length) lines.push(...wrapLabelled("   limits ", result.limits.map(([n, v]) => `${n}=${v}`)));
