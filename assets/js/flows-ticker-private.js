@@ -81,6 +81,8 @@
   const signed = (v) => (v === null ? DASH : F.pct(v, 1, true));
   const cell = (cls, label, ...kids) => h("span", { class: cls, "data-k": label }, ...kids);
 
+  const HEAD = [["", "Company"], ["r", "Funding"], ["r", "Investors"], ["r", "Mark"], ["r", "1y"], ["", "Last round"], ["r", "Team"]];
+
   function peerRow(r) {
     const mark = r.price === null ? DASH : F.px(r.price, 2) + (r.priceDate ? " " + r.priceDate : "");
     const round = r.round ? [r.round.name, r.round.date, r.round.amount === null ? null : F.money(r.round.amount)].filter(Boolean).join(" · ") : DASH;
@@ -120,7 +122,8 @@
         right.replaceChildren(h("h3", null, "Private peers"));
         if (m.state !== "ok") { right.append(h("p", { class: "pl-line" }, m.line)); return; }
         right.append(h("p", { class: "pl-line" }, m.title),
-          h("div", { class: "pl-tbl", role: "table", "aria-label": m.title }, ...m.rows.map(peerRow)),
+          h("div", { class: "pl-tbl", role: "table", "aria-label": m.title },
+            h("div", { class: "pl-hd", "aria-hidden": "true" }, ...HEAD.map(([cls, label]) => h("span", { class: cls }, label))), ...m.rows.map(peerRow)),
           h("p", { class: "pl-note" }, m.mark), h("p", { class: "pl-note" }, m.coverage));
       });
   }

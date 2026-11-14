@@ -72,10 +72,11 @@
       for (const s of series) {
         if (s.pts.length < 2) continue;
         g += `<path class="ln ${s.cls}" d="${s.pts.map((p, i) => (i ? "L" : "M") + r1(lx(p.m)) + " " + r1(ly(p.v))).join("")}"/>`;
-        const last = s.pts[s.pts.length - 1];
-        g += `<text class="lab" x="${r1(lx(last.m)) + 6}" y="${r1(ly(last.v)) + 3}">${s.name}</text>`;
         g += s.pts.map((p) => shapeOf(s.si, r1(lx(p.m)), r1(ly(p.v)), s.si === 0 && p.d !== top)).join("");
       }
+      const labs = series.filter((s) => s.pts.length >= 2).map((s) => { const last = s.pts[s.pts.length - 1]; return { name: s.name, x: r1(lx(last.m)) + 6, y: r1(ly(last.v)) + 3 }; }).sort((a, b) => a.y - b.y);
+      for (let i = 1; i < labs.length; i++) if (labs[i].y - labs[i - 1].y < 11) labs[i].y = labs[i - 1].y + 11;
+      g += labs.map((l) => `<text class="lab" x="${l.x}" y="${l.y}">${l.name}</text>`).join("");
       host.innerHTML = `<svg class="mc-svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" tabindex="0" aria-label="Treasury yield curve now, one month back and one year back. Arrow keys move across maturities and dates." focusable="true"><g>${g}</g><g id="mcCurveCur"></g></svg>`;
       const svg = host.firstChild;
       let mi = rows.findIndex((r) => r[0] === "10year"), si = 0;
