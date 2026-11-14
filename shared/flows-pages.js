@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "425";
+export const ASSET_VERSION = "426";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -557,7 +557,7 @@ ${shell("Session", "overview", username, `
       <div class="hm-hero-id">
         <div class="hm-hero-k"><h2 class="hm-hero-t" id="hmHeroT">Market tide</h2><span id="hmTideState"></span></div>
         <div class="hm-hero-v" id="hmTideV" data-tone="silent">\u2014</div>
-        <div class="hm-hero-cap" id="hmTideCap"></div>
+        <div class="hm-hero-sub"><div class="hm-hero-cap" id="hmTideCap"></div><p class="hm-cw" id="hmTideCw" hidden></p></div>
         <div class="hm-hero-legs" id="hmTideLegs"></div>
       </div>
       <div class="hm-hero-chart" id="hmTide"></div>

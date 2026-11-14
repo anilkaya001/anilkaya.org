@@ -222,6 +222,20 @@ GZIP_KIB.flowlabPage += (FLOWLAB_READS.gzip + FLOWLAB_DRILL_READS.gzip) / 1024;
 CSS_KIB.flowlabPage += FLOWLAB_READS.cssBytes / 1024;
 CSS_GZIP_KIB.flowlabPage += FLOWLAB_READS.cssGzip / 1024;
 
+const CAP_TIDE = {
+  home: { bytes: 5275, gzip: 1637, cssBytes: 1221, cssGzip: 175 },
+  market: { bytes: 5795, gzip: 1660, cssBytes: 1652, cssGzip: 306 },
+  why: "the cap-weighted Market Tide: flows-overview.js paints the hero line (the live or nightly rule, the reasons a figure is withheld, the fitter that keeps the line inside the identity column, the pill's facts) and flows-market.js the hero cell (the same rule, the meter centred on zero, the disclosure); flows-home.css and flows-market.css lay them out. Each page carries its own copy of the rule because assets/js imports nothing",
+};
+CEILING_KIB.overviewPage += CAP_TIDE.home.bytes / 1024;
+GZIP_KIB.overviewPage += CAP_TIDE.home.gzip / 1024;
+CSS_KIB.overviewPage += CAP_TIDE.home.cssBytes / 1024;
+CSS_GZIP_KIB.overviewPage += CAP_TIDE.home.cssGzip / 1024;
+CEILING_KIB.marketPage += CAP_TIDE.market.bytes / 1024;
+GZIP_KIB.marketPage += CAP_TIDE.market.gzip / 1024;
+CSS_KIB.marketPage += CAP_TIDE.market.cssBytes / 1024;
+CSS_GZIP_KIB.marketPage += CAP_TIDE.market.cssGzip / 1024;
+
 const RATCHET_KIB = { raw: 12, gzip: 3, css: 3, cssGzip: 3 };
 const HELD_RAW_KIB = { eventsPage: 50 };
 
