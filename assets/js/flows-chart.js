@@ -608,6 +608,8 @@
     const pal = PALETTES[o.palette || "gamma"] || PALETTES.gamma;
     const svg = svgRoot(el, w, H, animate, o.label);
     const rf = o.rowFormat || String, cf = o.colFormat || String;
+    const und = Array.isArray(o.undecided) ? o.undecided : null;
+    const open = (r, c) => !!und && !!und[r] && und[r][c] === true;
     const every = R > 18 ? 2 : 1;
     for (let r = 0; r < R; r++) {
       const yy = top + r * ch;
@@ -616,13 +618,14 @@
         const cell = { x: left + c * cw + 1, y: yy + 1, width: Math.max(0, cw - 2), height: ch - 2, rx: 2.5 };
         if (v === null) { s("rect", { ...cell, fill: "none", stroke: paint("--label-4"), "stroke-width": 1, "stroke-dasharray": "2 2", class: "void" }, svg); continue; }
         if (v === 0) { s("rect", { ...cell, fill: paint("--fill-4"), class: "zero" }, svg); continue; }
+        if (open(r, c)) { s("rect", { ...cell, fill: "none", stroke: paint("--label-3"), "stroke-width": 1, class: "und" }, svg); continue; }
         const a = clamp(Math.sqrt(Math.abs(v) / cap), 0.08, 1);
         s("rect", { ...cell, fill: paint(v > 0 ? pal.pos : v < 0 ? pal.neg : "--fill-4"), "fill-opacity": a.toFixed(3), ...fade(c * 40 + "ms") }, svg);
       }
       if (r % every === 0 || r === o.highlightRow) s("text", { x: left - 8, y: yy + ch / 2 + 3.5, text: rf(rows[r]), "text-anchor": "end", class: r === o.highlightRow ? "tx-1 tx-b" : null }, svg);
     }
     if (num(o.highlightRow) !== null) s("circle", { cx: left - 3, cy: top + o.highlightRow * ch + ch / 2, r: 2.5, fill: paint("--label-1") }, svg);
-    const everyX = cw < 40 ? 2 : 1;
+    const everyX = Number.isInteger(o.colEvery) && o.colEvery > 0 ? o.colEvery : cw < 40 ? 2 : 1;
     const hc = num(o.highlightCol);
     const hcIn = hc !== null && hc >= 0 && hc < C;
     if (hcIn) s("rect", { x: left + hc * cw + 0.5, y: top - 0.5, width: Math.max(0, cw - 1), height: R * ch + 1, rx: 3.5, fill: "none", stroke: paint("--accent"), "stroke-width": 1.25 }, svg);
@@ -644,7 +647,7 @@
       hl.setAttribute("x", xx + 0.5);
       hl.setAttribute("y", yy + 0.5);
       hl.setAttribute("visibility", "visible");
-      readout.replaceChildren(part(cf(cols[c]), "k"), h("b", null, rf(rows[r])), v === null ? part("no reading", "k") : part(fmt(v), null, v > 0 ? pal.posT : v < 0 ? pal.negT : null));
+      readout.replaceChildren(part(cf(cols[c]), "k"), h("b", null, rf(rows[r])), v === null ? part("no reading", "k") : part(fmt(v, r, c), null, open(r, c) ? null : v > 0 ? pal.posT : v < 0 ? pal.negT : null));
       readout.classList.add("is-on");
       const rw = readout.offsetWidth;
       readout.style.left = clamp(xx + cw / 2 - rw / 2, 0, Math.max(0, w - rw)) + "px";

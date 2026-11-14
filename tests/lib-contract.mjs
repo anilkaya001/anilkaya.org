@@ -224,7 +224,7 @@ const notes = [];
     const after = text.replace(/(\/assets\/[^"'()\s?#]+)\?v=\d+/g, "$1?v=").replace(/data-asset-version="\d+"/g, 'data-asset-version=""');
     eq(after, before, `bump-assets: ${rel} changes in its version tokens and nowhere else`);
   }
-  ok(css >= 40 && fonts >= 16 && shells >= 3, `bump-assets: ${css} CSS and JavaScript references moved, ${fonts} font references held, ${shells} shells`);
+  ok(css >= 40 && fonts >= 14 && shells >= 3, `bump-assets: ${css} CSS and JavaScript references moved, ${fonts} font references held, ${shells} shells`);
   ok(img >= 1, `bump-assets: ${other} other /assets/ references moved, ${img} of them under /assets/img/ (at least one, so the check above is not vacuous)`);
   for (const [rel, asset] of [["lab/placement/index.html", "storage.js"], ["lab/placement/index.html", "auth.js"], ["lab/course.html", "lab-suite.bundle.js"]]) {
     if (!(snapshot[rel] ?? "").includes(`/assets/js/${asset}?v=`)) { notes.push(`bump-assets: ${rel} no longer loads ${asset}; its spot check is skipped`); continue; }
@@ -235,11 +235,11 @@ const notes = [];
   const post = run("--check");
   eq(post.status, 0, "bump-assets --check: the bumped tree is consistent: " + said(post));
   const base = path.join(tree, "assets/css/base.css");
-  writeFileSync(base, readFileSync(base, "utf8").replace(`Inter-latin.woff2?v=${fv}`, `Inter-latin.woff2?v=${v + 1}`));
+  writeFileSync(base, readFileSync(base, "utf8").replace(`GoogleSans-latin.woff2?v=${fv}`, `GoogleSans-latin.woff2?v=${v + 1}`));
   const lab = path.join(tree, "lab/index.html");
   writeFileSync(lab, readFileSync(lab, "utf8").replace(`/assets/js/nav.js?v=${v + 1}`, `/assets/js/nav.js?v=${v}`));
   const stale = run("--check");
-  ok(stale.status === 1 && /Inter-latin\.woff2 at \d+, expected/.test(stale.stderr) && /nav\.js at \d+, expected/.test(stale.stderr), "bump-assets --check: a font moved by a blanket rewrite and a reference left behind both fail it: " + stale.stderr.trim().split("\n").join(" | "));
+  ok(stale.status === 1 && /GoogleSans-latin\.woff2 at \d+, expected/.test(stale.stderr) && /nav\.js at \d+, expected/.test(stale.stderr), "bump-assets --check: a font moved by a blanket rewrite and a reference left behind both fail it: " + stale.stderr.trim().split("\n").join(" | "));
   const again = run();
   ok(again.status === 0 && /1 font reference\(s\) set back/.test(again.stdout), "bump-assets: the next bump sets the font back to its token and reports it");
   const settled = run("--check");

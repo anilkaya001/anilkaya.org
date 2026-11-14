@@ -48,7 +48,7 @@
     if (n === null) return DASH;
     const scale = Math.pow(10, dp);
     const c = Math.round(Math.abs(n) * 100 * scale);
-    const body = (c / scale).toFixed(dp) + "%";
+    const body = Math.floor(c / scale) + (dp > 0 ? "." + String(c % scale).padStart(dp, "0") : "") + "%";
     if (c === 0) return body;
     return (n < 0 ? MINUS : plus ? "+" : "") + body;
   }
@@ -61,7 +61,9 @@
     return (n < 0 ? MINUS : "+") + body;
   }
   const money = (v) => (num(v) === null ? DASH : UI.F.money(v));
-  const whole = (v) => (num(v) === null ? DASH : Math.round(v).toLocaleString("en-US"));
+  const grouped = (n) => (n < 0 ? "-" : "") + String(Math.abs(n)).replace(/\B(?=(\d{3})+$)/g, ",");
+  const whole = (v) => (num(v) === null ? DASH : grouped(Math.round(v)));
+  const cents = (c) => Math.floor(c / 100) + "." + String(c % 100).padStart(2, "0");
   const shares = (v) => (num(v) === null ? DASH : UI.F.compact ? UI.F.compact(v) : whole(v));
   const dayText = (d) => (typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : DASH);
   const shape = (v) => (v > 0 ? "▲" : v < 0 ? "▼" : "◆");
@@ -590,7 +592,7 @@
       const max = Math.max(1, ...rows.map((r) => r[1]));
       const bars = el("div", "pos-dbars", null, { role: "img", "aria-label": "Shares failed by settlement date, " + rows.length + " dates" });
       for (const r of rows) { const i = document.createElement("i"); i.style.height = Math.max(2, (r[1] / max) * 100) + "%"; i.title = r[0] + ": " + whole(r[1]) + " shares"; bars.append(i); }
-      ftd.append(bars, el("p", "pos-dline", "Newest " + dayText(fp[0][0]) + ": " + whole(fp[0][1]) + " shares" + (fp[0][2] ? " at $" + (fp[0][2] / 100).toFixed(2) : ", no price in the row")));
+      ftd.append(bars, el("p", "pos-dline", "Newest " + dayText(fp[0][0]) + ": " + whole(fp[0][1]) + " shares" + (fp[0][2] ? " at $" + cents(Math.round(fp[0][2])) : ", no price in the row")));
     }
     const vol = sec("Short-sale volume");
     const vp = ps && ps.parts && ps.parts.svx && ps.parts.svx.x ? ps.parts.svx.x : null;

@@ -7,6 +7,7 @@
   const DASH = UI.DASH;
   const SVG = "http://www.w3.org/2000/svg";
   const MAPS = new WeakMap();
+  const CAP_H = 22, GAP = 4, CH_MIN = 24, COMPACT_H = 380;
 
   const num = (v) => {
     if (v === null || v === undefined || v === "") return null;
@@ -75,7 +76,7 @@
     if (prev) prev.destroy();
     const S = { rows: [], st: { state: "pending", reason: "Reading the flagged windows." }, session: null, readAt: null };
     const U = { map: null, state: opts.sectors ? "ok" : "wait" };
-    let mode = "lean", view = "map", layerPick = 2, sel = null, M = null, G = null, dead = false, W = 0, H = 0;
+    let mode = "lean", view = "map", layerPick = 2, sel = null, M = null, G = null, dead = false, W = 0, H = 0, compact = false;
     const ids = { sel: null };
     const secFn = () => (U.state === "ok" ? (t) => (U.map.has(t) ? U.map.get(t) : null) : () => undefined);
 
@@ -133,15 +134,17 @@
     }
 
     function fitLayout() {
-      const cap0 = 10;
-      let cap = cap0, out = null;
       const phone = W < 640;
-      const availH = Math.max(120, H - (phone ? 0 : 24));
-      for (; cap >= 3; cap--) {
-        const m = UI.net.model(S.rows, { out: mode, names: cap, session: S.session, sectorOf: secFn(), unread: U.state === "fail" });
-        const maxN = phone ? m.layers[layerPick].length : Math.max(...m.layers.map((l) => l.length));
-        const minCh = phone ? 44 : 38;
-        if (maxN * minCh + (maxN - 1) * 5 <= availH || cap === 3) { out = m; break; }
+      const availH = Math.max(0, H - (phone ? 0 : CAP_H));
+      let out = null;
+      for (const minCh of phone ? [44, CH_MIN] : [38, CH_MIN]) {
+        const fit = Math.floor((availH + GAP) / (minCh + GAP));
+        for (let n = Math.min(11, Math.max(4, fit)); n >= 4; n--) {
+          const m = UI.net.model(S.rows, { out: mode, names: clamp(n - 1, 3, 10), groups: clamp(n, 3, 14), session: S.session, sectorOf: secFn(), unread: U.state === "fail" });
+          const maxN = phone ? m.layers[layerPick].length : Math.max(...m.layers.map((l) => l.length));
+          out = m;
+          if (maxN * minCh + (maxN - 1) * GAP <= availH) return out;
+        }
       }
       return out;
     }
@@ -149,19 +152,19 @@
     function layout() {
       const phone = W < 640;
       const cw = phone ? W : clamp(Math.round(W * 0.2), 150, 230);
-      const capY = phone ? 0 : 24;
-      const availH = Math.max(120, H - capY);
+      const capY = phone ? 0 : CAP_H;
+      const availH = Math.max(0, H - capY);
       const maxN = phone ? M.layers[layerPick].length : Math.max(...M.layers.map((l) => l.length));
-      const gap = 5;
-      const ch = clamp(Math.floor((availH - (maxN - 1) * gap) / maxN), phone ? 44 : 36, phone ? 48 : 44);
-      const two = ch >= 38 || cw < 180;
+      const gap = GAP;
+      const ch = clamp(Math.floor((availH - (maxN - 1) * gap) / maxN), CH_MIN, phone ? 48 : 44);
+      const two = ch >= 38;
       const nodes = new Map();
       const colX = (i) => (phone ? 0 : (i * (W - cw)) / 3);
       const vMax = Math.max(...M.layers.flat().map((n) => n.v), 1);
       M.layers.forEach((l, i) => {
         if (phone && i !== layerPick) return;
         const total = l.length * ch + (l.length - 1) * gap;
-        const y0 = capY + (availH - total) / 2;
+        const y0 = capY + Math.max(0, (availH - total) / 2);
         l.forEach((d, j) => nodes.set(d.id, { d, i, x: colX(i), y: y0 + j * (ch + gap), w: cw, h: ch }));
       });
       const k = (ch * 0.86) / vMax;
@@ -204,12 +207,13 @@
 
     function chipText(d, g, wMax) {
       const full = d.full && d.full !== d.label ? d.full : null;
-      const fig = money(d.v) + " \u00b7 " + pct(d.share);
-      const avail = g.two ? wMax : wMax - ctxW(fig, "400 11px") - 8;
       const folded = d.members && d.members.length ? " (" + d.members.length + ")" : "";
-      let label = d.label + folded;
-      if (full && ctxW(full, "600 12px") <= avail) label = full;
-      return { label, fig, full: full || (folded ? d.members.length + " " + (d.id === "s:~" ? "sectors" : "names") + " folded in" : null) };
+      const said = full || (folded ? d.members.length + " " + (d.id === "s:~" ? "sectors" : "names") + " folded in" : null);
+      const figs = [money(d.v) + " \u00b7 " + pct(d.share), money(d.v)];
+      const labels = [full, d.label + folded, d.label].filter(Boolean);
+      if (g.two) return { label: labels.find((l) => ctxW(l, "600 12px") <= wMax) || d.label, fig: figs[0], full: said };
+      for (const fig of figs) for (const label of labels) if (ctxW(label, "600 12px") + ctxW(fig, "400 11px") + 8 <= wMax) return { label, fig, full: said };
+      return { label: d.label, fig: figs[1], full: said };
     }
     let MC = null;
     const ctxW = (t, font) => {
@@ -297,11 +301,11 @@
         h("span", { class: "nm-lg" }, h("b", null, "$ \u00b7 %"), "Figure: sided premium and its share of the sided total"),
         h("span", { class: "nm-lg nm-conv" }, "Lean is a convention: calls on the ask side and puts on the bid side read bullish, calls on the bid side and puts on the ask side bearish."),
       ];
-      if (W < 640) {
+      if (W < 640 || compact) {
         legend.replaceChildren(h("button", { type: "button", class: "nm-link", "aria-haspopup": "dialog", onclick: () => {
           dlg.replaceChildren(h("div", { class: "nm-dg" }, h("h3", { id: "nmDlgT" }, "Legend"), h("div", { class: "nm-lgl" }, items), h("div", { class: "nm-dx" }, h("button", { type: "button", class: "nm-link", onclick: () => dlg.close() }, "Close"))));
           if (typeof dlg.showModal === "function") dlg.showModal();
-        } }, "Legend: colours, band width, figures"));
+        } }, compact ? "Legend" : "Legend: colours, band width, figures"));
         return;
       }
       legend.replaceChildren(...items);
@@ -351,6 +355,8 @@
       if (dead) return;
       if (!S.rows.length) { M = null; G = null; for (const b of modeSeg.children) b.setAttribute("aria-pressed", String(b.dataset.mode === mode)); layerSeg.hidden = true; silent(S.st.state === "ok" ? { state: "quiet" } : S.st); return; }
       wrap.dataset.state = "ok";
+      const tight = host.clientHeight > 0 && host.clientHeight < COMPACT_H;
+      if (tight !== compact) { compact = tight; wrap.toggleAttribute("data-compact", compact); if (compact) bar.append(legend); else wrap.insertBefore(legend, dlg); }
       W = Math.round(stage.clientWidth || host.clientWidth || 0);
       H = Math.round(stage.clientHeight || 0);
       if (W < 40 || H < 40) return;

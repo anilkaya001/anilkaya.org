@@ -543,8 +543,8 @@ const NOW = Date.parse("2026-10-20T21:45:00Z");
   ok(DEEPEN.baselineCalls >= CALL_BUDGET, `the baseline (${DEEPEN.baselineCalls}) covers the nominal budget (${CALL_BUDGET}) with the slow term in it`);
   ok(DEEPEN.baselineMs >= 14 * 60 * 1000 + X.SLOW_CAP * 150, "and the baseline time holds the slow cap at the nightly's 150 ms pace");
   const g = governor({ cap: 100000, backlog: 794, dayLine: 100e6, minuteLine: 500, callsSoFar: 0 });
-  ok(g.n >= 470 && g.binding === "time", `AN UNCAPPED NIGHT STILL READS ${g.n} NAMES, bound by time: two nights cover the 794 names behind the board`);
-  ok(Math.ceil(794 / g.n) <= 2, "so the universe is still covered in two nights");
+  ok(g.n === 794 && g.binding === "backlog", `AN UNCAPPED NIGHT READS ALL ${g.n} NAMES behind the board, bound by the backlog and not by time`);
+  ok(Math.ceil(794 / g.n) === 1, "so the universe is covered in one night");
 }
 
 const sourceOf = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");

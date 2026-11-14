@@ -259,7 +259,7 @@
 }
 @media (pointer: coarse) {
   .pl-row, .pl-trow { --rh: 44px; }
-  .pl-seg button, .pl-seg.sm button, .pl-seg5 button { min-height: 44px; }
+  .pl-seg button, .pl-seg.sm button, .pl-seg5 button { min-height: 44px; min-width: 44px; }
   .pl-ph .pl-seg button, .pl-ph .r .pl-seg button { min-height: 44px; }
   .pl .link, .pl-dlg .link { min-height: 44px; }
   .pl-bh { height: 44px; }

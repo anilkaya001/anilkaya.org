@@ -62,6 +62,8 @@ import {
   COMPUTE_JOBS, COMPUTE_NAME_CPU_MS, computeNames, processCpuMs, runCompute,
 } from "../scripts/flows-nightly/sections/compute.mjs";
 
+process.env.FLOWS_WRITE_BATCH = "off";
+
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const near = (a, b, eps, msg) => { assert.ok(Math.abs(a - b) <= eps, `${msg} — got ${a}, want ${b}`); checks++; };
@@ -3829,9 +3831,9 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "EVERY SHARD CHECKS THE CONTRACTS FIRST: after npm ci and the Chromium decision, before its own selection, each shard runs " +
     "node run.mjs --only contracts (about ten seconds), so a red contracts check stops the shard inside its first minute " +
     "instead of after a complete run of the six, while the fast job still runs the whole fast group once");
-  ok(/- name: Install WebKit and Firefox on the shard that holds the engine suite\n {8}if: steps\.browser\.outputs\.needs == 'true'\n {8}working-directory: tests\n {8}run: \|\n {10}pin="\$\(node -e '[^\n]*suites\/flows-sfc-firstpaint\.json[^\n]*'\)"\n {10}if \[ "\$pin" = "\$\{\{ matrix\.shard \}\}" \]; then timeout 420 npx playwright install --with-deps webkit firefox \|\| timeout 420 npx playwright install --with-deps webkit firefox; fi\n/.test(regShard) &&
+  ok(/- name: Install WebKit and Firefox on the shard that holds the engine suite\n {8}if: steps\.browser\.outputs\.needs == 'true'\n {8}working-directory: tests\n {8}run: \|\n {10}pin="\$\(node -e '[^\n]*suites\/flows-sfc-firstpaint\.json[^\n]*'\)"\n {10}if \[ "\$pin" = "\$\{\{ matrix\.shard \}\}" \]; then timeout 420 npx playwright install --with-deps webkit firefox \|\| \{ sudo sh -c 'pkill -x apt-get; pkill -x dpkg; sleep 5; dpkg --configure -a'; timeout 600 npx playwright install --with-deps webkit firefox; \}; fi\n/.test(regShard) &&
      /^ {10}SFC_ENGINES: all$/m.test(regShard) && (regShard.match(/playwright install/g) || []).length === 3,
-    "THE ENGINE SUITE GETS ITS ENGINES: the shard that pins flows-sfc-firstpaint installs WebKit and Firefox beside Chromium, each attempt capped at seven minutes and tried twice so a stalled mirror cannot hold the job (read from the suite's own pin, so a repin moves the install with it) and the shard step sets SFC_ENGINES=all, which makes the suite require all three instead of skipping an engine that is not installed");
+    "THE ENGINE SUITE GETS ITS ENGINES: the shard that pins flows-sfc-firstpaint installs WebKit and Firefox beside Chromium, the first attempt capped at seven minutes; a capped attempt leaves its apt-get holding the package lock, so before the second (ten minutes) the leftover apt-get and dpkg are stopped and dpkg is settled, and a stalled mirror cannot hold the job or fail the retry on the lock (read from the suite's own pin, so a repin moves the install with it) and the shard step sets SFC_ENGINES=all, which makes the suite require all three instead of skipping an engine that is not installed");
   ok(new RegExp(String.raw`run: node run\.mjs --shard \$\{\{ matrix\.shard \}\}\/${CI_SHARDS} \$\{\{ steps\.select\.outputs\.args \}\}\n`).test(regShard) && /run: node run\.mjs --group fast\n/.test(regFast) &&
      !/npm test/.test(regression),
     "the shards and the fast job run run.mjs selections, which run-contract proves cover every suite exactly once");
@@ -4594,7 +4596,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(compute.names > 0 && compute.names <= cardCount, "and with the Oracle registered it computes the carded names the run built");
   ok(cardCount > 0 && /compute: \d+ of \d+ deep name\(s\), 1 job\(s\)/.test(log), "its log line counts the carded names it was offered");
   ok(meta.stages.every((r) => Number.isInteger(r.cpu) && r.cpu >= 0), "every stage record carries whole-number CPU milliseconds");
-  ok(JSON.stringify(meta.stages).length < 3600, `and the records add under 3.6 KiB to meta, the Vol desk and its audit and the funds and positioning stages being the records added since 3 KiB (${JSON.stringify(meta.stages).length} bytes)`);
+  ok(JSON.stringify(meta.stages).length < 3800, `and the records add under 3.8 KiB to meta, the Vol desk and its audit, the funds stage, the positioning stages and the Fire & Forget stage being the records added since 3 KiB (${JSON.stringify(meta.stages).length} bytes)`);
   same(meta.health, { failures: 0, warnings: 0, first: [] }, "meta carries the gate's verdict: a clean dry run has none");
   const wrote = [...log.matchAll(/^ {2}\[dry-run\] (\S+): .*, \d+ bytes$/gm)].map((m) => m[1]);
   ok(wrote.length > 400, `the dry run printed ${wrote.length} writes`);
@@ -4669,7 +4671,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 }
 
 {
-  const measured = callModel({ enriched: 149, deep: 50, cross: 99, dossiers: 3, earnings: 73 }, { ...CALL_COST, sigmaLedger: 0, ivp: 0, slow: 0, voldesk: 0, funds: 0, positioning: 0 });
+  const measured = callModel({ enriched: 149, deep: 50, cross: 99, dossiers: 3, earnings: 73 }, { ...CALL_COST, sigmaLedger: 0, ivp: 0, slow: 0, voldesk: 0, funds: 0, flowlab: 0, positioning: 0 });
   ok(Math.abs(measured.total - 3071) / 3071 < 0.01,
      `the call model reproduces the 2026-09-24 nightly (3,071 calls, before the sigma ledger's rotation existed) from its own shape: ${measured.total}`);
   eq(measured.legs.vol, 632, "leg by leg: the vol leg's 632 calls exactly (8 deep, 2 cross, 10 per dossier, 4 radar)");
@@ -5282,7 +5284,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     }
     r.finish();
     ok(r.records().filter((y) => y.why).every((y) => y.why.length <= WHY_CAP && !/\s{2}/.test(y.why)), "a failure reason is one line and capped");
-    ok(JSON.stringify(r.records()).length < 6800, `even with every isolated stage failed the records stay under 6.8 KB, the funds stage, the Vol desk and its audit and the positioning stages being the records added since 6 KB (${JSON.stringify(r.records()).length})`);
+    ok(JSON.stringify(r.records()).length < 7000, `even with every isolated stage failed the records stay under 7 KB, the funds stage, the Vol desk and its audit, the positioning stages and the Fire & Forget stage being the records added since 6 KB (${JSON.stringify(r.records()).length})`);
     let n = 0;
     const bigClock = () => (n += 98765);
     const wide = createStageRunner({ clock: bigClock, calls: () => n / 30 });

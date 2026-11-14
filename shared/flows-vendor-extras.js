@@ -1,6 +1,7 @@
 import { isoDay, addDays, vnum } from "./flows-cross.js";
 import { isTradingDay } from "./flows-freshness.js";
 import { unwrap } from "./flows-vendor-core.js";
+import { fixedHalfUp } from "./flows-display-round.js";
 
 export const EXTRAS_VERSION = 1;
 
@@ -306,7 +307,7 @@ const dollarsToCents = (v) => {
   if (v === null || v === undefined || v === "") return null;
   const n = typeof v === "number" ? v : /^\d+(\.\d+)?$/.test(String(v).trim()) ? Number(String(v).trim()) : NaN;
   if (!Number.isFinite(n) || n <= 0) return null;
-  const c = Math.round(n * 100);
+  const c = Number(fixedHalfUp(n, 0, 2));
   return Number.isSafeInteger(c) ? c : null;
 };
 

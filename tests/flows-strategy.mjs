@@ -750,6 +750,23 @@ try {
     const end = await edges("end");
     ok(Number(end.left) > 0.5 && Number(end.right) < 0.05,
        `and at its end only on the left (${end.left}/${end.right}) — an edge fade is honest only where content is hidden`);
+    {
+      await page.setViewportSize({ width: 1280, height: 900 });
+      const nav = () => page.$eval(".tl-stripw", (w) => { const s = w.firstChild, show = (c) => getComputedStyle(w.querySelector(c)).display !== "none"; return { left: s.scrollLeft, max: s.scrollWidth - s.clientWidth, prev: show(".tl-nav.is-prev"), next: show(".tl-nav.is-next") }; });
+      await page.$eval(".tl-stripw", (w) => { w.firstChild.scrollLeft = 0; });
+      await page.waitForTimeout(300);
+      const a0 = await nav();
+      ok(a0.max > 2 && a0.next && !a0.prev, `THE STRUCTURE STRIP CARRIES A FORWARD BUTTON WHEN STRUCTURES ARE HIDDEN TO THE RIGHT, and no back button at its start (${JSON.stringify(a0)})`);
+      await page.click(".tl-stripw .tl-nav.is-next");
+      await page.waitForFunction(() => document.querySelector(".tl-stripw").firstChild.scrollLeft > 100, null, { timeout: 4000 });
+      await page.waitForTimeout(700);
+      const a1 = await nav();
+      ok(a1.left > 100 && a1.prev, `pressing it moves the strip sideways and brings the back button (${JSON.stringify(a1)})`);
+      for (let i = 0; i < 8 && (await nav()).next; i++) { await page.click(".tl-stripw .tl-nav.is-next"); await page.waitForTimeout(700); }
+      const a2 = await nav();
+      ok(!a2.next && a2.prev && a2.left >= a2.max - 2, `at the end only the back button is left (${JSON.stringify(a2)})`);
+      ok(await page.$eval(".tl-nav.is-prev", (b) => b.tagName === "BUTTON" && /back/.test(b.getAttribute("aria-label"))), "and each is a named button");
+    }
     await page.setViewportSize({ width: 1280, height: 1000 });
   }
 

@@ -5,16 +5,16 @@ export const DEEPEN = Object.freeze({
   key: "deepen",
   switchEnv: "FLOWS_DEEPEN",
   capEnv: "FLOWS_DEEPEN_CAP",
-  perNightCap: 470,
+  perNightCap: 860,
   dryRunCap: 24,
   hardCap: 900,
   minBatch: 4,
   keepSessions: 40,
   callsPerName: 39,
   msPerName: 6650,
-  baselineCalls: 7220,
+  baselineCalls: 7270,
   baselineMs: 19 * 60 * 1000,
-  deadlineMs: 90 * 60 * 1000,
+  deadlineMs: 165 * 60 * 1000,
   daySharePct: 0.85,
   timeSharePct: 0.8,
   minuteSharePct: 0.8,
@@ -71,9 +71,10 @@ export function paceFor(minuteLine, share = DEEPEN.minuteSharePct) {
 
 export function governor({
   mode = "on", cap = DEEPEN.perNightCap, backlog = 0, dayLine = null, minuteLine = null, callsSoFar = 0, elapsedMs = 0,
-  deadlineMs = DEEPEN.deadlineMs, budget = DEEPEN, dailySeen = null,
+  deadlineMs = DEEPEN.deadlineMs, budget = DEEPEN, dailySeen = null, perMinute = null,
 } = {}) {
-  const pace = paceFor(minuteLine, budget.minuteSharePct);
+  const paced = num(perMinute) !== null && perMinute >= 1 ? Math.floor(perMinute) : null;
+  const pace = paced !== null ? { perMinute: paced, spacingMs: Math.ceil(60000 / paced) } : paceFor(minuteLine, budget.minuteSharePct);
   const out = { n: 0, binding: "none", limits: {}, pace, why: "" };
   if (mode === "off") return { ...out, binding: "switch", why: "the switch is off" };
   const day = num(dayLine) !== null && dayLine > 0 ? dayLine : budget.workingDayLine;
@@ -164,6 +165,7 @@ export function pickRotation({ candidates = [], ledger, sessionDate, exclude = n
 export function planNight({
   mode = "on", cap = DEEPEN.perNightCap, payload = null, readable = true, sessionDate, rows = [], board = new Set(),
   rosterKnown = null, dayLine = null, minuteLine = null, callsSoFar = 0, elapsedMs = 0, deadlineMs = DEEPEN.deadlineMs, dailySeen = null,
+  perMinute = null,
 } = {}) {
   const ledger = parseLedger(readable ? payload : null);
   let carried = readable ? carriedFrom(ledger, sessionDate) : new Map();
@@ -177,6 +179,7 @@ export function planNight({
   const candidates = rows.filter((r) => r && !board.has(r.t));
   const gov = governor({
     mode: readable ? mode : "off", cap, backlog: candidates.length, dayLine, minuteLine, callsSoFar, elapsedMs, deadlineMs, dailySeen,
+    perMinute,
   });
   const picked = gov.n > 0
     ? pickRotation({ candidates, ledger, sessionDate, n: gov.n })
@@ -248,7 +251,7 @@ export function ledgerSummary(at, { sessionDate, universe = null, planned = null
   };
 }
 
-export function ledgerPayload(prior, { sessionDate, generatedAt = null, landed, failed, universe = null, plan = null, usage = null } = {}) {
+export function ledgerPayload(prior, { sessionDate, generatedAt = null, landed, failed, universe = null, plan = null, usage = null, line = null } = {}) {
   const next = updateLedger(prior, { sessionDate, landed, failed, universe });
   const names = Object.keys(next.at).length;
   const payload = {
@@ -259,6 +262,7 @@ export function ledgerPayload(prior, { sessionDate, generatedAt = null, landed, 
     names,
     plan,
     summary: ledgerSummary(next.at, { sessionDate, universe, planned: plan ? plan.n : null, usage }),
+    ...(line && typeof line === "object" ? { line } : {}),
   };
   const bytes = new TextEncoder().encode(JSON.stringify(payload)).length;
   return { payload: { ...payload, bytes }, bytes, fits: bytes <= DEEPEN.ledgerBudgetBytes };

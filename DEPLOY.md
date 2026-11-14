@@ -241,7 +241,7 @@ grep -i '^cache-control: public, max-age=31536000, immutable' /tmp/css.headers
 
 curl -fsSI https://anilkaya.org/ | grep -i '^cache-control: no-cache'
 
-curl -fsSI "https://anilkaya.org/assets/fonts/Inter-latin.woff2?v=${FONTS_VERSION}" \
+curl -fsSI "https://anilkaya.org/assets/fonts/GoogleSans-latin.woff2?v=${FONTS_VERSION}" \
   | grep -i '^cache-control: public, max-age=31536000, immutable'
 curl -fsSI https://anilkaya.org/assets/fonts-version.txt | grep -i '^cache-control: public, max-age=3600'
 ```
@@ -262,7 +262,7 @@ unchanged, or every returning visitor downloads the fonts again for nothing.
 A blanket `?v=` rewrite, or a merge that brings one in, moves them anyway;
 before deploying, `grep -rn 'woff2?v=' --include=*.html --include=*.css .`
 must show only the fonts token, and `tests/contracts.mjs` must pass and
-report sixteen font references at it.
+report fourteen font references at it.
 
 The versioned stylesheet is served asset-first by the edge, without invoking
 `worker.js`; its headers come from the root `_headers` file. Check that the
@@ -1481,6 +1481,18 @@ key's tier. If it settles at the same value across several mornings, that value
 belongs in `RATE.startDelayMs` — at which point the run stops paying for the
 same discovery every day.
 
+Since 2026-11-10 the floor is no longer a one-way ratchet once the rotation has
+set a pace. On 2026-11-09 one refusal in 23,304 calls held the floor at 225 ms
+for the rest of the night (`queued 3867.7s` of a 4,841.8 s run). The floor now
+eases by a factor of 1.25 after 600 clean calls and never under the paced
+spacing; before the rotation sets a pace it behaves as before. The minute line
+itself is carried night to night in the deepening ledger and moved on evidence
+(`docs/fire-and-forget.md`, sections 3 and 4). The line to read each morning is
+`transport: line ... a minute (verdict; x% refused, y% of calls issued while
+backed off; the run's share was n a minute); busiest minute m call(s); the
+feed's own per-minute counter read between a and b left`, and beside it
+`reconcile: the store holds all N key(s) this run wrote, by content hash`.
+
 The controller is AIMD: ×2 on a 429 and ×0.9 on a clean response, with the
 floor rising 1.5× per 429 and never falling within a run. A 5xx or a transport
 failure backs off but teaches the floor NOTHING — a server error is not a rate
@@ -1592,7 +1604,7 @@ ranking that looks complete.
 
 ### 10.5c The deadline, and why it is 36 minutes
 
-Superseded 2026-10-18: `DEADLINE_MS` is 90 minutes and the nightly job's `timeout-minutes` 120, sized with the deepening rotation (docs/deepening.md, "Sizing"). The reasoning below is the history of the 36 minutes.
+Superseded again 2026-11-10: `DEADLINE_MS` is 165 minutes and `timeout-minutes` 200 (docs/deepening.md, "Every name, every night"). Superseded 2026-10-18: `DEADLINE_MS` is 90 minutes and the nightly job's `timeout-minutes` 120, sized with the deepening rotation (docs/deepening.md, "Sizing"). The reasoning below is the history of the 36 minutes.
 
 `DEADLINE_MS` was 30 minutes until 2026-08-26 and it was BINDING — on the
 wrong leg, which is why nothing looked wrong.
@@ -3727,3 +3739,97 @@ LOAD_USERS=... node scripts/staging-load.mjs --base https://anilkaya-staging.<ac
 
 `tests/staging-contract.mjs` holds the staging configuration, the prober, the
 smoke checks and the load tool's guards against fakes, with no server.
+
+### 10.7 Fire & Forget: the mount, shadow mode, how to look, how to turn it off
+
+Fire & Forget (the wires product, `docs/ff/contract.md`) is mounted in the
+Worker and shipped in shadow. Shadow means: members can open `/flows/fire/`,
+preview and arm wires; the evaluator runs on the nightly and on live landings;
+every hit it finds is stored with state `held`; nothing is delivered, because
+the Inbox, Digest and Wires pages (lanes E, F and H) are not built and answer
+with a not-released page. The Fire page says so in one sentence.
+
+**Before the first deploy.** Apply `migrations/0026_ff.sql` to production D1
+(section 3). The Worker also runs the same sixteen `CREATE TABLE IF NOT
+EXISTS` statements once per isolate before its first Fire statement
+(`ensureFf`), so a database that has not had the migration still works; the
+migration is the reviewed path and the first-use DDL the fallback. No secret
+is added. Three rate-limit bindings are new in both configurations:
+`FF_WRITE` (namespace 1131, staging 2131, 10 a minute), `FF_HEAVY` (1132,
+2132, 6 a minute, shared by preview and export) and `FF_HEALTH` (1133, 2133,
+4 a minute). They are flood brakes that fail open.
+
+**Switches** (`wrangler.toml` [vars]; a deploy overwrites the dashboard's
+list, so the file is what the next deploy runs):
+
+| Variable | Shipped | Meaning |
+|---|---|---|
+| `FF_MODE` | `shadow` | `on` delivers, `shadow` evaluates and holds every hit, anything else is off |
+| `FF_ROUTE_FIRE` | `on` | the Fire page, its sidebar entry and the compose routes |
+| `FF_ROUTE_WIRES` | `on` | the wire routes |
+| `FF_ROUTE_INBOX` | `on` | the inbox routes (the page is a placeholder) |
+| `FF_ROUTE_EXPORT` | `on` | the export route |
+
+Off is closed everywhere: every `/api/ff/*` route answers JSON 404 `ff_off`,
+the four pages are the unknown-page 404, the sidebar carries no Fire entry,
+`POST /api/ff/run` is closed, and neither the cron guard nor the live hook
+sends a statement that names an `ff_` table (`tests/server-ff.mjs` holds this
+for an unset, empty, `off` and misspelt value).
+
+**What runs, and why it cannot hurt what was there.**
+
+- The nightly's `ff` stage is isolated: after the vendor reads are done it
+  builds `ff-metrics` and `ff-carry` from payloads the run already holds
+  (no vendor call, no model), publishes them through the ingest door, then
+  asks `POST /api/ff/run` for the session. A failure in any step is recorded
+  on the stage and the night goes on; `meta` is still the last write.
+- `POST /api/ff/run` takes the ingest credential (the nightly token for a
+  nightly run; the live credential may only ask for a live look). It refuses
+  with `source_missing` until `ff-metrics` for that session is stored, and a
+  run is claimed by one row with a lease, so two callers cannot both
+  evaluate.
+- The half-hourly housekeeping firing has one more guard, `ff housekeeping
+  failed`. While the night is open (before the next session's deadline) it
+  retries a run that is missing, failed or past its lease, at most three
+  attempts, and only on that session's figures. Past the deadline it flags
+  the armed wires of a night that never ran as `not_evaluated`, reason
+  `run_late`. In the 03:00 ET window it prunes run rows older than fourteen
+  days. A store that refuses fails this guard alone.
+- After a `live:alerts` write has landed (status 200), the fetch handler
+  starts the live evaluation in `ctx.waitUntil`. The hook's whole body is in
+  a catch that only logs `ff live tick failed`; the write has already been
+  answered. The Tier 1 cron has no evaluation hook: live wires are looked at
+  when the Actions live leg lands a record, about every five minutes in the
+  regular session.
+
+**Row budget.** `tests/lib/d1-budget.mjs` prices the mount (`ff.mount`) beside
+the four lines of `tests/lib/d1-budget-ff.mjs`; `flows-d1-budget` sums them
+against the caps. A warm preview reads two rows in one trip; a steady
+housekeeping firing past the deadline reads two rows and writes none.
+
+**How to look.**
+
+```bash
+wrangler d1 execute iewt --remote --command "SELECT id, status, attempts, started_at FROM ff_run ORDER BY started_at DESC LIMIT 10"
+wrangler d1 execute iewt --remote --command "SELECT state, COUNT(*) FROM ff_hit GROUP BY state"
+wrangler d1 execute iewt --remote --command "SELECT session, status, reason, COUNT(*) FROM ff_receipt GROUP BY 1, 2, 3 ORDER BY 1 DESC LIMIT 20"
+```
+
+In shadow every `ff_hit` row is `held`. `GET /api/ff/health` (signed in)
+names the mode, each route's availability and the evaluator's last run. The
+nightly's `meta.stages` carries the `ff` stage record. Logs to search:
+`ff housekeeping failed`, `ff live tick failed`, `ff run failed`.
+
+**Turning it off.** Set `FF_MODE = "off"` in `wrangler.toml` and deploy.
+Stored wires, hits and receipts stay; nothing is evaluated. `FF_NIGHTLY=off`
+in the nightly workflow's environment skips the pipeline's `ff` stage alone
+(the stage is on when the variable is unset). To close only the
+page, set `FF_ROUTE_FIRE = "off"`.
+
+**Before `FF_MODE = "on"`.** Lanes E, F and H (Inbox, Digest, the mark, the
+Wires page) must exist, since `on` delivers to pages that are placeholders
+today. The contract's licensing question stands: anything that leaves Flows
+carries Flows-computed metrics only until the owner has settled
+redistribution with the data provider. `docs/ff/ff-u-mount.md` lists the
+deferred contract items and the findings handed to the other lanes; read it
+before the switch moves.

@@ -59,17 +59,18 @@ export const drillBody = (t) => {
   return { t, sessionDate: SESSION, ps: parts ? { v: 1, status: "ok", parts } : null, ...(parts ? {} : { why: "absent" }) };
 };
 
-export const html = () => PAGES.positioningPage({ username: "test" });
+export const html = (now = NOW_MS) => PAGES.positioningPage({ username: "test", now });
 
 export async function openPos(browser, w, h, o = {}) {
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, reducedMotion: "reduce", ...(o.context || {}) });
   const page = await ctx.newPage();
-  if (o.now) await page.clock.setFixedTime(new Date(o.now));
+  const at = o.now ? Date.parse(o.now) : NOW_MS;
+  await page.clock.setFixedTime(new Date(at));
   const errors = [];
   const asked = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   const body = o.body === undefined ? payload() : o.body;
-  const doc = o.html || html();
+  const doc = o.html || html(at);
   await page.route("**/*", async (r) => {
     const u = new URL(r.request().url());
     if (u.pathname.startsWith("/assets/")) {

@@ -450,7 +450,7 @@ const LAYOUT_MUTANTS = [
   ["the context reasons printed in the narrow desktop column", "css", ".pl-rc.ctx .kv small.why { display: none; }", ""],
   ["no end space for the orb in the switch layout", "css", ".flows-body:has(#fxOracle:not([hidden])) .pl-acts, .flows-body:has(#fxOracle:not([hidden])) .pl-rc.ev { padding-inline-end: 56px; }", ""],
   ["the selection bar running under the orb", "css", ".flows-body:has(#fxOracle:not([hidden])) .pl-selbar { width: calc(100% - 72px); }", ""],
-  ["the caption clamped to two lines", "css", "-webkit-line-clamp: 3;", "-webkit-line-clamp: 2;"],
+  ["the caption clamped to one line", "css", "-webkit-line-clamp: 3;", "-webkit-line-clamp: 1;"],
   ["the tile cap keyed to the viewport again", "js", "const mobile = () => { const pl = document.getElementById(\"pl\"); return pl ? pl.getBoundingClientRect().width < 900 : matchMedia(\"(max-width:899px)\").matches; };", "const mobile = () => matchMedia(\"(max-width:899px)\").matches;"],
   ["whiskers named under the map", "js", "tabNote(tab, false)", "tabNote(tab, true)"],
 ];

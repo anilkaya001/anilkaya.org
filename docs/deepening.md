@@ -274,3 +274,55 @@ or every night after, and the first night of a regression in a proven part does.
 What is not done: a part that keeps failing is still read each night (no
 quarantine that stops the calls), and a stub is not re-read earlier when the card
 has shrunk before the maximum age.
+
+## Every name, every night (2026-11-10)
+
+The night of 2026-11-09 read 470 names in full and carried 710 cards from an
+earlier night. Its ledger of 761 names held 228 stale ones, and the run took about
+80 of its 90 minutes: the cap bound, and the time term (478) sat just above it, so
+no cap could have read more. The feed's day allowance was not the limit: the night
+made 23,304 calls.
+
+The sizing moved so that the whole universe is read in full each night:
+
+| | before | now |
+|---|---|---|
+| run deadline (`DEADLINE_MS`) | 90 minutes | 165 minutes |
+| workflow `timeout-minutes` | 120 | 200 |
+| default cap | 470 | 860 (hard ceiling 900 unchanged) |
+| time term, nothing else spent | 478 names | 1,019 names |
+| what binds on an ordinary night | the cap | the backlog: every name behind the board |
+| nights to a deep read of 794 names | 2 | 1 |
+| calls a full night | about 24,900 | about 40,100 (6,520 + 860 x 39 at most) |
+
+The pace is unchanged: 39 calls in 6.65 s a name is about 352 calls a minute,
+inside 80 per cent of the 500 working minute line, whatever the cap. A full night
+of 794 names is 19 + 88 = 107 minutes by the governor's constants; at the 7.8 s a
+name the night of 2026-11-09 measured, about 122 minutes, which ends near 19:35 ET
+after a 17:30 ET start, before the 21:00 ET line the witness holds. A night that
+runs slow is still cut by the time term, never by a timeout.
+
+Not yet measured on a real night: the stage times at 794 names. The first run's
+`deepen-plan` record and the ledger summary are the reading.
+
+## The pace learns (2026-11-10)
+
+The 7.8 s a name of 2026-11-09 was not the feed's speed. One call of 23,304 was
+refused, the spacing floor rose from 150 to 225 ms, and it stayed there: 3,868 s
+of that 4,842 s run were spent waiting in the run's own queue. Two changes, both
+specified in `docs/fire-and-forget.md`:
+
+- The floor eases. After 600 clean calls it comes down by a factor of 1.25, never
+  under the paced spacing, so one refusal costs about two minutes and not the
+  night.
+- The minute line is learned. The ledger carries `line`: the line the next night
+  paces by, the last line that held, the last that drew refusals, and fourteen
+  nights of history. The run's share is the line less the 100 a minute reserved
+  for members and the live layer, so the 500 working line still gives 400 a
+  minute. A clean night that used its share raises the line by a quarter; a
+  refused night returns it to the last line that held. It stays between 250 and
+  1,500 and moves at most once a night.
+
+The first night records a line and cannot move it. The governor's `msPerName`
+(6,650) still assumes 150 ms, so a faster line makes the time term conservative,
+never optimistic.

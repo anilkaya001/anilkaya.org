@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "418";
+export const ASSET_VERSION = "429";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -9,6 +9,7 @@ import { positioningBody, POSITIONING_DESCRIPTION, POSITIONING_STYLES, POSITIONI
 import { HORIZON_SESSIONS } from "./flows-horizon.js";
 import { COPY as VD_COPY } from "./flows-voldesk-copy.js";
 import { flowlabBody, FLOWLAB_DESCRIPTION, FLOWLAB_STYLES, FLOWLAB_SCRIPTS } from "./flows-page-flowlab.js";
+import { FIRE_DESCRIPTION, FIRE_SCRIPTS, FIRE_STYLES, fireBody } from "./ff-pages-fire.js";
 
 export const CALENDAR_BACK_DAYS = 14;
 export const CALENDAR_SESSIONS = 60;
@@ -21,7 +22,7 @@ export function sessionCalendar(now = Date.now()) {
   return out;
 }
 
-export const FONTS_VERSION = "230";
+export const FONTS_VERSION = "428";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -36,7 +37,7 @@ const head = (title, description, styles = []) => `<!doctype html>
 <title>${title}</title>
 <meta name="description" content="${description}">
 <link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
-<link rel="preload" href="/assets/fonts/Inter-latin.woff2?v=${FONTS_VERSION}" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/assets/fonts/GoogleSans-latin.woff2?v=${FONTS_VERSION}" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="${v("/assets/css/base.css")}">
 <link rel="stylesheet" href="${v("/assets/css/flows.css")}">
 ${styles.map((href) => `<link rel="stylesheet" href="${v(String(href))}">`).join("\n")}
@@ -87,6 +88,7 @@ const GLYPHS = {
   sidebar: '<rect x="3.5" y="5" width="17" height="14" rx="3"/><path d="M9.5 5v14"/>',
   boards: '<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/>',
   bars: '<path d="M6 18v-3M12 18v-7M18 18V7"/>',
+  fire: '<path d="M12 4.5c.75 3.6 4.8 5.55 4.8 9.75a4.8 4.8 0 0 1-9.6 0c0-2.25 1.2-3.3 2.1-4.8.75 1.05 1.5 1.35 1.95 1.35C11.55 9.6 11.85 7.8 12 4.5z"/>',
 };
 
 const SPRITE = `<svg class="ui-sprite" aria-hidden="true" focusable="false" width="0" height="0">${
@@ -146,12 +148,9 @@ export const FLOWS_NAV = [
     { key: "political", href: "/flows/political/", label: "Political", glyph: "hall" },
   ] },
   { group: "Tools", id: "railTools", items: [
+    { key: "fire", href: "/flows/fire/", label: "Fire", glyph: "fire", switched: true },
     { key: "strategy", href: "/flows/strategy/", label: "Strategy", glyph: "flask" },
     { key: "desk", href: "/flows/desk/", label: "Premium desk", glyph: "layers" },
-  ] },
-  { group: "Operations", id: "railOps", only: "status", items: [
-    { key: "status", href: "/flows/status/", label: "Status", glyph: "track" },
-    { key: "latency", href: "/flows/status/#view=latency", label: "Latency", glyph: "clock" },
   ] },
 ];
 
@@ -167,7 +166,7 @@ const TABS = [
 ];
 
 const railItem = (active) => (it) => {
-  if (it.ownerOnly && it.key !== active) return "";
+  if ((it.ownerOnly || it.switched) && it.key !== active) return "";
   const on = it.key === active;
   const badge = it.count ? `<span class="rail-count" data-rail-count="${it.key}" hidden></span>` : "";
   return `<a href="${it.href}"${on ? ' class="is-on" aria-current="page"' : ""}>` +
@@ -197,9 +196,7 @@ const BRAND_LINK = brandMark(BRAND_MEMBER);
 export function ownerNav(html) {
   let text = String(html);
   if (text.includes(BRAND_LINK)) text = text.replace(BRAND_LINK, () => brandMark(BRAND_OWNER));
-  if (text.includes('id="railOps"') || !text.includes(RAIL_END)) return text;
-  const ops = FLOWS_NAV.find((g) => g.id === "railOps");
-  return text.replace(RAIL_END, () => railGroup(ops, "") + RAIL_END);
+  return text;
 }
 
 const sidebar = (active, username) => {
@@ -458,6 +455,7 @@ export function aboutPage() {
       <li><strong>Events.</strong> Earnings, economic prints and FDA dates for the coming sessions, with the move each report is priced for.</li>
       <li><strong>Political.</strong> Stocks that members of Congress disclosed buying or selling, in the dollar ranges the filings give, with how late each filing arrives.</li>
       <li><strong>Ticker.</strong> One name's dossier: price against the priced move, the dealer book, volatility, flow and positioning, and a written reading of how they fit together.</li>
+      <li><strong>Fire.</strong> A wire is a standing condition a member writes once. Flows reads it on the nightly run or in the live session, records a hit when it first holds, and keeps a receipt for every session it was read or not read.</li>
       <li><strong>Strategy, Premium desk and Ask.</strong> Option structures priced on the name's own smile, and questions answered from what has been published.</li>
     </ul>
   </section>
@@ -560,7 +558,7 @@ ${shell("Session", "overview", username, `
       <div class="hm-hero-id">
         <div class="hm-hero-k"><h2 class="hm-hero-t" id="hmHeroT">Market tide</h2><span id="hmTideState"></span></div>
         <div class="hm-hero-v" id="hmTideV" data-tone="silent">\u2014</div>
-        <div class="hm-hero-cap" id="hmTideCap"></div>
+        <div class="hm-hero-sub"><div class="hm-hero-cap" id="hmTideCap"></div><p class="hm-cw" id="hmTideCw" hidden></p></div>
         <div class="hm-hero-legs" id="hmTideLegs"></div>
       </div>
       <div class="hm-hero-chart" id="hmTide"></div>
@@ -1192,7 +1190,7 @@ export function ledgerPage({ username = "", live = false } = {}) {
   });
 }
 
-export function positioningPage({ username = "" } = {}) {
+export function positioningPage({ username = "", now = Date.now() } = {}) {
   return flowsDocument({
     title: "Positioning",
     description: POSITIONING_DESCRIPTION,
@@ -1201,7 +1199,7 @@ export function positioningPage({ username = "" } = {}) {
     chrome: false,
     styles: POSITIONING_STYLES,
     scripts: POSITIONING_SCRIPTS,
-    body: positioningBody(glyph, sessionCalendar()),
+    body: positioningBody(glyph, sessionCalendar(now)),
   });
 }
 
@@ -1587,6 +1585,15 @@ ${scripts.map((src) => `<script src="${v(String(src))}" defer></script>`).join("
 
 const ORACLE_MODES = Object.freeze(["on", "quiet"]);
 
+const SIDE_BODY = '<body class="flows-body has-rail"';
+
+export function sideShell(html, cookie) {
+  const text = String(html);
+  const kept = /(?:^|;\s*)fx_side=([01])\s*(?:;|$)/.exec(String(cookie || ""));
+  if (!kept || text.split(SIDE_BODY).length !== 2) return text;
+  return text.replace(SIDE_BODY, () => '<body class="flows-body has-rail ' + (kept[1] === "1" ? "has-side-open" : "is-side-collapsed") + '"');
+}
+
 export function oracleShell(html, mode, slug) {
   if (typeof html !== "string" || !ORACLE_MODES.includes(mode)) return html;
   const page = escapeHTML(String(slug || "overview"));
@@ -1605,9 +1612,53 @@ export function oracleShell(html, mode, slug) {
   return out;
 }
 
+const FIRE_BANNER = '<p class="ffx-banner" id="ffxBanner" hidden></p>';
+
+export const FIRE_SHADOW_LINE = "Running in shadow: wires are evaluated, hits are not delivered yet.";
+
+export function firePage({ username = "", shadow = false } = {}) {
+  const body = fireBody(glyph);
+  return flowsDocument({
+    title: "Fire", description: FIRE_DESCRIPTION, active: "fire", username, chrome: false, styles: FIRE_STYLES, scripts: FIRE_SCRIPTS,
+    body: shadow ? body.replace(FIRE_BANNER, () => `<p class="ffx-banner" id="ffxBanner" data-ff-mode="shadow">${FIRE_SHADOW_LINE}</p>`) : body,
+  });
+}
+
+export const FF_PENDING_PAGES = Object.freeze({
+  inbox: Object.freeze({ title: "Inbox", name: "the Inbox", description: "The hits your wires and the house wires wrote." }),
+  digest: Object.freeze({ title: "Digest", name: "the Digest", description: "A session's hits and receipts, side by side." }),
+  wires: Object.freeze({ title: "Wires", name: "the Wires page", description: "Your wires, their versions and their receipts." }),
+});
+
+export function ffPendingPage({ username = "", page = "inbox", shadow = false } = {}) {
+  const slug = Object.hasOwn(FF_PENDING_PAGES, page) ? page : "inbox";
+  const spec = FF_PENDING_PAGES[slug];
+  return flowsDocument({
+    title: spec.title, description: spec.description, active: slug, username,
+    body: `
+  <section class="ui-card ui-mod" data-ff-page="${slug}" aria-labelledby="ffxPendingT">
+    <header class="ui-mod-h"><h2 class="ui-mod-t" id="ffxPendingT">Not released yet</h2></header>
+    <div class="ui-silent" data-state="unavailable" data-ff-absent="not_released">${glyph("unavailable")}
+      <span class="ui-silent-t">— unavailable: ${spec.name} is not released yet.</span>
+      <span class="ui-silent-t">${shadow ? FIRE_SHADOW_LINE : "A wire armed on Fire is stored and evaluated."}</span>
+      <a class="ds-btn" href="/flows/fire/">Open Fire</a>
+    </div>
+  </section>`,
+  });
+}
+
+const FIRE_NAV_ANCHOR = '<a href="/flows/strategy/"';
+const FIRE_NAV_ITEM = `<a href="/flows/fire/" data-ff-nav>${glyph("fire")}<span class="rail-label">Fire</span></a>`;
+
+export function fireNav(html, on, slug) {
+  if (typeof html !== "string" || on !== true || slug === "fire") return html;
+  if (html.includes("data-ff-nav") || !html.includes(FIRE_NAV_ANCHOR)) return html;
+  return html.replace(FIRE_NAV_ANCHOR, () => FIRE_NAV_ITEM + "\n      " + FIRE_NAV_ANCHOR);
+}
+
 export const FLOWS_PAGES = {
   loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, networkPage, nowPage, deskPage,
   politicalPage, positioningPage,
-  tickerPage, unusualPage, movesPage, flowlabPage, ledgerPage, statusPage, eventsPage, strategyPage, ASSET_VERSION,
+  tickerPage, unusualPage, movesPage, flowlabPage, ledgerPage, statusPage, eventsPage, strategyPage, firePage, ffPendingPage, ASSET_VERSION,
 };
 

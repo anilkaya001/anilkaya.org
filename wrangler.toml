@@ -73,6 +73,21 @@ name = "MEMBER_EXPORT"
 namespace_id = "1123"
 simple = { limit = 10, period = 60 }
 
+[[ratelimits]]
+name = "FF_WRITE"
+namespace_id = "1131"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "FF_HEAVY"
+namespace_id = "1132"
+simple = { limit = 6, period = 60 }
+
+[[ratelimits]]
+name = "FF_HEALTH"
+namespace_id = "1133"
+simple = { limit = 4, period = 60 }
+
 [[durable_objects.bindings]]
 name = "PULSE"
 class_name = "Pulse"
@@ -124,3 +139,8 @@ FLOWS_RT_USERS = "anilkaya"
 FLOWS_RT_HINT = "enam"
 FLOWS_RT_UPSTREAM = "socket"
 FLOWS_RT_SOCKET_HOURS = "session"
+FF_MODE = "shadow"
+FF_ROUTE_WIRES = "on"
+FF_ROUTE_INBOX = "on"
+FF_ROUTE_FIRE = "on"
+FF_ROUTE_EXPORT = "on"

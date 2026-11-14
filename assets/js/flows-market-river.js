@@ -6,7 +6,7 @@
   const DASH = UI.DASH, MINUS = UI.MINUS, MID = " " + UI.MID + " ";
   const TAU = Math.PI * 2, DEG = Math.PI / 180;
   const WHITE = [255, 255, 255], BLACK = [0, 0, 0];
-  const FONT = "Inter, system-ui, sans-serif";
+  const FONT = "\"Google Sans\", system-ui, sans-serif";
   const LANE_W = 0.5, R0 = 0.03, R1 = 0.12, WALL_H = 0.55, WALL_GAP = 0.25;
   const OPEN_MIN = 9 * 60 + 30, CLOSE_MIN = 16 * 60, STEP_MS = 5 * 60000;
   const FUNDS = new Set(["SPY", "QQQ", "IWM", "DIA"]);

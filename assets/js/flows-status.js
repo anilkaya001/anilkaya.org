@@ -721,18 +721,6 @@
     }
     if (e.target && e.target.tagName === "DIALOG" && e.target.open) e.target.close();
   });
-  function syncRail() {
-    const rail = document.querySelector("#railOps");
-    if (!rail) return;
-    const links = rail.nextElementSibling ? rail.nextElementSibling.querySelectorAll("a") : [];
-    for (const a of links) {
-      const latency = /view=latency/.test(a.getAttribute("href") || "");
-      const on = latency ? S.tab === "latency" : S.tab !== "latency";
-      a.classList.toggle("is-on", on);
-      if (on) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
-    }
-  }
-
   function show(view, user, manual) {
     S.tab = view;
     for (const v of VIEWS) {
@@ -743,7 +731,6 @@
     if (user) {
       try { window.history.replaceState(null, "", window.location.pathname + window.location.search + "#view=" + view); } catch { S.hashBlocked = true; }
     }
-    syncRail();
     mountSub(view);
     if (view !== "health" && UI.defer && !S.loaded) {
       S.loaded = true;

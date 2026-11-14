@@ -52,6 +52,7 @@ export const STAGES = Object.freeze([
   stage("voldesk", ISOLATION.isolated, ["compute"], ["voldesk", "voldesk-stance"]),
   stage("deepen-ledger", ISOLATION.isolated, ["compute"], ["deepen"]),
   stage("flowlab", ISOLATION.isolated, ["compute"], ["flowlab-roots", "flowlab-venues", "flowlab-screen", "flowlab-groups", "flowlab-corr"]),
+  stage("ff", ISOLATION.isolated, ["compute"], ["ff-metrics", "ff-carry"]),
   stage("roster", ISOLATION.isolated, ["compute"], ["roster"]),
   stage("archive-check", ISOLATION.fatal, ["roster"]),
   stage("neuron-ledger", ISOLATION.isolated, ["roster"]),
