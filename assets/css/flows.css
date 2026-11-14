@@ -764,9 +764,6 @@ td.c-num { white-space: nowrap; }
 .rail-items:has(> :nth-child(7)) { min-height: 188px; }
 .rail-items:has(> :nth-child(8)) { min-height: 215px; }
 .rail-items:has(> :nth-child(9)) { min-height: 242px; }
-.rail-items:has(> :nth-child(10)) { min-height: 269px; }
-.rail-items:has(> :nth-child(11)) { min-height: 296px; }
-.rail-items:has(> :nth-child(12)) { min-height: 323px; }
 .rail-group { flex: none; }
 @media (max-height: 899.98px) {
   .flows-rail { padding-bottom: var(--sp-3); }

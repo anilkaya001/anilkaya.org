@@ -458,8 +458,7 @@ export function aboutPage({ positioning = false } = {}) {
       <li><strong>Flow Lab.</strong> The contracts behind a name's flow: a screener ranked by the site's own ratios, strike and Greek flow, price ladders, routing, lit prints and group flow, each with its unit or a dash and the reason.</li>
       <li><strong>Ledger.</strong> The flagged option premium booked as a closed ledger: takers on one side, liquidity providers on the other, so every row and column sums to zero. It sets each sector's share against its market-cap share, with the bounds it can prove.</li>
       <li><strong>Events.</strong> Earnings, economic prints and FDA dates for the coming sessions, with the move each report is priced for.</li>
-      <li><strong>Political.</strong> Stocks that members of Congress disclosed buying or selling, in the dollar ranges the filings give, with how late each filing arrives.</li>
-${positioning ? `
+      <li><strong>Political.</strong> Stocks that members of Congress disclosed buying or selling, in the dollar ranges the filings give, with how late each filing arrives.</li>${positioning ? `
       <li><strong>Positioning.</strong> How a fixed set of 13F filers moved their book between sectors, what insiders did by sector, and where failures to deliver and short-sale volume sit.</li>` : ""}
       <li><strong>Ticker.</strong> One name's dossier: price against the priced move, the dealer book, volatility, flow and positioning, and a written reading of how they fit together.</li>
       <li><strong>Fire.</strong> A wire is a standing condition a member writes once. Flows reads it on the nightly run or in the live session, records a hit when it first holds, and keeps a receipt for every session it was read or not read.</li>
