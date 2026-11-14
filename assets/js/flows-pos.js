@@ -41,7 +41,7 @@
     const c = Math.round(Math.abs(n) * 100);
     const body = Math.floor(c / 100) + "." + String(c % 100).padStart(2, "0");
     if (c === 0) return body;
-    return (n < 0 ? MINUS : plus ? "+" : "") + body;
+    return n < 0 ? MINUS + body : n > 0 ? (plus ? "+" : "") + body : body;
   }
   function fmtRatio(v, dp, plus) {
     const n = num(v);
@@ -50,7 +50,7 @@
     const c = Math.round(Math.abs(n) * 100 * scale);
     const body = Math.floor(c / scale) + (dp > 0 ? "." + String(c % scale).padStart(dp, "0") : "") + "%";
     if (c === 0) return body;
-    return (n < 0 ? MINUS : plus ? "+" : "") + body;
+    return n < 0 ? MINUS + body : n > 0 ? (plus ? "+" : "") + body : body;
   }
   function fmtNet(v) {
     const n = num(v);
@@ -58,7 +58,7 @@
     const c = Math.round(Math.abs(n) * 100);
     const body = Math.floor(c / 100) + "." + String(c % 100).padStart(2, "0");
     if (c === 0) return body;
-    return (n < 0 ? MINUS : "+") + body;
+    return n < 0 ? MINUS + body : n > 0 ? "+" + body : body;
   }
   const money = (v) => (num(v) === null ? DASH : UI.F.money(v));
   const grouped = (n) => (n < 0 ? "-" : "") + String(Math.abs(n)).replace(/\B(?=(\d{3})+$)/g, ",");

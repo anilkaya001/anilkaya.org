@@ -874,9 +874,9 @@
         const parts = [e.dem, e.rep, e.other];
         const tot = parts.reduce((a, v) => a + (finite(v) || 0), 0);
         const names = ["Democratic", "Republican", "Other"];
-        const pct = parts.map((v) => (tot > 0 ? ((finite(v) || 0) / tot) * 100 : 0));
-        box.innerHTML += '<div class="pl-seg-fill" role="img" aria-label="Split of the money by recipient kind">' + pct.map((w, i) => '<i style="width:' + w + '%">' + (w >= 24 ? "<span>" + names[i] + " " + Math.round(w) + "%</span>" : "") + "</i>").join("") + "</div>";
-        box.innerHTML += '<div class="pl-seg-leg">' + pct.map((w, i) => "<span>" + names[i] + " " + (tot > 0 ? Math.round(w) + "%" : DASH) + "</span>").join("") + "</div>";
+        const widths = parts.map((v) => (tot > 0 ? ((finite(v) || 0) / tot) * 100 : 0));
+        box.innerHTML += '<div class="pl-seg-fill" role="img" aria-label="Split of the money by recipient kind">' + widths.map((w, i) => '<i style="width:' + w + '%">' + (w >= 24 ? "<span>" + names[i] + " " + Math.round(w) + "%</span>" : "") + "</i>").join("") + "</div>";
+        box.innerHTML += '<div class="pl-seg-leg">' + widths.map((w, i) => "<span>" + names[i] + " " + (tot > 0 ? Math.round(w) + "%" : DASH) + "</span>").join("") + "</div>";
         box.innerHTML += kv("To Democratic candidates", m(e.dem)) + kv("To Republican candidates", m(e.rep)) + kv("To other candidates", m(e.other));
         box.innerHTML += kv("Lobbying", m(e.lobby)) + kv("Employees' giving (estimated)", m(e.emp)) + kv("Candidates counted", finite(e.cands) === null ? DASH : String(e.cands));
       }
