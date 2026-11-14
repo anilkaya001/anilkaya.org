@@ -85,8 +85,8 @@ reads one night and returns the next line:
 | Night | Rule | Verdict |
 |---|---|---|
 | under 5,000 calls | no evidence | `thin` (`start` on the first night) |
-| 2% refused, or 25% of calls issued while backed off | back to the last line that held, else seven tenths | `cut` |
-| over 0.2% refused, or over 8% backed off | back to the last line that held | `ease`, else `hold` |
+| 2% refused, or 25% of calls issued while backed off on a night with ten refusals or more | back to the last line that held, else seven tenths | `cut` |
+| over 0.2% refused, or over 8% backed off on a night with ten refusals or more | back to the last line that held | `ease`, else `hold` |
 | clean, but the busiest minute was under 60% of the share | a clean night that never ran near its share proves nothing | `idle` |
 | clean and used, never cut before | raise by a quarter | `raise` |
 | clean and used, a refused line on record | halfway between the line that held and the one that did not, until they are within 15% | `raise`, then `capped` |
@@ -133,3 +133,5 @@ the store's row, not what a reader's cache holds. `FLOWS_RECONCILE=off` skips it
 `tests/flows-transport.mjs` holds the allocation properties, the line rule against worked answers, random nights and hidden
 capacities, the floor's recovery, and the reconcile against a store that computes its hash independently and that loses,
 refuses or misreports writes. It plants 32 wrong builds; each must fail the check written for it.
+
+The backed-off share counts only from ten refusals (`slowRefusals`). On 2026-11-13 two refusals in 26,579 calls left 9.0% of the calls issued while backed off, which measures how slowly the pacer recovers and not what the feed allows, and the line was eased from 562 to 500 on it. An ease recorded on fewer than ten refusals and a clean refused share is taken back on the next night: the mark against that line is cleared before the night is judged.
