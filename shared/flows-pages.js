@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "427";
+export const ASSET_VERSION = "428";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -21,7 +21,7 @@ export function sessionCalendar(now = Date.now()) {
   return out;
 }
 
-export const FONTS_VERSION = "230";
+export const FONTS_VERSION = "428";
 
 const v = (path) => `${path}?v=${ASSET_VERSION}`;
 
@@ -36,7 +36,7 @@ const head = (title, description, styles = []) => `<!doctype html>
 <title>${title}</title>
 <meta name="description" content="${description}">
 <link rel="icon" href="/assets/img/favicon.svg" type="image/svg+xml">
-<link rel="preload" href="/assets/fonts/Inter-latin.woff2?v=${FONTS_VERSION}" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/assets/fonts/GoogleSans-latin.woff2?v=${FONTS_VERSION}" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="${v("/assets/css/base.css")}">
 <link rel="stylesheet" href="${v("/assets/css/flows.css")}">
 ${styles.map((href) => `<link rel="stylesheet" href="${v(String(href))}">`).join("\n")}

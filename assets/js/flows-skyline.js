@@ -17,8 +17,8 @@
   const PAD_B = 8;
   const MINUS = "−";
   const DASH = "—";
-  const FONT = "11px Inter, system-ui, sans-serif";
-  const FONT_HEAD = "600 12px Inter, system-ui, sans-serif";
+  const FONT = "11px \"Google Sans\", system-ui, sans-serif";
+  const FONT_HEAD = "600 12px \"Google Sans\", system-ui, sans-serif";
   const TICKS = [2, 5, 10, 25, 50, 100, FLOOR_N];
   const isNum = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 

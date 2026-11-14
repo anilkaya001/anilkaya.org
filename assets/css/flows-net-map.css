@@ -97,4 +97,5 @@
   .rl-note { -webkit-line-clamp: 3; }
 }
 @media (pointer: coarse) { .rl-seg button { min-height: 44px; } .rl-pair { height: 44px; } }
+@media (max-width: 480px) { .rl-seg { max-width: 100%; } .rl-seg button { padding: 0 7px; font-size: 12px; } }
 @media (forced-colors: active) { .rl-edge { stroke: CanvasText; } .rl-node.is-sel .rl-dot { stroke: Highlight; } }

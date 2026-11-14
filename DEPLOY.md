@@ -241,7 +241,7 @@ grep -i '^cache-control: public, max-age=31536000, immutable' /tmp/css.headers
 
 curl -fsSI https://anilkaya.org/ | grep -i '^cache-control: no-cache'
 
-curl -fsSI "https://anilkaya.org/assets/fonts/Inter-latin.woff2?v=${FONTS_VERSION}" \
+curl -fsSI "https://anilkaya.org/assets/fonts/GoogleSans-latin.woff2?v=${FONTS_VERSION}" \
   | grep -i '^cache-control: public, max-age=31536000, immutable'
 curl -fsSI https://anilkaya.org/assets/fonts-version.txt | grep -i '^cache-control: public, max-age=3600'
 ```
@@ -262,7 +262,7 @@ unchanged, or every returning visitor downloads the fonts again for nothing.
 A blanket `?v=` rewrite, or a merge that brings one in, moves them anyway;
 before deploying, `grep -rn 'woff2?v=' --include=*.html --include=*.css .`
 must show only the fonts token, and `tests/contracts.mjs` must pass and
-report sixteen font references at it.
+report fourteen font references at it.
 
 The versioned stylesheet is served asset-first by the edge, without invoking
 `worker.js`; its headers come from the root `_headers` file. Check that the
