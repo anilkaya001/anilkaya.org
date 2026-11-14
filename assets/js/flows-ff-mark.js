@@ -8,6 +8,25 @@
   var MAX_S = 900;
   var STATES = ["live", "resting", "degraded", "down", "unknown"];
   var WORD = { live: "Live", resting: "Resting", degraded: "Degraded", down: "Down", unknown: DASH };
+  var KEPT = "ff_mark";
+
+  function keep(v, seconds) {
+    try {
+      var body = { state: v.state, line: v.line, reason: v.reason || null, reasonText: v.reasonText || null, evaluator: v.evaluator || null, unread: v.unread || null, next: Date.now() + seconds * 1000 };
+      document.cookie = KEPT + "=" + encodeURIComponent(JSON.stringify(body)) + "; Path=/flows; Max-Age=" + Math.round(seconds) + "; SameSite=Lax" + (location.protocol === "https:" ? "; Secure" : "");
+    } catch (e) { void e; }
+  }
+
+  function kept() {
+    try {
+      var m = document.cookie.match(/(?:^|;\s*)ff_mark=([^;]*)/);
+      if (!m) return null;
+      var v = JSON.parse(decodeURIComponent(m[1]));
+      if (!v || typeof v !== "object" || typeof v.next !== "number") return null;
+      var left = (v.next - Date.now()) / 1000;
+      return left > 0 && left <= MAX_S ? { v: v, left: left } : null;
+    } catch (e) { return null; }
+  }
 
   function sheet() {
     var holder = document.querySelector('i[data-defer="ff-mark"][data-css]');
@@ -100,7 +119,7 @@
       timer = setTimeout(poll, clampS(seconds, 60) * 1000);
     }
 
-    function apply(v) {
+    function apply(v, left) {
       if (!v || typeof v !== "object") return fail({ code: "unreadable", message: "the health answer could not be read" });
       last = v;
       var state = STATES.indexOf(v.state) >= 0 ? v.state : "unknown";
@@ -112,7 +131,14 @@
         K.hooks.emit("ff:health", { state: state, evaluator: v.evaluator || null });
         if (v.unread) K.hooks.emit("ff:unread", { house: v.unread.house, member: v.unread.member, total: v.unread.total });
       }
-      schedule(v.pollAfterS);
+      if (left) {
+        clearTimeout(timer);
+        if (!stopped) timer = setTimeout(poll, Math.max(1, left) * 1000);
+        return;
+      }
+      var wait = clampS(v.pollAfterS, 60);
+      keep(v, wait);
+      schedule(wait);
     }
 
     function fail(err) {
@@ -154,7 +180,8 @@
 
     return kit().then(function (G) {
       api = G.ffClient;
-      poll();
+      var held = kept();
+      if (held) apply(held.v, held.left); else poll();
     }, function () {
       paint("unknown", "not loaded", DASH + " the Wires mark did not load its client", "client_missing", null);
     });

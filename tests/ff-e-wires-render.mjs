@@ -226,6 +226,20 @@ const SUITES = {
     ok(true, "mark: an unreachable health endpoint is down on the client");
     await down.ctx.close();
 
+    const k = await mount(b, 1440, 820, { state: makeState({ health: health("resting", { pollAfterS: 60 }) }) });
+    await k.page.waitForFunction(() => document.querySelector(".ffx-mark[data-ff-state=resting]"), null, { timeout: 10000 });
+    const k0 = k.calls.filter((c) => c.path === "/api/ff/health").length;
+    await k.page.goto("https://example.test/flows/wires/");
+    await k.page.waitForFunction(() => document.querySelector(".ffx-mark[data-ff-state=resting]"), null, { timeout: 10000 });
+    await k.page.waitForTimeout(300);
+    eq([k0, k.calls.filter((c) => c.path === "/api/ff/health").length], [1, 1], "mark: a page opened inside the poll interval paints the kept health and reads nothing, so moving between pages never spends the health budget");
+    ok(/Resting/.test(await k.page.getAttribute(".ffx-mark", "title")), "mark: and the kept health carries the API's line");
+    await k.ctx.clearCookies({ name: "ff_mark" });
+    await k.page.goto("https://example.test/flows/wires/");
+    await k.page.waitForFunction(() => document.querySelector(".ffx-mark[data-ff-state=resting]"), null, { timeout: 10000 });
+    eq(k.calls.filter((c) => c.path === "/api/ff/health").length, 2, "mark: with nothing kept a page reads once");
+    await k.ctx.close();
+
     const p = await mount(b, 1440, 820, {
       state: makeState({ health: health("resting", { pollAfterS: 60 }) }),
       before: (page) => page.clock.install({ time: new Date("2026-11-13T21:00:00Z") }),
@@ -283,6 +297,8 @@ const PLANTS = [
   { name: "the mark breathes under reduced motion", suite: "mark", files: () => [plant(MARK_CSS, "@media (prefers-reduced-motion: no-preference) {", "@media all {")] },
   { name: "the mark polls while hidden", suite: "mark", files: () => [plantAll(MARK_JS, [["      if (document.hidden) { owed = true; return; }\n", ""], ["        if (timer) { clearTimeout(timer); timer = 0; owed = true; }\n", ""]])] },
   { name: "an unreachable endpoint reads as resting", suite: "mark", files: () => [plant(MARK_JS, '      paint("down", "health not read"', '      paint("resting", "health not read"')] },
+  { name: "the mark reads health on every page load", suite: "mark", files: () => [plant(MARK_JS, "      if (held) apply(held.v, held.left); else poll();", "      poll();")] },
+  { name: "the mark keeps nothing between pages", suite: "mark", files: () => [plant(MARK_JS, "      keep(v, wait);\n", "")] },
   { name: "the mark drops the unread event", suite: "mark", files: () => [plant(MARK_JS, '        if (v.unread) K.hooks.emit("ff:unread"', '        if (false) K.hooks.emit("ff:unread"')] },
   { name: "the name panel offers Fire without the name", suite: "namePanel", files: () => [plant(PANEL_JS, 'href: "/flows/fire/?symbol=" + encodeURIComponent(symbol)', 'href: "/flows/fire/"')] },
   { name: "the name panel reads a refusal as no wire", suite: "namePanel", files: () => [plant(PANEL_JS, '        absent(slot, err && err.code ? err.code : "error", errLine(err));', '        paint(slot, model({ wires: [] }, symbol));')] },
