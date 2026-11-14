@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { FLOWS_PAGES, sideShell } from "../shared/flows-pages.js";
+import { FLOWS_NAV, FLOWS_PAGES, fireNav, macroNav, ownerNav, positioningNav, sideShell } from "../shared/flows-pages.js";
+import { flowlabShell } from "../shared/flows-flowlab-shell.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ORIGIN = "https://side.test";
@@ -10,6 +11,15 @@ const MIME = { ".js": "text/javascript", ".css": "text/css", ".woff2": "font/wof
 const NARROW = { width: 390, height: 844 };
 const WIDE = { width: 1440, height: 820 };
 const PAGES = { "/flows/long/": () => FLOWS_PAGES.sidePage({ username: "member", side: "long" }), "/flows/short/": () => FLOWS_PAGES.sidePage({ username: "member", side: "short" }) };
+
+const RAIL_PATH = "/flows/rail/";
+const RAIL_SIZES = [{ width: 1920, height: 1080 }, { width: 1440, height: 820 }, { width: 1024, height: 768 }];
+const RAIL_SHORT = { width: 1280, height: 600 };
+const RAIL_KEYS = FLOWS_NAV.flatMap((g) => g.items.map((i) => i.href));
+const railPage = (owner) => {
+  const full = positioningNav(fireNav(macroNav(flowlabShell(FLOWS_PAGES.sidePage({ username: "member", side: "long" }), "long", true)), true, "long"), true, "long");
+  return owner ? ownerNav(full) : full;
+};
 
 let checks = 0;
 
@@ -24,6 +34,9 @@ const VARIANTS = {
   "the script forgets the cookie on load": { js: (src) => swap(src, "let sidePref = sideKeep();", "let sidePref = null;") },
   "Escape closes for this page only": { js: (src) => swap(src, 'if (e.key === "Escape") closeDrawer(true, true);', 'if (e.key === "Escape") closeDrawer(true, false);') },
   "the button never learns the state": { js: (src) => swap(src, 'if (btn) btn.setAttribute("aria-expanded", on);', "") },
+  "the rail keeps its roomy rhythm at every height": { css: (src) => swap(src, "grid-auto-rows: minmax(26px, 34px);", "grid-auto-rows: 34px;") },
+  "the rail fits by hiding an entry": { css: (src) => src + "\n.flows-rail a[data-pos-nav] { display: none; }\n" },
+  "a short window squeezes rows under their floor": { css: (src) => swap(swap(src, ".rail-items:has(> :nth-child(8)) { min-height: 215px; }", ""), ".rail-items:has(> :nth-child(9)) { min-height: 242px; }", "") + "\n.rail-items { min-height: 0; }\n.flows-rail a { min-height: 0; }\n.rail-items { grid-auto-rows: minmax(0, 34px); }\n" },
 };
 
 const run = async (browser, variant = {}) => {
@@ -38,7 +51,12 @@ const run = async (browser, variant = {}) => {
       if (!fs.existsSync(f)) return r.fulfill({ status: 404, body: "" });
       if (u.pathname.endsWith("/flows-ui.js")) return r.fulfill({ contentType: "text/javascript", body: variant.js ? variant.js(fs.readFileSync(f, "utf8")) : fs.readFileSync(f, "utf8") });
       if (u.pathname.endsWith(".js")) return r.fulfill({ contentType: "text/javascript", body: "" });
+      if (u.pathname.endsWith("/flows.css") && variant.css) return r.fulfill({ contentType: "text/css", body: variant.css(fs.readFileSync(f, "utf8")) });
       return r.fulfill({ path: f, contentType: MIME[path.extname(f)] || "application/octet-stream" });
+    }
+    if (u.pathname === RAIL_PATH) {
+      const cookie = (await r.request().allHeaders()).cookie || "";
+      return r.fulfill({ contentType: "text/html; charset=utf-8", body: sideShell(railPage(u.searchParams.get("as") === "owner"), cookie) });
     }
     if (PAGES[u.pathname]) {
       const cookie = (await r.request().allHeaders()).cookie || "";
@@ -72,6 +90,39 @@ const run = async (browser, variant = {}) => {
     return is === want && side.getAnimations().length === 0;
   }, shown, { timeout: 5000 }).then(() => true, () => false);
   const go = async (page, p) => { await page.goto(ORIGIN + p); await page.waitForFunction(() => document.getElementById("fxSideBtn").getAttribute("aria-expanded") !== null && document.readyState === "complete"); await page.waitForTimeout(80); };
+
+  const rail = (page) => page.evaluate(() => {
+    const el = document.querySelector("#fxSide .flows-rail"), box = el.getBoundingClientRect();
+    const rows = [...el.querySelectorAll("a")].map((a) => { const r = a.getBoundingClientRect(), cs = getComputedStyle(a); return { href: a.getAttribute("href"), top: r.top, bottom: r.bottom, h: r.height, shown: cs.display !== "none" && cs.visibility !== "hidden" && r.width > 0 }; });
+    const heads = [...el.querySelectorAll(".rail-group")].map((p) => { const r = p.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; });
+    const marks = [...rows, ...heads].sort((a, b) => a.top - b.top);
+    let overlap = 0;
+    for (let i = 1; i < marks.length; i++) overlap = Math.max(overlap, marks[i - 1].bottom - marks[i].top);
+    return { over: el.scrollHeight - el.clientHeight, rows, overlap, inside: rows.every((r) => r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5), low: Math.min(...rows.map((r) => r.h)), high: Math.max(...rows.map((r) => r.h)), brand: (document.querySelector("#fxSide .ff-brand") || { getAttribute: () => null }).getAttribute("href") };
+  });
+  for (const as of ["member", "owner"]) {
+    for (const size of [...RAIL_SIZES, RAIL_SHORT]) {
+      const { ctx, page } = await fresh(size, { cookie: size.width > 1024 ? undefined : "1" });
+      await page.goto(ORIGIN + RAIL_PATH + "?as=" + as);
+      await page.waitForFunction(() => document.readyState === "complete");
+      await page.evaluate(() => document.fonts.ready);
+      const r = await rail(page);
+      const at = as + " at " + size.width + "x" + size.height + ": ";
+      need(r.rows.map((x) => x.href).join(" ") === RAIL_KEYS.join(" "), at + "the rail lists every entry of FLOWS_NAV, in order, with every switched page open");
+      need(r.rows.every((x) => x.shown), at + "and none of them is hidden");
+      need(r.brand === (as === "owner" ? "/flows/status/#view=coverage" : "/flows/about/"), at + "the footer is this reader's");
+      need(r.overlap <= 0.5, at + "no entry overlaps the next entry or a group heading (" + r.overlap.toFixed(1) + " px)");
+      need(r.low >= 26 - 0.01, at + "no row is squeezed under 26 px (" + r.low.toFixed(1) + ")");
+      need(r.high - r.low <= 0.75, at + "every row has the same height");
+      if (size === RAIL_SHORT) need(r.over > 0, at + "a window too short for the floor scrolls the rail instead of squeezing it");
+      else {
+        need(r.over <= 0, at + "THE RAIL DOES NOT SCROLL (" + r.over + " px over)");
+        need(r.inside, at + "and every entry sits inside it");
+      }
+      if (size.height >= 1080) need(Math.abs(r.high - 34) <= 0.01, at + "where there is room a row keeps its 34 px");
+      await ctx.close();
+    }
+  }
 
   {
     const { ctx, page } = await fresh(NARROW);
