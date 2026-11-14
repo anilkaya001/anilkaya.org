@@ -326,3 +326,37 @@ specified in `docs/fire-and-forget.md`:
 The first night records a line and cannot move it. The governor's `msPerName`
 (6,650) still assumes 150 ms, so a faster line makes the time term conservative,
 never optimistic.
+
+## What can still leave a name stale (2026-11-14)
+
+The night of 2026-11-13 (run 43519759507) read all 630 universe names in full:
+`deepen: 569 name(s) chosen ... limited by backlog`, 630 chains built and none
+failed, the ledger recording 630 deep reads, 26,579 calls in 65 minutes, 2 of
+them refused. The cap and the day line no longer bind. What can still leave a
+figure old for a reader, path by path:
+
+| path | what happens | what the reader is told |
+|---|---|---|
+| tonight's read of a name does not land | the roster's retire step keeps the older card, card-x and hist as held keys; the deepen ledger retries after 1, 2, 4 and 8 sessions | the ticker's Stale chip now counts the age in exchange sessions over the sessions the page carries (`#ftCal data-past`) and says the run for the expected session did not land a new read, so the older read is kept |
+| the night has not published yet | every card is one session behind until `meta` lands | the chip says the run for that session has not published yet |
+| a read failed inside a built card | the panel is `unavailable` with code `failed` and the route and status in its reason | unchanged: the panel's own reason |
+| a card-x part past its maximum age | the dossier withholds it as expired | unchanged |
+| a name outside the live roster in session | the ticker's price is the on-demand quote, any name | unchanged |
+| a name that joined the universe today | not in the universe until tonight, so tier `none` with a live quote; tonight's run reads it in full | unchanged |
+
+Two faults in the owner's coverage view are fixed. The listing behind
+`/api/flows/coverage` was a prefix scan cut at 2,000 rows; on 2026-11-13 the
+store held the 1,890 keys of tonight's names and 758 older held keys of names
+that left the universe, so the report was cut and incomplete every night. It
+now looks up exactly the three name keys of each universe name by primary key.
+And the verifier took a name's tier from the roster, which lists only the names
+that landed tonight, so a name whose read did not land counted as a screen name
+with no card by design and was never flagged. `freshness`, the per-name
+freshness contract, judges every universe name on its own card key, whatever
+its tier: fresh, split, held, stale, undated, new, absent or unknown, with its
+age in sessions; it holds only when every name is fresh.
+
+Not built: the panel-level as-of on the card (a held card's figures are all one
+session's), and a daytime re-read of a name whose nightly read failed. With
+every name read each night, the second is the remaining gap: a name that fails
+tonight waits for its backoff, and the page says so.
