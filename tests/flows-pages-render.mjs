@@ -140,6 +140,7 @@ const SPECS = [
   { id: "ticker", fn: "tickerPage", url: "/flows/ticker/?t=NVDA" },
   { id: "status", fn: "statusPage", url: "/flows/status/" },
   { id: "fire", fn: "firePage", args: { shadow: true }, url: "/flows/fire/" },
+  { id: "digest", fn: "digestPage", args: { shadow: true }, url: "/flows/digest/" },
   { id: "inbox", fn: "ffPendingPage", args: { page: "inbox", shadow: true }, url: "/flows/inbox/" },
 ];
 
