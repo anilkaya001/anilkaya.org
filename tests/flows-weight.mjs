@@ -57,7 +57,7 @@ const GLASS_V3_TICKER = { bytes: 219, gzip: 37, why: "design v3 Lane 1: the tick
 const KERNEL_LIMIT = { kib: 3.8, decision: "F-07 PR 1 measured FlowsUI.defer at 1.6 KB where section 2.10 ruling 8 counted 0.9 KB, so the V and L share of the kernel is stated as 3.8 KB instead of 3.1" };
 
 const CEILING_KIB = {
-  tickerPage: 411 + (6504 + 752) / 1024 + (411 + 6504 / 1024 + 2310 / 1024) - (411 + 6504 / 1024) + (411 + 6504 / 1024 + 2310 / 1024 + 265 / 1024) - (411 + 6504 / 1024 + 2310 / 1024) + (411 + 6504 / 1024 + 2310 / 1024 + 265 / 1024 - 65 / 1024) - (411 + 6504 / 1024 + 2310 / 1024 + 265 / 1024) + 405 / 1024 + 64 / 1024 + 702 / 1024 + 56300 / 1024 + 2400 / 1024 + 32000 / 1024 + 2348 / 1024 + 210 / 1024 + 1400 / 1024 + 5700 / 1024 + 2500 / 1024 + 2895 / 1024 + 1300 / 1024 + 2200 / 1024 + 256 / 1024 + NN_KERNEL.bytes / 1024 + NN_TICKER.bytes / 1024 + NETWORK_TICKER.bytes / 1024 + RT_STAMP.bytes / 1024,
+  tickerPage: 411 + (6504 + 752) / 1024 + (411 + 6504 / 1024 + 2310 / 1024) - (411 + 6504 / 1024) + (411 + 6504 / 1024 + 2310 / 1024 + 265 / 1024) - (411 + 6504 / 1024 + 2310 / 1024) + (411 + 6504 / 1024 + 2310 / 1024 + 265 / 1024 - 65 / 1024) - (411 + 6504 / 1024 + 2310 / 1024 + 265 / 1024) + 405 / 1024 + 64 / 1024 + 702 / 1024 + 56300 / 1024 + 2400 / 1024 + 32000 / 1024 + 2348 / 1024 + 210 / 1024 + 1400 / 1024 + 5700 / 1024 + 2500 / 1024 + 2895 / 1024 + 1300 / 1024 + 2200 / 1024 + 256 / 1024 + NN_KERNEL.bytes / 1024 + NN_TICKER.bytes / 1024 + NETWORK_TICKER.bytes / 1024 + RT_STAMP.bytes / 1024 + 1000 / 1024,
   overviewPage: 246 + 1483 / 1024 + (246 + 2327 / 1024) - (246) + (246 + 2327 / 1024 + 265 / 1024) - (246 + 2327 / 1024) + (246 + 2327 / 1024 + 265 / 1024 - 958 / 1024) - (246 + 2327 / 1024 + 265 / 1024) + 2322 / 1024 + 3600 / 1024 + 3900 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024 + NN_HOME.bytes / 1024 + HOME_BENTO.bytes / 1024 + 9 / 1024 + RT_STAMP.bytes / 1024,
   sidePage: 230 + 7778 / 1024 + (230 + 7778 / 1024 + 2327 / 1024) - (230 + 7778 / 1024) + (230 + 7778 / 1024 + 2327 / 1024 + 265 / 1024) - (230 + 7778 / 1024 + 2327 / 1024) + 2322 / 1024 + 608 / 1024 + 608 / 1024 + 1536 / 1024 + 1470 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024 + RT_STAMP.bytes / 1024,
   watchPage: 230 + 7778 / 1024 + (230 + 7778 / 1024 + 2327 / 1024) - (230 + 7778 / 1024) + (230 + 7778 / 1024 + 2327 / 1024 + 265 / 1024) - (230 + 7778 / 1024 + 2327 / 1024) + 2322 / 1024 + 608 / 1024 + 608 / 1024 + 1536 / 1024 + 1470 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024 + RT_STAMP.bytes / 1024,
@@ -71,6 +71,7 @@ const CEILING_KIB = {
   movesPage: 151 + 5522 / 1024 + 442 / 1024 + 320 / 1024 + 64 / 1024 + NN_KERNEL.bytes / 1024 + MOVES_PARTS.bytes / 1024 + MOVES_SECTORS.bytes / 1024 + 144 / 1024 + MOVES_EARNINGS.bytes / 1024 + RT_STAMP.bytes / 1024 + FLOWLAB_LINK.movesBytes / 1024,
   ledgerPage: 82.6 + LEDGER_PAGE.bytes / 1024 + LEDGER_HOOKS.bytes / 1024,
   flowlabPage: 135.2 + FLOWLAB_PAGE.bytes / 1024,
+  macroPage: 182.5,
   politicalPage: 130 + 2010 / 1024 + 700 / 1024 + 442 / 1024 + NN_KERNEL.bytes / 1024,
   positioningPage: 116.6,
   loginPage: 5,
@@ -93,10 +94,11 @@ const GZIP_KIB = {
   networkPage: 39,
   nowPage: 40.3,
   unusualPage: 87 - 30788 / 1024 + (87 - 30788 / 1024 + 830 / 1024) - (87 - 30788 / 1024) + (87 - 30788 / 1024 + 830 / 1024 + 101 / 1024) - (87 - 30788 / 1024 + 830 / 1024) + 722 / 1024 + 2000 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + 200 / 1024 + 531 / 1024 + 100 / 1024,
-  eventsPage: 34 + 1932 / 1024 + (34 + 1932 / 1024 + 830 / 1024) - (34 + 1932 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (34 + 1932 / 1024 + 830 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024 - 98 / 1024) - (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) + 641 / 1024 + 2000 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
+  eventsPage: 34 + 1932 / 1024 + (34 + 1932 / 1024 + 830 / 1024) - (34 + 1932 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) - (34 + 1932 / 1024 + 830 / 1024) + (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024 - 98 / 1024) - (34 + 1932 / 1024 + 830 / 1024 + 101 / 1024) + 641 / 1024 + 2000 / 1024 + 149 / 1024 + 500 / 1024 + NN_KERNEL.gzip / 1024,
   movesPage: 47.5 + 1122 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024 + MOVES_PARTS.gzip / 1024 + MOVES_SECTORS.gzip / 1024 + MOVES_PARTS.gzip / 1024 + MOVES_SECTORS.gzip / 1024 + MOVES_EARNINGS.gzip / 1024,
   ledgerPage: 27 + LEDGER_PAGE.gzip / 1024 + LEDGER_HOOKS.gzip / 1024,
   flowlabPage: 42.1 + FLOWLAB_PAGE.gzip / 1024,
+  macroPage: 55.5,
   politicalPage: 41.5 + 641 / 1024 + 149 / 1024 + NN_KERNEL.gzip / 1024,
   positioningPage: 37.1,
   loginPage: 3,
@@ -119,10 +121,11 @@ const CSS_KIB = {
   networkPage: 96,
   nowPage: 90,
   unusualPage: 113 + 5007 / 1024 + 1700 / 1024 + 6000 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
-  eventsPage: 105 + 565 / 1024 + 160 / 1024 + 367 / 1024 + 367 / 1024 + 1500 / 1024 + 4700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
+  eventsPage: 105 + 565 / 1024 + 160 / 1024 + 367 / 1024 + 367 / 1024 + 1500 / 1024 + 4700 / 1024 + 200 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   movesPage: 95.5 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024 + MOVES_SECTORS.cssBytes / 1024,
   ledgerPage: 86.5 + LEDGER_PAGE.cssBytes / 1024,
   flowlabPage: 86.5 + FLOWLAB_PAGE.cssBytes / 1024,
+  macroPage: 104.5,
   politicalPage: 103 + 1700 / 1024 + 400 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
   positioningPage: 136.2,
   loginPage: 80 + 565 / 1024 + 1700 / 1024 + GLASS_BYTES + NN_FLOWS_CSS.bytes / 1024,
@@ -149,6 +152,7 @@ const CSS_GZIP_KIB = {
   movesPage: 21 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024 + MOVES_SECTORS.cssGzip / 1024,
   ledgerPage: 18.6 + LEDGER_PAGE.cssGzip / 1024,
   flowlabPage: 18.6 + FLOWLAB_PAGE.cssGzip / 1024,
+  macroPage: 24.5,
   politicalPage: 23.5 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
   positioningPage: 28.2,
   loginPage: 18 + 64 / 1024 + 400 / 1024 + (GLASS_V3.gzip + GLASS_REBASE.gzip) / 1024 + NN_FLOWS_CSS.gzip / 1024,
@@ -192,6 +196,7 @@ const EVENTS_RECENT = { od: "LANE-4", bytes: 4498, gzip: 1127, cssBytes: 379, cs
 GZIP_KIB.eventsPage += EVENTS_RECENT.gzip / 1024;
 CSS_KIB.eventsPage += EVENTS_RECENT.cssBytes / 1024;
 CSS_GZIP_KIB.eventsPage += EVENTS_RECENT.cssGzip / 1024;
+GZIP_KIB.eventsPage += 190 / 1024;
 CEILING_KIB.tickerPage += (TICKER_DEALER_LABELS.bytes + TICKER_PRINTS_MOVE.bytes) / 1024;
 GZIP_KIB.tickerPage += (TICKER_DEALER_LABELS.gzip + TICKER_PRINTS_MOVE.gzip) / 1024;
 for (const name of ["sidePage", "watchPage"]) {
@@ -207,7 +212,7 @@ for (const name of Object.keys(CSS_KIB)) {
 }
 CSS_KIB.tickerPage += MEMBER_TICKER_CSS.bytes / 1024;
 CSS_GZIP_KIB.tickerPage += MEMBER_TICKER_CSS.gzip / 1024;
-const RAIL_FIT = { bytes: 713, gzip: 132, why: "shell follow-ups: flows.css sizes the sidebar's rows to the height the rail has (a grid of 26 to 34 px rows per group, a :has floor per group size, tighter headings under 900 px), 78,168 to 78,881 B raw; every Flows route links flows.css" };
+const RAIL_FIT = { bytes: 790, gzip: 141, why: "shell follow-ups: flows.css sizes the sidebar's rows to the height the rail has (a grid of 26 to 34 px rows per group, a :has floor per group size, tighter headings under 900 px and again under 800 px), 78,168 to 78,958 B raw; every Flows route links flows.css" };
 for (const name of Object.keys(CSS_KIB)) { CSS_KIB[name] += RAIL_FIT.bytes / 1024; CSS_GZIP_KIB[name] += RAIL_FIT.gzip / 1024; }
 for (const name of ["deskPage", "sidePage", "watchPage"]) {
   CEILING_KIB[name] += MEMBER_EXPORT_JS.bytes / 1024;
@@ -278,11 +283,12 @@ const judge = (row, bases = BASES) => {
 };
 
 const DEFERRED = {
-  tickerPage: { groups: { surface: "/assets/js/flows-ticker-surface.js", movelab: "/assets/js/flows-ticker-movelab.js", network: "/assets/js/flows-ticker-network.js", live: "/assets/js/flows-ticker-live.js", "nn-orb": "/assets/js/flows-nn-orb.js", xcheck: "/assets/js/flows-ticker-xcheck.js" } },
+  tickerPage: { groups: { surface: "/assets/js/flows-ticker-surface.js", movelab: "/assets/js/flows-ticker-movelab.js", network: "/assets/js/flows-ticker-network.js", live: "/assets/js/flows-ticker-live.js", private: "/assets/js/flows-ticker-private.js", "nn-orb": "/assets/js/flows-nn-orb.js", xcheck: "/assets/js/flows-ticker-xcheck.js" } },
   unusualPage: { groups: { net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js", "flow-below": "/assets/js/flows-unusual-below.js" }, modules: ["uaTimelineCard", "uaNamesCard", "uaUrgencyCard", "uaFeedCard", "uaSurpriseCard"] },
   marketPage: { groups: { voldesk: "/assets/js/flows-voldesk.js", floor: "/assets/js/flows-market-floor.js", river: "/assets/js/flows-market-river.js", "market-below": "/assets/js/flows-market-below.js", net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" }, modules: ["mkSectorsCard", "mkGroupsCard", "mkExpiryCard", "mkVolCard", "mkRadarCard", "mkAdvCard", "mkVolumeCard", "mkAgainstCard", "mkMoversCard", "mkOiCard", "mkDarkCard", "mkImpactCard", "mkInsidersCard", "mkSeasonCard"] },
   networkPage: { groups: { net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" } },
   deskPage: { groups: { "desk-calls": "/assets/js/flows-desk-calls.js" } },
+  macroPage: { groups: { "macro-charts": ["/assets/js/flows-macro-charts.js"] } },
   ledgerPage: { groups: { "ledger-live": ["/assets/js/flows-rt.js", "/assets/js/flows-ledger.bundle.js", "/assets/js/flows-sfc-live.js"] } },
   statusPage: { groups: { "status-panels": ["/assets/js/flows-chart.js", "/assets/js/flows-status-latency.js", "/assets/js/flows-status-capacity.js", "/assets/js/flows-status-coverage.js"] } },
   overviewPage: { groups: { "home-below": "/assets/js/flows-overview-below.js", "home-net": "/assets/js/flows-net.js", "home-netmap": "/assets/js/flows-net-map.js", "nn-orb": "/assets/js/flows-nn-orb.js" }, modules: ["hmChg", "hmVol", "hmEvents", "hmNews"] },
@@ -304,8 +310,8 @@ const NEURON_RESTORE = { bytes: 2922, why: "a Neuron hidden by mistake could onl
 const ORACLE_DEFERRED_KIB = 60 + NEURON_RESTORE.bytes / 1024;
 const ORACLE_MARKUP_BYTES = 720;
 const DEFERRED_KIB = {
-  tickerPage: 80 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + NETWORK_GROUP.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + (260 + 848) / 1024 + HOME_FIT.deferred / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024 + DESK_CALLS.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024 + (2240 + 627) / 1024 + HOME_FIT.deferred / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
-  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + (26400 + 745) / 1024 + HOME_FIT.deferred / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024 + LEDGER_LIVE.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, firePage: 80 + NN_ASK.bytes / 1024, ffPendingPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024 + FLOWLAB_HEATMAP.bytes / 1024,
+  tickerPage: 80 + 7.3 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + NETWORK_GROUP.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + (260 + 848) / 1024 + HOME_FIT.deferred / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024 + DESK_CALLS.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024 + (2240 + 627) / 1024 + HOME_FIT.deferred / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
+  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + (26400 + 745) / 1024 + HOME_FIT.deferred / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024 + LEDGER_LIVE.bytes / 1024, macroPage: 80 + 15.4 + NN_ASK.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, firePage: 80 + NN_ASK.bytes / 1024, ffPendingPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024 + FLOWLAB_HEATMAP.bytes / 1024,
 };
 const DARK_POOL_TIME = { bytes: 107, why: "lane 2 math audit: the Market page's dark-pool list drops canceled prints, prints its times in TRT through F.time and its prices through F.px, and says how many canceled prints it left out, measured as 58,946 to 59,053 B raw in the deferred flows-market-below.js" };
 DEFERRED_KIB.marketPage += DARK_POOL_TIME.bytes / 1024;
@@ -393,7 +399,7 @@ const measured = [];
 for (const name of pageNames) {
   let html;
   try {
-    html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", scenes: name === "tickerPage", xcheck: name === "tickerPage", voldesk: name === "marketPage" }));
+    html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", scenes: name === "tickerPage", xcheck: name === "tickerPage", privateLens: name === "tickerPage", voldesk: name === "marketPage" }));
   } catch (error) {
     assert.fail(`${name} threw while rendering: ${error && error.message}`);
   }
@@ -492,7 +498,7 @@ for (const m of measured) {
   ok(judge({ ...base, raw: base.raw - 13 * 1024 }).length > 0,
      "the ratchet fails a route that saved 13 KiB raw and left its ceiling where it was");
   ok(judge({ ...base, name: "nowhere" }).length === 4, "a route with no ceilings fails on all four bases");
-  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 39938 + NN_KERNEL.gzip, css: 118855 + NN_FLOWS_CSS.bytes + RAIL_FIT.bytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip + RAIL_FIT.gzip };
+  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 40627 + NN_KERNEL.gzip, css: 119045 + NN_FLOWS_CSS.bytes + RAIL_FIT.bytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip + RAIL_FIT.gzip };
   eq(judge(events).join("; "), "", "events, whose ceiling is held for the earnings strip, passes with its wide raw headroom");
   eq(Object.keys(HELD_RAW_KIB).join(", "), "eventsPage", "events is the only route whose raw ceiling is held above the ratchet");
 }
@@ -575,7 +581,7 @@ for (const name of Object.keys(CEILING_KIB)) {
   }
 
   {
-    const CHART_ROUTES = ["deskPage", "flowlabPage", "marketPage", "overviewPage", "sidePage", "strategyPage", "tickerPage",
+    const CHART_ROUTES = ["deskPage", "flowlabPage", "macroPage", "marketPage", "overviewPage", "sidePage", "strategyPage", "tickerPage",
       "unusualPage", "watchPage"];
     const FREE_ROUTES = ["aboutPage", "eventsPage", "glossaryPage", "loginPage", "notFoundPage", "politicalPage"];
     const chartRoutes = measured.filter((m) => m.parts.some((p) => /^flows-chart\.js/.test(p))).map((m) => m.name).sort();
@@ -585,7 +591,7 @@ for (const name of Object.keys(CEILING_KIB)) {
       ok(pageNames.includes(name) && !chartRoutes.includes(name), `${name} does not link flows-chart.js`);
     }
     for (const name of CHART_ROUTES) {
-      const html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", scenes: name === "tickerPage", xcheck: name === "tickerPage", voldesk: name === "marketPage" }));
+      const html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", scenes: name === "tickerPage", xcheck: name === "tickerPage", privateLens: name === "tickerPage", voldesk: name === "marketPage" }));
       const order = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1].split("?")[0]);
       const at = order.indexOf("/assets/js/flows-ui.js");
       ok(at >= 0 && order[at + 1] === "/assets/js/flows-chart.js",
@@ -775,7 +781,7 @@ for (const name of Object.keys(CEILING_KIB)) {
       }
     }
     if (TICKER_RAISE) {
-      const grouped = Object.entries(DEFERRED.tickerPage.groups).filter(([g]) => g !== "surface" && g !== "movelab" && g !== "network" && g !== "live" && g !== "nn-orb" && g !== "xcheck").map(([, f]) => f).flat().reduce((a, f) => a + bytesOf(f), 0);
+      const grouped = Object.entries(DEFERRED.tickerPage.groups).filter(([g]) => g !== "surface" && g !== "movelab" && g !== "network" && g !== "live" && g !== "private" && g !== "nn-orb" && g !== "xcheck").map(([, f]) => f).flat().reduce((a, f) => a + bytesOf(f), 0);
       ok(TICKER_RAISE.bytes <= 1613, `the ticker's raise (${TICKER_RAISE.od}) is at most the 1,613 B it was made with`);
       ok(grouped < TICKER_RAISE.bytes, `THE TICKER'S ${TICKER_RAISE.bytes} B RAISE STAYS ONLY WHILE THE TICKER DEFERS LESS THAN IT: ${grouped} B of group files are deferred; once they reach the raise, delete TICKER_RAISE (${TICKER_RAISE.od}) and the ceiling returns to 400 KiB`);
       console.log(`  ticker ceiling carries a pending ${TICKER_RAISE.od} deduction of ${TICKER_RAISE.bytes} B: ${TICKER_RAISE.why}`);

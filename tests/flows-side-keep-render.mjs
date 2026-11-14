@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
-import { FLOWS_NAV, FLOWS_PAGES, fireNav, ownerNav, positioningNav, sideShell } from "../shared/flows-pages.js";
+import { FLOWS_NAV, FLOWS_PAGES, fireNav, macroNav, ownerNav, positioningNav, sideShell } from "../shared/flows-pages.js";
 import { flowlabShell } from "../shared/flows-flowlab-shell.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -17,7 +17,7 @@ const RAIL_SIZES = [{ width: 1920, height: 1080 }, { width: 1440, height: 820 },
 const RAIL_SHORT = { width: 1280, height: 600 };
 const RAIL_KEYS = FLOWS_NAV.flatMap((g) => g.items.map((i) => i.href));
 const railPage = (owner) => {
-  const full = positioningNav(fireNav(flowlabShell(FLOWS_PAGES.sidePage({ username: "member", side: "long" }), "long", true), true, "long"), true, "long");
+  const full = positioningNav(fireNav(macroNav(flowlabShell(FLOWS_PAGES.sidePage({ username: "member", side: "long" }), "long", true)), true, "long"), true, "long");
   return owner ? ownerNav(full) : full;
 };
 
@@ -36,7 +36,7 @@ const VARIANTS = {
   "the button never learns the state": { js: (src) => swap(src, 'if (btn) btn.setAttribute("aria-expanded", on);', "") },
   "the rail keeps its roomy rhythm at every height": { css: (src) => swap(src, "grid-auto-rows: minmax(26px, 34px);", "grid-auto-rows: 34px;") },
   "the rail fits by hiding an entry": { css: (src) => src + "\n.flows-rail a[data-pos-nav] { display: none; }\n" },
-  "a short window squeezes rows under their floor": { css: (src) => swap(src, ".rail-items:has(> :nth-child(8)) { min-height: 215px; }", "") + "\n.rail-items { min-height: 0; }\n.flows-rail a { min-height: 0; }\n.rail-items { grid-auto-rows: minmax(0, 34px); }\n" },
+  "a short window squeezes rows under their floor": { css: (src) => swap(swap(src, ".rail-items:has(> :nth-child(8)) { min-height: 215px; }", ""), ".rail-items:has(> :nth-child(9)) { min-height: 242px; }", "") + "\n.rail-items { min-height: 0; }\n.flows-rail a { min-height: 0; }\n.rail-items { grid-auto-rows: minmax(0, 34px); }\n" },
 };
 
 const run = async (browser, variant = {}) => {

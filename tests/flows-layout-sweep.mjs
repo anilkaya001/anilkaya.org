@@ -138,6 +138,7 @@ const SPECS = [
   { id: "ticker", fn: "tickerPage", url: "/flows/ticker/?t=NVDA" },
   { id: "ledger", fn: "ledgerPage", url: "/flows/ledger/" },
   { id: "flowlab", fn: "flowlabPage", url: "/flows/flowlab/" },
+  { id: "macro", fn: "macroPage", url: "/flows/macro/" },
   { id: "status", fn: "statusPage", url: "/flows/status/" },
   { id: "fire", fn: "firePage", args: { shadow: true }, url: "/flows/fire/" },
   { id: "inbox", fn: "ffPendingPage", args: { page: "inbox", shadow: true }, url: "/flows/inbox/" },

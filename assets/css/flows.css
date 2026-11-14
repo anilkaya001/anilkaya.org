@@ -769,6 +769,9 @@ td.c-num { white-space: nowrap; }
   .flows-rail { padding-bottom: var(--sp-3); }
   .rail-group { margin-top: var(--sp-3); margin-bottom: var(--sp-1); }
 }
+@media (max-height: 799.98px) {
+  .rail-group { margin-top: var(--sp-2); }
+}
 .flows-rail a {
   position: relative;
   display: flex;

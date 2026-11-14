@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "430";
+export const ASSET_VERSION = "431";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -7,6 +7,7 @@ import { etDayOf, isSession, shiftDay } from "./flows-quant-time.js";
 import { ledgerBody, LEDGER_DESCRIPTION, LEDGER_STYLES, LEDGER_SCRIPTS } from "./flows-page-ledger.js";
 import { positioningBody, POSITIONING_DESCRIPTION, POSITIONING_STYLES, POSITIONING_SCRIPTS } from "./flows-page-positioning.js";
 import { HORIZON_SESSIONS } from "./flows-horizon.js";
+import { macroBody, MACRO_DESCRIPTION, MACRO_STYLES, MACRO_SCRIPTS, MACRO_DEFER } from "./flows-page-macro.js";
 import { COPY as VD_COPY } from "./flows-voldesk-copy.js";
 import { flowlabBody, FLOWLAB_DESCRIPTION, FLOWLAB_STYLES, FLOWLAB_SCRIPTS } from "./flows-page-flowlab.js";
 import { FIRE_DESCRIPTION, FIRE_SCRIPTS, FIRE_STYLES, fireBody } from "./ff-pages-fire.js";
@@ -88,6 +89,7 @@ const GLYPHS = {
   sidebar: '<rect x="3.5" y="5" width="17" height="14" rx="3"/><path d="M9.5 5v14"/>',
   boards: '<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/>',
   bars: '<path d="M6 18v-3M12 18v-7M18 18V7"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="3.8" ry="9"/><path d="M3 12h18"/>',
   fire: '<path d="M12 4.5c.75 3.6 4.8 5.55 4.8 9.75a4.8 4.8 0 0 1-9.6 0c0-2.25 1.2-3.3 2.1-4.8.75 1.05 1.5 1.35 1.95 1.35C11.55 9.6 11.85 7.8 12 4.5z"/>',
 };
 
@@ -144,6 +146,7 @@ export const FLOWS_NAV = [
     { key: "unusual", href: "/flows/unusual/", label: "Unusual", glyph: "unusual" },
     { key: "flowlab", href: "/flows/flowlab/", label: "Flow Lab", glyph: "flask", ownerOnly: true },
     { key: "ledger", href: "/flows/ledger/", label: "Ledger", glyph: "levels" },
+    { key: "macro", href: "/flows/macro/", label: "Macro", glyph: "globe", gate: "macro" },
     { key: "events", href: "/flows/events/", label: "Events", glyph: "cal", count: true },
     { key: "political", href: "/flows/political/", label: "Political", glyph: "hall" },
     { key: "positioning", href: "/flows/positioning/", label: "Positioning", glyph: "stack", switched: true },
@@ -171,7 +174,7 @@ export const FLOWS_TABS = Object.freeze([
 const TABS = FLOWS_TABS;
 
 const railItem = (active) => (it) => {
-  if ((it.ownerOnly || it.switched) && it.key !== active) return "";
+  if ((it.ownerOnly || it.switched || it.gate) && it.key !== active) return "";
   const on = it.key === active;
   const badge = it.count ? `<span class="rail-count" data-rail-count="${it.key}" hidden></span>` : "";
   return `<a href="${it.href}"${on ? ' class="is-on" aria-current="page"' : ""}>` +
@@ -197,6 +200,18 @@ export function brandMark(href) {
 }
 
 const BRAND_LINK = brandMark(BRAND_MEMBER);
+
+const MACRO_ITEM = FLOWS_NAV.flatMap((g) => g.items).find((it) => it.key === "macro");
+
+export function macroNav(html) {
+  const text = String(html);
+  if (text.includes('href="/flows/macro/"')) return text;
+  const at = text.indexOf('<a href="/flows/ledger/"');
+  if (at < 0) return text;
+  const end = text.indexOf("</a>", at);
+  if (end < 0) return text;
+  return text.slice(0, end + 4) + "\n      " + railItem("")({ ...MACRO_ITEM, gate: undefined }) + text.slice(end + 4);
+}
 
 export function ownerNav(html) {
   let text = String(html);
@@ -457,6 +472,7 @@ export function aboutPage({ positioning = false } = {}) {
       <li><strong>Unusual.</strong> The option windows the vendor flagged, drawn as a flow network from sector through the side of the quote and name to lean, and the contracts trading far above their open interest.</li>
       <li><strong>Flow Lab.</strong> The contracts behind a name's flow: a screener ranked by the site's own ratios, strike and Greek flow, price ladders, routing, lit prints and group flow, each with its unit or a dash and the reason.</li>
       <li><strong>Ledger.</strong> The flagged option premium booked as a closed ledger: takers on one side, liquidity providers on the other, so every row and column sums to zero. It sets each sector's share against its market-cap share, with the bounds it can prove.</li>
+      <li><strong>Macro.</strong> Rates, currencies, commodities, crypto and futures on one screen, with prediction-market odds beside each scheduled release and seasonality shown with its intervals. A figure the feed does not carry is a dash with its reason.</li>
       <li><strong>Events.</strong> Earnings, economic prints and FDA dates for the coming sessions, with the move each report is priced for.</li>
       <li><strong>Political.</strong> Stocks that members of Congress disclosed buying or selling, in the dollar ranges the filings give, with how late each filing arrives.</li>${positioning ? `
       <li><strong>Positioning.</strong> How a fixed set of 13F filers moved their book between sectors, what insiders did by sector, and where failures to deliver and short-sale volume sit.</li>` : ""}
@@ -1077,7 +1093,7 @@ const feedHead = (key, title) => `
     <p class="fd-meta" id="${key}Meta"></p>
   </header>`;
 
-export function eventsPage({ username = "" } = {}) {
+export function eventsPage({ username = "", odds = false } = {}) {
   return `${head("Flows — Events", "What reports next, what is priced into it, and what else is on the calendar.", FEEDS_CSS)}
 ${shell("Events", "events", username, `${feedHead("ev", "Events")}
   <p class="visually-hidden" id="evStatus" role="status">Loading the calendar…</p>
@@ -1094,7 +1110,7 @@ ${feedTabs([["week", "Week", "evWeekCard"], ["earn", "Earnings", "evEarnCard"], 
   <div class="fd-stage" id="fdStage" data-view="week">
 ${feedModule("evWeekCard", "Week ahead", `<div class="fd-body" id="evWeek"></div>`, { tab: "week" })}
 ${feedModule("evEarnCard", "Earnings", `<div class="fd-body" id="evEarn"></div>`, { tab: "earn" })}
-${feedModule("evMacroCard", "Macro", `<div class="fd-body" id="evMacro"></div>`, { tab: "macro" })}
+${feedModule("evMacroCard", "Macro", `<div class="fd-body" id="evMacro"></div>`, { tab: "macro" }).replace('id="evMacroCard"', odds ? 'id="evMacroCard" data-odds="on"' : 'id="evMacroCard"')}
 ${feedModule("evFdaCard", "FDA", `<div class="fd-body" id="evFda"></div>`, { tab: "fda" })}
 ${feedModule("evReactCard", "Reaction", `<div class="fd-body" id="evReact"></div>`, { tab: "react" })}
   </div>
@@ -1196,6 +1212,21 @@ export function ledgerPage({ username = "", live = false } = {}) {
   });
 }
 
+export function macroPage({ username = "", live = false } = {}) {
+  return flowsDocument({
+    title: "Macro",
+    description: MACRO_DESCRIPTION,
+    active: "macro",
+    username,
+    chrome: false,
+    chart: true,
+    styles: MACRO_STYLES,
+    scripts: MACRO_SCRIPTS,
+    body: macroBody(glyph, { live }) + `
+  <i hidden data-defer="macro-charts" data-src="${v(MACRO_DEFER)}"></i>`,
+  });
+}
+
 export function positioningPage({ username = "", now = Date.now() } = {}) {
   return flowsDocument({
     title: "Positioning",
@@ -1253,7 +1284,7 @@ ${UI_CHART_SCRIPTS}
 </html>`;
 }
 
-export function tickerPage({ username = "", scenes = false, xcheck = false, now = Date.now() } = {}) {
+export function tickerPage({ username = "", scenes = false, xcheck = false, privateLens = false, now = Date.now() } = {}) {
   return flowsDocument({
     title: "Ticker",
     description: "One name's options dossier: price against the priced move, the Neuron verdict with priced structures, and the dealer book, volatility, flow and positioning behind it.",
@@ -1324,7 +1355,8 @@ export function tickerPage({ username = "", scenes = false, xcheck = false, now 
   </div>
   <i hidden data-defer="movelab" data-src="${v("/assets/js/flows-ticker-movelab.js")}" id="ftMoveLab"></i>
   <i hidden data-defer="network" data-src="${v("/assets/js/flows-ticker-network.js")}" data-css="${v("/assets/css/flows-ticker-network.css")}" id="ftNetwork"></i>
-  <i hidden data-defer="live" data-src="${v("/assets/js/flows-ticker-live.js")}" id="ftLive"></i>${scenes ? `
+  <i hidden data-defer="live" data-src="${v("/assets/js/flows-ticker-live.js")}" id="ftLive"></i>${privateLens ? `
+  <i hidden data-defer="private" data-src="${v("/assets/js/flows-ticker-private.js")}" data-css="${v("/assets/css/flows-ticker-private.css")}" id="ftPrivate"></i>` : ""}${scenes ? `
   <i hidden data-defer="surface" data-src="${v("/assets/js/flows-ticker-surface.js")}" id="ftSurface"${xcheck ? ' data-xcheck="1"' : ""}></i>${xcheck ? `
   <i hidden data-defer="xcheck" data-src="${v("/assets/js/flows-ticker-xcheck.js")}" data-css="${v("/assets/css/flows-voldesk.css")}" id="ftXcheckLoad"></i>` : ""}` : ""}
 `,
@@ -1674,6 +1706,6 @@ export function positioningNav(html, on, slug) {
 export const FLOWS_PAGES = {
   loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, networkPage, nowPage, deskPage,
   politicalPage, positioningPage,
-  tickerPage, unusualPage, movesPage, flowlabPage, ledgerPage, statusPage, eventsPage, strategyPage, firePage, ffPendingPage, ASSET_VERSION,
+  tickerPage, unusualPage, movesPage, flowlabPage, ledgerPage, macroPage, statusPage, eventsPage, strategyPage, firePage, ffPendingPage, ASSET_VERSION,
 };
 
