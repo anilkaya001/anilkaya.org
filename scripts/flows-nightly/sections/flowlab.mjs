@@ -12,7 +12,8 @@ export const FLOWLAB_PUBLISHES = FLOWLAB_KEYS;
 export async function flowlabStage(ctx, deps = {}) {
   const { vendor, sessionDate, generatedAt } = ctx;
   const { env = process.env, put = publish, store = publishedStore, pool = runPooled, width = poolWidth(2).width, now = Date.now, startedAt = stats.startedAt } = deps;
-  const cap = callCeiling(extrasCap(env));
+  const deadline = startedAt + DEADLINE_MS;
+  const cap = callCeiling(extrasCap(env), deadline, now);
   const alerts = store.flowalerts;
   const result = await readFlowlab({
     vendor,
@@ -20,7 +21,7 @@ export async function flowlabStage(ctx, deps = {}) {
     generatedAt,
     cap,
     env,
-    deadline: startedAt + DEADLINE_MS,
+    deadline,
     pool,
     width,
     alertRows: alerts && Array.isArray(alerts.rows) ? alerts.rows : [],

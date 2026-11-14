@@ -224,7 +224,6 @@ function flowlabRules(id, payload, structural) {
     if (!Number.isInteger(payload.n) || payload.n < 0) bad("n");
   } else if (id === "flowlab-venues") {
     if (!Array.isArray(payload.tickers)) bad("tickers");
-    if (!Array.isArray(payload.codes)) bad("codes");
   } else if (id === "flowlab-screen") {
     if (!isObject(payload.presets)) bad("presets");
     else for (const [name, preset] of Object.entries(payload.presets)) if (!isObject(preset) || (!Array.isArray(preset.rows) && typeof preset.why !== "string")) bad("presets." + name);

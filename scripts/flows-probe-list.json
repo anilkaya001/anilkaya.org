@@ -117,8 +117,7 @@
     {"id": "option-trades", "tier": "2", "op": "/api/option-trades", "path": "/api/option-trades", "query": {"ticker_symbol": "{t}", "limit": "50"}},
     {"id": "lit-flow", "tier": "used", "op": "/api/lit-flow/{ticker}", "path": "/api/lit-flow/{t}", "query": {"limit": "50"}},
     {"id": "quote", "tier": "2", "op": "/api/stock/{ticker}/quote", "path": "/api/stock/{t}/quote"},
-    {"id": "flow-per-strike-intraday", "tier": "used", "op": "/api/stock/{ticker}/flow-per-strike-intraday", "path": "/api/stock/{t}/flow-per-strike-intraday", "query": {"date": "{date}"}},
-    {"id": "stock-volume-price-levels", "tier": "used", "op": "/api/stock/{ticker}/stock-volume-price-levels", "path": "/api/stock/{t}/stock-volume-price-levels", "query": {"date": "{date}"}},
+    {"id": "flow-per-strike-intraday", "tier": "used", "op": "/api/stock/{ticker}/flow-per-strike-intraday", "path": "/api/stock/{t}/flow-per-strike-intraday", "query": {"date": "{date}", "filter": "Volume"}},
     {"id": "option-stance", "tier": "used", "op": "/api/stock/{ticker}/option-stance", "path": "/api/stock/{t}/option-stance", "query": {"stance": "sell_premium", "limit": "25"}},
     {"id": "volatility-context", "tier": "2", "op": "/api/stock/{ticker}/volatility/context", "path": "/api/stock/{t}/volatility/context"},
     {"id": "futures-stats", "tier": "2", "op": "/api/futures/{contract}/stats", "path": "/api/futures/{gold-front}/stats"},
@@ -130,13 +129,12 @@
     {"id": "multi-leg-legs", "tier": "used", "op": "/api/option-trades/multi-leg/{id}/legs", "path": "/api/option-trades/multi-leg/{leg}/legs", "query": {}, "bind": {"leg": {"from": "multi-leg-session", "field": "id"}}},
     {"id": "exchange-breakdown", "tier": "used", "op": "/api/option-trades/exchange-breakdown/{date}", "path": "/api/option-trades/exchange-breakdown/{date}", "query": {"limit": "100"}},
     {"id": "optionable-roots", "tier": "used", "op": "/api/option-trades/optionable-tickers", "path": "/api/option-trades/optionable-tickers", "query": {}},
-    {"id": "flow-recent", "tier": "used", "op": "/api/stock/{ticker}/flow-recent", "path": "/api/stock/{t}/flow-recent", "query": {}},
     {"id": "greek-flow-expiry", "tier": "used", "op": "/api/stock/{ticker}/greek-flow/{expiry}", "path": "/api/stock/{t}/greek-flow/{weekly}", "query": {"date": "{date}"}},
     {"id": "group-greek-flow-expiry", "tier": "used", "op": "/api/group-flow/{flow_group}/greek-flow/{expiry}", "path": "/api/group-flow/mag7/greek-flow/{weekly}", "query": {"date": "{date}"}},
     {"id": "option-price-levels", "tier": "used", "op": "/api/stock/{ticker}/option/stock-price-levels", "path": "/api/stock/{t}/option/stock-price-levels", "query": {"date": "{date}"}},
     {"id": "lit-recent", "tier": "used", "op": "/api/lit-flow/recent", "path": "/api/lit-flow/recent", "query": {"limit": "100", "date": "{date}"}},
-    {"id": "analytics-window", "tier": "used", "op": "/api/analytics/window", "path": "/api/analytics/window", "query": {"symbols": "{tickers}", "range": "3M", "calculations": "correlation"}},
-    {"id": "analytics-sliding", "tier": "used", "op": "/api/analytics/sliding", "path": "/api/analytics/sliding", "query": {"symbols": "{tickers}", "range": "3M", "window_size": "20", "calculations": "correlation"}}
+    {"id": "analytics-window", "tier": "used", "op": "/api/analytics/window", "path": "/api/analytics/window", "query": {"symbols": "{tickers}", "range": "3month", "calculations": "CORRELATION"}},
+    {"id": "analytics-sliding", "tier": "used", "op": "/api/analytics/sliding", "path": "/api/analytics/sliding", "query": {"symbols": "{tickers}", "range": "3month", "window_size": "20", "calculations": "CORRELATION"}}
   ],
   "expect": {
     "/api/stock/{ticker}/volatility/realized": ["date", "implied_volatility", "price", "realized_volatility", "unshifted_rv_date"],
@@ -154,7 +152,6 @@
     "/api/option-trades/flow-alerts/{id}": ["alert", "has_more", "trades"],
     "/api/option-trades/multi-leg/{id}/legs": ["data", "delta", "expiry", "nbbo_ask", "nbbo_bid", "open_interest", "option_symbol", "option_symbol_id", "premium", "price", "side", "size", "strike", "theta", "type", "volume"],
     "/api/option-trades/exchange-breakdown/{date}": ["call_trades", "contracts", "exchange", "premium", "put_trades", "trade_code", "trade_count", "underlying_symbol"],
-    "/api/stock/{ticker}/flow-recent": ["call_otm_premium", "call_otm_trades", "call_otm_volume", "call_premium", "call_premium_ask_side", "call_premium_bid_side", "call_trades", "call_volume", "call_volume_ask_side", "call_volume_bid_side", "date", "expiry", "put_otm_premium", "put_otm_trades", "put_otm_volume", "put_premium", "put_premium_ask_side", "put_premium_bid_side", "put_trades", "put_volume", "put_volume_ask_side", "put_volume_bid_side", "ticker"],
     "/api/stock/{ticker}/greek-flow/{expiry}": ["dir_delta_flow", "dir_vega_flow", "expiry", "otm_dir_delta_flow", "otm_dir_vega_flow", "otm_total_delta_flow", "otm_total_vega_flow", "ticker", "timestamp", "total_delta_flow", "total_vega_flow", "transactions", "volume"],
     "/api/group-flow/{flow_group}/greek-flow/{expiry}": ["dir_delta_flow", "dir_vega_flow", "expiry", "flow_group", "net_call_premium", "net_call_volume", "net_put_premium", "net_put_volume", "otm_dir_delta_flow", "otm_dir_vega_flow", "otm_total_delta_flow", "otm_total_vega_flow", "timestamp", "total_delta_flow", "total_vega_flow", "transactions", "volume"],
     "/api/stock/{ticker}/option/stock-price-levels": ["call_volume", "price", "put_volume"],
@@ -241,7 +238,6 @@
     "/api/lit-flow/{ticker}": ["canceled", "executed_at", "ext_hour_sold_codes", "market_center", "nbbo_ask", "nbbo_ask_quantity", "nbbo_bid", "nbbo_bid_quantity", "premium", "price", "sale_cond_codes", "size", "ticker", "tracking_id", "trade_code", "trade_settlement", "volume"],
     "/api/stock/{ticker}/quote": ["ask", "bid", "data", "last_trade", "market_time", "midpoint", "midpoint_changes", "postmarket", "premarket", "price", "quote", "quote_age_ms", "quote_changes", "quote_statistics", "quote_values", "regular", "size", "size_imbalance", "size_only_changes", "size_weighted_midpoint", "spread", "spread_bps", "spread_tightened", "spread_unchanged", "spread_widened", "time", "vol"],
     "/api/stock/{ticker}/flow-per-strike-intraday": ["call_premium", "call_premium_ask_side", "call_premium_bid_side", "call_trades", "call_volume", "call_volume_ask_side", "call_volume_bid_side", "date", "put_premium", "put_premium_ask_side", "put_premium_bid_side", "put_trades", "put_volume", "put_volume_ask_side", "put_volume_bid_side", "strike", "ticker", "timestamp"],
-    "/api/stock/{ticker}/stock-volume-price-levels": ["data", "lit_vol", "off_vol", "price"],
     "/api/futures/{contract}/stats": ["data", "open_interest", "session_volume", "settlement", "settlement_date"],
     "/api/congress/unusual-trades": ["amount", "asset", "asset_type", "company_name", "data", "description", "filing_date", "id", "politician_id", "politician_name", "ticker", "transaction_date", "transaction_type", "unusual_activity_meta", "unusual_activity_tags"]
   },
