@@ -3725,3 +3725,97 @@ LOAD_USERS=... node scripts/staging-load.mjs --base https://anilkaya-staging.<ac
 
 `tests/staging-contract.mjs` holds the staging configuration, the prober, the
 smoke checks and the load tool's guards against fakes, with no server.
+
+### 10.7 Fire & Forget: the mount, shadow mode, how to look, how to turn it off
+
+Fire & Forget (the wires product, `docs/ff/contract.md`) is mounted in the
+Worker and shipped in shadow. Shadow means: members can open `/flows/fire/`,
+preview and arm wires; the evaluator runs on the nightly and on live landings;
+every hit it finds is stored with state `held`; nothing is delivered, because
+the Inbox, Digest and Wires pages (lanes E, F and H) are not built and answer
+with a not-released page. The Fire page says so in one sentence.
+
+**Before the first deploy.** Apply `migrations/0026_ff.sql` to production D1
+(section 3). The Worker also runs the same sixteen `CREATE TABLE IF NOT
+EXISTS` statements once per isolate before its first Fire statement
+(`ensureFf`), so a database that has not had the migration still works; the
+migration is the reviewed path and the first-use DDL the fallback. No secret
+is added. Three rate-limit bindings are new in both configurations:
+`FF_WRITE` (namespace 1131, staging 2131, 10 a minute), `FF_HEAVY` (1132,
+2132, 6 a minute, shared by preview and export) and `FF_HEALTH` (1133, 2133,
+4 a minute). They are flood brakes that fail open.
+
+**Switches** (`wrangler.toml` [vars]; a deploy overwrites the dashboard's
+list, so the file is what the next deploy runs):
+
+| Variable | Shipped | Meaning |
+|---|---|---|
+| `FF_MODE` | `shadow` | `on` delivers, `shadow` evaluates and holds every hit, anything else is off |
+| `FF_ROUTE_FIRE` | `on` | the Fire page, its sidebar entry and the compose routes |
+| `FF_ROUTE_WIRES` | `on` | the wire routes |
+| `FF_ROUTE_INBOX` | `on` | the inbox routes (the page is a placeholder) |
+| `FF_ROUTE_EXPORT` | `on` | the export route |
+
+Off is closed everywhere: every `/api/ff/*` route answers JSON 404 `ff_off`,
+the four pages are the unknown-page 404, the sidebar carries no Fire entry,
+`POST /api/ff/run` is closed, and neither the cron guard nor the live hook
+sends a statement that names an `ff_` table (`tests/server-ff.mjs` holds this
+for an unset, empty, `off` and misspelt value).
+
+**What runs, and why it cannot hurt what was there.**
+
+- The nightly's `ff` stage is isolated: after the vendor reads are done it
+  builds `ff-metrics` and `ff-carry` from payloads the run already holds
+  (no vendor call, no model), publishes them through the ingest door, then
+  asks `POST /api/ff/run` for the session. A failure in any step is recorded
+  on the stage and the night goes on; `meta` is still the last write.
+- `POST /api/ff/run` takes the ingest credential (the nightly token for a
+  nightly run; the live credential may only ask for a live look). It refuses
+  with `source_missing` until `ff-metrics` for that session is stored, and a
+  run is claimed by one row with a lease, so two callers cannot both
+  evaluate.
+- The half-hourly housekeeping firing has one more guard, `ff housekeeping
+  failed`. While the night is open (before the next session's deadline) it
+  retries a run that is missing, failed or past its lease, at most three
+  attempts, and only on that session's figures. Past the deadline it flags
+  the armed wires of a night that never ran as `not_evaluated`, reason
+  `run_late`. In the 03:00 ET window it prunes run rows older than fourteen
+  days. A store that refuses fails this guard alone.
+- After a `live:alerts` write has landed (status 200), the fetch handler
+  starts the live evaluation in `ctx.waitUntil`. The hook's whole body is in
+  a catch that only logs `ff live tick failed`; the write has already been
+  answered. The Tier 1 cron has no evaluation hook: live wires are looked at
+  when the Actions live leg lands a record, about every five minutes in the
+  regular session.
+
+**Row budget.** `tests/lib/d1-budget.mjs` prices the mount (`ff.mount`) beside
+the four lines of `tests/lib/d1-budget-ff.mjs`; `flows-d1-budget` sums them
+against the caps. A warm preview reads two rows in one trip; a steady
+housekeeping firing past the deadline reads two rows and writes none.
+
+**How to look.**
+
+```bash
+wrangler d1 execute iewt --remote --command "SELECT id, status, attempts, started_at FROM ff_run ORDER BY started_at DESC LIMIT 10"
+wrangler d1 execute iewt --remote --command "SELECT state, COUNT(*) FROM ff_hit GROUP BY state"
+wrangler d1 execute iewt --remote --command "SELECT session, status, reason, COUNT(*) FROM ff_receipt GROUP BY 1, 2, 3 ORDER BY 1 DESC LIMIT 20"
+```
+
+In shadow every `ff_hit` row is `held`. `GET /api/ff/health` (signed in)
+names the mode, each route's availability and the evaluator's last run. The
+nightly's `meta.stages` carries the `ff` stage record. Logs to search:
+`ff housekeeping failed`, `ff live tick failed`, `ff run failed`.
+
+**Turning it off.** Set `FF_MODE = "off"` in `wrangler.toml` and deploy.
+Stored wires, hits and receipts stay; nothing is evaluated. `FF_NIGHTLY=off`
+in the nightly workflow's environment skips the pipeline's `ff` stage alone
+(the stage is on when the variable is unset). To close only the
+page, set `FF_ROUTE_FIRE = "off"`.
+
+**Before `FF_MODE = "on"`.** Lanes E, F and H (Inbox, Digest, the mark, the
+Wires page) must exist, since `on` delivers to pages that are placeholders
+today. The contract's licensing question stands: anything that leaves Flows
+carries Flows-computed metrics only until the owner has settled
+redistribution with the data provider. `docs/ff/ff-u-mount.md` lists the
+deferred contract items and the findings handed to the other lanes; read it
+before the switch moves.

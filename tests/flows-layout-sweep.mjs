@@ -9,6 +9,7 @@ import { chromium } from "playwright";
 import * as PAGES from "../shared/flows-pages.js";
 import { liveEntry, phaseView } from "../shared/flows-live-worker.js";
 import { phaseAt, expectedNightlySession, freshHeaders } from "../shared/flows-freshness.js";
+import { fulfilFf } from "./lib/ff-u-world.mjs";
 import { realisticWorld, respondWith } from "./lib/sfc-render-world.mjs";
 import { payloadFor as voldeskPayload } from "./lib/voldesk-world.mjs";
 
@@ -136,6 +137,8 @@ const SPECS = [
   { id: "ledger", fn: "ledgerPage", url: "/flows/ledger/" },
   { id: "flowlab", fn: "flowlabPage", url: "/flows/flowlab/" },
   { id: "status", fn: "statusPage", url: "/flows/status/" },
+  { id: "fire", fn: "firePage", args: { shadow: true }, url: "/flows/fire/" },
+  { id: "inbox", fn: "ffPendingPage", args: { page: "inbox", shadow: true }, url: "/flows/inbox/" },
 ];
 
 const pageFunctions = Object.keys(PAGES.FLOWS_PAGES).filter((k) => typeof PAGES.FLOWS_PAGES[k] === "function").sort();
@@ -159,6 +162,7 @@ async function mount(page, html, url, patch = null) {
       return route.fulfill({ path: f, contentType: MIME[path.extname(f)] || "application/octet-stream" });
     }
     if (u.pathname.startsWith("/api/rt/")) return route.fulfill({ status: 404, contentType: "application/json", body: '{"error":{"code":"rt_off"}}' });
+    if (u.pathname.startsWith("/api/ff/")) return fulfilFf(route, NOW);
     if (u.pathname.startsWith("/api/flows/")) {
       const r = u.pathname.slice("/api/flows/".length);
       asked.push(r);
@@ -195,7 +199,7 @@ async function mount(page, html, url, patch = null) {
 
 
 const SIZES = (process.env.SIZES || "1920x1080,1440x820,1024x768,390x844").split(",").map((s) => s.split("x").map(Number));
-const ONE_SCREEN = new Set(["overview", "market", "moves", "unusual", "events", "political", "status", "network", "now", "ledger", "flowlab"]);
+const ONE_SCREEN = new Set(["overview", "market", "moves", "unusual", "events", "political", "status", "network", "now", "ledger", "flowlab", "fire", "inbox"]);
 
 const SWEEP = () => {
   const vis = (e) => {

@@ -71,6 +71,8 @@ const GLOBALS = [
   global("flowlab-screen", { capBytes: 96 * 1024, required: ["v", "sessionDate", "presets"] }),
   global("flowlab-groups", { capBytes: 24 * 1024, required: ["v", "sessionDate", "expiry", "groups"] }),
   global("flowlab-corr", { capBytes: 32 * 1024, required: ["v", "sessionDate", "status"] }),
+  global("ff-metrics", { capBytes: 96 * 1024, required: ["v", "sessionDate", "generatedAt", "t", "cols"] }),
+  global("ff-carry", { capBytes: 96 * 1024, required: ["v", "sessionDate", "generatedAt", "windows"] }),
 ];
 
 const dated = (id, source, over = {}) => product(id, "dated", { pattern: source, archive: true, ...over });
