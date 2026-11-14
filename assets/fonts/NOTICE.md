@@ -22,6 +22,8 @@ The layout features kept are `kern`, `mark`, `mkmk`, `ccmp`, `locl`, `liga`,
 `calt`, `tnum`, `pnum`, `lnum`, `case`, `zero`, `frac`, `numr`, `dnom`,
 `sups`, `subs`, `sinf` and `ordn`.
 
+The files are rebuilt with `python3 scripts/build-fonts.py <upstream dir> <out dir> wght`.
+
 | File | Style | Covers |
 |---|---|---|
 | `GoogleSans-latin.woff2` | upright | Basic Latin, Latin-1, Latin Extended-A, general punctuation, super and subscript digits, the arrows, mathematical operators and geometric shapes the face draws |
