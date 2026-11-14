@@ -48,6 +48,7 @@ export const STAGES = Object.freeze([
   stage("card-x", ISOLATION.fatal, ["dossiers"], ["card-x:*"]),
   stage("positioning", ISOLATION.isolated, ["card-x"], ["positioning"]),
   stage("compute", ISOLATION.isolated, ["card-x"]),
+  stage("eventrisk", ISOLATION.isolated, ["card-x"], ["eventrisk", "er-sectors"]),
   stage("oracle-publish", ISOLATION.isolated, ["compute"], ["oracle:*", "oracle-top", "oracle-norm"]),
   stage("voldesk", ISOLATION.isolated, ["compute"], ["voldesk", "voldesk-stance"]),
   stage("deepen-ledger", ISOLATION.isolated, ["compute"], ["deepen"]),

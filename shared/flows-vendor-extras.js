@@ -23,11 +23,15 @@ export const PARTS = Object.freeze({
   svx: Object.freeze({ group: "ps", op: "short-venues", rv: 1, refreshS: 20 * 3600, maxS: 3 * DAY_S }),
   ibs: Object.freeze({ group: "ps", op: "insider-bs", rv: 1, refreshS: 3 * DAY_S, maxS: 7 * DAY_S }),
   ins: Object.freeze({ group: "ps", op: "insiders", rv: 1, refreshS: 30 * DAY_S, maxS: 60 * DAY_S }),
+  eps: Object.freeze({ group: "er", op: "stock-earnings", rv: 1, refreshS: 5 * DAY_S, maxS: 30 * DAY_S }),
+  fin: Object.freeze({ group: "er", op: "income-statements", rv: 1, refreshS: 7 * DAY_S, maxS: 45 * DAY_S, calls: 3 }),
 });
 
-export const SLOW_IDS = Object.freeze(Object.keys(PARTS).filter((id) => id !== "ivp" && PARTS[id].group !== "ps"));
+export const SLOW_IDS = Object.freeze(Object.keys(PARTS).filter((id) => id !== "ivp" && PARTS[id].group !== "ps" && PARTS[id].group !== "er"));
 
 export const PS_IDS = Object.freeze(Object.keys(PARTS).filter((id) => PARTS[id].group === "ps"));
+
+export const ER_IDS = Object.freeze(["eps", "fin"]);
 
 export const NIGHTLY_IDS = Object.freeze(["ivp"]);
 
@@ -35,9 +39,10 @@ export const GROUPS = Object.freeze({
   dx: Object.freeze(Object.keys(PARTS).filter((id) => PARTS[id].group === "dx")),
   vx: Object.freeze(Object.keys(PARTS).filter((id) => PARTS[id].group === "vx")),
   ps: Object.freeze(Object.keys(PARTS).filter((id) => PARTS[id].group === "ps")),
+  er: Object.freeze(Object.keys(PARTS).filter((id) => PARTS[id].group === "er")),
 });
 
-export const SECTION_BYTES = Object.freeze({ dx: 24 * 1024, vx: 8 * 1024, ps: 8 * 1024 });
+export const SECTION_BYTES = Object.freeze({ dx: 24 * 1024, vx: 8 * 1024, ps: 8 * 1024, er: 8 * 1024 });
 
 export const SLOW_CAP = 2000;
 
@@ -60,7 +65,9 @@ export function extrasCap(env = {}, fallback = SLOW_CAP) {
   return Math.min(Math.floor(n), SLOW_CAP_MAX);
 }
 
-export const SHED_ORDER = Object.freeze(["svx", "ins", "ibs", "ftd", "financials", "breakdown", "ownership", "analysts", "estimates", "profile", "info", "etf", "splits", "dividends", "ivp"]);
+const EXTRAS_SHED = Object.freeze(["svx", "ins", "ibs", "ftd", "financials", "breakdown", "ownership", "analysts", "estimates", "profile", "info", "etf", "splits", "dividends", "ivp"]);
+
+export const SHED_ORDER = Object.freeze(["fin", "eps", ...EXTRAS_SHED]);
 
 export const FAIL_REASONS = Object.freeze(["unshaped", "missing", "type", "empty", "plan", "limited", "failed", "deadline", "cap", "size", "unread"]);
 
@@ -457,13 +464,13 @@ export function exSplit(x, today) {
   return { next: future[0] || null, last: past.length ? past[past.length - 1] : null, future, known: true };
 }
 
-export function partState(part, id, now) {
+export function partState(part, id, now, refreshS = null) {
   const spec = PARTS[id];
   if (!spec || !isObj(part) || !isNum(part.at)) return "missing";
   if (part.rv !== spec.rv) return "outdated";
   const age = (now - part.at) / 1000;
   if (!(age >= -DAY_S)) return "outdated";
-  if (age <= spec.refreshS) return "fresh";
+  if (age <= (refreshS === null ? spec.refreshS : refreshS)) return "fresh";
   if (age <= spec.maxS) return "stale";
   return "expired";
 }
@@ -482,15 +489,15 @@ export function fnv32(text) {
   return h >>> 0;
 }
 
-export function urgency(part, id, now) {
-  const s = partState(part, id, now);
+export function urgency(part, id, now, refreshS = null) {
+  const s = partState(part, id, now, refreshS);
   if (s === "fresh") return -1;
   if (s === "stale" && part.shed === 1) return -1;
   if (s !== "stale") return Infinity;
   return ((now - part.at) / 1000) / PARTS[id].maxS;
 }
 
-export function planSlow({ names, priors, now, cap = SLOW_CAP, ids = SLOW_IDS, scopeOf = null }) {
+export function planSlow({ names, priors, now, cap = SLOW_CAP, ids = SLOW_IDS, scopeOf = null, refreshOf = null }) {
   const due = [];
   let fresh = 0;
   for (const t of names) {
@@ -499,15 +506,22 @@ export function planSlow({ names, priors, now, cap = SLOW_CAP, ids = SLOW_IDS, s
       if (scopeOf && !scopeOf(id, t)) continue;
       const group = PARTS[id].group;
       const part = sections && isObj(sections[group]) && isObj(sections[group].parts) ? sections[group].parts[id] : null;
-      const u = urgency(part, id, now);
+      const u = urgency(part, id, now, refreshOf ? refreshOf(id, t) : null);
       if (u < 0) { fresh++; continue; }
       due.push({ t, id, u, h: fnv32(t + "|" + id) });
     }
   }
   const rank = (u) => (u === Infinity ? 1e9 : u);
   due.sort((a, b) => (rank(b.u) - rank(a.u)) || (a.h - b.h) || (a.t < b.t ? -1 : a.t > b.t ? 1 : a.id < b.id ? -1 : 1));
-  const picked = due.slice(0, Math.max(0, cap));
-  return { picked, deferred: due.length - picked.length, due: due.length, fresh };
+  const picked = [];
+  let spent = 0;
+  for (const d of due) {
+    const cost = PARTS[d.id].calls || 1;
+    if (spent + cost > Math.max(0, cap)) break;
+    spent += cost;
+    picked.push(d);
+  }
+  return { picked, deferred: due.length - picked.length, due: due.length, fresh, spent };
 }
 
 const stubOf = (part) => ({ at: part.at, rv: part.rv, shed: 1 });

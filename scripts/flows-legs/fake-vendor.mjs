@@ -2,6 +2,7 @@ import { addDays, weekdaysAhead, priorWeekdayIso, isWeekdayIso } from "../../sha
 import { touch } from "./taint.mjs";
 import { fakePositioningUw } from "./positioning-fake.mjs";
 import { flowlabHandlers } from "./flowlab-fake.mjs";
+import { eventRiskHandlers } from "./eventrisk-fake.mjs";
 
 function prng(seed) {
   let s = seed | 0;
@@ -572,6 +573,7 @@ export function makeFakeVendor({ sessionDate, screenerRows = [], carded = [] } =
       })) };
     }],
     ...flowlabHandlers(S),
+    ...eventRiskHandlers({ sessionDate: S, tickers }),
   ];
 
   let positioningUw = null;

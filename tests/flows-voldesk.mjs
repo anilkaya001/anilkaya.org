@@ -721,7 +721,7 @@ eq(MUTANTS.length, 27, "twenty-seven planted wrong builds, the package's twenty-
   const off = fs.mkdtempSync(path.join(process.env.TMPDIR || "/tmp", "wp3-off-"));
   try {
     execFileSync(process.execPath, [path.join(ROOT, "scripts/flows-pipeline.mjs"), "--dry-run", "--emit", off + path.sep], {
-      cwd: ROOT, env: { ...process.env, FLOWS_DRY_NOW: "2026-08-24T21:45:00Z", FLOWS_VOLDESK_BUILD: "off" }, stdio: ["ignore", "ignore", "pipe"], maxBuffer: 64 * 1024 * 1024,
+      cwd: ROOT, env: { ...process.env, FLOWS_DRY_NOW: "2026-08-24T21:45:00Z", FLOWS_VOLDESK_BUILD: "off", FLOWS_EVENTRISK_NIGHTLY: "off" }, stdio: ["ignore", "ignore", "pipe"], maxBuffer: 64 * 1024 * 1024,
     });
     ok(!fs.existsSync(path.join(off, "-voldesk.json")) && !fs.existsSync(path.join(off, "-voldesk-stance.json")), "SWITCH OFF: neither payload is written");
     const files = fs.readdirSync(emit).filter((f) => f !== ".emit-complete");

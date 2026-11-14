@@ -85,7 +85,11 @@ function oldChain(path, rc, d) {
       "/flows/flowlab/": (u) => FLOWS_PAGES.flowlabPage({ username: u }),
       "/flows/unusual/": (u, summary, owner) => FLOWS_PAGES.unusualPage({ username: u, owner }),
       "/flows/ledger/": (u) => FLOWS_PAGES.ledgerPage({ username: u }),
-      "/flows/events/": (u) => FLOWS_PAGES.eventsPage({ username: u }),
+      "/flows/events/": (u, summary, owner, env) => {
+        const w = String(env && env.FLOWS_EVENTRISK || "").trim().toLowerCase();
+        const open = w === "on" || ((w !== "off") && owner === true);
+        return FLOWS_PAGES.eventsPage({ username: u, eventrisk: open, halts: String(env && env.FLOWS_EVENTRISK_HALTS || "").trim().toLowerCase() === "on" });
+      },
       "/flows/political/": (u, summary, owner, env) => FLOWS_PAGES.politicalPage({ username: u, layers: positioningMode(env, owner) }),
       "/flows/positioning/": (u) => FLOWS_PAGES.positioningPage({ username: u }),
       "/flows/status/": (u) => FLOWS_PAGES.statusPage({ username: u }),
@@ -245,7 +249,8 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     if (slug === "status") continue;
     const asMember = await call({ ...scenario({ username: "anilkaya" }).deps, isOwner: () => false });
     ok(!asMember.includes("railOps") && !asMember.includes("/flows/status/"), path + ": a member's HTML names neither the group nor the page");
-    if (slug === "market" || slug === "unusual") continue;
+    if (slug === "events") ok(asOwner.includes("erRiskCard") && !asMember.includes("erRiskCard") && !asMember.includes("flows-er"), path + ": the event-risk views are the owner's alone while the switch ships owner");
+    if (slug === "market" || slug === "unusual" || slug === "events") continue;
     const brand = /<a class="ff-brand" href="([^"]*)"/;
     ok((asOwner.match(brand) || [])[1] === "/flows/status/#view=coverage" && (asMember.match(brand) || [])[1] === "/flows/about/", path + ": the trade-mark opens data coverage for an owner and About for a member");
     if (slug === "political") continue;

@@ -69,11 +69,14 @@ const { keys, unknown } = emitKeys(dir);
 eq(unknown, [], "EVERY KEY THE DRY-RUN EMIT WRITES IS A REGISTERED PRODUCT");
 ok(keys.size >= 400, "the emit holds " + keys.size + " keys");
 const emitted = [...keys.keys()];
-eq(GLOBAL_KEYS.filter((k) => !keys.has(k)), [], "AND EVERY REGISTERED GLOBAL IS WRITTEN BY IT");
+const NIGHTLY_SWITCHED = ["eventrisk", "er-sectors"];
+eq(NIGHTLY_SWITCHED.filter((k) => GLOBAL_KEYS.includes(k)), NIGHTLY_SWITCHED, "the event-risk keys are registered globals");
+eq(NIGHTLY_SWITCHED.filter((k) => keys.has(k)), [], "the shared emit runs with FLOWS_EVENTRISK_NIGHTLY off and writes no event-risk key; flows-er-nightly holds the on run");
+eq(GLOBAL_KEYS.filter((k) => !keys.has(k) && !NIGHTLY_SWITCHED.includes(k)), [], "AND EVERY OTHER REGISTERED GLOBAL IS WRITTEN BY IT");
 for (const k of emitted) ok(productOf(k) !== null, `${k}: registered`);
 const byFamily = { global: 0, dated: 0, name: 0, live: 0 };
 for (const k of emitted) byFamily[productOf(k).family]++;
-ok(byFamily.global === GLOBAL_KEYS.length && byFamily.dated >= 4 && byFamily.name >= 400 && byFamily.live >= 8, "the families are all present in it: " + JSON.stringify(byFamily));
+ok(byFamily.global === GLOBAL_KEYS.length - NIGHTLY_SWITCHED.length && byFamily.dated >= 4 && byFamily.name >= 400 && byFamily.live >= 8, "the families are all present in it: " + JSON.stringify(byFamily));
 for (const k of emitted.filter((x) => productOf(x).family !== "live")) {
   const bytes = Buffer.byteLength(JSON.stringify(keys.get(k)));
   ok(bytes <= FLOWS_MAX_PAYLOAD_BYTES, `${k}: ${bytes} bytes, inside the door's cap`);

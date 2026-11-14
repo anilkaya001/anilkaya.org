@@ -119,7 +119,7 @@ export async function runMarketLegs({
     `, earnings history ${[...earnings.values()].filter((e) => e.status === "ok").length}/${earnings.size}`);
 
   const extras = extrasOptions
-    ? await runExtras({ uw, names: owned, sessionDate, now: Date.parse(readAt) || Date.now(), deadline, pool, width, log: say, ...extrasOptions })
+    ? await runExtras({ uw, names: owned, sessionDate, now: Date.parse(readAt) || Date.now(), deadline, pool, width, log: say, ...extrasOptions, ...(extrasOptions.er ? { er: { ...extrasOptions.er, names: windowTickers } } : {}) })
     : null;
 
   let reportsOut = null;

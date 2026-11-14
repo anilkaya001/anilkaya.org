@@ -4596,7 +4596,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(compute.names > 0 && compute.names <= cardCount, "and with the Oracle registered it computes the carded names the run built");
   ok(cardCount > 0 && /compute: \d+ of \d+ deep name\(s\), 1 job\(s\)/.test(log), "its log line counts the carded names it was offered");
   ok(meta.stages.every((r) => Number.isInteger(r.cpu) && r.cpu >= 0), "every stage record carries whole-number CPU milliseconds");
-  ok(JSON.stringify(meta.stages).length < 3800, `and the records add under 3.8 KiB to meta, the Vol desk and its audit, the funds stage, the positioning stages and the Fire & Forget stage being the records added since 3 KiB (${JSON.stringify(meta.stages).length} bytes)`);
+  ok(JSON.stringify(meta.stages).length < 3900, `and the records add under 3.9 KB to meta, the Vol desk and its audit, the funds stage, the positioning stages, the Fire & Forget stage and the event-risk stage being the records added since 3 KiB (${JSON.stringify(meta.stages).length} bytes)`);
   same(meta.health, { failures: 0, warnings: 0, first: [] }, "meta carries the gate's verdict: a clean dry run has none");
   const wrote = [...log.matchAll(/^ {2}\[dry-run\] (\S+): .*, \d+ bytes$/gm)].map((m) => m[1]);
   ok(wrote.length > 400, `the dry run printed ${wrote.length} writes`);
@@ -5284,7 +5284,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     }
     r.finish();
     ok(r.records().filter((y) => y.why).every((y) => y.why.length <= WHY_CAP && !/\s{2}/.test(y.why)), "a failure reason is one line and capped");
-    ok(JSON.stringify(r.records()).length < 7000, `even with every isolated stage failed the records stay under 7 KB, the funds stage, the Vol desk and its audit, the positioning stages and the Fire & Forget stage being the records added since 6 KB (${JSON.stringify(r.records()).length})`);
+    ok(JSON.stringify(r.records()).length < 7200, `even with every isolated stage failed the records stay under 7.2 KB, the funds stage, the Vol desk and its audit, the positioning stages, the Fire & Forget stage and the event-risk stage being the records added since 6 KB (${JSON.stringify(r.records()).length})`);
     let n = 0;
     const bigClock = () => (n += 98765);
     const wide = createStageRunner({ clock: bigClock, calls: () => n / 30 });

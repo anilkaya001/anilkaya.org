@@ -205,7 +205,7 @@
       h("div", { class: "fe-dh" }), laneHead("Macro", macroSt), laneHead("Earnings", earnSt), laneHead("FDA", fdaSt), divSt ? laneHead("Ex-div", divSt) : null));
     const mark = nextMark(list, nowDay, payload.gateOrigin);
     list.forEach((d, k) => {
-      const col = h("section", { class: "fe-col", "aria-label": weekday(d) + " " + F.day(d) });
+      const col = h("section", { class: "fe-col", "aria-label": weekday(d) + " " + F.day(d), "data-day": d });
       col.append(h("div", { class: "fe-dh" }, h("b", null, weekday(d)), h("span", null, F.day(d)), d === mark ? h("i", { class: "fe-next" }, d === nowDay ? "Today" : "Next") : null));
       const mac = macroSt.state === "ok" ? (payload.macro.rows || []).filter((m) => m && m.day === d).sort((a, b) => String(a.at).localeCompare(String(b.at))) : [];
       col.append(h("div", { class: "fe-cell fe-c-macro", "data-lane": "Macro" }, mac.length ? mac.map(macroPill) : macroSt.state === "ok" ? h("span", { class: "fe-none", title: "No scheduled economic print for this day in the vendor calendar" }, "No print") : null));
@@ -722,6 +722,13 @@
 
   const trouble = (kind, message) => { const e = new Error(message); e.evKind = kind; return e; };
 
+  const erHost = document.getElementById("erDefer");
+  const erStart = () => {
+    if (!erHost || !UI.defer) return;
+    const er = () => window.FlowsUI.er;
+    UI.defer("er", { when: "idle" }).then(() => er() && er().mount()).then(() => { if (er()) er().weekMarks(host.week); });
+  };
+
   wireInfos();
   fetch("/api/flows/events", { credentials: "same-origin", headers: { Accept: "application/json" } }).then((response) => {
     if (response.status === 401) { location.replace("/flows/"); return null; }
@@ -742,6 +749,7 @@
     UI.freshness({ sessionDate: payload.sessionDate, generatedAt: payload.generatedAt, updatedAt: payload.__updatedAt, source: "events" });
     if (payload.status === "pending") {
       failEverywhere("pending", "The pipeline has not published this key yet. This calendar is built by the weekday after-close run out of screener rows it already holds — it costs no vendor call — and it appears with the first run after this page shipped.");
+      erStart();
       return;
     }
     stale(payload, payload.__updatedAt);
@@ -754,6 +762,7 @@
     paintFda(payload);
     paintReact(payload);
     wireInfos();
+    erStart();
   }).catch((error) => {
     const why = error && error.message ? error.message : "the request failed";
     if (error && error.evKind === "unreadable") {
@@ -761,5 +770,6 @@
     } else {
       failEverywhere("failed", "The calendar could not be fetched (" + why + "). Refresh to try again.");
     }
+    erStart();
   });
 })();

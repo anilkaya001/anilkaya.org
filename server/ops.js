@@ -15,7 +15,7 @@ export const OPS_LEDGER_DAYS = 7;
 export const OPS_SWITCHES = Object.freeze([
   "FLOWS_RT_MODE", "FLOWS_RT_AUDIENCE", "FLOWS_RT_UPSTREAM", "FLOWS_RT_SOCKET_HOURS", "FLOWS_READ_MODE", "FLOWS_LIVE_MODE",
   "FLOWS_PREMARKET_NEWS", "FLOWS_READY", "FLOWS_HEALTH", "FLOWS_SCENES", "FLOWS_FLOOR_FUNDS", "FLOWS_MOVES", "FLOWS_LEDGER", "FLOWS_HOME_NET", "FLOWS_FRONT_DOOR",
-  "FLOWS_OPS", "FLOWS_FLOWLAB", "FLOWS_FLOWLAB_NIGHTLY", "FLOWS_FLOWLAB_ANALYTICS", "FLOWS_POSITIONING", "FLOWS_POSITIONING_NIGHTLY", "FLOWS_POSITIONING_CAP",
+  "FLOWS_OPS", "FLOWS_FLOWLAB", "FLOWS_FLOWLAB_NIGHTLY", "FLOWS_FLOWLAB_ANALYTICS", "FLOWS_POSITIONING", "FLOWS_POSITIONING_NIGHTLY", "FLOWS_POSITIONING_CAP", "FLOWS_EVENTRISK", "FLOWS_EVENTRISK_NIGHTLY", "FLOWS_EVENTRISK_CAP", "FLOWS_EVENTRISK_HALTS",
 ]);
 
 export const RATE_LIMITS = Object.freeze([
@@ -25,7 +25,7 @@ export const RATE_LIMITS = Object.freeze([
   Object.freeze({ name: "LAB_WRITE", limit: 30, periodS: 60 }),
 ]);
 
-export const COVERAGE_KEYS = Object.freeze([...new Set([...NOW_NIGHTLY_KEYS, "universe", "regime", "ideas", "roster", "calib", "dispersion", "deepen"])]);
+export const COVERAGE_KEYS = Object.freeze([...new Set([...NOW_NIGHTLY_KEYS, "universe", "regime", "ideas", "roster", "calib", "dispersion", "deepen", "eventrisk", "er-sectors"])]);
 
 const LIVE_IDS = Object.freeze(Object.keys(LIVE_KEYS));
 
