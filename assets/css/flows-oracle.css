@@ -16,6 +16,9 @@
 @media (max-width: 767.98px) {
   .has-dock-open .orc:not(.is-open) { visibility: hidden; }
 }
+@media (max-width: 599.98px) {
+  .orc { right: calc(max(var(--gutter), var(--safe-r)) - var(--sp-3)); }
+}
 
 .orc-orb {
   position: relative;

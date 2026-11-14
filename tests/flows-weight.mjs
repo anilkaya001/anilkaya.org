@@ -214,7 +214,7 @@ CSS_KIB.tickerPage += MEMBER_TICKER_CSS.bytes / 1024;
 CSS_GZIP_KIB.tickerPage += MEMBER_TICKER_CSS.gzip / 1024;
 const RAIL_FIT = { bytes: 790, gzip: 141, why: "shell follow-ups: flows.css sizes the sidebar's rows to the height the rail has (a grid of 26 to 34 px rows per group, a :has floor per group size, tighter headings under 900 px and again under 800 px), 78,168 to 78,958 B raw; every Flows route links flows.css" };
 for (const name of Object.keys(CSS_KIB)) { CSS_KIB[name] += RAIL_FIT.bytes / 1024; CSS_GZIP_KIB[name] += RAIL_FIT.gzip / 1024; }
-const ORB_SLOT = { bytes: 342, gzip: 82, why: "the Neuron orb docked in the top bar: flows.css reserves the 44 px slot oracleShell puts at the bar's end, lets the bar title give way first and the freshness label shrink with an ellipsis, and closes the bar's gaps to 4 px on a phone, so the orb, its pill and its toast never sit over page content; 78,958 to 79,300 B raw and 15,732 to 15,814 B gzip, on every Flows route that links flows.css" };
+const ORB_SLOT = { bytes: 542, gzip: 117, why: "the Neuron orb docked in the top bar: flows.css reserves the 44 px slot oracleShell puts at the bar's end, lets the bar title give way first (and take no width while a hero hides it) and the freshness label shrink with an ellipsis, and closes the bar's gaps and the freshness button's padding to 4 px on a phone, where the slot also takes 8 px of the gutter, so the orb, its pill and its toast never sit over page content; 78,958 to 79,500 B raw and 15,732 to 15,849 B gzip, on every Flows route that links flows.css" };
 for (const name of Object.keys(CSS_KIB)) { CSS_KIB[name] += ORB_SLOT.bytes / 1024; CSS_GZIP_KIB[name] += ORB_SLOT.gzip / 1024; }
 for (const name of ["deskPage", "sidePage", "watchPage"]) {
   CEILING_KIB[name] += MEMBER_EXPORT_JS.bytes / 1024;
@@ -254,6 +254,8 @@ CEILING_KIB.marketPage += CAP_TIDE.market.bytes / 1024;
 GZIP_KIB.marketPage += CAP_TIDE.market.gzip / 1024;
 CSS_KIB.marketPage += CAP_TIDE.market.cssBytes / 1024;
 CSS_GZIP_KIB.marketPage += CAP_TIDE.market.cssGzip / 1024;
+const ORB_CORNER_MARKET = { bytes: 307, why: "the orb docked in the top bar: flows-market.css no longer holds the stage's right margin and phone bottom margin that kept the floating orb's corner clear, 39,360 to 39,053 B raw" };
+CSS_KIB.marketPage -= ORB_CORNER_MARKET.bytes / 1024;
 
 const RATCHET_KIB = { raw: 12, gzip: 3, css: 3, cssGzip: 3 };
 const HELD_RAW_KIB = { eventsPage: 50 };

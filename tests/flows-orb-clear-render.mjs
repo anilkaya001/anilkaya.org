@@ -46,6 +46,8 @@ const CLEAR = () => {
   const sp = document.querySelector("#fxBar .fx-bar-sp");
   if (sp) { const r = sp.getBoundingClientRect(); out.room = { x: r.left, y: r.top, r: r.right, b: r.bottom }; }
   out.bar = [...document.getElementById("fxBar").children].map((c) => (c.id || c.className.split(" ")[0]) + ":" + Math.round(c.getBoundingClientRect().left) + "-" + Math.round(c.getBoundingClientRect().right));
+  const fl = document.querySelector("#fxBar.has-hero:not(.is-scrolled) .fx-fresh-l");
+  out.freshCut = !!fl && fl.getClientRects().length > 0 && fl.scrollWidth > fl.clientWidth;
   if (!out.surfaces.length) return out;
   const clipOf = (el, self) => {
     let box = { x: 0, y: 0, r: innerWidth, b: innerHeight };
@@ -187,6 +189,7 @@ async function sweepSpec(spec, width, height, patch = null) {
           if (fail.length && process.env.ORB_DEBUG) fail.push("bar " + r.bar.join(" "));
           if (!dock || width >= 768) {
             if (state === "calm" && !r.surfaces.some((s) => s.name === "orb")) fail.push("the orb is not shown");
+            if (state === "calm" && r.freshCut) fail.push("the freshness label is cut to make room for the orb");
             if (state === "undo" && !r.surfaces.some((s) => s.name === "restore")) fail.push("the restore control is not shown");
           }
           out.push({ tag, view: v || "-", dock, state, fail, surfaces: r.surfaces.map((s) => s.name) });
@@ -232,7 +235,6 @@ try {
       const room = await w.page.evaluate(() => document.getElementById("fxOracle").dataset.room);
       if (room === "1") ok(r.surfaces.some((s) => s.name === what), `a real signal from the flow stream shows the ${what} where the bar has room, at ${width}x${height} (${r.surfaces.map((s) => s.name).join(", ")})`);
       else ok(!r.surfaces.some((s) => s.name === what) && r.surfaces.some((s) => s.name === "badge"), `where the bar has no room the ${what} stays out and the orb's count says it at ${width}x${height} (${r.surfaces.map((s) => s.name).join(", ")})`);
-      eq(room, width < 768 ? "0" : "1", `the bar has room for a message on a desktop and none beside a phone's controls at ${width}x${height}`);
       eq([...r.hits, ...r.sayOutside], [], `the real ${what} sits in the bar's free span and covers nothing at ${width}x${height}`);
       await w.page.evaluate(() => window.FlowsUI.oracle.open());
       await w.page.waitForTimeout(400);
@@ -255,6 +257,7 @@ try {
       ["the toast is not held to the free span", "events", 1440, 820, { "/assets/css/flows-oracle.css": [["  max-width: var(--say-w, 0px);\n", "  max-width: none;\n"]] }],
       ["the room check lets a message into a span too narrow for it", "events", 390, 844, { "/assets/js/flows-oracle.js": [["host.setAttribute(\"data-room\", r && w >= 96 ? \"1\" : \"0\");", "host.setAttribute(\"data-room\", \"1\");"], ["host.style.setProperty(\"--say-w\", Math.max(0, w) + \"px\");", "host.style.setProperty(\"--say-w\", Math.max(160, w) + \"px\");"]] }],
       ["the Undo control spreads left from the slot over the bar", "watch", 1024, 768, { "/assets/css/flows-oracle.css": [[".orc-pill, .orc-toast, .orc[data-room=\"1\"] .orc-restore.is-undo {", ".orc-pill, .orc-toast {"]] }],
+      ["the hidden bar title keeps its width and the freshness label is cut", "overview", 390, 844, { "/assets/css/flows.css": [[".fx-bar.has-hero:has(.orc-slot):not(.is-scrolled) .fx-bar-t { flex-basis: 0; }", ""]] }],
       ["the orb stays on top of an open Ask dock on a phone", "overview", 390, 844, { "/assets/css/flows-oracle.css": [["  .has-dock-open .orc:not(.is-open) { visibility: hidden; }\n", "  .has-dock-open .orc:not(.is-open) { top: auto; bottom: 120px; }\n"]] }],
     ];
     for (const [name, id, w, h, patch] of MUTANTS.filter((m, i) => mine(i))) {
