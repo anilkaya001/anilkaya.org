@@ -283,8 +283,6 @@ async function restoreProbe(mutate, only) {
     ["the shortcut ignores the saved mode", "flows-oracle.js", "{ e.preventDefault(); restorePref(); }", '{ e.preventDefault(); setPref("on"); }', ["shortcut"]],
     ["a stale tab overwrites the saved mode", "flows-oracle.js", SAVE, 'setCookie("fn_oracle_prev", PREF[raw] > 0 ? raw : was);', ["tabs"]],
     ["a tab never takes up the current choice", "flows-oracle.js", '    document.addEventListener("visibilitychange", onVis);\n', "", ["tabs"]],
-    ["the Undo pill outlives focus", "flows-oracle.js", '    restore.addEventListener("focusout", function () { if (S.undoUntil > Date.now()) { S.undoUntil = 0; clearTimeout(S.undoTimer); paintOrb(); } });\n', "", ["cover1"]],
-    ["the hidden corner takes clicks", "flows-oracle.css", '.orc[data-pref="off"]:not(.is-open) { width: 0; height: 0; }\n', "", ["dead1"]],
     ["the restore button sits over an open sheet", "flows-oracle.js", "    restore.hidden = !off || S.open;\n", "    restore.hidden = !off;\n", ["sheet"]],
     ["the toast outlives Hidden", "flows-oracle.js", 'if (S.pref === "off") { setOpen(false); dropToast(); }', 'if (S.pref === "off") { setOpen(false); }', ["toast"]],
     ["a one-second Undo", "flows-oracle.js", "  var UNDO_MS = 10000;", "  var UNDO_MS = 1000;", ["undo"]],

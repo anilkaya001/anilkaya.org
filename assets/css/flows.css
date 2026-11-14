@@ -986,6 +986,11 @@ a.ff-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 }
 .fx-bar.has-hero:not(.is-scrolled) .fx-bar-t { opacity: 0; transform: translateY(4px); }
 .fx-bar-sp { flex: 1; min-width: 0; }
+.fx-bar .orc-slot { flex: none; width: 44px; height: 44px; }
+.fx-bar:has(.orc-slot) .fx-bar-t { flex-shrink: 100; }
+.fx-bar .ui-fresh { flex: 0 1 auto; min-width: 0; }
+.fx-bar .ui-fresh .fx-fresh-l { overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 599.98px) { .flows-body .topbar.fx-bar:has(.orc-slot) { gap: var(--sp-2); } }
 .fx-search {
   display: inline-flex;
   align-items: center;

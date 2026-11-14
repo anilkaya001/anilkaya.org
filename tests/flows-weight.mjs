@@ -214,6 +214,8 @@ CSS_KIB.tickerPage += MEMBER_TICKER_CSS.bytes / 1024;
 CSS_GZIP_KIB.tickerPage += MEMBER_TICKER_CSS.gzip / 1024;
 const RAIL_FIT = { bytes: 790, gzip: 141, why: "shell follow-ups: flows.css sizes the sidebar's rows to the height the rail has (a grid of 26 to 34 px rows per group, a :has floor per group size, tighter headings under 900 px and again under 800 px), 78,168 to 78,958 B raw; every Flows route links flows.css" };
 for (const name of Object.keys(CSS_KIB)) { CSS_KIB[name] += RAIL_FIT.bytes / 1024; CSS_GZIP_KIB[name] += RAIL_FIT.gzip / 1024; }
+const ORB_SLOT = { bytes: 342, gzip: 82, why: "the Neuron orb docked in the top bar: flows.css reserves the 44 px slot oracleShell puts at the bar's end, lets the bar title give way first and the freshness label shrink with an ellipsis, and closes the bar's gaps to 4 px on a phone, so the orb, its pill and its toast never sit over page content; 78,958 to 79,300 B raw and 15,732 to 15,814 B gzip, on every Flows route that links flows.css" };
+for (const name of Object.keys(CSS_KIB)) { CSS_KIB[name] += ORB_SLOT.bytes / 1024; CSS_GZIP_KIB[name] += ORB_SLOT.gzip / 1024; }
 for (const name of ["deskPage", "sidePage", "watchPage"]) {
   CEILING_KIB[name] += MEMBER_EXPORT_JS.bytes / 1024;
   GZIP_KIB[name] += MEMBER_EXPORT_JS.gzip / 1024;
@@ -307,7 +309,8 @@ const MEMBER_MARKUP_BYTES = 2400;
 const MEMBER_SLUG = { overviewPage: "overview", sidePage: "long", watchPage: "watch", marketPage: "market", networkPage: "network", nowPage: "now", deskPage: "desk", strategyPage: "strategy", tickerPage: "ticker", movesPage: "moves", unusualPage: "unusual", ledgerPage: "ledger", eventsPage: "events", politicalPage: "political" };
 const ORACLE_FILES = ["/assets/js/flows-oracle-core.js", "/assets/js/flows-oracle.js", "/assets/js/flows-oracle-boot.js"];
 const NEURON_RESTORE = { bytes: 2922, why: "a Neuron hidden by mistake could only come back by a keyboard chord a phone cannot press; Hidden now leaves a restore button that offers Undo for ten seconds and then stays as a small Show the Neuron button, and restoring returns the mode chosen before hiding without pulling focus out of an open sheet, which grew flows-oracle.js from 39,034 to 41,956 B" };
-const ORACLE_DEFERRED_KIB = 60 + NEURON_RESTORE.bytes / 1024;
+const ORB_SAY = { bytes: 736, why: "the orb docked in the top bar: placeSay lays the pill, the phone toast and the wide Undo in the bar's free span and marks data-room when it is too narrow, run on paint, on resize and from a ResizeObserver that destroy disconnects, which grew flows-oracle.js from 41,956 to 42,692 B" };
+const ORACLE_DEFERRED_KIB = 60 + (NEURON_RESTORE.bytes + ORB_SAY.bytes) / 1024;
 const ORACLE_MARKUP_BYTES = 720;
 const DEFERRED_KIB = {
   tickerPage: 80 + 7.3 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + NETWORK_GROUP.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + (260 + 848) / 1024 + HOME_FIT.deferred / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024 + DESK_CALLS.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024 + (2240 + 627) / 1024 + HOME_FIT.deferred / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
@@ -498,7 +501,7 @@ for (const m of measured) {
   ok(judge({ ...base, raw: base.raw - 13 * 1024 }).length > 0,
      "the ratchet fails a route that saved 13 KiB raw and left its ceiling where it was");
   ok(judge({ ...base, name: "nowhere" }).length === 4, "a route with no ceilings fails on all four bases");
-  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 40627 + NN_KERNEL.gzip, css: 119045 + NN_FLOWS_CSS.bytes + RAIL_FIT.bytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip + RAIL_FIT.gzip };
+  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 40627 + NN_KERNEL.gzip, css: 119045 + NN_FLOWS_CSS.bytes + RAIL_FIT.bytes + ORB_SLOT.bytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip + RAIL_FIT.gzip + ORB_SLOT.gzip };
   eq(judge(events).join("; "), "", "events, whose ceiling is held for the earnings strip, passes with its wide raw headroom");
   eq(Object.keys(HELD_RAW_KIB).join(", "), "eventsPage", "events is the only route whose raw ceiling is held above the ratchet");
 }
