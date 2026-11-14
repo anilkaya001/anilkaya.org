@@ -70,18 +70,18 @@ def flowlab(rng):
             why = "noSides"
         elif not prem > 0:
             why = "noPremium"
-        elif ask + bid + mid == 0:
+        elif ask + bid == 0:
             why = "noSides"
-        elif 5 * (ask + bid + mid) < 2 * vol:
+        elif 5 * (ask + bid) < 2 * vol:
             why = "lowCoverage"
         elif prem < 25000000:
             why = "smallClassified"
         e["askWhy"] = why
-        e["stated"] = fl(F(ask + bid + mid, vol)) if vol > 0 and ask is not None else None
+        e["stated"] = fl(F(ask + bid, vol)) if vol > 0 and ask is not None and bid is not None and ask + bid <= vol else None
         if why is None:
             e["askLo"] = fl(F(ask, vol))
-            e["askHi"] = fl(F(ask + none, vol))
-            buy = 1 if 2 * ask > vol else (-1 if 2 * (ask + none) < vol else 0)
+            e["askHi"] = fl(F(vol - bid, vol))
+            buy = 1 if 2 * ask > vol else (-1 if 2 * (vol - bid) < vol else 0)
             e["lean"] = 0 if buy == 0 else (-buy if cp == "p" else buy)
         else:
             e["askLo"] = None

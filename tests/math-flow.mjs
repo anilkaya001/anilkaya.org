@@ -49,7 +49,7 @@ function flowlab(M) {
     else if (a === null) j.say(`profile ${i}: no value area`);
     else for (const k of ["poc", "lo", "hi", "v", "of"]) j.same(a[k], c.area[k], `profile ${i} area ${k}`);
   });
-  FX.flowlab.strikes.forEach((c, i) => j.same(M.medianStrike(c.rows), c.median, `strikes ${i} median`));
+  FX.flowlab.strikes.forEach((c, i) => j.same(M.medianStrike(c.rows.map((r) => ({ k: r.k, vol: r.callVol + r.putVol }))), c.median, `strikes ${i} median`));
   return j.bad;
 }
 
@@ -223,7 +223,8 @@ ok(FX.cross.history.some((c) => c.expect.why === "zero-sd") && FX.cross.history.
 
 const PLANTS = [
   ["the value area stops at half the volume", "shared/flows-flowlab.js", flowlab, [["valueAreaNum: 7", "valueAreaNum: 5"]]],
-  ["the ask-side high bound forgets the contracts with no side", "shared/flows-flowlab.js", flowlab, [["hi: (ask + none) / vol", "hi: ask / vol"]]],
+  ["the ask-side high bound forgets the contracts with no stated side", "shared/flows-flowlab.js", flowlab, [["hi: (vol - bid) / vol", "hi: ask / vol"]]],
+  ["the stated share counts fills between the quotes as sided", "shared/flows-flowlab.js", flowlab, [["const stated = sided / vol;", "const stated = (sided + (r.mid || 0)) / vol;"]]],
   ["a put's lean is read like a call's", "shared/flows-flowlab.js", flowlab, [["return cp === \"p\" ? -buy : buy;", "return buy;"]]],
   ["the average fill forgets the contract multiplier", "shared/flows-flowlab.js", flowlab, [["r.premC / (r.vol * 100)", "r.premC / r.vol"]]],
   ["the median strike is the middle row", "shared/flows-flowlab.js", flowlab, [["if (2 * acc >= total) return r.k;", "if (2 * acc >= total) return w[Math.floor(w.length / 2)].k;"]]],
