@@ -186,8 +186,14 @@ export async function runExtras({
   for (const t of erList) {
     const prior = priors.get(t) || { dx: null, vx: null, ps: null };
     const out = {};
-    const base = positioning ? ["dx", "vx", "ps"] : ["dx", "vx"];
-    for (const group of er ? (own.has(t) ? [...base, "er"] : ["er"]) : base) {
+    const groups = [];
+    if (own.has(t)) {
+      for (const group of positioning ? ["dx", "vx", "ps"] : ["dx", "vx"]) {
+        groups.push(group);
+      }
+    }
+    if (er) groups.push("er");
+    for (const group of groups) {
       const merged = mergeParts({ prior: prior[group], got: got.get(t) || {}, miss: miss.get(t) || {}, group, now });
       if (!Object.keys(merged.parts).length && !Object.keys(merged.miss).length) continue;
       out[group] = fitSection(sectionOf({ ...merged, group }), group);

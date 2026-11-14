@@ -65,7 +65,9 @@ export function extrasCap(env = {}, fallback = SLOW_CAP) {
   return Math.min(Math.floor(n), SLOW_CAP_MAX);
 }
 
-export const SHED_ORDER = Object.freeze(["fin", "eps", "svx", "ins", "ibs", "ftd", "financials", "breakdown", "ownership", "analysts", "estimates", "profile", "info", "etf", "splits", "dividends", "ivp"]);
+const EXTRAS_SHED = Object.freeze(["svx", "ins", "ibs", "ftd", "financials", "breakdown", "ownership", "analysts", "estimates", "profile", "info", "etf", "splits", "dividends", "ivp"]);
+
+export const SHED_ORDER = Object.freeze(["fin", "eps", ...EXTRAS_SHED]);
 
 export const FAIL_REASONS = Object.freeze(["unshaped", "missing", "type", "empty", "plan", "limited", "failed", "deadline", "cap", "size", "unread"]);
 

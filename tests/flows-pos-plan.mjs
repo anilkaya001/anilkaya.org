@@ -44,7 +44,7 @@ function simulate(n, { cap = 600, scoped = true } = {}) {
   eq(X.PS_IDS, ["ftd", "svx", "ibs", "ins"], "the positioning group holds the four parts");
   eq(["ftd", "svx", "ibs", "ins"].map((id) => [X.PARTS[id].refreshS / 3600, X.PARTS[id].maxS / 86400]), [[168, 21], [20, 3], [72, 7], [720, 60]], "with the stated refresh and maximum ages");
   eq(X.SLOW_IDS.filter((id) => X.PARTS[id].group === "ps"), [], "the slow planner's own list is unchanged and holds none of them");
-  eq(X.SHED_ORDER.slice(0, 4), ["svx", "ins", "ibs", "ftd"], "and the positioning parts are shed before any existing one");
+  eq(X.SHED_ORDER.slice(0, 6), ["fin", "eps", "svx", "ins", "ibs", "ftd"], "and the positioning parts are shed before any part of the extras, after the two event-risk parts");
   for (const n of [700, 856]) {
     const s = simulate(n);
     ok(s.nightly.every((c) => c <= 600), `${n} names: no night reads more than 600 positioning parts (largest ${Math.max(...s.nightly)})`);
