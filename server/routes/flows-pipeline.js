@@ -1,13 +1,13 @@
 import { HttpError, internalKey, edgeCache } from "../http.js";
 import { expectedNightlySession } from "../../shared/flows-freshness.js";
-import { GLOBAL_KEYS, NAME_KINDS } from "../../shared/flows-products.js";
+import { NIGHTLY_GLOBAL_KEYS, NAME_KINDS } from "../../shared/flows-products.js";
 import { verifyCoverage } from "../../shared/flows-coverage.js";
 
 const on = (value) => typeof value === "string" && value.trim().toLowerCase() === "on";
 
 export const COVERAGE_TTL_S = 60;
 
-export const COVERAGE_ROW_CEILING = 2 + GLOBAL_KEYS.length + 2001;
+export const COVERAGE_ROW_CEILING = 2 + NIGHTLY_GLOBAL_KEYS.length + 2001;
 
 const parse = (stored) => {
   if (stored === null || typeof stored.payload !== "string") return null;
@@ -38,7 +38,7 @@ export function flowsPipelineRows(deps) {
       Promise.resolve(readClock(env.DB)).catch(() => null),
       store.read(env, "universe"),
       store.read(env, "roster"),
-      store.metadata(env, GLOBAL_KEYS.slice()),
+      store.metadata(env, NIGHTLY_GLOBAL_KEYS.slice()),
       store.listing(env, NAME_KINDS.slice()),
     ]);
     const universeBody = parse(universe);

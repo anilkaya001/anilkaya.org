@@ -490,7 +490,7 @@ for (const m of measured) {
   ok(judge({ ...base, raw: base.raw - 13 * 1024 }).length > 0,
      "the ratchet fails a route that saved 13 KiB raw and left its ceiling where it was");
   ok(judge({ ...base, name: "nowhere" }).length === 4, "a route with no ceilings fails on all four bases");
-  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 39938 + NN_KERNEL.gzip, css: 118855 + NN_FLOWS_CSS.bytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip };
+  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 39938 + NN_KERNEL.gzip + EVENTS_ER.gzip, css: 118855 + NN_FLOWS_CSS.bytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip };
   eq(judge(events).join("; "), "", "events, whose ceiling is held for the earnings strip, passes with its wide raw headroom");
   eq(Object.keys(HELD_RAW_KIB).join(", "), "eventsPage", "events is the only route whose raw ceiling is held above the ratchet");
 }
