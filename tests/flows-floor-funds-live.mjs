@@ -3,8 +3,8 @@ import { fakeD1 } from "./lib/d1-fake.mjs";
 import { FLOWS_COOKIE, sessionEpoch, signFlowsSession } from "../shared/flows-auth.js";
 import { FIXTURE_OWNER, FIXTURE_MEMBER } from "./lib/fixture-roster.mjs";
 import { easternInstant } from "../shared/flows-freshness.js";
-import { readList, FLOOR_FUNDS } from "../shared/flows-floor-funds.js";
-import { FUNDS_KEY, FUNDS_WRITERS, FUNDS_FILL, fundsNote, marketSectors } from "../shared/flows-floor-funds-live.js";
+import { readList, FLOOR_FUNDS, FUND_WHY } from "../shared/flows-floor-funds.js";
+import { FUNDS_KEY, FUNDS_WRITERS, FUNDS_FILL, fundsNote, marketSectors, fundsFromMarket } from "../shared/flows-floor-funds-live.js";
 import { fakeFundsRead, FUNDS_FAKE_SCREENER_GAPS } from "../scripts/flows-legs/funds-fake.mjs";
 import { loadMutated } from "./truth/mutants.mjs";
 import * as REAL from "../shared/flows-live-worker.js";
@@ -163,6 +163,27 @@ async function routeChecks(W, label) {
     const body = await res.json();
     out.push(["a fill that could not read is a pending body that names why", fill.n === 1 && body.status === "pending" && body.why === "throttled" && res.headers.get("X-Funds-Fill") === "throttled"]);
   }
+  for (const [why, reason] of [["throttled", "limited"], ["no-fund-read", "failed"], ["recent:no-fund-read", "failed"]]) {
+    const f = fakeD1({ latencyMs: 0 });
+    f.live("live:market", marketRow(PREV), at("15:59", PREV), PREV);
+    const fill = counter(async () => ({ written: false, why, calls: 0 }));
+    const res = await W.serveLiveKey(env(f), url, at("08:30"), { json, HttpError, fill });
+    const body = await res.json();
+    out.push([`A FILL THAT COULD NOT READ (${why}) ANSWERS THE LAST SESSION'S SECTOR ROW instead of a pending body`, fill.n === 1 && res.status === 200 && body.key === FUNDS_KEY && body.session === PREV &&
+      res.headers.get("X-Funds-Fill") === why && res.headers.get("X-Funds-Source") === "live:market"]);
+    out.push([`with that session's own figures for the funds the sector row holds (${why})`, body.rows && body.rows.XLE && body.rows.XLE.cp === 9100 && body.rows.XLE.pv === 41 && body.rows.SPY && body.rows.SPY.cp === 990000 && body.rows.SPY.src === "sector-etfs"]);
+    out.push([`every other fund says why it has no figure, never a zero (${why} is ${reason})`, Boolean(body.rows) && readList().filter((t) => t !== "XLE" && t !== "SPY").every((t) => body.rows[t] && body.rows[t].why === reason && !("cp" in body.rows[t]))]);
+    out.push([`and the answer names its source, its session and its read time (${why})`, body.fallback && body.fallback.from === "live:market" && body.fresh && body.fresh.session === PREV &&
+      body.fresh.readAt === new Date(at("15:59", PREV)).toISOString() && body.fresh.writer === FUNDS_WRITERS.market]);
+    out.push([`and it is not stored, so the next reader still fills (${why})`, heldFunds(f) === null]);
+  }
+  {
+    const f = fakeD1({ latencyMs: 0 });
+    f.live("live:market", { v: 1, key: "live:market", session: PREV, sectors: { status: "unavailable", rows: [] } }, at("15:59", PREV), PREV);
+    const fill = counter(async () => ({ written: false, why: "throttled", calls: 0 }));
+    const body = await (await W.serveLiveKey(env(f), url, at("08:30"), { json, HttpError, fill })).json();
+    out.push(["a sector row with no figures is no answer: the body stays pending and names why", body.status === "pending" && body.why === "throttled"]);
+  }
   {
     const f = fakeD1({ latencyMs: 0 });
     const fill = counter(async () => ({ written: false, why: "never" }));
@@ -313,6 +334,13 @@ for (const [m, pass] of await workerChecks(loadReal, "worker")) ok(pass, m);
   eq(note, "live:funds: held row by worker@funds, session 2026-09-23, read 2026-09-23T15:02:00.000Z, 68 of 72 funds read", "and names the writer, the session, the read time and the count when a row is held");
   eq(marketSectors({ session: PREV, sectors: JSON.stringify(marketRow(PREV).sectors) }, DAY), null, "a sector row of another session is not offered");
   eq(marketSectors({ session: DAY, sectors: "{" }, DAY), null, "nor an unreadable one");
+  const fb = fundsFromMarket({ session: PREV, read_at: at("15:59", PREV), sectors: JSON.stringify(marketRow(PREV).sectors) }, "throttled");
+  const fp = JSON.parse(fb.payload);
+  ok(fb.session === PREV && fb.writer === FUNDS_WRITERS.market && fp.session === PREV && fp.status === "partial" && fp.counts.read === 2, "THE MARKET FALLBACK is the sector row's own session, partial, two funds read");
+  ok(FUND_WHY.limited && fp.rows.TLT.why === "limited" && fp.rows.SPXW.alias === "SPX", "a fund it does not hold is limited when the fill was refused, and a weekly root keeps its parent");
+  eq(JSON.parse(fundsFromMarket({ session: PREV, read_at: 1, sectors: JSON.stringify(marketRow(PREV).sectors) }, "no-fund-read").payload).rows.TLT.why, "failed", "and failed when the read failed");
+  eq(fundsFromMarket(null, "throttled"), null, "no market row is no fallback");
+  eq(fundsFromMarket({ session: "yesterday", sectors: JSON.stringify(marketRow(PREV).sectors) }, "throttled"), null, "nor a row with no session date");
 }
 
 const SHARED = "shared/flows-live-worker.js";
@@ -325,6 +353,8 @@ const PLANTS = [
     "  if (!env.UW_API_KEY || typeof fetchVendor !== \"function\") return { due: true, written: false, why: \"no-key\" };\n  const out = await fundsRead("]] },
   { name: "empty-block-written: a failed read writes a block of dashes over the held row", target: "shared", transforms: [["  if (payload.status === \"unavailable\") {\n    return { statement: null,", "  if (false) {\n    return { statement: null,"]] },
   { name: "stale-sector-row: an earlier session's sector row is taken for today's", target: "shared-leaf", transforms: [["if (!row || row.session !== session || typeof row.sectors !== \"string\") return null;", "if (!row || typeof row.sectors !== \"string\") return null;"]] },
+  { name: "no-market-fallback: a refused fill answers pending though the sector row holds the last session", target: "shared", transforms: [["        if (kept) return liveResponse(kept, now, clock, { \"X-Funds-Fill\": why, \"X-Funds-Source\": \"live:market\" });\n", ""]] },
+  { name: "market-fallback-unexplained: a fund the sector row lacks answered as no row", target: "shared-leaf", transforms: [["  const reasons = new Map(reason ? readList().map((t) => [t, reason]) : []);", "  const reasons = new Map();"]] },
   { name: "no-single-flight: two readers at once run two fills", target: "worker", transforms: [["  if (!state.fundsFill) {\n    const gate = vendorGate(env, session);", "  if (true) {\n    const gate = vendorGate(env, session);"]] },
   { name: "no-member-gate: a member over the rate limit still fills", target: "worker", transforms: [["      if (!(await gate.member())) return { written: false, why: \"throttled\", calls: 0 };\n", ""]] },
   { name: "no-marker: a failed fill is retried by every reader", target: "worker", transforms: [["  const held = await edgeCache.get(FUNDS_FILL_MARK);", "  const held = null;"]] },
@@ -338,7 +368,9 @@ for (const plant of PLANTS) {
       results = await workerChecks(async () => (await loadMutated("worker.js", plant.transforms, { salt: ++n + instance++ })).default, "planted");
     } else if (plant.target === "shared-leaf") {
       const leaf = await loadMutated("shared/flows-floor-funds-live.js", plant.transforms);
-      results = [["leaf: an earlier session's sector row is not offered", leaf.marketSectors({ session: PREV, sectors: JSON.stringify(marketRow(PREV).sectors) }, DAY) === null]];
+      const fb2 = leaf.fundsFromMarket({ session: PREV, read_at: 1, sectors: JSON.stringify(marketRow(PREV).sectors) }, "throttled");
+      results = [["leaf: an earlier session's sector row is not offered", leaf.marketSectors({ session: PREV, sectors: JSON.stringify(marketRow(PREV).sectors) }, DAY) === null],
+        ["leaf: a fund the fallback lacks says why", !!fb2 && JSON.parse(fb2.payload).rows.TLT.why === "limited"]];
     } else {
       const W = await loadMutated(SHARED, plant.transforms);
       results = [...await tickChecks(W, "planted"), ...await routeChecks(W, "planted")];

@@ -16,7 +16,7 @@ import { emitFailure } from "./flows-log.js";
 import { newsFields } from "./flows-news.js";
 import { FIXTURE_REFUSALS, fixtureHost, fixtureRefusal } from "./flows-fixture-names.js";
 import { nightlyFundsOn } from "./flows-floor-funds.js";
-import { FUNDS_KEY, FUNDS_READ, FUNDS_WRITERS, fundsReadParams, marketSectors, needsSectorRead, sectorEtfsOf, shapeFunds } from "./flows-floor-funds-live.js";
+import { FUNDS_KEY, FUNDS_READ, FUNDS_WRITERS, fundsFromMarket, fundsReadParams, marketSectors, needsSectorRead, sectorEtfsOf, shapeFunds } from "./flows-floor-funds-live.js";
 import {
   LEDGER_SCHEMA_SQL, LEDGER_ROWS_SQL, tickWindow, ledgerTickStatement, ledgerOutcomeStatement, ledgerFocusStatement,
   ledgerPassStatement, ledgerNightlyStatement, ledgerView, ledgerPruneCutoff, worstStale,
@@ -970,7 +970,7 @@ export function fillSession(at, clock = null) {
   return typeof session === "string" && session ? { session, date: live ? null : session } : null;
 }
 
-export const FUNDS_MARKET_SQL = "SELECT session, CASE WHEN json_valid(payload) THEN json_extract(payload, '$.sectors') END AS sectors " +
+export const FUNDS_MARKET_SQL = "SELECT session, read_at, CASE WHEN json_valid(payload) THEN json_extract(payload, '$.sectors') END AS sectors " +
   "FROM flows_live WHERE id = 'live:market'";
 
 async function fundsRead(env, at, { fetchVendor, session, date, marketRow, writer, sectorCall, isRefusal = () => false, log = console }) {
@@ -1045,6 +1045,8 @@ export async function serveLiveKey(env, url, now, { json, HttpError, fill = null
         const got = await Promise.resolve().then(() => fill(clock, firstOf(results[2]))).catch(() => null);
         const why = got && typeof got.why === "string" ? got.why : "failed";
         if (got && got.row) return liveResponse(got.row, now, clock, { "X-Funds-Fill": why });
+        const kept = fundsFromMarket(firstOf(results[2]), why);
+        if (kept) return liveResponse(kept, now, clock, { "X-Funds-Fill": why, "X-Funds-Source": "live:market" });
         return json({ key, status: "pending", why }, 200, { ...pendingHeaders(LIVE_KEYS[key].klass, now, clock), "X-Funds-Fill": why });
       }
       return json({ key, status: "pending" }, 200, pendingHeaders(LIVE_KEYS[key].klass, now, clock));

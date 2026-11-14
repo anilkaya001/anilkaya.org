@@ -6,7 +6,7 @@ import * as PAGES from "../shared/flows-pages.js";
 import { launch } from "./lib/browser.mjs";
 import { openMarket, alertsFixture, universeFixture, SESSION } from "./lib/market-fixtures.mjs";
 import * as L from "../shared/flows-floor-funds.js";
-import { nightlyFunds, liveFunds } from "./lib/funds-fixtures.mjs";
+import { nightlyFunds, liveFunds, marketFallback } from "./lib/funds-fixtures.mjs";
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 let checks = 0;
@@ -664,8 +664,8 @@ try {
     {
       const { context, page } = await open({ funds: { market: full, live: null, now: NOW }, hash: "#view=floor&basis=session" });
       const f = await page.evaluate(INSPECT_F);
-      ok(/^Whole session · read 23:41 TRT$/.test(f.sub), `THE SUBTITLE prints the read time in TRT on a pinned clock: ${f.sub}`);
-      ok(f.hits[0].label.includes("Whole session · read 23:41 TRT") && /the feed's screener row/.test(f.hits[0].label), "and the hit sentence of a pillar names the basis, the time and the source in plain words");
+      ok(/^Session · 2026-09-29 · read 23:41 TRT$/.test(f.sub), `THE SUBTITLE names the figures' own session and prints the read time in TRT on a pinned clock: ${f.sub}`);
+      ok(f.hits[0].label.includes("Session · 2026-09-29 · read 23:41 TRT") && /the feed's screener row/.test(f.hits[0].label), "and the hit sentence of a pillar names the basis, the time and the source in plain words");
       ok(!/\bvendor\b|\btape\b|at ask|at bid/i.test(f.read + f.note + f.legend + f.hits.map((x) => x.label).join(" ")), "no provider wording in the readout, the caption or any pillar");
       eq(f.seg.map((g) => g.map((x) => x[0])), [["Flagged", "Session"], ["Premium", "Volume", "Net lean"]], "the Basis control sits beside the Height control");
       eq(f.seg[0].map((x) => x[1]), ["false", "true"], "and starts on Session when the address says so");
@@ -685,7 +685,7 @@ try {
       let f = await page.evaluate(INSPECT_F);
       eq(f.basis, "session", "BASIS: WITH A USABLE FUNDS BLOCK AND NO CHOICE MADE, THE FLOOR OPENS ON THE WHOLE SESSION");
       eq(f.hash, "", "with nothing written to the address, since the reader chose nothing");
-      eq(f.sub, "Whole session · read 23:41 TRT", "and the subtitle names the basis and its TRT read time");
+      eq(f.sub, "Session · 2026-09-29 · read 23:41 TRT", "and the subtitle names the figures' session and its TRT read time");
       eq(verifyF(f, full, "premium"), [], "every fund pillar stands on the session scale");
       const heldRow = [...L.FLOOR_FUNDS.funds, ...L.FLOOR_FUNDS.etf].filter((t) => full.rows[t] && Number.isInteger(full.rows[t].cp));
       ok(heldRow.length === 15 && heldRow.every((t) => { const tile = f.tiles.find((x) => x.label === t); return tile && tile.v !== null && tile.v > 0; }),
@@ -773,7 +773,7 @@ try {
       const r = await open({ funds: { market: prevBlock, live, now: NOW }, hash: "#view=floor&basis=session" });
       const g = await r.page.evaluate(INSPECT_F);
       ok(g.funds && g.funds.src === "live" && g.funds.previous === false, "LIVE: a live row of the alerts' session is chosen over an earlier nightly block");
-      ok(/^Whole session · read 23:30 TRT$/.test(g.sub), `and prints its own read time: ${g.sub}`);
+      ok(/^Session · 2026-09-29 · read 23:30 TRT$/.test(g.sub), `and prints its own session and read time: ${g.sub}`);
       await r.context.close();
     }
 
@@ -811,7 +811,8 @@ try {
       ["stale-as-today: an earlier session printed without its label", "previous: Boolean(session) }", "previous: false }", { block: nightlyFunds({ session: "2026-09-28", readAt: "2026-09-28T20:41:00.000Z" }) }, "premium"],
       ["stocks-in-session: the stock row drawn in the session basis", 'const groups = GROUPS.filter((g) => basis !== "session" || g.id !== "stocks")', "const groups = GROUPS.filter(() => true)", {}, "premium"],
       ["eastern-stamp: the subtitle in Eastern time", 'const read = M.funds.readAt && F.when(M.funds.readAt, Date.now()) ? MID + "read " + F.when(M.funds.readAt, Date.now()) : "";', 'const read = MID + "read " + new Date(M.funds.readAt).toLocaleTimeString("en-GB", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit" }) + " ET";', {}, "premium"],
-      ["previous-undated: a previous session drawn without its date and read time", 'return M.funds.previous ? "Previous session" + MID + M.funds.session + read : "Whole session" + read;', 'return M.funds.previous ? "Previous session" : "Whole session" + read;', { block: nightlyFunds({ session: "2026-09-28", readAt: "2026-09-28T20:41:00.000Z" }) }, "premium"],
+      ["previous-undated: a previous session drawn without its date and read time", 'return (M.funds.previous ? "Previous session" : "Session") + MID + M.funds.session + read;', 'return M.funds.previous ? "Previous session" : "Session" + read;', { block: nightlyFunds({ session: "2026-09-28", readAt: "2026-09-28T20:41:00.000Z" }) }, "premium"],
+      ["session-undated: the session's own figures drawn without naming the session", 'return (M.funds.previous ? "Previous session" : "Session") + MID + M.funds.session + read;', 'return (M.funds.previous ? "Previous session" + MID + M.funds.session : "Whole session") + read;', {}, "premium"],
     ];
     for (const [name, from, to, extra, measureKey] of FUNDS_MUTANTS) {
       ok(SRC.includes(from), `mutant "${name}" anchors on the served module`);
@@ -823,7 +824,7 @@ try {
         const f = await r.page.evaluate(INSPECT_F);
         why = verifyF(f, block, measureKey)[0] || null;
         if (!why && block.session !== SESSION) why = /^Previous session · \d{4}-\d{2}-\d{2} · read \d{4}-\d{2}-\d{2} \d{2}:\d{2} TRT$/.test(f.sub || "") ? null : "the previous session is not printed with its date and TRT read time: " + f.sub;
-        if (!why && block.session === SESSION && !/^Whole session · read 23:41 TRT$/.test(f.sub || "")) why = "the subtitle is not in TRT: " + f.sub;
+        if (!why && block.session === SESSION && !/^Session · 2026-09-29 · read 23:41 TRT$/.test(f.sub || "")) why = "the subtitle does not name the session in TRT: " + f.sub;
         if (!why) {
           const grabbed = await r.page.evaluate(() => ({ bonds: window.FlowsUI.floor.of(document.getElementById("mkFloor")).model().tiles.find((t) => t.id === "other:Bonds").sess.of }));
           if (grabbed.bonds !== 11) why = "the Bonds class holds " + grabbed.bonds + " funds, not 11";
@@ -835,11 +836,73 @@ try {
     }
     ok(true, "funds block planted builds done");
     {
-      const from = 'if (M.fundsOn && !picked && M.basis === "flagged" && M.funds) { basis = "session"; auto = true; M = build(); }';
+      const fb = marketFallback();
+      const unavailable = { v: 1, status: "unavailable", why: "not_read" };
+      const held = [...L.FLOOR_FUNDS.funds, ...L.FLOOR_FUNDS.etf];
+      const checkFallback = async (page) => {
+        const f = await page.evaluate(INSPECT_F);
+        const bad = [];
+        if (f.basis !== "session") bad.push("the floor opened on " + f.basis);
+        for (const t of held) { const tile = f.tiles.find((x) => x.label === t); if (!tile || tile.v === null || !(tile.v > 0)) bad.push(t + " is empty"); }
+        if (f.sub !== "Session · 2026-09-29 · read 23:05 TRT") bad.push("the subtitle is " + f.sub);
+        if (!/Only the sector fund row could be read; each other fund says why\./.test(f.note)) bad.push("the caption does not say only the sector fund row was read: " + f.note);
+        const bonds = f.hits.find((x) => x.id === "other:Bonds");
+        if (!bonds || !bonds.label.includes(L.FUND_WHY.limited)) bad.push("a class the sector row lacks does not give its reason: " + (bonds && bonds.label));
+        if (f.tiles.filter((t) => t.group === "other").some((t) => t.v !== null)) bad.push("a class the sector row lacks carries a figure");
+        if (f.labels.some((l) => /none flagged/.test(l.text)) || (f.canvas.w >= 640 && !f.labels.some((l) => /none read/.test(l.text)))) bad.push("a row of the session floor with nothing read is labelled " + f.labels.filter((l) => /none/.test(l.text)).map((l) => l.text).join(", "));
+        return { f, bad };
+      };
+      for (const [w, h] of [[1440, 820], [390, 844]]) {
+        const { context, page, errors } = await open({ viewport: { width: w, height: h }, coarse: w < 500, funds: { market: unavailable, live: fb, now: NOW } });
+        const { f, bad } = await checkFallback(page);
+        eq(bad, [], `${w}x${h} THE FILL REFUSED, NO NIGHTLY BLOCK: the Worker's answer from the sector row draws every index fund and sector ETF with the session's own figures, labelled, and every other class says why`);
+        eq(verifyF(f, fb, "premium"), [], `${w}x${h} and every pillar stands at its height on the one session scale`);
+        eq(errors, [], `${w}: no page error`);
+        await shot(page, `floor-fallback-${w}`);
+        await context.close();
+      }
+      {
+        const { context, page } = await open({ alertsStatus: 500, funds: { market: full, live: null, now: NOW } });
+        const f = await page.evaluate(INSPECT_F);
+        ok(f.basis === "session" && f.sub === "Session · 2026-09-29 · read 23:41 TRT", `THE FLAGGED FEED DOWN, CLOSED MARKET: the session block is drawn and named by its own session: ${f.sub}`);
+        await context.close();
+      }
+      const OPEN_NOW = Date.parse("2026-09-30T15:00:00.000Z");
+      const openCheck = async (patch) => {
+        const r = await open({ alertsStatus: 500, patch, funds: { market: full, live: null, now: OPEN_NOW } });
+        const f = await r.page.evaluate(INSPECT_F);
+        await r.context.close();
+        return f;
+      };
+      const g = await openCheck(null);
+      ok(g.basis === "session" && /^Previous session · 2026-09-29 · read 2026-09-29 23:41 TRT$/.test(g.sub) && /not today's/.test(g.note), `THE FLAGGED FEED DOWN IN THE OPEN SESSION: yesterday's figures say they are the previous session's: ${g.sub}`);
+      const nf = 'const chosen = fundsOn ? chooseFunds(o.funds, session || (typeof o.today === "string" ? o.today : null)) : null;';
+      ok(SRC.includes(nf), 'mutant "no-today" anchors on the served module');
+      const g2 = await openCheck({ [JS]: [[nf, "const chosen = fundsOn ? chooseFunds(o.funds, session) : null;"]] });
+      const caught = /^Previous session/.test(g2.sub) ? null : "yesterday's figures are labelled " + g2.sub;
+      console.log("  planted no-today: " + (caught || "NOT CAUGHT"));
+      ok(caught !== null, 'THE PLANTED WRONG BUILD "no-today: with no flagged feed, yesterday labelled as the open session" FAILS');
+      const nrAnchor = 'const none = M.basis === "session" ? "none read" : "none flagged";';
+      ok(SRC.includes(nrAnchor), 'mutant "none-flagged-in-session" anchors on the served module');
+      const r4 = await open({ patch: { [JS]: [[nrAnchor, 'const none = "none flagged";']] }, funds: { market: unavailable, live: fb, now: NOW } });
+      const c4 = (await checkFallback(r4.page)).bad[0] || null;
+      await r4.context.close();
+      console.log("  planted none-flagged-in-session: " + (c4 || "NOT CAUGHT"));
+      ok(c4 !== null, 'THE PLANTED WRONG BUILD "none-flagged-in-session: an unread row of the session floor called unflagged" FAILS');
+      const fbAnchor = 'fallback: Boolean(f.live.fallback) });';
+      ok(SRC.includes(fbAnchor), 'mutant "fallback-unsaid" anchors on the served module');
+      const r3 = await open({ patch: { [JS]: [[fbAnchor, "fallback: false });"]] }, funds: { market: unavailable, live: fb, now: NOW } });
+      const c3 = (await checkFallback(r3.page)).bad[0] || null;
+      await r3.context.close();
+      console.log("  planted fallback-unsaid: " + (c3 || "NOT CAUGHT"));
+      ok(c3 !== null, 'THE PLANTED WRONG BUILD "fallback-unsaid: the sector-row answer drawn without saying the rest was not read" FAILS');
+    }
+    {
+      const from = 'let basis = fromHash() || "session";';
       ok(SRC.includes(from), 'mutant "flagged-default" anchors on the served module');
       let why = null, context = null;
       try {
-        const r = await open({ patch: { [JS]: [[from, 'if (M.fundsOn && !picked && M.basis === "flagged" && M.count === 0 && M.funds) { basis = "session"; auto = true; M = build(); }']] }, funds: { market: full, live: null, now: NOW } });
+        const r = await open({ patch: { [JS]: [[from, 'let basis = fromHash() || "flagged";']] }, funds: { market: full, live: null, now: NOW } });
         context = r.context;
         const f = await r.page.evaluate(INSPECT_F);
         const empty = [...L.FLOOR_FUNDS.funds, ...L.FLOOR_FUNDS.etf].filter((t) => { const tile = f.tiles.find((x) => x.label === t); return !tile || tile.v === null || !(tile.v > 0); });

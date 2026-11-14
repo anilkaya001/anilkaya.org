@@ -44,6 +44,7 @@
     over_cap: "Not read tonight: the fallback read cap was reached.",
     refused: "The feed refused this read.",
     failed: "The read failed; it will be tried again.",
+    limited: "Not read yet: the site's read limit was reached; it will be tried again.",
     off: "Whole-session activity is switched off.",
   };
   const SRC_WORD = { screener: "the feed's screener row", "sector-etfs": "the feed's sector fund row", "options-volume": "the feed's per-fund volume" };
@@ -111,7 +112,7 @@
     const nOk = usable(n) && (n.status === "ok" || n.status === "partial");
     const lOk = usable(f.live);
     const cands = [];
-    if (lOk) cands.push({ src: "live", session: f.live.session, readAt: readAtOf(f.live), rows: f.live.rows, meta: nOk && n.meta ? n.meta : {}, dir: nOk ? n.dir || null : null });
+    if (lOk) cands.push({ src: "live", session: f.live.session, readAt: readAtOf(f.live), rows: f.live.rows, meta: nOk && n.meta ? n.meta : {}, dir: nOk ? n.dir || null : null, fallback: Boolean(f.live.fallback) });
     if (nOk) cands.push({ src: "nightly", session: n.session, readAt: n.readAt || null, rows: n.rows, meta: n.meta || {}, dir: n.dir || null });
     if (!cands.length) return { block: null, why: n && n.status === "off" ? "off" : n && n.status === "unavailable" ? "unavailable" : "absent" };
     const newest = (a, b) => (a.session !== b.session ? (a.session > b.session ? -1 : 1) : String(b.readAt || "") < String(a.readAt || "") ? -1 : 1);
@@ -161,7 +162,7 @@
     if (uniOk) u.t.forEach((t, i) => secOf.set(String(t).toUpperCase(), Number.isInteger(u.sec[i]) ? u.sectors[u.sec[i]] || null : null));
     const session = alerts && typeof alerts.sessionDate === "string" ? alerts.sessionDate.slice(0, 10) : null;
     const fundsOn = Boolean(o.funds);
-    const chosen = fundsOn ? chooseFunds(o.funds, session) : null;
+    const chosen = fundsOn ? chooseFunds(o.funds, session || (typeof o.today === "string" ? o.today : null)) : null;
     const block = chosen ? chosen.block : null;
     const basis = fundsOn && o.basis === "session" && block ? "session" : "flagged";
     const tiles = new Map();
@@ -362,7 +363,7 @@
     const S = { alerts: null, st: { state: "pending", reason: "Reading the flagged windows." }, universe: opts.universe, funds: opts.funds || null };
     const fromHash = () => { const m = /basis=(flagged|session)/.exec(location.hash); return m ? m[1] : null; };
     let M = null, SC = null, W = 0, H = 0, dpr = 1, sel = null, hover = null, paints = 0, dead = false, measure = "premium", yaw = null, pitch = null, wide = false, LAB = { labels: [], dropped: [] };
-    let basis = fromHash() || "flagged", picked = Boolean(fromHash());
+    let basis = fromHash() || "session";
     let TOK = null, SHADOW = null;
     const glows = new Map();
     const tokens = () => {
@@ -420,7 +421,7 @@
       if (!M || !M.fundsOn) { basisSeg = null; mountSegs(); return; }
       const off = !M.funds;
       const items = BASES.map((b) => ({ label: b.label, disabled: b.id === "session" && off, title: b.id === "session" && off ? (M.fundsWhy === "off" ? FUND_WHY.off : "Whole-session activity was not read tonight.") : null }));
-      basisSeg = UI.segmented("Basis", items, (i) => { basis = BASES[i].id; picked = true; setHash(); rebuild(); }, BASES.findIndex((b) => b.id === M.basis));
+      basisSeg = UI.segmented("Basis", items, (i) => { basis = BASES[i].id; setHash(); rebuild(); }, BASES.findIndex((b) => b.id === M.basis));
       mountSegs();
     };
     tableBtn.addEventListener("click", () => {
@@ -443,7 +444,7 @@
       if (M.basis === "flagged") return "Flagged windows";
       if (!M.funds) return "";
       const read = M.funds.readAt && F.when(M.funds.readAt, Date.now()) ? MID + "read " + F.when(M.funds.readAt, Date.now()) : "";
-      return M.funds.previous ? "Previous session" + MID + M.funds.session + read : "Whole session" + read;
+      return (M.funds.previous ? "Previous session" : "Session") + MID + M.funds.session + read;
     };
     const srcText = (x) => x.src.map((k) => SRC_WORD[k] || k).join(" and ");
     const metaText = (t) => {
@@ -824,11 +825,12 @@
       const hf = "600 " + (phone ? 9.5 : 12) + "px " + FONT, hs = (phone ? 9.5 : 11) + "px " + FONT;
       SC.heads.forEach((hd) => {
         const g = M.groups.find((x) => x.id === hd.id);
-        const head = phone ? g.label + MID + (g.n ? money(g.prem) + MID + F.pct(g.share, 0) : "none flagged") : g.label;
+        const none = M.basis === "session" ? "none read" : "none flagged";
+        const head = phone ? g.label + MID + (g.n ? money(g.prem) + MID + F.pct(g.share, 0) : none) : g.label;
         if (phone) lab.add(head, 8, hd.p.y, "left", 20, TOK.strong, hf);
         else {
           lab.add(head, 14, hd.p.y - 2, "left", 20, TOK.strong, hf);
-          lab.add(g.n ? money(g.prem) + MID + F.pct(g.share, 0) : DASH + " none flagged", 14, hd.p.y + 13, "left", 19, TOK.body, hs);
+          lab.add(g.n ? money(g.prem) + MID + F.pct(g.share, 0) : DASH + " " + none, 14, hd.p.y + 13, "left", 19, TOK.body, hs);
         }
       });
       lab.flush(TOK.halo);
@@ -884,7 +886,7 @@
         SC = null;
         return;
       }
-      const fundsNote = !M.fundsOn ? "" : M.funds ? (M.funds.previous ? "These figures are from the previous session (" + M.funds.session + "), not today's." : "")
+      const fundsNote = !M.fundsOn ? "" : M.funds ? [M.funds.previous ? "These figures are from the previous session (" + M.funds.session + "), not today's." : "", M.funds.fallback ? "Only the sector fund row could be read; each other fund says why." : ""].filter(Boolean).join(" ")
         : M.fundsWhy === "off" ? FUND_WHY.off : M.fundsWhy === "unavailable" ? "Whole-session activity was not read tonight." : "Whole-session activity has not been published yet.";
       note.textContent = [M.basis === "session" ? "Stocks show flagged windows only." : M.uniOk ? "" : "The universe has not published, so stocks are not split by sector.", fundsNote].filter(Boolean).join(" ");
       if (M.basis === "session") fullNote.textContent = "One pillar for each class of fund: the four index funds, the eleven sector ETFs and the other fund classes. Height is the measure chosen above on one scale, from each fund's whole-session options activity as the feed reports it. Colour is lean by convention: calls on the ask side and puts on the bid side read bullish, the reverse bearish, slate when the two are within " + LEAN_EDGE_PCT + "% of premium. The white stripe at each base is the class's share of all fund premium in the session. A dashed tile had no row; its reason is in the readout. Stocks show flagged windows only. Session figures are never added to flagged premium or drawn on its scale.";
@@ -971,13 +973,10 @@
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     if (mq.addEventListener) mq.addEventListener("change", onTheme);
 
-    let auto = false;
-    const build = () => model(S.alerts, { universe: S.universe, funds: S.funds, basis });
+    const today = () => { const mk = UI.freshness && typeof UI.freshness.market === "function" ? UI.freshness.market() : null; return mk && mk.open && typeof mk.today === "string" ? mk.today : null; };
+    const build = () => model(S.alerts, { universe: S.universe, funds: S.funds, basis, today: today() });
     const rebuild = () => {
-      if (auto && !picked) basis = "flagged";
-      auto = false;
       M = build();
-      if (M.fundsOn && !picked && M.basis === "flagged" && M.funds) { basis = "session"; auto = true; M = build(); }
       sel = null;
       hover = null;
       paintBasis();
@@ -995,7 +994,7 @@
         if (S.alerts || S.st.state !== "pending" || S.funds) rebuild();
       },
       basis: () => (M ? M.basis : basis),
-      setBasis(id) { if (!BASES.some((b) => b.id === id)) return; basis = id; picked = true; setHash(); rebuild(); },
+      setBasis(id) { if (!BASES.some((b) => b.id === id)) return; basis = id; setHash(); rebuild(); },
       model: () => M,
       scene: () => SC,
       labels: () => LAB,
