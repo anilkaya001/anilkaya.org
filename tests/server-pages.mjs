@@ -100,7 +100,7 @@ function oldChain(path, rc, d) {
       "/flows/status/": (u) => FLOWS_PAGES.statusPage({ username: u }),
       "/flows/fire/": (u, summary, owner, e) => FLOWS_PAGES.firePage({ username: u, shadow: ffModeOf(e) === "shadow" }),
       "/flows/inbox/": (u, summary, owner, e) => FLOWS_PAGES.ffPendingPage({ username: u, page: "inbox", shadow: ffModeOf(e) === "shadow" }),
-      "/flows/digest/": (u, summary, owner, e) => FLOWS_PAGES.ffPendingPage({ username: u, page: "digest", shadow: ffModeOf(e) === "shadow" }),
+      "/flows/digest/": (u, summary, owner, e) => FLOWS_PAGES.digestPage({ username: u, shadow: ffModeOf(e) === "shadow" }),
       "/flows/wires/": (u, summary, owner, e) => FLOWS_PAGES.ffPendingPage({ username: u, page: "wires", shadow: ffModeOf(e) === "shadow" }),
     };
     if (Object.hasOwn(FLOWS_ROUTES, path)) {
@@ -339,7 +339,13 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     ok(banner && !/\bhidden\b/.test(banner[1]) && banner[2] === FIRE_SHADOW_LINE, "in shadow the Fire page's banner is shown and says so");
     const live = /<p class="ffx-banner" id="ffxBanner"([^>]*)>([^<]*)<\/p>/.exec((await ffAs("fire", member, FF_ON))[2]);
     ok(live && /\bhidden\b/.test(live[1]) && live[2] === "", "and with FF_MODE on the banner is hidden and empty");
-    for (const slug of ["inbox", "digest", "wires"]) {
+    {
+      const text = (await ffAs("digest", member, FF_ON))[2];
+      ok(!text.includes('data-ff-absent="not_released">') || !text.includes("is not released yet."), "digest: the Digest is built, not the not-released placeholder");
+      ok(/<p class="ffx-banner" id="ffxDigBanner" hidden><\/p>/.test(text), "digest: with FF_MODE on its shadow banner is hidden and empty");
+      ok(/<p class="ffx-banner" id="ffxDigBanner" data-ff-mode="shadow">Running in shadow: /.test((await ffAs("digest", member, { ...FF_ON, FF_MODE: "shadow" }))[2]), "digest: in shadow the banner is shown");
+    }
+    for (const slug of ["inbox", "wires"]) {
       const text = (await ffAs(slug, member, FF_ON))[2];
       ok(/— unavailable: the [A-Za-z ]+ is not released yet\./.test(text) && text.includes('data-ff-absent="not_released"'), slug + ": a page that is not built says so as an em dash with its reason, never an empty list");
       ok(text.includes('<a class="ds-btn" href="/flows/fire/">Open Fire</a>'), slug + ": and links to Fire");
@@ -423,7 +429,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     absent(text, new RegExp('path === "' + p.replace(/[-/]/g, "\\$&") + '"'), { anchor: /path === "\/flows\/login"/, why: p + " is a table row and no longer a branch of the chain" });
   }
   absent(text, /\bFLOWS_ROUTES\b|\bFLOWS_READER_FROM\b/, { anchor: /path === "\/flows\/logout"/, why: "the page table moved out of the Worker" });
-  absent(text, /FLOWS_PAGES\.(overviewPage|sidePage|watchPage|marketPage|networkPage|nowPage|deskPage|strategyPage|tickerPage|unusualPage|movesPage|ledgerPage|macroPage|eventsPage|politicalPage|positioningPage|statusPage|firePage|ffPendingPage)/, { anchor: /FLOWS_PAGES\.loginPage\(/, why: "the Worker renders only the sign-in page itself" });
+  absent(text, /FLOWS_PAGES\.(overviewPage|sidePage|watchPage|marketPage|networkPage|nowPage|deskPage|strategyPage|tickerPage|unusualPage|movesPage|ledgerPage|macroPage|eventsPage|politicalPage|positioningPage|statusPage|firePage|digestPage|ffPendingPage)/, { anchor: /FLOWS_PAGES\.loginPage\(/, why: "the Worker renders only the sign-in page itself" });
   const src = moduleSource("server/routes/flows-pages.js");
   ok(!/from "\.\.\/\.\.\/worker\.js"|cloudflare:|\bfetch\(|\benv\.DB\b/.test(src), "the family imports neither the Worker nor the platform and reads no store: the session and the summary are injected");
   ok(!/\bsetCookie\b|Set-Cookie|\.json\(/.test(src), "and sets no cookie and answers no JSON");

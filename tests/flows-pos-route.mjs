@@ -243,7 +243,7 @@ const readBattery = async () => {
       const M = await import(pathToFileURL(path.join(root, "shared/flows-pages.js")).href);
       const out = {};
       for (const [name, fn] of Object.entries(M.FLOWS_PAGES)) {
-        if (typeof fn !== "function" || name === "positioningPage" || name === "macroPage") continue;
+        if (typeof fn !== "function" || name === "positioningPage" || name === "macroPage" || name === "digestPage") continue;
         for (const [label, args] of [["member", { username: "test" }], ["owner", { username: "test", owner: true }]]) {
           let html = fn(args);
           for (const [from, to] of NORMALISE) html = html.replace(from, to);
@@ -265,7 +265,7 @@ const readBattery = async () => {
   }
   const want = JSON.parse(fs.readFileSync(FIXTURE, "utf8"));
   const got = await render(ROOT);
-  eq(Object.keys(got).sort(), Object.keys(want.pages).sort(), "the baseline covers every page function but the new ones (Positioning, and the Macro page of the package after it), as member and as owner");
+  eq(Object.keys(got).sort(), Object.keys(want.pages).sort(), "the baseline covers every page function but the new ones (Positioning, the Macro page of the package after it, and the Fire & Forget Digest), as member and as owner");
   const moved = Object.keys(want.pages).filter((k) => want.pages[k] !== got[k]);
   eq(moved, [], "WITH BOTH SWITCHES OFF EVERY EXISTING PAGE RENDERS BYTE FOR BYTE AS ORIGIN/MAIN RENDERS IT (version tokens, the declared renames and what the Macro package adds to every page aside: its glyph in the sprite, its About line and its glossary entries): " + moved.join(", "));
 }

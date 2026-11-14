@@ -141,6 +141,7 @@ const SPECS = [
   { id: "macro", fn: "macroPage", url: "/flows/macro/" },
   { id: "status", fn: "statusPage", url: "/flows/status/" },
   { id: "fire", fn: "firePage", args: { shadow: true }, url: "/flows/fire/" },
+  { id: "digest", fn: "digestPage", args: { shadow: true }, url: "/flows/digest/" },
   { id: "inbox", fn: "ffPendingPage", args: { page: "inbox", shadow: true }, url: "/flows/inbox/" },
 ];
 
@@ -202,7 +203,7 @@ async function mount(page, html, url, patch = null) {
 
 
 const SIZES = (process.env.SIZES || "1920x1080,1440x820,1024x768,390x844").split(",").map((s) => s.split("x").map(Number));
-const ONE_SCREEN = new Set(["overview", "market", "moves", "unusual", "events", "political", "status", "network", "now", "ledger", "flowlab", "fire", "inbox"]);
+const ONE_SCREEN = new Set(["overview", "market", "moves", "unusual", "events", "political", "status", "network", "now", "ledger", "flowlab", "fire", "inbox", "digest"]);
 
 const SWEEP = () => {
   const vis = (e) => {
