@@ -102,7 +102,10 @@ function oldChain(path, rc, d) {
       "/flows/political/": (u, summary, owner, env) => FLOWS_PAGES.politicalPage({ username: u, layers: positioningMode(env, owner) }),
       "/flows/positioning/": (u) => FLOWS_PAGES.positioningPage({ username: u }),
       "/flows/status/": (u) => FLOWS_PAGES.statusPage({ username: u }),
-      "/flows/fire/": (u, summary, owner, e) => FLOWS_PAGES.firePage({ username: u, shadow: ffModeOf(e) === "shadow" }),
+      "/flows/fire/": (u, summary, owner, e) => {
+        const w = String(e && e.FLOWS_EVENTRISK || "").trim().toLowerCase();
+        return FLOWS_PAGES.firePage({ username: u, shadow: ffModeOf(e) === "shadow", feed: w === "on" || ((w !== "off") && owner === true) });
+      },
       "/flows/inbox/": (u, summary, owner, e) => FLOWS_PAGES.ffPendingPage({ username: u, page: "inbox", shadow: ffModeOf(e) === "shadow" }),
       "/flows/digest/": (u, summary, owner, e) => FLOWS_PAGES.ffPendingPage({ username: u, page: "digest", shadow: ffModeOf(e) === "shadow" }),
       "/flows/wires/": (u, summary, owner, e) => FLOWS_PAGES.ffPendingPage({ username: u, page: "wires", shadow: ffModeOf(e) === "shadow" }),
@@ -265,6 +268,13 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     if (slug === "market" || slug === "unusual" || slug === "events") continue;
     const brand = /<a class="ff-brand" href="([^"]*)"/;
     ok((asOwner.match(brand) || [])[1] === "/flows/status/#view=coverage" && (asMember.match(brand) || [])[1] === "/flows/about/", path + ": the trade-mark opens data coverage for an owner and About for a member");
+    if (slug === "fire") {
+      ok(asOwner.includes('id="ffxSeg"') && asOwner.includes('data-defer="er-fire"') && !asMember.includes("ffxSeg") && !asMember.includes("flows-er-fire"), path + ": the feed templates are the owner's alone while the event-risk switch ships owner");
+      const noBrand = (t) => t.replace(/<a class="ff-brand"[\s\S]*?<\/a>/, "");
+      const strip = (t) => noBrand(t).replace(/<div class="ffx-seg"[\s\S]*?<\/div>/, "").replace(/\n        <ul class="ffx-tpls ffx-feed"[\s\S]*?<\/i>/, "").replace(' id="ffxTplFoot"', "").replace('\n        <p class="ffx-foot" id="ffxFeedFoot" hidden></p>', "");
+      eq(strip(asOwner), strip(asMember), path + ": and is otherwise byte-identical to the member's");
+      continue;
+    }
     if (slug === "political") continue;
     const noBrand = (t) => t.replace(/<a class="ff-brand"[\s\S]*?<\/a>/, "");
     eq(noBrand(asOwner), noBrand(asMember), path + ": and is otherwise byte-identical to the member's");
