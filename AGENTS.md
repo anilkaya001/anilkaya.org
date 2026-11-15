@@ -1593,7 +1593,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 280 suites: 225 that need only Node (N), 40 that also
+`tests/suites/` registers 281 suites: 224 that need only Node (N), 42 that also
 need Playwright's Chromium (C) and 15 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1622,43 +1622,42 @@ flows-floor-funds         flows-floor-funds-live    flows-flow-below-render   fl
 flows-flowlab             flows-flowlab-nightly     flows-flowlab-onescreen   flows-flowlab-render
 flows-forward             flows-forward-lab         flows-freshness           flows-garch
 flows-glass-render        flows-guard-lexicon       flows-home-below-render   flows-home-composition
-flows-home-net-render     flows-home-onescreen      flows-horizon             flows-horizon-lint
-flows-lean                flows-ledger              flows-ledger-book         flows-ledger-live
-flows-ledger-live-plants-a flows-ledger-live-plants-b flows-ledger-live-render  flows-ledger-live-render-b
-flows-legs                flows-live                flows-macro               flows-macro-render
-flows-market-below-render flows-market-floor-render flows-market-onescreen    flows-market-river-render
-flows-market-visual       flows-member-export       flows-member-mutants      flows-member-onescreen
-flows-member-render       flows-member-shell        flows-member-since        flows-member-state
-flows-member-worker       flows-meter-worker        flows-mint                flows-moves-render
-flows-moves-sig           flows-net-map-render      flows-neuron              flows-neuron-screen
-flows-nn-render           flows-now-render          flows-oracle              flows-oracle-core
-flows-oracle-home-render  flows-oracle-live         flows-oracle-render       flows-oracle-restore-render
-flows-overlay             flows-payload-shape       flows-permits             flows-pipeline-chaos
-flows-pipeline-mutants    flows-plan-facts          flows-political           flows-political-render
-flows-popout-render       flows-pos-firstpaint      flows-pos-leaves          flows-pos-nightly
-flows-pos-plan            flows-pos-render          flows-pos-route           flows-pos-switch
-flows-positioning         flows-premium-rank        flows-private-render      flows-probe
-flows-public              flows-pulse               flows-quant               flows-quant-audit
-flows-quant-card          flows-read-failures       flows-readers             flows-reading
-flows-reading-worker      flows-reads               flows-ready               flows-record
-flows-registry-contract   flows-relations-render    flows-reports             flows-round
-flows-rt                  flows-scores              flows-sfc                 flows-sfc-render
-flows-sfc-route           flows-sfc-view            flows-sides               flows-sign
-flows-skyline-render      flows-starts              flows-stats               flows-stock
-flows-tape-stats          flows-targets             flows-time                flows-transport
-flows-truth               flows-universe            flows-variation           flows-vendor-budget
-flows-vendor-extras       flows-verdict             flows-vol                 flows-voldesk
-flows-voldesk-render      flows-warnings            flows-weight              flows-write-batch
-flows-ws-probe            flows-xcheck-render       lab-write                 launch-readiness
-markets                   mastery                   math-browser              math-darkpool
-math-dealer               math-duplicates           math-flow                 math-format
-math-print                math-short                math-sigma                math-site
-math-time                 math-units                math-vol                  pipeline
-route-matrix              server-ai                 server-desk               server-desk-sc
-server-ff                 server-flowlab            server-ingest             server-kernel
-server-log                server-macro              server-ops                server-oracle
-server-pages              server-router             server-rt                 server-voldesk
-staging
+flows-home-net-render     flows-horizon             flows-horizon-lint        flows-lean
+flows-ledger              flows-ledger-book         flows-ledger-live         flows-ledger-live-plants-a
+flows-ledger-live-plants-b flows-ledger-live-render  flows-ledger-live-render-b flows-legs
+flows-live                flows-macro               flows-macro-render        flows-market-below-render
+flows-market-floor-render flows-market-onescreen    flows-market-river-render flows-market-visual
+flows-member-export       flows-member-mutants      flows-member-onescreen    flows-member-render
+flows-member-shell        flows-member-since        flows-member-state        flows-member-worker
+flows-meter-worker        flows-mint                flows-moves-render        flows-moves-sig
+flows-net-map-render      flows-neuron              flows-neuron-screen       flows-nn-render
+flows-now-render          flows-oracle              flows-oracle-core         flows-oracle-home-render
+flows-oracle-live         flows-oracle-render       flows-oracle-restore-render flows-overlay
+flows-payload-shape       flows-permits             flows-pipeline-chaos      flows-pipeline-mutants
+flows-plan-facts          flows-political           flows-political-render    flows-popout-render
+flows-pos-firstpaint      flows-pos-leaves          flows-pos-nightly         flows-pos-plan
+flows-pos-render          flows-pos-route           flows-pos-switch          flows-positioning
+flows-premium-rank        flows-private-render      flows-probe               flows-public
+flows-pulse               flows-quant               flows-quant-audit         flows-quant-card
+flows-read-failures       flows-readers             flows-reading             flows-reading-worker
+flows-reads               flows-ready               flows-record              flows-registry-contract
+flows-relations-render    flows-reports             flows-round               flows-rt
+flows-scores              flows-sfc                 flows-sfc-render          flows-sfc-route
+flows-sfc-view            flows-sides               flows-sign                flows-skyline-render
+flows-starts              flows-stats               flows-stock               flows-tape-stats
+flows-targets             flows-time                flows-transport           flows-truth
+flows-universe            flows-variation           flows-vendor-budget       flows-vendor-extras
+flows-verdict             flows-vol                 flows-voldesk             flows-voldesk-render
+flows-warnings            flows-weight              flows-write-batch         flows-ws-probe
+flows-xcheck-render       lab-write                 launch-readiness          markets
+mastery                   math-browser              math-darkpool             math-dealer
+math-duplicates           math-flow                 math-format               math-print
+math-short                math-sigma                math-site                 math-time
+math-units                math-vol                  pipeline                  route-matrix
+server-ai                 server-desk               server-desk-sc            server-ff
+server-flowlab            server-ingest             server-kernel             server-log
+server-macro              server-ops                server-oracle             server-pages
+server-router             server-rt                 server-voldesk            staging
 ```
 
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):
@@ -1668,12 +1667,13 @@ flows-ask                 flows-brand-render        flows-chart-kernel        fl
 flows-defaults-render     flows-desk-audit-render   flows-desk-calls-render   flows-desk-client
 flows-desk-onescreen      flows-desk-ratio          flows-desk-wiring         flows-events
 flows-export              flows-fixture-guard-render flows-flow-net-render     flows-glance-frame-render
-flows-glance-live-render  flows-glance-render       flows-index               flows-kit
-flows-layout-sweep        flows-link                flows-movelab-render      flows-moves0
-flows-net-render          flows-pages-render        flows-readers-render      flows-reading-render
-flows-render              flows-rt-client           flows-sfc-firstpaint      flows-side-keep-render
-flows-status-render       flows-strip               flows-surface-render      flows-ticker
-flows-ticker-firstpaint-render landing-motion            market-ticker             placement
+flows-glance-live-render  flows-glance-render       flows-home-onescreen      flows-home-webkit
+flows-index               flows-kit                 flows-layout-sweep        flows-link
+flows-movelab-render      flows-moves0              flows-net-render          flows-pages-render
+flows-readers-render      flows-reading-render      flows-render              flows-rt-client
+flows-sfc-firstpaint      flows-side-keep-render    flows-status-render       flows-strip
+flows-surface-render      flows-ticker              flows-ticker-firstpaint-render landing-motion
+market-ticker             placement
 ```
 <!-- /gen:suites-local -->
 

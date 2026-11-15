@@ -21,7 +21,26 @@
   const verdictHost = $("ccVerdict");
   const stage = $("hmStage"), hm = $("hm"), pager = $("hmPager");
   if (!statusEl || !verdictHost || !stage || !hm || !pager) return;
-  const fitOf = () => getComputedStyle(stage).getPropertyValue("--hm-fit").trim() || "flat";
+  const FIT_BOX = [["xl", 1400, 800], ["l", 1040, 640], ["m", 760, 560]];
+  const boxFit = () => {
+    const w = hm.clientWidth, ht = hm.clientHeight;
+    const hit = FIT_BOX.find(([, bw, bh]) => w >= bw && ht >= bh);
+    return hit ? hit[0] : "s";
+  };
+  const fitOf = () => {
+    const said = getComputedStyle(stage).getPropertyValue("--hm-fit").trim();
+    const box = boxFit();
+    const forced = box !== "s" && (said === "" || said === "s") ? box : "";
+    if (forced) {
+      if (stage.getAttribute("data-fit-js") !== forced) stage.setAttribute("data-fit-js", forced);
+      const head = parseFloat(getComputedStyle(hm).getPropertyValue("--hm-head")) || 0;
+      stage.style.setProperty("--hm-h", Math.max(0, hm.clientHeight - head) + "px");
+    } else if (stage.hasAttribute("data-fit-js")) {
+      stage.removeAttribute("data-fit-js");
+      stage.style.removeProperty("--hm-h");
+    }
+    return forced || said || "flat";
+  };
 
   const ROW_MAX = 10;
   const LIST_MAX = 8;

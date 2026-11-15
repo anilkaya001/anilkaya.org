@@ -147,12 +147,12 @@ jobs:
         if: steps.browser.outputs.needs == 'true'
         working-directory: tests
         run: npx playwright install --with-deps chromium
-      - name: Install WebKit and Firefox on the shard that holds the engine suite
+      - name: Install WebKit and Firefox on the shard that holds the engine suites
         if: steps.browser.outputs.needs == 'true'
         working-directory: tests
         run: |
-          pin="$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync("suites/flows-sfc-firstpaint.json", "utf8")).shard))')"
-          if [ "$pin" = "${{ matrix.shard }}" ]; then timeout 420 npx playwright install --with-deps webkit firefox || { sudo sh -c 'pkill -x apt-get; pkill -x dpkg; sleep 5; dpkg --configure -a'; timeout 600 npx playwright install --with-deps webkit firefox; }; fi
+          pins="$(node -e 'const fs = require("fs"); process.stdout.write(["flows-sfc-firstpaint", "flows-home-webkit"].map((n) => JSON.parse(fs.readFileSync("suites/" + n + ".json", "utf8")).shard).join(" "))')"
+          if printf '%s\n' $pins | grep -qx "${{ matrix.shard }}"; then timeout 420 npx playwright install --with-deps webkit firefox || { sudo sh -c 'pkill -x apt-get; pkill -x dpkg; sleep 5; dpkg --configure -a'; timeout 600 npx playwright install --with-deps webkit firefox; }; fi
       - name: Check the contracts first
         working-directory: tests
         run: node run.mjs --only contracts

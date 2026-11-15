@@ -309,6 +309,8 @@ a.hm-chiplink:hover { background: color-mix(in srgb, var(--tone, var(--label-2))
 .hm-boards-day { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--label-3); }
 .hm-stage { --gap: 12px; flex: 1; min-height: 0; min-width: 0; position: relative; display: grid; gap: var(--gap); --hm-h: calc(100cqh - var(--hm-head)); }
 .hm-stage > * { min-width: 0; min-height: 0; overflow: hidden; }
+.hm-stage { --gap: 10px; --r-tile: 20px; --strip: clamp(56px, calc(var(--hm-h) * 0.09), 80px); --top: max(250px, calc(var(--hm-h) * 0.40)); grid-template-columns: repeat(12, minmax(0, 1fr)); grid-template-rows: calc(var(--top) - var(--strip) - var(--gap)) var(--strip) minmax(0, 1fr) minmax(0, 1fr) var(--strip) var(--strip); grid-template-areas: "hero hero hero hero hero hero neu neu neu lean lean lean" "hero hero hero hero hero hero news news news lean lean lean" "net net net net net net bull bull bull bear bear bear" "net net net net net net flag flag flag lead lead lead" "metl metl metl chg chg chg vol vol vol evt evt evt" "metl metl metl wtch wtch wtch vol vol vol evt evt evt"; }
+.hm-stage:where(:not([data-net])) { grid-template-areas: "hero hero hero hero hero hero neu neu neu lean lean lean" "hero hero hero hero hero hero news news news lean lean lean" "flag flag flag flag flag flag bull bull bull bear bear bear" "flag flag flag flag flag flag wtch wtch wtch lead lead lead" "metl metl metl chg chg chg vol vol vol evt evt evt" "metl metl metl chg chg chg vol vol vol evt evt evt"; }
 .hm-stage > .hm-mod { container-type: size; }
 .hm-stage > .hm-verdict { container: nnt / size; }
 #hmHero { grid-area: hero; } #hmVerdict { grid-area: neu; } #hmNet { grid-area: net; } #hmAlerts { grid-area: flag; } #hmLean { grid-area: lean; } #hmBull { grid-area: bull; } #hmBear { grid-area: bear; } #hmWatch { grid-area: wtch; } #hmLeaders { grid-area: lead; } #hmMetals { grid-area: metl; } #hmChg { grid-area: chg; } #hmVol { grid-area: vol; } #hmEvents { grid-area: evt; } #hmNews { grid-area: news; }
@@ -528,29 +530,46 @@ a.hm-chiplink:hover { background: color-mix(in srgb, var(--tone, var(--label-2))
 }
 
 @container hm not ((min-width: 760px) and (min-height: 560px)) {
-  .hm-stage { --hm-fit: s; --gap: 8px; --r-tile: 18px; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(12, minmax(0, 1fr)); touch-action: pan-y pinch-zoom; }
-  .hm-stage > [data-page] { visibility: hidden; }
-  .hm-stage[data-page="now"] > [data-page="now"], .hm-stage[data-page="flow"] > [data-page="flow"], .hm-stage[data-page="names"] > [data-page="names"], .hm-stage[data-page="glance"] > [data-page="glance"] { visibility: visible; }
-  #hmHero { grid-area: 1 / 1 / 9 / 3; } #hmVerdict { grid-area: 9 / 1 / 13 / 3; }
-  #hmNet { grid-area: 1 / 1 / 8 / 3; } #hmAlerts { grid-area: 8 / 1 / 13 / 3; }
-  #hmBull { grid-area: 1 / 1 / 7 / 3; } #hmBear { grid-area: 7 / 1 / 13 / 3; }
-  #hmLean { grid-area: 1 / 1 / 4 / 2; } #hmWatch { grid-area: 1 / 2 / 4 / 3; }
-  #hmLeaders { grid-area: 4 / 1 / 7 / 2; } #hmMetals { grid-area: 4 / 2 / 7 / 3; }
-  #hmChg { grid-area: 7 / 1 / 10 / 2; } #hmVol { grid-area: 7 / 2 / 10 / 3; }
-  #hmEvents { grid-area: 10 / 1 / 13 / 2; } #hmNews { grid-area: 10 / 2 / 13 / 3; }
-  .hm-stage:not([data-net]) > #hmAlerts { grid-area: 1 / 1 / 8 / 3; }
-  .hm-stage:not([data-net]) > #hmLean { grid-area: 8 / 1 / 13 / 3; }
-  .hm-stage:not([data-net]) > #hmWatch { grid-area: 1 / 1 / 4 / 3; }
-  .hm-stage:not([data-net]) > #hmLeaders { grid-area: 4 / 1 / 7 / 2; }
-  .hm-pager:not([hidden]) { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) 0; }
-  .flows-body .flows-head.hm-head { height: auto; min-height: 32px; margin-bottom: 6px; flex-wrap: wrap; gap: 0 var(--sp-4); }
-  .flows-body .flows-head.hm-head h1 { font-size: 22px; }
-  .hm-head .hm-meta { flex: 1 1 0; flex-wrap: wrap; white-space: normal; gap: 2px var(--sp-3); font-size: 13px; }
-  .hm-meta:has(> .hm-boards-day) > #ccMetaScreened { display: none; }
-  .hm-stage .hm-hero-in { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; grid-template-areas: "id" "chart" "kpi"; }
-  .hm-stage .hm-hero-in::before, .hm-stage .hm-hero-in::after { grid-area: 1 / 1 / 3 / 2; }
-  .hm-stage > #hmVerdict .hm-verdict-g { --s: 40px; }
+  .hm-stage { --hm-fit: s; }
+  .hm-stage:where(:not([data-fit-js])) { --gap: 8px; --r-tile: 18px; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(12, minmax(0, 1fr)); grid-template-areas: none; touch-action: pan-y pinch-zoom; }
+  .hm-stage:where(:not([data-fit-js])) > [data-page] { visibility: hidden; }
+  .hm-stage:where(:not([data-fit-js]))[data-page="now"] > [data-page="now"], .hm-stage:where(:not([data-fit-js]))[data-page="flow"] > [data-page="flow"], .hm-stage:where(:not([data-fit-js]))[data-page="names"] > [data-page="names"], .hm-stage:where(:not([data-fit-js]))[data-page="glance"] > [data-page="glance"] { visibility: visible; }
+  .hm-stage:where(:not([data-fit-js])) > #hmHero { grid-area: 1 / 1 / 9 / 3; } .hm-stage:where(:not([data-fit-js])) > #hmVerdict { grid-area: 9 / 1 / 13 / 3; }
+  .hm-stage:where(:not([data-fit-js])) > #hmNet { grid-area: 1 / 1 / 8 / 3; } .hm-stage:where(:not([data-fit-js])) > #hmAlerts { grid-area: 8 / 1 / 13 / 3; }
+  .hm-stage:where(:not([data-fit-js])) > #hmBull { grid-area: 1 / 1 / 7 / 3; } .hm-stage:where(:not([data-fit-js])) > #hmBear { grid-area: 7 / 1 / 13 / 3; }
+  .hm-stage:where(:not([data-fit-js])) > #hmLean { grid-area: 1 / 1 / 4 / 2; } .hm-stage:where(:not([data-fit-js])) > #hmWatch { grid-area: 1 / 2 / 4 / 3; }
+  .hm-stage:where(:not([data-fit-js])) > #hmLeaders { grid-area: 4 / 1 / 7 / 2; } .hm-stage:where(:not([data-fit-js])) > #hmMetals { grid-area: 4 / 2 / 7 / 3; }
+  .hm-stage:where(:not([data-fit-js])) > #hmChg { grid-area: 7 / 1 / 10 / 2; } .hm-stage:where(:not([data-fit-js])) > #hmVol { grid-area: 7 / 2 / 10 / 3; }
+  .hm-stage:where(:not([data-fit-js])) > #hmEvents { grid-area: 10 / 1 / 13 / 2; } .hm-stage:where(:not([data-fit-js])) > #hmNews { grid-area: 10 / 2 / 13 / 3; }
+  .hm-stage:where(:not([data-fit-js])):not([data-net]) > #hmAlerts { grid-area: 1 / 1 / 8 / 3; }
+  .hm-stage:where(:not([data-fit-js])):not([data-net]) > #hmLean { grid-area: 8 / 1 / 13 / 3; }
+  .hm-stage:where(:not([data-fit-js])):not([data-net]) > #hmWatch { grid-area: 1 / 1 / 4 / 3; }
+  .hm-stage:where(:not([data-fit-js])):not([data-net]) > #hmLeaders { grid-area: 4 / 1 / 7 / 2; }
+  :where(.hm:not(:has(> .hm-stage[data-fit-js]))) .hm-pager:not([hidden]) { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) 0; }
+  .flows-body :where(.hm:not(:has(> .hm-stage[data-fit-js]))) > .flows-head.hm-head { height: auto; min-height: 32px; margin-bottom: 6px; flex-wrap: wrap; gap: 0 var(--sp-4); }
+  .flows-body :where(.hm:not(:has(> .hm-stage[data-fit-js]))) > .flows-head.hm-head h1 { font-size: 22px; }
+  :where(.hm:not(:has(> .hm-stage[data-fit-js]))) .hm-head .hm-meta { flex: 1 1 0; flex-wrap: wrap; white-space: normal; gap: 2px var(--sp-3); font-size: 13px; }
+  :where(.hm:not(:has(> .hm-stage[data-fit-js]))) .hm-meta:has(> .hm-boards-day) > #ccMetaScreened { display: none; }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-in { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; grid-template-areas: "id" "chart" "kpi"; }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-in::before, .hm-stage:where(:not([data-fit-js])) .hm-hero-in::after { grid-area: 1 / 1 / 3 / 2; }
+  .hm-stage:where(:not([data-fit-js])) > #hmVerdict .hm-verdict-g { --s: 40px; }
 }
+.hm-stage[data-fit-js="xl"] { --gap: 12px; --r-tile: 24px; --strip: clamp(60px, calc(var(--hm-h) * 0.085), 92px); --top: max(412px, calc(var(--hm-h) * 0.47)); grid-template-columns: repeat(7, minmax(0, 1fr)) repeat(5, minmax(0, 1.05fr)); grid-template-rows: calc(var(--top) - var(--strip) - var(--gap)) var(--strip) minmax(0, 1fr) var(--strip) var(--strip); grid-template-areas: "hero hero hero hero hero neu neu net net net net net" "hero hero hero hero hero news news net net net net net" "bull bull bull bear bear bear flag flag flag lead lead lead" "lean lean lean lean metl metl metl vol vol vol evt evt" "lean lean lean lean metl metl metl chg chg chg wtch wtch"; }
+.hm-stage[data-fit-js="xl"]:not([data-net]) { grid-template-areas: "hero hero hero hero hero neu neu flag flag flag flag flag" "hero hero hero hero hero news news flag flag flag flag flag" "bull bull bull bear bear bear wtch wtch wtch lead lead lead" "lean lean lean lean metl metl metl vol vol vol evt evt" "lean lean lean lean metl metl metl chg chg chg evt evt"; }
+.hm-stage[data-fit-js="xl"] :is(#hmNews, #hmVol, #hmChg, #hmEvents, #hmWatch) { --tp: 8px 12px; --tg: 4px; }
+.hm-stage[data-fit-js="xl"] > #hmVerdict .hm-verdict-g { --s: 56px; }
+.hm-stage[data-fit-js="xl"] .hm-hero-legs .ui-metrics { grid-template-columns: minmax(0, 1fr); gap: 6px; } .hm-stage[data-fit-js="xl"] .hm-hero-legs .ui-metric { flex-direction: row; justify-content: space-between; align-items: baseline; }
+.hm-stage[data-fit-js="l"] { --gap: 10px; --r-tile: 20px; --strip: clamp(56px, calc(var(--hm-h) * 0.09), 80px); --top: max(250px, calc(var(--hm-h) * 0.40)); grid-template-columns: repeat(12, minmax(0, 1fr)); grid-template-rows: calc(var(--top) - var(--strip) - var(--gap)) var(--strip) minmax(0, 1fr) minmax(0, 1fr) var(--strip) var(--strip); grid-template-areas: "hero hero hero hero hero hero neu neu neu lean lean lean" "hero hero hero hero hero hero news news news lean lean lean" "net net net net net net bull bull bull bear bear bear" "net net net net net net flag flag flag lead lead lead" "metl metl metl chg chg chg vol vol vol evt evt evt" "metl metl metl wtch wtch wtch vol vol vol evt evt evt"; }
+.hm-stage[data-fit-js="l"]:not([data-net]) { grid-template-areas: "hero hero hero hero hero hero neu neu neu lean lean lean" "hero hero hero hero hero hero news news news lean lean lean" "flag flag flag flag flag flag bull bull bull bear bear bear" "flag flag flag flag flag flag wtch wtch wtch lead lead lead" "metl metl metl chg chg chg vol vol vol evt evt evt" "metl metl metl chg chg chg vol vol vol evt evt evt"; }
+.hm-stage[data-fit-js="l"] .hm-hero-in { grid-template-columns: minmax(0, 0.42fr) minmax(0, 0.58fr); }
+.hm-stage[data-fit-js="l"] :is(#hmNews, #hmChg, #hmWatch) { --tp: 8px 12px; --tg: 4px; }
+.hm-stage[data-fit-js="l"] :is(#hmBull, #hmBear, #hmAlerts, #hmLeaders) { --tp: 8px 12px; --tg: 4px; }
+.hm-stage[data-fit-js="l"] > #hmVerdict .hm-verdict-g { --s: 44px; }
+.hm-stage[data-fit-js="m"] { --gap: 8px; --r-tile: 18px; --strip: clamp(52px, calc(var(--hm-h) * 0.09), 76px); --top: max(232px, calc(var(--hm-h) * 0.40)); grid-template-columns: repeat(12, minmax(0, 1fr)); grid-template-rows: calc(var(--top) - var(--strip) - var(--gap)) var(--strip) minmax(0, 1fr) minmax(0, 1fr) var(--strip); grid-template-areas: "hero hero hero hero hero hero neu neu neu neu neu neu" "hero hero hero hero hero hero news news news news news news" "bull bull bull bear bear bear flag flag flag lead lead lead" "lean lean lean lean lean lean net net net metl metl metl" "chg chg chg vol vol vol evt evt evt wtch wtch wtch"; }
+.hm-stage[data-fit-js="m"]:not([data-net]) { grid-template-areas: "hero hero hero hero hero hero neu neu neu neu neu neu" "hero hero hero hero hero hero news news news news news news" "bull bull bull bear bear bear flag flag flag lead lead lead" "lean lean lean lean lean lean wtch wtch wtch metl metl metl" "chg chg chg vol vol vol evt evt evt evt evt evt"; }
+.hm-stage[data-fit-js="m"] .hm-hero-in { grid-template-columns: minmax(0, 0.42fr) minmax(0, 0.58fr); }
+.hm-stage[data-fit-js="m"] :is(#hmNews, #hmVol, #hmChg, #hmEvents, #hmWatch) { --tp: 8px 12px; --tg: 4px; }
+.hm-stage[data-fit-js="m"] > #hmVerdict .hm-verdict-g { --s: 44px; }
 
 @container mod (max-height: 159.98px) { .hm-stage #ccVol .ui-metric-s, .hm-stage #ccVol .hm-radar { display: none; } }
 @container mod (max-height: 55.98px) {
@@ -673,34 +692,39 @@ a.hm-chiplink:hover { background: color-mix(in srgb, var(--tone, var(--label-2))
 }
 
 @container hm not ((min-width: 760px) and (min-height: 560px)) {
-  .hm-stage .hm-hero-id { padding: 12px 16px 0; }
-  .hm-stage .hm-hero-chart { padding: 4px 16px 8px; }
-  .hm-stage .hm-hero-v, .hm-stage .hm-hero-legs { margin-top: 0; }
-  .hm-stage .hm-hero-v { font-size: min(48px, 19.5cqi); }
-  @container hid (max-width: 339.98px) { .hm-stage .hm-cw { gap: 5px; font-size: 11px; } }
-  @container hid (max-width: 319.98px) { .hm-stage .hm-cw-s[data-src] { display: none; } }
-  .hm-stage .hm-hero-chips :is(.ui-chips-w, .ui-chips) { height: auto; }
-  .hm-stage .hm-hero-chips .ui-chips { grid-template-columns: repeat(6, minmax(0, 1fr)); grid-auto-rows: 44px; }
-  .hm-stage .hm-hero-chips .ui-gchip { grid-column: span 2; padding: 3px 4px; gap: 1px; }
-  .hm-stage .hm-hero-chips .ui-gchip:nth-child(4) { grid-column: 2 / span 2; }
-  .hm-stage .hm-hero-chips .ui-chip-v { font-size: 17px; }
-  .hm-stage .hm-hero-chips .ui-chip-l { font-size: 11px; }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-id { padding: 12px 16px 0; }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-chart { padding: 4px 16px 8px; }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-v, .hm-stage:where(:not([data-fit-js])) .hm-hero-legs { margin-top: 0; }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-v { font-size: min(48px, 19.5cqi); }
+  @container hid (max-width: 339.98px) { .hm-stage:where(:not([data-fit-js])) .hm-cw { gap: 5px; font-size: 11px; } }
+  @container hid (max-width: 319.98px) { .hm-stage:where(:not([data-fit-js])) .hm-cw-s[data-src] { display: none; } }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-chips :is(.ui-chips-w, .ui-chips) { height: auto; }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-chips .ui-chips { grid-template-columns: repeat(6, minmax(0, 1fr)); grid-auto-rows: 44px; }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-chips .ui-gchip { grid-column: span 2; padding: 3px 4px; gap: 1px; }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-chips .ui-gchip:nth-child(4) { grid-column: 2 / span 2; }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-chips .ui-chip-v { font-size: 17px; }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-chips .ui-chip-l { font-size: 11px; }
 }
 @container hm (max-height: 639.98px) and (not ((min-width: 760px) and (min-height: 560px))) {
-  .hm-stage { --tp: 8px 12px; --tg: 4px; }
-  .hm-stage .hm-hero-legs { display: none; }
-  .hm-stage .hm-hero-v { font-size: min(44px, 19.5cqi); }
-  .hm-stage .hm-hero-chips .ui-chips { grid-template-columns: repeat(5, minmax(0, 1fr)); grid-auto-rows: 44px; }
-  .hm-stage .hm-hero-chips .ui-gchip, .hm-stage .hm-hero-chips .ui-gchip:nth-child(4) { grid-column: auto; }
-  .hm-stage .hm-hero-chips .ui-chip-v { font-size: 15px; }
-  .hm-stage .hm-hero-chips .ui-chip-l { font-size: 10px; }
+  .hm-stage:where(:not([data-fit-js])) { --tp: 8px 12px; --tg: 4px; }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-legs { display: none; }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-v { font-size: min(44px, 19.5cqi); }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-chips .ui-chips { grid-template-columns: repeat(5, minmax(0, 1fr)); grid-auto-rows: 44px; }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-chips .ui-gchip, .hm-stage:where(:not([data-fit-js])) .hm-hero-chips .ui-gchip:nth-child(4) { grid-column: auto; }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-chips .ui-chip-v { font-size: 15px; }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-chips .ui-chip-l { font-size: 10px; }
 }
 @container hm (max-height: 519.98px) and (not ((min-width: 760px) and (min-height: 560px))) {
-  .hm-stage .hm-hero-chart { display: none; }
-  .hm-stage .hm-hero-in { grid-template-rows: minmax(0, 1fr) auto; grid-template-areas: "id" "kpi"; }
-  .hm-stage .hm-hero-in::before, .hm-stage .hm-hero-in::after { grid-area: 1 / 1 / 2 / 2; }
-  .hm-stage .hm-hero-open { display: block; position: absolute; top: 10px; right: 12px; z-index: 2; min-height: 32px; padding: 0 14px; border: 0; border-radius: var(--r-pill); background: var(--glass-ctl); box-shadow: var(--glass-chrome-edge); color: var(--label-1); font: 500 13px / 1 var(--font-text); cursor: pointer; }
-  @media (pointer: coarse) { .hm-stage .hm-hero-open { min-height: 44px; } }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-chart { display: none; }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-in { grid-template-rows: minmax(0, 1fr) auto; grid-template-areas: "id" "kpi"; }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-in::before, .hm-stage:where(:not([data-fit-js])) .hm-hero-in::after { grid-area: 1 / 1 / 2 / 2; }
+  .hm-stage:where(:not([data-fit-js])) .hm-hero-open { display: block; position: absolute; top: 10px; right: 12px; z-index: 2; min-height: 32px; padding: 0 14px; border: 0; border-radius: var(--r-pill); background: var(--glass-ctl); box-shadow: var(--glass-chrome-edge); color: var(--label-1); font: 500 13px / 1 var(--font-text); cursor: pointer; }
+  @media (pointer: coarse) { .hm-stage:where(:not([data-fit-js])) .hm-hero-open { min-height: 44px; } }
 }
 @media (pointer: coarse) { .hm-stage .hm-mlead { min-height: 44px; } }
 @container mod (max-width: 270px) { #ccChgStats .ui-metric:nth-child(n+2) { display: none; } }
+@supports (hanging-punctuation: first) {
+  @media (min-width: 1800px), (min-height: 1200px) {
+    .hm { --mat-regular: var(--glass-solid); --mat-thick: var(--glass-solid-thick); --mat-thin: var(--glass-solid); --mat-blur: none; --mat-blur-thick: none; --glass-lens: none; }
+  }
+}

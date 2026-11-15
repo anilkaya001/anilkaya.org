@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launch } from "./lib/browser.mjs";
+import { webkit } from "playwright";
 import { openHome, openDock, FITS, PAGES } from "./lib/home-fixtures.mjs";
 import { richAnswer } from "./lib/market-fixtures.mjs";
 import { nightlyEmit, emitRead } from "./lib/nightly-emit.mjs";
@@ -26,7 +27,8 @@ const eq = (a, b, msg) => {
   } else assert.deepEqual(a, b, msg);
   checks++;
 };
-const want = (name) => !ONLY || ONLY.test(name);
+const PART = (process.argv.find((a) => a.startsWith("--part=")) || "").slice("--part=".length);
+const want = (name) => (PART === "engines" ? name === "engines" : name !== "engines" && (!ONLY || ONLY.test(name)));
 const VP = process.env.ONESCREEN_VP ? new Set(process.env.ONESCREEN_VP.split(",")) : null;
 const wantVp = (w, h, extra) => !VP || VP.has(w + "x" + h + (extra && extra.dock ? "+dock" : ""));
 
@@ -503,11 +505,11 @@ const MUTANTS = [
   ["a tile lets its content overflow", [[CSS, ".hm-stage > * { min-width: 0; min-height: 0; overflow: hidden; }", ".hm-stage > * { min-width: 0; min-height: 0; overflow: visible; }"]], [[1440, 820, "l"]]],
   ["the fitter trims the heat map", [[JS, ", [data-nofit]\"))", "\"))"]], [[1440, 820, "l"]], { nofit: true }],
   ["the sheet holds a clone", [[JS, "sheet.replaceChildren(close, mod);", "sheet.replaceChildren(close, mod.cloneNode(true));"]], [[1440, 820, "l"]], { sheet: "#hmAlerts .hm-all, #hmBull .hm-all, #hmLeaders .hm-all" }],
-  ["the pages of the pager are display none", [[CSS, ".hm-stage > [data-page] { visibility: hidden; }", ".hm-stage > [data-page] { display: none; }"]], [[390, 844, "s"]]],
+  ["the pages of the pager are display none", [[CSS, ".hm-stage:where(:not([data-fit-js])) > [data-page] { visibility: hidden; }", ".hm-stage:where(:not([data-fit-js])) > [data-page] { display: none; }"]], [[390, 844, "s"]]],
   ["the KPI row is taller than the strip row", [[CSS, "grid-template-rows: minmax(0, 1fr) var(--strip);", "grid-template-rows: minmax(0, 1fr) calc(var(--strip) + 6px);"]], [[1920, 1080, "xl"]]],
   ["an absent numeral is painted 0", [[JS, "v.textContent = none ? DASH : value;", "v.textContent = none ? \"0\" : value;"]], [[1440, 820, "l"]], { pending: true }],
-  ["the XL columns are all 1fr, so the network host falls short", [[CSS, "repeat(7, minmax(0, 1fr)) repeat(5, minmax(0, 1.05fr))", "repeat(12, minmax(0, 1fr))"]], [[1920, 1080, "xl"]]],
-  ["the --top floor is gone", [[CSS, "--top: max(412px, calc(var(--hm-h) * 0.47));", "--top: calc(var(--hm-h) * 0.47);"]], [[1920, 929, "xl"]]],
+  ["the XL columns are all 1fr, so the network host falls short", [[CSS, "--hm-fit: xl; --gap: 12px; --r-tile: 24px; --strip: clamp(60px, calc(var(--hm-h) * 0.085), 92px); --top: max(412px, calc(var(--hm-h) * 0.47)); grid-template-columns: repeat(7, minmax(0, 1fr)) repeat(5, minmax(0, 1.05fr))", "--hm-fit: xl; --gap: 12px; --r-tile: 24px; --strip: clamp(60px, calc(var(--hm-h) * 0.085), 92px); --top: max(412px, calc(var(--hm-h) * 0.47)); grid-template-columns: repeat(12, minmax(0, 1fr))"]], [[1920, 1080, "xl"]]],
+  ["the --top floor is gone", [[CSS, "--hm-fit: xl; --gap: 12px; --r-tile: 24px; --strip: clamp(60px, calc(var(--hm-h) * 0.085), 92px); --top: max(412px, calc(var(--hm-h) * 0.47));", "--hm-fit: xl; --gap: 12px; --r-tile: 24px; --strip: clamp(60px, calc(var(--hm-h) * 0.085), 92px); --top: calc(var(--hm-h) * 0.47);"]], [[1920, 929, "xl"]]],
   ["the fitter keeps three rows at least", [[JS, "const FIT_MIN = 2;", "const FIT_MIN = 3;"]], [[1440, 820, "l"]]],
   ["the lower chunk is asked for at s before Glance", [[JS, "else { for (const m of stage.children) m.inert = false; askLower(); }", "else { for (const m of stage.children) m.inert = false; }\n    askLower();"]], [[390, 844, "s"]], { s: true }],
   ["the L block never sets --hm-fit", [[CSS, "--hm-fit: l; --gap: 10px;", "--gap: 10px;"]], [[1440, 820, "l"]]],
@@ -835,6 +837,160 @@ if (want("cap")) {
   for (const triples of results) for (const [a, b, m] of triples) eq(a, b, m);
 }
 
+if (want("engines")) {
+  const CSS_FILE = path.join(ROOT, "assets/css/flows-home.css");
+  const JS_FILE = path.join(ROOT, "assets/js/flows-overview.js");
+  const once = (src, from, to, file) => {
+    const n = src.split(from).length - 1;
+    if (n !== 1) throw new Error(`planted anchor matches ${n} times in ${file}: ${from}`);
+    return src.replace(from, to);
+  };
+  const WORLDS = {
+    live: (css) => css,
+    unmatched: (css) => once(css, "container: hm / size; --hm-head: 44px;", "container: hm-gone / size; --hm-head: 44px;", "flows-home.css"),
+    zero: (css) => css.replace(/@container hm ([^{]*)\{/g, (all, cond) => (cond.trim().startsWith("(min-") ? "@media not all {" : "@media all {")),
+  };
+  const zeroBlocks = (fs.readFileSync(CSS_FILE, "utf8").match(/@container hm [^{]*\{/g) || []).length;
+  ok(zeroBlocks >= 8, `the zero-size world rewrites every hm container query (${zeroBlocks})`);
+  const served = (world, edits) => async (route, u) => {
+    const file = u.pathname === CSS ? CSS_FILE : u.pathname === JS ? JS_FILE : null;
+    if (!file) return false;
+    let src = fs.readFileSync(file, "utf8");
+    if (file === CSS_FILE) src = WORLDS[world](src);
+    for (const [f, from, to] of edits) if (f === u.pathname) src = once(src, from, to, f);
+    await route.fulfill({ body: src, contentType: file === CSS_FILE ? "text/css" : "text/javascript" });
+    return true;
+  };
+  const SHOWN = () => {
+    const stage = document.getElementById("hmStage");
+    const s = stage.getBoundingClientRect();
+    const tiles = [...stage.children].filter((e) => e.tagName === "SECTION").map((t) => {
+      const r = t.getBoundingClientRect();
+      return { id: t.id, x: r.x, y: r.y, w: r.width, h: r.height, vis: getComputedStyle(t).visibility, inert: !!t.inert };
+    });
+    return { forced: stage.getAttribute("data-fit-js") || "", fit: stage.dataset.fit, tiles, stage: { x: s.x, y: s.y, w: s.width, h: s.height }, sh: document.documentElement.scrollHeight, ih: innerHeight };
+  };
+  const allShown = (g, label) => {
+    const bad = [];
+    if (g.tiles.length !== 14) bad.push(`${label}: ${g.tiles.length} tiles`);
+    for (const t of g.tiles) {
+      if (t.vis === "hidden" || t.inert || t.w < 20 || t.h < 20) bad.push(`${label}: ${t.id} is not shown (${t.vis}, ${Math.round(t.w)}x${Math.round(t.h)})`);
+      if (t.x < g.stage.x - 1 || t.y < g.stage.y - 1 || t.x + t.w > g.stage.x + g.stage.w + 1 || t.y + t.h > g.stage.y + g.stage.h + 1) bad.push(`${label}: ${t.id} leaves the stage`);
+    }
+    for (let i = 0; i < g.tiles.length; i++) for (let j = i + 1; j < g.tiles.length; j++) {
+      const a = g.tiles[i], b = g.tiles[j];
+      if (a.x < b.x + b.w - 1 && b.x < a.x + a.w - 1 && a.y < b.y + b.h - 1 && b.y < a.y + a.h - 1) bad.push(`${label}: ${a.id} and ${b.id} intersect`);
+    }
+    if (g.sh > g.ih + 1) bad.push(`${label}: the page scrolls`);
+    return bad;
+  };
+  const forcedVisit = async (b, world, [w, h, fit], edits = []) => {
+    const label = `${world} ${w}x${h}`;
+    const { context, page, errors } = await openHome(b, { viewport: { width: w, height: h }, rich: true, coarse: w < 500, onRoute: served(world, edits) });
+    const bad = [];
+    try {
+      await settle(page, { net: true, fit });
+      const g = await page.evaluate(SHOWN);
+      if (fit === "flat") {
+        if (g.fit !== "flat" || g.forced) bad.push(`${label}: the fit is ${g.fit}/${g.forced}, not the CSS default`);
+        bad.push(...allShown(g, label));
+      } else {
+        const f = await measure(page);
+        if (world !== "live" && g.forced !== fit) bad.push(`${label}: the script forced ${g.forced || "nothing"}, not ${fit}`);
+        if (world === "live" && g.forced) bad.push(`${label}: the script forced ${g.forced} although the container query answered`);
+        bad.push(...geometry({ ...f, cssFit: f.fit }, fit, true, label));
+        bad.push(...allShown(g, label));
+      }
+      if (errors.length) bad.push(`${label}: page error ${errors[0]}`);
+    } catch (error) {
+      bad.push(`${label}: threw ${String(error && error.message).split("\n")[0]}`);
+    }
+    await context.close();
+    return bad;
+  };
+
+  const cssText = fs.readFileSync(CSS_FILE, "utf8");
+  const copyOf = (fit) => {
+    const head = cssText.indexOf(`  .hm-stage { --hm-fit: ${fit};`);
+    const body = cssText.slice(head, cssText.indexOf("\n}\n", head)).split("\n").map((l) => l.trim()).filter(Boolean);
+    return body.map((l) => l.replace(/--hm-fit: \w+; /, "").replaceAll(".hm-stage", `.hm-stage[data-fit-js="${fit}"]`));
+  };
+  for (const fit of ["xl", "l", "m"]) {
+    const lines = copyOf(fit);
+    ok(lines.length >= 4, `the ${fit} container block has its rules (${lines.length})`);
+    eq(lines.filter((l) => !cssText.includes("\n" + l + "\n")), [], `THE FORCED ${fit.toUpperCase()} LAYOUT IS A LINE-FOR-LINE COPY OF THE ${fit.toUpperCase()} CONTAINER BLOCK, so the fallback cannot drift from it`);
+  }
+  const defaultRule = copyOf("l").slice(0, 2).map((l) => l.replaceAll('.hm-stage[data-fit-js="l"]:not([data-net])', ".hm-stage:where(:not([data-net]))").replaceAll('.hm-stage[data-fit-js="l"]', ".hm-stage"));
+  eq(defaultRule.filter((l) => !cssText.includes("\n" + l + "\n")), [], "THE CSS DEFAULT OUTSIDE EVERY CONTAINER QUERY IS THE L GRID, which places all fourteen tiles");
+
+  const FORCED_JOBS = [
+    ["unmatched", [1920, 1080, "xl"]], ["unmatched", [1440, 820, "l"]], ["unmatched", [1280, 800, "m"]], ["unmatched", [2560, 1390, "xl"]],
+    ["zero", [2560, 1390, "xl"]], ["zero", [1440, 820, "l"]], ["zero", [1024, 768, "m"]],
+    ["unmatched", [390, 844, "flat"]],
+  ];
+  const results = await pool(FORCED_JOBS, async ([world, spec]) => [[await forcedVisit(browser, world, spec), [], `WHEN THE CONTAINER QUERY ${world === "zero" ? "REPORTS A ZERO SIZE" : "NEVER MATCHES"} AT ${spec[0]}x${spec[1]} ${spec[2] === "flat" ? "THE CSS DEFAULT STILL SHOWS ALL FOURTEEN TILES" : `THE SCRIPT FITS THE STAGE AT ${spec[2].toUpperCase()} FROM ITS MEASURED BOX: every tile in its grid area, none hidden`}`]]);
+  for (const triples of results) for (const [a, b, m] of triples) eq(a, b, m);
+  const NOJS = [[JS, "const forced = box !== \"s\" && (said === \"\" || said === \"s\") ? box : \"\";", "const forced = \"\";"]];
+  for (const spec of [[1440, 820, "flat"], [2560, 1390, "flat"]]) eq(await forcedVisit(browser, "unmatched", spec, NOJS), [], `WITH NEITHER THE CONTAINER QUERY NOR THE SCRIPT AT ${spec[0]}x${spec[1]}, THE CSS DEFAULT SHOWS ALL FOURTEEN TILES ON ONE SCREEN`);
+
+  const LAYERS = () => {
+    let n = 0, area = 0;
+    for (const e of document.querySelectorAll("#hm, #hm *")) for (const p of [null, "::before", "::after"]) {
+      const cs = getComputedStyle(e, p);
+      const v = cs.backdropFilter || cs.webkitBackdropFilter;
+      if (!v || v === "none") continue;
+      if (p && (cs.content === "none" || cs.content === "normal")) continue;
+      const r = e.getBoundingClientRect();
+      if (r.width * r.height < 1) continue;
+      n++; area += r.width * r.height;
+    }
+    return { n, share: area / (innerWidth * innerHeight) };
+  };
+  const CAP = { n: 2, share: 0.01 };
+  const layerVisit = async (b, [w, h], edits = []) => {
+    const { context, page } = await openHome(b, { viewport: { width: w, height: h }, rich: true, onRoute: served("live", edits) });
+    await settle(page, { net: true, fit: "xl" });
+    const l = await page.evaluate(LAYERS);
+    await context.close();
+    return l;
+  };
+  const capped = (l) => l.n <= CAP.n && l.share <= CAP.share;
+  const CR_BIG = await layerVisit(browser, [2560, 1390]);
+  ok(!capped(CR_BIG) && CR_BIG.n >= 10, `CHROMIUM AT 2560x1390 KEEPS THE GLASS: ${CR_BIG.n} backdrop layers in the stage over ${(CR_BIG.share * 100).toFixed(0)}% of the window`);
+
+  let wk = null;
+  try { wk = await webkit.launch(); } catch (error) {
+    const need = process.env.SFC_ENGINES === "all" || process.env.HOME_WEBKIT === "require";
+    if (need) throw new Error("WebKit is required here and did not launch: " + String(error && error.message).split("\n")[0]);
+    console.log("flows-home-onescreen: WebKit is not installed, so the WebKit half is skipped (CI requires it)");
+  }
+  if (wk) {
+    for (const spec of [[2560, 1390, "xl"], [1440, 820, "l"]]) {
+      eq(await forcedVisit(wk, "live", spec), [], `WEBKIT AT ${spec[0]}x${spec[1]}: THE HOME IS ONE SCREEN AT ${spec[2].toUpperCase()}, every tile in its grid area, nothing clipped, no page scroll`);
+    }
+    const big = await layerVisit(wk, [2560, 1390]);
+    ok(capped(big), `WEBKIT AT 2560x1390 DRAWS AT MOST ${CAP.n} BACKDROP LAYERS IN THE STAGE OVER AT MOST ${CAP.share * 100}% OF THE WINDOW (${big.n}, ${(big.share * 100).toFixed(2)}%)`);
+    const small = await layerVisit(wk, [1440, 820]);
+    ok(!capped(small) && small.n >= 10, `WEBKIT AT 1440x820 KEEPS THE GLASS (${small.n} layers)`);
+    const SUP = "@supports (hanging-punctuation: first) {";
+    const MED = "@media (min-width: 1800px), (min-height: 1200px) {";
+    ok(!capped(await layerVisit(wk, [2560, 1390], [[CSS, SUP, "@supports (hanging-punctuation: zz-none) {"]])), "PLANTED WRONG BUILD IS CAUGHT: the WebKit cap is gone, so 2560x1390 carries every glass layer");
+    ok(capped(await layerVisit(wk, [1440, 820], [[CSS, MED, "@media all {"]])), "PLANTED WRONG BUILD IS CAUGHT: the cap applies at every window, so 1440x820 loses its glass");
+    await wk.close();
+  }
+  ok(capped(await layerVisit(browser, [2560, 1390], [[CSS, "@supports (hanging-punctuation: first) {", "@supports (display: grid) {"]])), "PLANTED WRONG BUILD IS CAUGHT: the cap reaches every browser, so Chromium at 2560x1390 loses its glass");
+
+  const PLANTS = [
+    ["the script never forces a fit", "zero", [1440, 820, "l"], NOJS],
+    ["an s rule still hides tiles under a forced fit", "zero", [1440, 820, "l"], [[CSS, ".hm-stage:where(:not([data-fit-js])) > [data-page] { visibility: hidden; }", ".hm-stage > [data-page] { visibility: hidden; }"]]],
+    ["the forced xl copy drifts from the container's xl", "unmatched", [1920, 1080, "xl"], [[CSS, ".hm-stage[data-fit-js=\"xl\"] { --gap: 12px;", ".hm-stage[data-fit-js=\"xl\"] { --gap: 18px;"]]],
+    ["the CSS default is gone", "unmatched", [1440, 820, "flat"], [...NOJS, [CSS, ".hm-stage { --gap: 10px; --r-tile: 20px;", ".hm-stage-gone { --gap: 10px; --r-tile: 20px;"]]],
+  ];
+  const caught = await pool(PLANTS, async ([name, world, spec, edits]) => [[(await forcedVisit(browser, world, spec, edits)).length > 0, true, `PLANTED WRONG BUILD IS CAUGHT BY THE FALLBACK CHECKS: ${name}`]]);
+  for (const triples of caught) for (const [a, b, m] of triples) eq(a, b, m);
+}
+
 await browser.close();
 if (soft) console.log(`flows-home-onescreen: ${soft} soft failures`);
-console.log(`flows-home-onescreen: ${checks} checks, ${TABLE.length} viewports, the pager, the sheet, the dock, the cap-weighted line in ${CAP_WORLDS.length} worlds and ${MUTANTS.length + CAP_MUTANTS.length} planted wrong builds`);
+if (PART === "engines") console.log(`flows-home-onescreen --part=engines: ${checks} checks: the container-query fallback in Chromium and the WebKit sweep`);
+else console.log(`flows-home-onescreen: ${checks} checks, ${TABLE.length} viewports, the pager, the sheet, the dock, the cap-weighted line in ${CAP_WORLDS.length} worlds and ${MUTANTS.length + CAP_MUTANTS.length} planted wrong builds`);
