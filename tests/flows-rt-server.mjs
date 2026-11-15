@@ -419,6 +419,36 @@ async function runMain() {
     }
 
     {
+      const p = connect(base, OWNER, { query: "?k=px,pb" });
+      opened.push(p);
+      await until(() => p.frames.length > 0, 8000, "the pulse socket's hello");
+      const ph = p.frames[0];
+      deep([ph.t, ph.rows.map((f) => f.k)], ["hello", ["px", "pb"]], "pulse: the hello carries px and the pb snapshot");
+      const first = ph.rows[1];
+      deep([first.snap, first.rows.length, first.meta.pv, first.meta.cols], [true, 60, 1, ["s", "px", "fl", "gx", "mk", "nw"]], "pulse: the snapshot is sixty one-second cells, pv 1, a second then a count per topic");
+      ok(!("fresh" in first), "pulse: and carries no fresh entry");
+      await until(() => p.data("pb").filter((f) => !f.snap).length >= 5, 15000, "pb deltas");
+      cleanFrames(p, "pulse");
+      const pv = seqVerdicts(p);
+      ok(!pv.gap && !pv.dup && !pv.orphan, `pulse: sequences are clean in workerd: ${JSON.stringify(pv)}`);
+      const deltas = p.data("pb").filter((f) => !f.snap);
+      const secs = deltas.flatMap((f) => f.rows.map((r) => r[0]));
+      ok(secs.length >= 5 && secs.every((x, i) => i === 0 || x === secs[i - 1] + 1), `pulse: delta rows are consecutive seconds (${secs.length})`);
+      ok(deltas.every((f) => f.rows.every((r) => r[0] <= Math.floor(f.at / 1000) - 1)), "pulse: no frame carries the second it is still in");
+      const recent = deltas.slice(-3).flatMap((f) => f.rows);
+      ok(recent.every((r) => Number.isInteger(r[1]) && Number.isInteger(r[2])), "pulse: px and fl, which sockets ask for, are counted in every recent second");
+      ok(recent.some((r) => r[1] > 0), "pulse: and px beats while its prices move");
+      const snapPb = await fetch(base + "/api/rt/snap?k=pb", { headers: { Cookie: OWNER } });
+      eq(snapPb.status, 200, "pulse: /api/rt/snap?k=pb answers");
+      const sf = await snapPb.json();
+      deep([sf.length, sf[0].k, sf[0].rows.length, checkFrame(sf[0]).length], [1, "pb", 60, 0], "pulse: one clean pb snapshot of sixty cells");
+      eq((await fetch(base + "/api/rt/snap?k=pb,zz", { headers: { Cookie: OWNER } })).status, 400, "pulse: pb beside an unknown topic is still 400");
+      const { body } = await statusOf(base, OWNER);
+      ok(body.pulse && body.pulse.pv === 1 && body.pulse.wanted === true && Number.isInteger(body.pulse.sq), "pulse: the status names the pulse, its sq and that a socket wants it");
+      p.close();
+    }
+
+    {
       const mup = await rawUpgrade(base, "/api/rt/ws", { Cookie: MEMBER });
       eq(mup.status, 101, "member: a signed-in member who is not an owner gets the 101 under the shipped config");
       const msnap = await fetch(base + "/api/rt/snap?k=px,fl,mk", { headers: { Cookie: MEMBER } });

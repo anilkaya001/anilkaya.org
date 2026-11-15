@@ -16,7 +16,15 @@ export const RT_OBJECT_NAME = "pulse:1";
 
 export const RT_TOPIC_KEYS = Object.freeze(["px", "fl", "gx", "mk", "nw"]);
 
-export const RT_KINDS = Object.freeze([...RT_TOPIC_KEYS, "ctl"]);
+export const RT_DERIVED_KEYS = Object.freeze(["pb"]);
+
+export const RT_STREAM_KEYS = Object.freeze([...RT_TOPIC_KEYS, ...RT_DERIVED_KEYS]);
+
+export const RT_KINDS = Object.freeze([...RT_STREAM_KEYS, "ctl"]);
+
+export const RT_PULSE = Object.freeze({
+  k: "pb", pv: 1, periodMs: 5000, cells: 60, keepS: 90, cols: Object.freeze(["s", ...RT_TOPIC_KEYS]),
+});
 
 export const RT_CTL = Object.freeze(["hello", "hb", "resync", "degraded", "closed", "bye"]);
 
@@ -302,10 +310,10 @@ export function parseClientMessage(data) {
   if (!m || typeof m !== "object" || Array.isArray(m)) return { ok: false, why: "shape" };
   const only = (allowed) => Object.keys(m).every((key) => allowed.includes(key));
   if (m.t === "sub") {
-    if (!only(["t", "k", "f"]) || !Array.isArray(m.k) || m.k.length > RT_TOPIC_KEYS.length) return { ok: false, why: "sub" };
+    if (!only(["t", "k", "f"]) || !Array.isArray(m.k) || m.k.length > RT_STREAM_KEYS.length) return { ok: false, why: "sub" };
     const topics = [];
     for (const k of m.k) {
-      if (typeof k !== "string" || !RT_TOPIC_KEYS.includes(k)) return { ok: false, why: "sub.k" };
+      if (typeof k !== "string" || !RT_STREAM_KEYS.includes(k)) return { ok: false, why: "sub.k" };
       if (!topics.includes(k)) topics.push(k);
     }
     let f;
@@ -320,13 +328,13 @@ export function parseClientMessage(data) {
     if (!only(["t", "sq"]) || !m.sq || typeof m.sq !== "object" || Array.isArray(m.sq)) return { ok: false, why: "p" };
     const sq = {};
     for (const [k, v] of Object.entries(m.sq)) {
-      if (!RT_TOPIC_KEYS.includes(k) || !Number.isSafeInteger(v) || v < 0) return { ok: false, why: "p.sq" };
+      if (!RT_STREAM_KEYS.includes(k) || !Number.isSafeInteger(v) || v < 0) return { ok: false, why: "p.sq" };
       sq[k] = v;
     }
     return { ok: true, msg: { t: "p", sq } };
   }
   if (m.t === "rs") {
-    if (!only(["t", "k"]) || typeof m.k !== "string" || !RT_TOPIC_KEYS.includes(m.k)) return { ok: false, why: "rs" };
+    if (!only(["t", "k"]) || typeof m.k !== "string" || !RT_STREAM_KEYS.includes(m.k)) return { ok: false, why: "rs" };
     return { ok: true, msg: { t: "rs", k: m.k } };
   }
   return { ok: false, why: "type" };
@@ -359,12 +367,86 @@ export function createSeq() {
 
 export function createCounter() {
   const sq = Object.create(null);
-  for (const k of RT_TOPIC_KEYS) sq[k] = 0;
+  for (const k of RT_STREAM_KEYS) sq[k] = 0;
   return {
     next: (k) => ++sq[k],
     peek: (k) => sq[k],
-    reset: () => { for (const k of RT_TOPIC_KEYS) sq[k] = 0; },
+    reset: () => { for (const k of RT_STREAM_KEYS) sq[k] = 0; },
     all: () => ({ ...sq }),
+  };
+}
+
+export function createBeatLedger({ cells = RT_PULSE.cells, keepS = RT_PULSE.keepS } = {}) {
+  const spans = Object.create(null);
+  const hits = Object.create(null);
+  const last = Object.create(null);
+  const why = Object.create(null);
+  for (const k of RT_TOPIC_KEYS) { spans[k] = []; hits[k] = new Map(); last[k] = null; why[k] = "undemanded"; }
+  const openSpan = (k) => {
+    const list = spans[k];
+    return list.length && list[list.length - 1][1] === null ? list[list.length - 1] : null;
+  };
+  const prune = (now) => {
+    const floor = Math.floor(now / 1000) - keepS;
+    for (const k of RT_TOPIC_KEYS) {
+      for (const s of hits[k].keys()) if (s < floor) hits[k].delete(s);
+      spans[k] = spans[k].filter((sp) => sp[1] === null || sp[1] > floor * 1000);
+    }
+  };
+  const observed = (k, s, now) => {
+    const a = s * 1000;
+    const b = a + 1000;
+    if (b > now) return false;
+    for (const [from, to] of spans[k]) if (from <= a && (to === null ? b <= now : b <= to)) return true;
+    return false;
+  };
+  const cell = (k, s, now) => (observed(k, s, now) ? hits[k].get(s) || 0 : null);
+  return {
+    observe(k, at, on, reason) {
+      if (!RT_TOPIC_KEYS.includes(k) || !Number.isFinite(at)) return;
+      const cur = openSpan(k);
+      if (on) { if (!cur) spans[k].push([at, null]); why[k] = "observing"; }
+      else { if (cur) cur[1] = Math.max(cur[0], at); why[k] = reason || "undemanded"; }
+      prune(at);
+    },
+    count(k, at) {
+      if (!RT_TOPIC_KEYS.includes(k) || !Number.isFinite(at) || !openSpan(k) || at < openSpan(k)[0]) return false;
+      const s = Math.floor(at / 1000);
+      hits[k].set(s, (hits[k].get(s) || 0) + 1);
+      if (last[k] === null || at > last[k]) last[k] = at;
+      return true;
+    },
+    cell,
+    rows(fromS, toS, now) {
+      const out = [];
+      const hi = Math.min(toS, Math.floor(now / 1000) - 1);
+      for (let s = Math.max(fromS, hi - cells + 1); s <= hi; s++) out.push([s, ...RT_TOPIC_KEYS.map((k) => cell(k, s, now))]);
+      return out;
+    },
+    window(now) {
+      const hi = Math.floor(now / 1000) - 1;
+      return this.rows(hi - cells + 1, hi, now);
+    },
+    summary(now) {
+      const hi = Math.floor(now / 1000) - 1;
+      const bpm = {};
+      const obsS = {};
+      for (const k of RT_TOPIC_KEYS) {
+        let n = 0;
+        let seen = 0;
+        for (let s = hi - cells + 1; s <= hi; s++) {
+          const c = cell(k, s, now);
+          if (c !== null) { seen++; n += c; }
+        }
+        obsS[k] = seen;
+        bpm[k] = seen === cells ? n : null;
+      }
+      return {
+        pv: RT_PULSE.pv, cells, bpm, obsS,
+        last: Object.fromEntries(RT_TOPIC_KEYS.map((k) => [k, iso(last[k])])),
+        why: { ...why },
+      };
+    },
   };
 }
 

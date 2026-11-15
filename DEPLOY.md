@@ -3604,6 +3604,25 @@ is not needed on bytes' account. If the bytes still matter, the lever is on the
 server: fewer px names, or a slower px cadence for the names no module on the
 page shows.
 
+**The pulse topic `pb`.** Stage 1 of the real-time migration (the no-nightly
+plan's section 7, kept in `docs/checkpoints/2026-10-28/` on the checkpoint
+branch) has a rail half and a store half. The rail half is built: `pb` is a
+derived topic that the hub computes from its own frames, so it costs no vendor
+call, no budget token and no Durable Object request beyond the alarm the other
+topics already set. A beat is a topic frame whose merge changed a row; a cell is
+`null` for any second the topic was not observed whole (no socket asked for it, a
+degraded episode, before the hub started, outside the session), so a quiet second
+and an unmeasured one never print alike. Nothing on the site asks for `pb` yet:
+the default topic list is unchanged, so no page receives it until a page names
+it. To read it on production, open `/api/rt/status` as the owner and read
+`pulse` (its `sq`, whether a socket wants it, beats a minute per topic once a
+whole minute was observed), or `GET /api/rt/snap?k=pb` for the sixty cells. Not
+built: the store half (beats from door commits, `rt_pulse` minute rows, the
+one-minute cron, `/api/pulse`) and the page strip; and stages 2, 4, 5, 6, 7 and 8
+of that plan (door compare-and-set with an outbox, the pacer in shadow, the
+queue-fed L1 and L2, the rolling deep parts, the session boundary archives, and
+gaps with AIMD before the nightly retires), plus the rail's `ff` topic of stage 3.
+
 ### 10.5o The live ledger: the switch, what it reads, what the strip says, how to turn it off
 
 `FLOWS_LEDGER_LIVE` (`wrangler.toml` [vars], shipped `owner`) is `on`, `owner` or anything else, and anything else is off. It does not open the page: `FLOWS_LEDGER` does. With the switch off for a member, `/flows/ledger/` is byte for byte the page it was, declares no deferred script, opens no socket and asks for no book, and `GET /api/flows/ledger?part=book` is a 404 `ledger_live_off`. A page that is open when the switch goes off finds out at its next book read (a return from a hidden tab, a heartbeat that saw a change) and stands down to the server's ledger.

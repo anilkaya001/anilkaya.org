@@ -1,6 +1,6 @@
 import { readMembers, memberOf } from "./flows-auth.js";
 import { fixtureHost, isFixtureTicker } from "./flows-fixture-names.js";
-import { RT_OBJECT_NAME, RT_TOPIC_KEYS, RT_LIMITS, TICKER_RE, rtSwitches, rtIsOwner, rtAdmits } from "./flows-rt.js";
+import { RT_OBJECT_NAME, RT_TOPIC_KEYS, RT_STREAM_KEYS, RT_LIMITS, TICKER_RE, rtSwitches, rtIsOwner, rtAdmits } from "./flows-rt.js";
 
 export const RT_PATHS = Object.freeze(["/api/rt/ws", "/api/rt/snap", "/api/rt/status"]);
 
@@ -9,7 +9,7 @@ export function rtTopics(raw) {
   const out = [];
   for (const k of String(raw).split(",")) {
     const x = k.trim();
-    if (!RT_TOPIC_KEYS.includes(x)) return { ok: false };
+    if (!RT_STREAM_KEYS.includes(x)) return { ok: false };
     if (!out.includes(x)) out.push(x);
   }
   return out.length ? { ok: true, topics: out } : { ok: false };

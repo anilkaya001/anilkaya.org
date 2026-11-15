@@ -3,7 +3,9 @@
   var UI = window.FlowsUI;
   if (!UI || UI.rt) return;
 
-  var TOPICS = ["px", "fl", "gx", "mk", "nw"];
+  var BASE = ["px", "fl", "gx", "mk", "nw"];
+  var TOPICS = BASE.concat(["pb"]);
+  var CELLS = 60;
   var FIELDS = ["px", "prev", "chg", "ncp", "npp", "net", "bull", "bear", "lean", "cv", "pv", "cvAsk", "pvAsk", "iv30", "ivRank", "im",
     "gOi", "gVol", "gDir", "pcr", "rvol", "vol", "qa"];
   var TICKER = /^[A-Z][A-Z0-9.-]{0,9}$/;
@@ -23,7 +25,7 @@
   var ROWS_MAX = 2000;
   var RING = { fl: 200, nw: 60 };
   var SEEN_MAX = 1000;
-  var GRACE = { px: 20000, fl: 20000, gx: 30000, mk: 40000, nw: 120000 };
+  var GRACE = { px: 20000, fl: 20000, gx: 30000, mk: 40000, nw: 120000, pb: 15000 };
   var FINAL = { 400: 1, 401: 1, 403: 1, 404: 1 };
   var KEEP_OFF = { 4001: 1, 4003: 1, 4009: 1, 4011: 1, 4012: 1 };
   var LABEL = { socket: "Socket", heartbeat: "Heartbeat" };
@@ -116,7 +118,7 @@
 
   function dropFresh() {
     if (!UI.freshness || typeof UI.freshness.drop !== "function") return;
-    TOPICS.forEach(function (k) { UI.freshness.drop("rt:" + k); S.topics[k].regAt = 0; });
+    BASE.forEach(function (k) { UI.freshness.drop("rt:" + k); S.topics[k].regAt = 0; });
   }
 
   function labelOf() {
@@ -217,7 +219,14 @@
     if (k === "mk") return row && typeof row === "object" && !Array.isArray(row) && typeof row.id === "string";
     if (k === "px") return Array.isArray(row) && typeof row[0] === "string" && row.length > 2;
     if (k === "gx") return Array.isArray(row) && typeof row[0] === "string" && row.length >= 6;
+    if (k === "pb") return Array.isArray(row) && row.length === BASE.length + 1 && Number.isSafeInteger(row[0]) && row.slice(1).every(function (c) { return c === null || (Number.isSafeInteger(c) && c >= 0); });
     return row && typeof row === "object" && !Array.isArray(row) && row.id !== undefined && row.id !== null;
+  }
+
+  function trimCells(map) {
+    if (map.size <= CELLS) return;
+    var keys = Array.from(map.keys()).sort(function (a, b) { return a - b; });
+    for (var i = 0; i < keys.length - CELLS; i++) map.delete(keys[i]);
   }
 
   function reset(k) {
@@ -229,7 +238,7 @@
     t.ver = T.ver + 1;
     S.topics[k] = t;
     if (had) queue(k, [], [], false, true);
-    if (UI.freshness && typeof UI.freshness.drop === "function") UI.freshness.drop("rt:" + k);
+    if (k !== "pb" && UI.freshness && typeof UI.freshness.drop === "function") UI.freshness.drop("rt:" + k);
   }
 
   function ask(k) {
@@ -275,12 +284,13 @@
     var ids = [];
     var fresh = [];
     var i;
-    if (k === "px" || k === "gx" || k === "mk") {
+    if (k === "px" || k === "gx" || k === "mk" || k === "pb") {
       var next = new Map();
       for (i = 0; i < f.rows.length; i++) {
         var r = f.rows[i];
         if (validRow(r, k)) next.set(k === "mk" ? r.id : r[0], r);
       }
+      if (k === "pb") trimCells(next);
       next.forEach(function (row, id) {
         var old = T.rows.get(id);
         var same = old && (k === "px" ? sameRow(old, row) : k === "gx" ? sameGx(old, row) : sameJson(old, row));
@@ -339,6 +349,10 @@
         var same = old && (k === "px" ? sameRow(old, r) : sameGx(old, r));
         T.rows.set(r[0], r);
         if (!same) ids.push(r[0]);
+      } else if (k === "pb") {
+        var cell = T.rows.get(r[0]);
+        T.rows.set(r[0], r);
+        if (!cell || !sameJson(cell, r)) ids.push(r[0]);
       } else if (k === "mk") {
         var was = T.rows.get(r.id);
         T.rows.set(r.id, r);
@@ -354,6 +368,7 @@
       }
     }
     if (T.ring.length > RING[k]) T.ring.splice(0, T.ring.length - RING[k]);
+    if (k === "pb") trimCells(T.rows);
     if (k === "fl") { T.dropped = num(meta.dropped) || T.dropped; T.truncated = meta.truncated === true; }
     T.meta = meta;
     var was = T.fresh && T.fresh.state;
@@ -783,7 +798,7 @@
     var was = S.focus;
     S.focus = focusOf();
     TOPICS.forEach(function (k) {
-      if (S.refs[k] <= 0 && (S.topics[k].synced || S.topics[k].rows.size)) { S.topics[k] = newTopic(); if (UI.freshness && UI.freshness.drop) UI.freshness.drop("rt:" + k); }
+      if (S.refs[k] <= 0 && (S.topics[k].synced || S.topics[k].rows.size)) { S.topics[k] = newTopic(); if (k !== "pb" && UI.freshness && UI.freshness.drop) UI.freshness.drop("rt:" + k); }
     });
     if (!wanted().length) { if (S.started) teardown(); return; }
     if (!S.started) { begin(); return; }
@@ -807,7 +822,7 @@
 
   function connect(opts) {
     var o = opts || {};
-    var asked = Array.isArray(o.topics) && o.topics.length ? o.topics : TOPICS;
+    var asked = Array.isArray(o.topics) && o.topics.length ? o.topics : BASE;
     var topics = TOPICS.filter(function (k) { return asked.indexOf(k) >= 0; });
     if (!topics.length) return null;
     var focus = typeof o.focus === "string" && TICKER.test(o.focus.trim().toUpperCase()) ? o.focus.trim().toUpperCase() : null;
@@ -956,6 +971,18 @@
 
   function fresh(k) { return S.topics[k] ? S.topics[k].fresh : null; }
 
+  function beats() {
+    var T = S.topics.pb;
+    if (!T.synced || S.refs.pb <= 0) return null;
+    var m = T.meta || {};
+    var cells = Array.from(T.rows.values()).sort(function (a, b) { return a[0] - b[0]; }).map(function (row) { return row.slice(); });
+    var cols = Array.isArray(m.cols) ? m.cols.slice() : ["s"].concat(BASE);
+    return {
+      pv: num(m.pv), cols: cols, cells: cells, bpm: m.bpm || null, obsS: m.obsS || null, last: m.last || null, why: m.why || null,
+      at: T.at, live: feeds("pb"),
+    };
+  }
+
   function status() {
     var out = { transport: S.mode, label: labelOf(), closed: S.closed, degraded: S.degraded, final: S.final, hidden: S.hidden, pollMs: S.pollMs, topics: {} };
     TOPICS.forEach(function (k) {
@@ -971,7 +998,7 @@
 
   var api = {
     connect: connect, on: on, transport: transport, feeds: feeds, strips: strips, quote: quote, gex: gex, market: market,
-    alerts: alerts, news: news, fresh: fresh, status: status, measure: measure,
+    alerts: alerts, news: news, fresh: fresh, beats: beats, status: status, measure: measure,
   };
   window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { rt: Object.freeze(api) }));
 })();
