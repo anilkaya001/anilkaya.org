@@ -1741,6 +1741,7 @@ async function readHomeSummary(env, scope) {
 
 const NEURON_GENERATING_MS = 90 * 1000;
 const NEURON_RETRY_MS = 5 * 60 * 1000;
+const NEURON_STALL_NOTE = "The Neuron's last request for model wording did not finish, so the next one waits a short while rather than ask again at once.";
 const NEURON_GEN = "gen:";
 const NEURON_HELD_NOTE = "This reading was written for an earlier version of this card and is kept until a reading of the current card is written and passes the checks.";
 const NEURON_HELD_MODEL_NOTE = "This reading of the current card was written by another model configuration and is kept until a reading by the current one is written and passes the checks.";
@@ -2166,12 +2167,18 @@ async function tickerNeuron(env, ctx, ticker) {
   };
   const held = (refreshing) => json(shape("ok", stillHolds().row, { held: "previous", refreshing, note: stillHolds().note }));
   const reading = () => (stillHolds() ? held(true) : json(shape("pending", null, { note: "Neuron is reading this card now." })));
+  const stalled = (retryAfterS) => {
+    if (stillHolds()) return json(shape("ok", stillHolds().row, { held: "previous", refreshing: false, note: stillHolds().note, retryAfterS }));
+    return json(shape("pending", null, { note: NEURON_STALL_NOTE, refreshing: false, retryAfterS }));
+  };
 
   for (const row of [prior, attempt]) {
     if (!current(row)) continue;
     const age = ageOf(row);
     if (row.guard === "generating") {
-      if (age < NEURON_GENERATING_MS) return reading();
+      const claim = FLOWS_READING.claimState(age);
+      if (claim.state === "live") return reading();
+      if (claim.state === "stalled") return stalled(claim.retryAfterS);
     } else if (row.summary) {
       const retryable = retryableGuard(row.guard, age) && age > NEURON_RETRY_MS;
       if (!retryable) return row !== prior && row.guard !== null && stillHolds() ? held(false) : json(shape("ok", FLOWS_NEURON.applyStaleCap(row, context)));

@@ -71,6 +71,7 @@ async function mount(page, read_, o = {}) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
   await page.route("**/*", async (route) => {
     const u = new URL(route.request().url());
+    if (u.pathname === "/assets/js/flows-ticker.js" && typeof o.src === "string") return route.fulfill({ contentType: "text/javascript", body: o.src });
     if (u.pathname.startsWith("/assets/")) {
       const f = path.join(ROOT, u.pathname);
       if (!fs.existsSync(f)) return route.fulfill({ status: 404, body: "" });
@@ -92,6 +93,7 @@ async function mount(page, read_, o = {}) {
     return route.fulfill({ status: 404, body: "" });
   });
   await page.routeWebSocket(/\/api\/rt\/ws/, (ws) => ws.close({ code: 4011, reason: "off" }));
+  if (o.clock) await page.clock.install({ time: Date.parse("2026-10-02T16:00:00Z") });
   await page.goto("https://example.test/flows/ticker/?t=" + encodeURIComponent(T));
   await page.waitForFunction(() => { const s = document.getElementById("ftStatus"); return s && s.textContent !== "Loading the name\u2026"; }, null, { timeout: 15000 });
   await page.waitForTimeout(150);
@@ -212,6 +214,66 @@ try {
     b = await block(page);
     ok(b && !b.overflow, "no horizontal scroll at " + w + " px " + JSON.stringify(b && b.wide));
   }
+
+  const step = async (p, ms) => { for (let t = 0; t < ms; t += 10000) { await p.clock.runFor(10000); await p.waitForTimeout(150); } };
+  const neverDone = async (fixture, src) => {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 820 } });
+    const p = await ctx.newPage();
+    try {
+      await mount(p, fixture, { queue: Array.from({ length: 60 }, () => clone(fixture)), clock: true, src });
+      await step(p, 240000);
+      const after = await block(p);
+      const n = stubs.calls.length;
+      await step(p, 60000);
+      const quiet = stubs.calls.length === n;
+      await step(p, 260000);
+      return { after, quiet, again: stubs.calls.length > n, calls: stubs.calls.length };
+    } finally {
+      await ctx.close();
+    }
+  };
+
+  const stuck = await neverDone(GENERATING);
+  ok(stuck.after.status === "fallback" && /did not arrive while this page waited/.test(stuck.after.text) && /next attempt is in about 5 minutes/.test(stuck.after.text),
+    "A READING THAT STAYS GENERATING PAST THE POLLING SCHEDULE ends in a terminal state with a plain reason and a retry time: " + stuck.after.status + ", " + stuck.after.text.slice(0, 220));
+  eq(stuck.after.claims.length, 4, "over the deterministic reading's claims");
+  ok(stuck.quiet, "and the page stops polling once the schedule is spent");
+  ok(stuck.again, "then asks once more when the retry time comes (" + stuck.calls + " summary requests in all)");
+
+  const box = await neverDone(BOXED);
+  ok(box.after.status === "fallback" && /still being assembled when this page stopped waiting/.test(box.after.text) && /next attempt is in about 5 minutes/.test(box.after.text),
+    "A DOSSIER THAT STAYS IN ASSEMBLY PAST THE SCHEDULE ends with its own plain reason and a retry time: " + box.after.text.slice(0, 200));
+
+  const STALLED = { ...clone(FALLBACK), why: "stalled", note: "The last request for model wording did not finish.", retryAfterS: 240 };
+  const SAID = /Model wording: The last request for model wording did not finish\. The next attempt is in about 4 minutes\./;
+  await mount(page, STALLED);
+  await page.waitForTimeout(5000);
+  b = await block(page);
+  ok(SAID.test(b.text), "A SERVER TERMINAL FALLBACK (a stalled claim) prints its reason and its retry time in the rail: " + b.text.slice(0, 200));
+  eq(stubs.calls.length, 1, "and is not polled");
+
+  const neuronStall = { status: "pending", tier: "family", summary: null, refreshing: false, retryAfterS: 200,
+    note: "The Neuron's last request for model wording did not finish, so the next one waits a short while rather than ask again at once." };
+  const stallMount = (src) => mount(page, READ, { neuron: neuronStall, neurons: [neuronStall, neuronStall, neuronStall], src });
+  await stallMount();
+  await page.waitForTimeout(9000);
+  eq(stubs.calls.length, 1, "A NEURON STALL (pending with a retry time) is terminal: the page does not poll it (" + stubs.calls.length + " summary requests in nine seconds)");
+
+  const plant = (from, to) => {
+    eq(TICKER_SRC.split(from).length - 1, 1, "(setup) a planted build's anchor occurs once: " + from.slice(0, 60));
+    return TICKER_SRC.replace(from, to);
+  };
+  const PLANTED = [
+    { name: "the schedule's end left as a bare fallback",
+      run: async () => (await neverDone(GENERATING, plant('note: ((sec.now || sec.identity) ? WAITED_READ : WAITED_ASSEMBLY) + " " + tail };', "};"))).after.text.includes("did not arrive while this page waited") },
+    { name: "no second round after the schedule",
+      run: async () => (await neverDone(GENERATING, plant("if (!last) setTimeout(() => { if (STATE.card === card) awaitReading(t, card, 0, round + 1); }, WAIT_AGAIN_S * 1000);", ""))).again },
+    { name: "a server fallback's reason hidden",
+      run: async () => { await mount(page, STALLED, { src: plant('} else if (read.status === "fallback" && typeof read.note === "string" && read.note && (retryOf(read) !== null || read.waited)) {', "} else if (false) {") }); return SAID.test((await block(page)).text); } },
+    { name: "a Neuron stall polled as pending",
+      run: async () => { await stallMount(plant('(neuron.status === "pending" && retryOf(neuron) === null)', 'neuron.status === "pending"')); await page.waitForTimeout(9000); return stubs.calls.length === 1; } },
+  ];
+  for (const m of PLANTED) ok(!(await m.run()), "A PLANTED WRONG BUILD (" + m.name + ") is caught");
 
   const mine = errors.filter((e) => !/flows-ticker: (buildGamma|buildFlow) failed/.test(e));
   eq(mine.length, 0, "no page error or console error through any of it, beyond the two modules the thin fixture card cannot feed (gamma and flow): " + mine.join(" | "));
