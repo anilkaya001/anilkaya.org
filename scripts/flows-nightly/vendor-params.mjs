@@ -56,6 +56,8 @@ export const CALL_COST = Object.freeze({
   macro: 152,
   privateMarkets: 150,
   misc: 67,
+  eventrisk: 40,
+  eventriskNames: 100,
 });
 
 export const NOMINAL_SHAPE = Object.freeze({ enriched: 180, deep: 72, cross: 110, dossiers: 12, earnings: 95 });

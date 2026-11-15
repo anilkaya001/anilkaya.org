@@ -6,6 +6,7 @@ import { modeOf } from "../../shared/flows-member-state.js";
 import { EXPORT_PAGES, pageHold } from "../../shared/flows-export-build.js";
 import { ledgerLiveOn } from "../../shared/flows-ledger-live.js";
 import { positioningMode, positioningWord } from "../../shared/flows-pos-switch.js";
+import { eventRiskOpen, eventRiskHalts } from "../../shared/flows-er-switch.js";
 import { flowlabMode } from "../../shared/flows-flowlab.js";
 import { flowlabShell } from "../../shared/flows-flowlab-shell.js";
 import { floorFundsMode } from "../../shared/flows-floor-funds.js";
@@ -58,11 +59,11 @@ const PAGES = Object.freeze([
   { slug: "unusual", render: (username, summary, owner) => FLOWS_PAGES.unusualPage({ username, owner }) },
   { slug: "ledger", gate: "FLOWS_LEDGER", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.ledgerPage({ username, live: ledgerLiveOn(env, owner) }) },
   { slug: "macro", open: "macro", render: (username, summary, owner, scenes, env, voldesk, gates) => FLOWS_PAGES.macroPage({ username, live: gates.macroLiveOn(env, owner) }) },
-  { slug: "events", render: (username, summary, owner, scenes, env, voldesk, gates) => FLOWS_PAGES.eventsPage({ username, odds: gates.macroOn(env, owner) }) },
+  { slug: "events", render: (username, summary, owner, scenes, env, voldesk, gates) => FLOWS_PAGES.eventsPage({ username, eventrisk: eventRiskOpen(env, owner), halts: eventRiskHalts(env), odds: gates.macroOn(env, owner) }) },
   { slug: "political", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.politicalPage({ username, layers: positioningMode(env, owner) }) },
   { slug: "positioning", gate: "FLOWS_POSITIONING", render: (username) => FLOWS_PAGES.positioningPage({ username }) },
   { slug: "status", ownerOnly: true, render: (username) => FLOWS_PAGES.statusPage({ username }) },
-  { slug: "fire", ff: "fire", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.firePage({ username, shadow: ffMode(env) === "shadow" }) },
+  { slug: "fire", ff: "fire", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.firePage({ username, shadow: ffMode(env) === "shadow", feed: eventRiskOpen(env, owner) }) },
   { slug: "inbox", ff: "inbox", render: ffPending("inbox") },
   { slug: "digest", ff: "inbox", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.digestPage({ username, shadow: ffMode(env) === "shadow" }) },
   { slug: "wires", ff: "wires", render: ffPending("wires") },

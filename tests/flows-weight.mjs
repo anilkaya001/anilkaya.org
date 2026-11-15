@@ -198,9 +198,13 @@ for (const name of Object.keys(CEILING_KIB)) {
   GZIP_KIB[name] += CALIB_READ.gzip / 1024;
 }
 const EVENTS_RECENT = { od: "LANE-4", bytes: 4498, gzip: 1127, cssBytes: 379, cssGzip: 46, why: "lane 4: the Events page counts the names whose report moved the price on the reaction session and the one before and the names whose report time is not stated, lists the largest movers among those that reacted on the nightly's session in typical days, names those that reacted two to five sessions ago, says why when the report column is withheld, pending or empty, cut or has no window, and prints its window in sessions through a date (flows-events.js 49,488 to 53,986 B raw and 14,009 to 15,136 B gzip, flows-feeds.css 31,209 to 31,588 B raw and 6,129 to 6,175 B gzip); the raw JavaScript ceiling is held by HELD_RAW_KIB, so only gzip and the sheet rise" };
-GZIP_KIB.eventsPage += EVENTS_RECENT.gzip / 1024;
+const EVENTS_ER = { od: "WP6", gzip: 160, why: "the Events page asks for the event-risk group after load and marks its week columns by date, a few hundred bytes of the page's own script; the group itself is deferred and counted by DEFERRED" };
+GZIP_KIB.eventsPage += (EVENTS_RECENT.gzip + EVENTS_ER.gzip) / 1024;
 CSS_KIB.eventsPage += EVENTS_RECENT.cssBytes / 1024;
 CSS_GZIP_KIB.eventsPage += EVENTS_RECENT.cssGzip / 1024;
+const ER_HALTS_CSS = { od: "WP6-HALTS", cssBytes: 543, cssGzip: 129, why: "the Events page header carries the halts channel's state chip and hides the filter chips on the four event-risk views (flows-feeds.css 33,112 to 33,655 B raw and 6,441 to 6,570 B gzip)" };
+CSS_KIB.eventsPage += ER_HALTS_CSS.cssBytes / 1024;
+CSS_GZIP_KIB.eventsPage += ER_HALTS_CSS.cssGzip / 1024;
 GZIP_KIB.eventsPage += 190 / 1024;
 CEILING_KIB.tickerPage += (TICKER_DEALER_LABELS.bytes + TICKER_PRINTS_MOVE.bytes) / 1024;
 GZIP_KIB.tickerPage += (TICKER_DEALER_LABELS.gzip + TICKER_PRINTS_MOVE.gzip) / 1024;
@@ -222,6 +226,11 @@ for (const name of Object.keys(CSS_KIB)) { CSS_KIB[name] += RAIL_FIT.bytes / 102
 for (const name of ["deskPage", "sidePage", "watchPage"]) {
   CEILING_KIB[name] += MEMBER_EXPORT_JS.bytes / 1024;
   GZIP_KIB[name] += MEMBER_EXPORT_JS.gzip / 1024;
+}
+const RT_HALTS = { od: "WP6-HALTS", bytes: 884, gzip: 206, routes: ["marketPage", "movesPage", "networkPage", "nowPage", "overviewPage", "sidePage", "tickerPage", "unusualPage", "watchPage"], why: "WP6 halts channel: the rail client carries the sixth topic (its ring, grace and default list), a heartbeat that tells a page when the channel's state turns, and the halts() adapter the Events page reads; flows-rt.js is eager on these nine routes, so each carries the same bytes" };
+for (const name of RT_HALTS.routes) {
+  CEILING_KIB[name] += RT_HALTS.bytes / 1024;
+  GZIP_KIB[name] += RT_HALTS.gzip / 1024;
 }
 
 const VOLDESK_MARKET = { od: "WP3", bytes: 1500, gzip: 600, cssBytes: 110, cssGzip: 120, why: "WP3 volatility structure: flows-market.js opens the Vol desk tab on first use (one optional fetch, the deferred volDesk group and the short sub-switch labels) and flows-market.css shows the tab's panel and sizes eleven tabs on a phone; the desk itself and the cross-check strip are deferred groups with their own sheets and add nothing eager" };
@@ -287,10 +296,18 @@ const judge = (row, bases = BASES) => {
   return faults;
 };
 
+const FF_FEED = { od: "WP6", bytes: 2194, gzip: 504, cssBytes: 2854, cssGzip: 438, deferredBytes: 10201, why: "WP6 Fire feed group: flows-ff-fire.js wires the Start panel's Flows or From the feed segment and asks for the er-fire group on first choice (15,732 to 17,926 B raw, 4,809 to 5,313 B gzip), and flows-ff-fire.css styles the segment, the feed rows and the account dialog (14,660 to 17,514 B raw, 3,110 to 3,548 B gzip); the rows themselves are the deferred flows-er-fire.js" };
+CEILING_KIB.firePage += FF_FEED.bytes / 1024;
+GZIP_KIB.firePage += FF_FEED.gzip / 1024;
+CSS_KIB.firePage += FF_FEED.cssBytes / 1024;
+CSS_GZIP_KIB.firePage += FF_FEED.cssGzip / 1024;
+
 const DEFERRED = {
   tickerPage: { groups: { surface: "/assets/js/flows-ticker-surface.js", movelab: "/assets/js/flows-ticker-movelab.js", network: "/assets/js/flows-ticker-network.js", live: "/assets/js/flows-ticker-live.js", private: "/assets/js/flows-ticker-private.js", "nn-orb": "/assets/js/flows-nn-orb.js", xcheck: "/assets/js/flows-ticker-xcheck.js" } },
   unusualPage: { groups: { net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js", "flow-below": "/assets/js/flows-unusual-below.js" }, modules: ["uaTimelineCard", "uaNamesCard", "uaUrgencyCard", "uaFeedCard", "uaSurpriseCard"] },
   marketPage: { groups: { voldesk: "/assets/js/flows-voldesk.js", floor: "/assets/js/flows-market-floor.js", river: "/assets/js/flows-market-river.js", "market-below": "/assets/js/flows-market-below.js", net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" }, modules: ["mkSectorsCard", "mkGroupsCard", "mkExpiryCard", "mkVolCard", "mkRadarCard", "mkAdvCard", "mkVolumeCard", "mkAgainstCard", "mkMoversCard", "mkOiCard", "mkDarkCard", "mkImpactCard", "mkInsidersCard", "mkSeasonCard"] },
+  eventsPage: { groups: { er: "/assets/js/flows-er.js" } },
+  firePage: { groups: { "er-fire": "/assets/js/flows-er-fire.js" } },
   networkPage: { groups: { net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" } },
   deskPage: { groups: { "desk-calls": "/assets/js/flows-desk-calls.js" } },
   macroPage: { groups: { "macro-charts": ["/assets/js/flows-macro-charts.js"] } },
@@ -316,8 +333,9 @@ const ORACLE_DEFERRED_KIB = 60 + NEURON_RESTORE.bytes / 1024;
 const ORACLE_MARKUP_BYTES = 720;
 const DEFERRED_KIB = {
   tickerPage: 80 + 7.3 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + NETWORK_GROUP.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + (260 + 848) / 1024 + HOME_FIT.deferred / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024 + DESK_CALLS.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024 + (2240 + 627) / 1024 + HOME_FIT.deferred / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
-  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + (26400 + 745) / 1024 + HOME_FIT.deferred / 1024, eventsPage: 80 + NN_ASK.bytes / 1024, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024 + LEDGER_LIVE.bytes / 1024, macroPage: 80 + 15.4 + NN_ASK.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, firePage: 80 + NN_ASK.bytes / 1024, digestPage: 80 + NN_ASK.bytes / 1024, ffPendingPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024 + FLOWLAB_HEATMAP.bytes / 1024,
+  unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + (26400 + 745) / 1024 + HOME_FIT.deferred / 1024, eventsPage: 80 + NN_ASK.bytes / 1024 + 42, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024 + LEDGER_LIVE.bytes / 1024, macroPage: 80 + 15.4 + NN_ASK.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, firePage: 80 + NN_ASK.bytes / 1024, digestPage: 80 + NN_ASK.bytes / 1024, ffPendingPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024 + FLOWLAB_HEATMAP.bytes / 1024,
 };
+DEFERRED_KIB.firePage += FF_FEED.deferredBytes / 1024;
 const DARK_POOL_TIME = { bytes: 107, why: "lane 2 math audit: the Market page's dark-pool list drops canceled prints, prints its times in TRT through F.time and its prices through F.px, and says how many canceled prints it left out, measured as 58,946 to 59,053 B raw in the deferred flows-market-below.js" };
 DEFERRED_KIB.marketPage += DARK_POOL_TIME.bytes / 1024;
 DEFERRED_KIB.positioningPage = 80 + NN_ASK.bytes / 1024;
@@ -332,6 +350,8 @@ DEFERRED_KIB.marketPage += VOLDESK_DEFERRED.marketBytes / 1024;
 const NETMAP_FOCUS = { bytes: 596, why: "shell follow-ups: flows-net-map.js finds the focused chip again by id after every repaint, falls back to the selected chip and keeps the phone layer switch focused (25,222 to 25,818 B raw); a deferred group on every page that draws the condensed map" };
 for (const name of Object.keys(DEFERRED_KIB)) if (DEFERRED[name] && JSON.stringify(DEFERRED[name]).includes("flows-net-map.js")) DEFERRED_KIB[name] += NETMAP_FOCUS.bytes / 1024;
 DEFERRED_KIB.tickerPage += FLOWLAB_LINK.networkBytes / 1024;
+const ER_HALTS_LIVE = { od: "WP6-HALTS", bytes: 301, why: "the Events page connects the rail for the halts channel when the halts switch is on, and its halts pane follows the channel's state as it turns instead of the state at first paint (flows-er.js, a deferred group file)" };
+DEFERRED_KIB.eventsPage += ER_HALTS_LIVE.bytes / 1024;
 DEFERRED_KIB.unusualPage += FLOWLAB_LINK.belowBytes / 1024;
 DEFERRED_KIB.flowlabPage = 80 + NN_ASK.bytes / 1024;
 
@@ -404,7 +424,7 @@ const measured = [];
 for (const name of pageNames) {
   let html;
   try {
-    html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", scenes: name === "tickerPage", xcheck: name === "tickerPage", privateLens: name === "tickerPage", voldesk: name === "marketPage" }));
+    html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", eventrisk: name === "eventsPage", feed: name === "firePage", scenes: name === "tickerPage", xcheck: name === "tickerPage", privateLens: name === "tickerPage", voldesk: name === "marketPage" }));
   } catch (error) {
     assert.fail(`${name} threw while rendering: ${error && error.message}`);
   }
@@ -491,7 +511,7 @@ for (const m of measured) {
 }
 
 {
-  const base = { name: "marketPage", raw: 240782, gzip: 72969, css: 137186, cssGzip: 28551 };
+  const base = { name: "marketPage", raw: 240782 + RT_HALTS.bytes, gzip: 72969 + RT_HALTS.gzip, css: 137186, cssGzip: 28551 };
   eq(judge(base).join("; "), "", "the ledger judge passes today's market route");
   ok(judge({ ...base, gzip: base.gzip + 8 * 1024 }).length > 0,
      "the judge fails a route inflated by 8 KiB of gzip");
@@ -503,7 +523,7 @@ for (const m of measured) {
   ok(judge({ ...base, raw: base.raw - 13 * 1024 }).length > 0,
      "the ratchet fails a route that saved 13 KiB raw and left its ceiling where it was");
   ok(judge({ ...base, name: "nowhere" }).length === 4, "a route with no ceilings fails on all four bases");
-  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 40627 + NN_KERNEL.gzip, css: 119045 + NN_FLOWS_CSS.bytes + RAIL_FIT.bytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip + RAIL_FIT.gzip };
+  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 40627 + NN_KERNEL.gzip + EVENTS_ER.gzip, css: 119045 + NN_FLOWS_CSS.bytes + RAIL_FIT.bytes + ER_HALTS_CSS.cssBytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip + RAIL_FIT.gzip + ER_HALTS_CSS.cssGzip };
   eq(judge(events).join("; "), "", "events, whose ceiling is held for the earnings strip, passes with its wide raw headroom");
   eq(Object.keys(HELD_RAW_KIB).join(", "), "eventsPage", "events is the only route whose raw ceiling is held above the ratchet");
 }
@@ -596,7 +616,7 @@ for (const name of Object.keys(CEILING_KIB)) {
       ok(pageNames.includes(name) && !chartRoutes.includes(name), `${name} does not link flows-chart.js`);
     }
     for (const name of CHART_ROUTES) {
-      const html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", scenes: name === "tickerPage", xcheck: name === "tickerPage", privateLens: name === "tickerPage", voldesk: name === "marketPage" }));
+      const html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", eventrisk: name === "eventsPage", feed: name === "firePage", scenes: name === "tickerPage", xcheck: name === "tickerPage", privateLens: name === "tickerPage", voldesk: name === "marketPage" }));
       const order = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1].split("?")[0]);
       const at = order.indexOf("/assets/js/flows-ui.js");
       ok(at >= 0 && order[at + 1] === "/assets/js/flows-chart.js",

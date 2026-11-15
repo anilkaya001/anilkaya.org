@@ -21,8 +21,9 @@ const same = (a, b, m) => { assert.deepEqual(a, b, m); checks++; };
 
 const WP4_PS = { od: "WP4", bytes: 2200, why: "the ps section (ftd, svx, ibs, ins) is the next field the headroom was held for: it adds 2.2 KB to a deep card, sheds before any other section and never costs one its room" };
 const HEADROOM_BYTES = Math.floor(0.95 * CARD_X_SOFT_BYTES) + WP4_PS.bytes;
-const WIRE_CEILING = 57500 + WP4_PS.bytes;
-const SERVED_CEILING = 63600 + WP4_PS.bytes;
+const WP6_ER = { od: "WP6", bytes: 900, why: "the er section (eps and fin) rides on the card-x of every name the event-risk nightly reads: it adds about 0.8 KB to the largest card, is the first section shed after the audit block and never costs another section its room" };
+const WIRE_CEILING = 57500 + WP4_PS.bytes + WP6_ER.bytes;
+const SERVED_CEILING = 63600 + WP4_PS.bytes + WP6_ER.bytes;
 const DAY = 86400000;
 const iso = (n) => new Date(n * DAY).toISOString().slice(0, 10);
 const dayN = (s) => Date.parse(s + "T00:00:00Z") / DAY;
@@ -268,10 +269,10 @@ for (const c of wireCards) {
 }
 eq(wireCards.length, cards.length, "the same cards are built with the switch on");
 ok(wireMax <= HEADROOM_BYTES, `WITH THE SWITCH ON THE LARGEST CARD-X IS ${wireMax} BYTES ON THE WIRE (${wireMaxName}), AT MOST 95% OF THE SOFT LIMIT: ${HEADROOM_BYTES} of ${CARD_X_SOFT_BYTES}`);
-ok(wireMax <= WIRE_CEILING, `held at ${WIRE_CEILING}, a ratchet that falls and is not raised without a named decision`);
+ok(wireMax <= WIRE_CEILING, `${wireMax} bytes, held at ${WIRE_CEILING}, a ratchet that falls and is not raised without a named decision`);
 eq(wireShed, 0, "and no card sheds its extras to the soft limit: every part of every card stays whole");
 ok(wireRawMax > CARD_X_SOFT_BYTES, `while the document the Worker serves is larger than the soft limit for the largest (${wireRawMax} bytes), which is why this is a decision and not a default`);
-ok(wireRawMax <= SERVED_CEILING, `it has its own ratchet at ${SERVED_CEILING} bytes so growth the packing hides is seen`);
+ok(wireRawMax <= SERVED_CEILING, `${wireRawMax} bytes: it has its own ratchet at ${SERVED_CEILING} bytes so growth the packing hides is seen`);
 ok(wireRawMax <= CARD_X_SERVED_BYTES, `and stays inside the served ceiling of ${CARD_X_SERVED_BYTES} bytes, 90% of the ${CARD_X_BUDGET_BYTES}-byte budget, which the pipeline enforces on every card-x`);
 console.log(`  card-x: ${cards.length} cards; as posted today the largest is ${rawMax} bytes (${rawMaxName}) and ${softShed} shed their extras; with FLOWS_CARDX_WIRE=pack the largest is ${wireMax} bytes on the wire (${wireMaxName}), ${(100 * wireMax / CARD_X_SOFT_BYTES).toFixed(1)}% of the soft limit, and ${wireRawMax} bytes served`);
 rmSync(wireDir, { recursive: true, force: true });
@@ -461,8 +462,8 @@ const rowOf = (d, id) => d.db.prepare("SELECT payload FROM flows_payload WHERE i
   for (const mode of ["off", "warn", undefined]) {
     const env = mode === undefined ? {} : { FLOWS_DOOR_V2: mode };
     const dWhole = H.fakeD1(), dPacked = H.fakeD1();
-    const whole = await rig({ DB: dWhole.D1, FLOWS_INGEST_TOKEN: NIGHTLY, FLOWS_POSITIONING: "on", ...env }, "https://anilkaya.test");
-    const wired = await rig({ DB: dPacked.D1, FLOWS_INGEST_TOKEN: NIGHTLY, FLOWS_POSITIONING: "on", ...env }, "https://anilkaya.test");
+    const whole = await rig({ DB: dWhole.D1, FLOWS_INGEST_TOKEN: NIGHTLY, FLOWS_POSITIONING: "on", FLOWS_EVENTRISK: "on", ...env }, "https://anilkaya.test");
+    const wired = await rig({ DB: dPacked.D1, FLOWS_INGEST_TOKEN: NIGHTLY, FLOWS_POSITIONING: "on", FLOWS_EVENTRISK: "on", ...env }, "https://anilkaya.test");
     const w1 = await post(whole, key, text);
     const w2 = await post(wired, key, packed);
     same([w1.res.status, w2.res.status], [200, 200], `the ingest door takes the largest card-x whole and packed (door ${mode === undefined ? "unset" : mode}): ${w2.text.slice(0, 100)}`);
