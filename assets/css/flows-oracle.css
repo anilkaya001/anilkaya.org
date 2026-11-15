@@ -425,6 +425,11 @@
   .orc-restore { transition: opacity var(--dur-fade) linear; }
 }
 
+@media (pointer: coarse) {
+  .orc-toast, .orc[data-room="1"] .orc-restore.is-undo { top: calc(var(--safe-t) + (var(--bar-h) - 44px) / 2); height: 44px; min-height: 44px; }
+  .orc-toast { line-height: 44px; }
+}
+
 @media (forced-colors: active) {
   .orc-restore { background: Canvas; color: CanvasText; border: 1px solid ButtonBorder; box-shadow: none; opacity: 1; }
   .orc-disc, .orc-pill, .orc-sheet, .orc-toast { background: Canvas; color: CanvasText; border: 1px solid ButtonBorder; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; }
