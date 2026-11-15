@@ -12,7 +12,7 @@ export const FEED_TEMPLATES = Object.freeze([
 export const FEED_STATES = Object.freeze(["ready", "plan", "unlisted", "unread", "unstated"]);
 
 export function feedTemplateRows(feed) {
-  const read = feed && typeof feed === "object" && Array.isArray(feed.types);
+  const read = !!feed && typeof feed === "object" && Array.isArray(feed.types) && feed.status !== "unavailable";
   const types = read ? feed.types : [];
   const targets = read && feed.grammar && Array.isArray(feed.grammar.targets) ? feed.grammar.targets : [];
   return FEED_TEMPLATES.map((t) => {

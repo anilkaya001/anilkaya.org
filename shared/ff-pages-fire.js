@@ -99,7 +99,29 @@ const templateRow = (t) => `
           <span class="ffx-trow-m"><span class="ffx-chip" data-cadence="${esc(t.cadence)}">${t.cadence === "live" ? "Live" : "Nightly"}</span>${t.status === "limited" ? '<span class="ffx-chip ffx-chip-lim" title="Sees part of the universe only">Limited</span>' : ""}<span class="ffx-trow-r" data-rate="${esc(t.key)}" data-ff-absent="reading">${ABSENT_MARK} reading</span></span>
         </button></li>`;
 
-export function fireBody(glyph, registry = fireRegistry()) {
+export const FEED_SEGMENTS = Object.freeze([["flows", "Flows"], ["feed", "From the feed"]]);
+
+const FLOWS_HEAD = '<header class="ffx-ph"><h2 id="ffxTplT">Start from</h2></header>';
+const FLOWS_FOOT = '<p class="ffx-foot">A template that needs data Flows does not hold yet is not listed.</p>';
+const LIST_END = `
+        </ul>`;
+
+const feedHead = () => `<header class="ffx-ph"><h2 id="ffxTplT">Start from</h2><div class="ffx-seg" id="ffxSeg" role="radiogroup" aria-label="Templates from">${FEED_SEGMENTS.map(([k, label], i) => `<button type="button" role="radio" class="ffx-seg-i" data-seg="${k}" aria-checked="${i === 0}" tabindex="${i === 0 ? 0 : -1}">${label}</button>`).join("")}</div></header>`;
+
+const feedParts = (src) => `
+        <ul class="ffx-tpls ffx-feed" id="ffxFeedTpls" aria-label="Alert types from the feed" hidden></ul>
+        <i hidden data-defer="er-fire" data-src="${esc(src)}"></i>`;
+
+export function fireBody(glyph, registry = fireRegistry(), { feed = false, feedSrc = "/assets/js/flows-er-fire.js" } = {}) {
+  const body = fireBase(glyph, registry);
+  if (!feed) return body;
+  return body
+    .replace(FLOWS_HEAD, () => feedHead())
+    .replace(LIST_END, () => LIST_END + feedParts(feedSrc))
+    .replace(FLOWS_FOOT, () => FLOWS_FOOT.replace('<p class="ffx-foot">', '<p class="ffx-foot" id="ffxTplFoot">') + '\n        <p class="ffx-foot" id="ffxFeedFoot" hidden></p>');
+}
+
+function fireBase(glyph, registry) {
   const g = typeof glyph === "function" ? glyph : () => "";
   return `
   ${dataBlock(registry)}

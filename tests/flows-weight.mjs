@@ -295,11 +295,18 @@ const judge = (row, bases = BASES) => {
   return faults;
 };
 
+const FF_FEED = { od: "WP6", bytes: 2194, gzip: 504, cssBytes: 2854, cssGzip: 438, deferredBytes: 10201, why: "WP6 Fire feed group: flows-ff-fire.js wires the Start panel's Flows or From the feed segment and asks for the er-fire group on first choice (15,732 to 17,926 B raw, 4,809 to 5,313 B gzip), and flows-ff-fire.css styles the segment, the feed rows and the account dialog (14,660 to 17,514 B raw, 3,110 to 3,548 B gzip); the rows themselves are the deferred flows-er-fire.js" };
+CEILING_KIB.firePage += FF_FEED.bytes / 1024;
+GZIP_KIB.firePage += FF_FEED.gzip / 1024;
+CSS_KIB.firePage += FF_FEED.cssBytes / 1024;
+CSS_GZIP_KIB.firePage += FF_FEED.cssGzip / 1024;
+
 const DEFERRED = {
   tickerPage: { groups: { surface: "/assets/js/flows-ticker-surface.js", movelab: "/assets/js/flows-ticker-movelab.js", network: "/assets/js/flows-ticker-network.js", live: "/assets/js/flows-ticker-live.js", private: "/assets/js/flows-ticker-private.js", "nn-orb": "/assets/js/flows-nn-orb.js", xcheck: "/assets/js/flows-ticker-xcheck.js" } },
   unusualPage: { groups: { net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js", "flow-below": "/assets/js/flows-unusual-below.js" }, modules: ["uaTimelineCard", "uaNamesCard", "uaUrgencyCard", "uaFeedCard", "uaSurpriseCard"] },
   marketPage: { groups: { voldesk: "/assets/js/flows-voldesk.js", floor: "/assets/js/flows-market-floor.js", river: "/assets/js/flows-market-river.js", "market-below": "/assets/js/flows-market-below.js", net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" }, modules: ["mkSectorsCard", "mkGroupsCard", "mkExpiryCard", "mkVolCard", "mkRadarCard", "mkAdvCard", "mkVolumeCard", "mkAgainstCard", "mkMoversCard", "mkOiCard", "mkDarkCard", "mkImpactCard", "mkInsidersCard", "mkSeasonCard"] },
   eventsPage: { groups: { er: "/assets/js/flows-er.js" } },
+  firePage: { groups: { "er-fire": "/assets/js/flows-er-fire.js" } },
   networkPage: { groups: { net: "/assets/js/flows-net.js", netmap: "/assets/js/flows-net-map.js" } },
   deskPage: { groups: { "desk-calls": "/assets/js/flows-desk-calls.js" } },
   macroPage: { groups: { "macro-charts": ["/assets/js/flows-macro-charts.js"] } },
@@ -327,6 +334,7 @@ const DEFERRED_KIB = {
   tickerPage: 80 + 7.3 + (38836 + 18916) / 1024 + 23400 / 1024 + 15800 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + NETWORK_GROUP.bytes / 1024, overviewPage: 120 + 82272 / 1024 + 24200 / 1024 + NN_ORB.bytes / 1024 + NN_ASK.bytes / 1024 + (260 + 848) / 1024 + HOME_FIT.deferred / 1024, sidePage: 80 + NN_ASK.bytes / 1024, watchPage: 80 + NN_ASK.bytes / 1024, deskPage: 120 + NN_ASK.bytes / 1024 + DESK_CALLS.bytes / 1024, strategyPage: 80 + NN_ASK.bytes / 1024, marketPage: 323 + LEAN_RULE.bytes / 1024 + NN_ASK.bytes / 1024 + (2240 + 627) / 1024 + HOME_FIT.deferred / 1024, networkPage: 210 + NN_ASK.bytes / 1024, nowPage: 80 + NN_ASK.bytes / 1024,
   unusualPage: 196 + 960 / 1024 + NN_ASK.bytes / 1024 + (26400 + 745) / 1024 + HOME_FIT.deferred / 1024, eventsPage: 80 + NN_ASK.bytes / 1024 + 42, movesPage: 80 + NN_ASK.bytes / 1024, ledgerPage: 80 + NN_ASK.bytes / 1024 + LEDGER_LIVE.bytes / 1024, macroPage: 80 + 15.4 + NN_ASK.bytes / 1024, politicalPage: 80 + NN_ASK.bytes / 1024, firePage: 80 + NN_ASK.bytes / 1024, ffPendingPage: 80 + NN_ASK.bytes / 1024, loginPage: 0, aboutPage: 0, glossaryPage: 0, notFoundPage: 0, statusPage: 80 + 80 + 15 + 4 + STATUS_RAISE.deferredBytes / 1024 + NN_ASK.bytes / 1024 + ASK_STORED_RAISE.bytes / 1024 + FLOWLAB_HEATMAP.bytes / 1024,
 };
+DEFERRED_KIB.firePage += FF_FEED.deferredBytes / 1024;
 const DARK_POOL_TIME = { bytes: 107, why: "lane 2 math audit: the Market page's dark-pool list drops canceled prints, prints its times in TRT through F.time and its prices through F.px, and says how many canceled prints it left out, measured as 58,946 to 59,053 B raw in the deferred flows-market-below.js" };
 DEFERRED_KIB.marketPage += DARK_POOL_TIME.bytes / 1024;
 DEFERRED_KIB.positioningPage = 80 + NN_ASK.bytes / 1024;
@@ -415,7 +423,7 @@ const measured = [];
 for (const name of pageNames) {
   let html;
   try {
-    html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", eventrisk: name === "eventsPage", scenes: name === "tickerPage", xcheck: name === "tickerPage", privateLens: name === "tickerPage", voldesk: name === "marketPage" }));
+    html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", eventrisk: name === "eventsPage", feed: name === "firePage", scenes: name === "tickerPage", xcheck: name === "tickerPage", privateLens: name === "tickerPage", voldesk: name === "marketPage" }));
   } catch (error) {
     assert.fail(`${name} threw while rendering: ${error && error.message}`);
   }
@@ -607,7 +615,7 @@ for (const name of Object.keys(CEILING_KIB)) {
       ok(pageNames.includes(name) && !chartRoutes.includes(name), `${name} does not link flows-chart.js`);
     }
     for (const name of CHART_ROUTES) {
-      const html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", eventrisk: name === "eventsPage", scenes: name === "tickerPage", xcheck: name === "tickerPage", privateLens: name === "tickerPage", voldesk: name === "marketPage" }));
+      const html = String(PAGES[name]({ username: "tester", ticker: "AAPL", net: true, live: name === "ledgerPage", eventrisk: name === "eventsPage", feed: name === "firePage", scenes: name === "tickerPage", xcheck: name === "tickerPage", privateLens: name === "tickerPage", voldesk: name === "marketPage" }));
       const order = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1].split("?")[0]);
       const at = order.indexOf("/assets/js/flows-ui.js");
       ok(at >= 0 && order[at + 1] === "/assets/js/flows-chart.js",

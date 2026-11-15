@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "434";
+export const ASSET_VERSION = "435";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -1666,8 +1666,8 @@ const FIRE_BANNER = '<p class="ffx-banner" id="ffxBanner" hidden></p>';
 
 export const FIRE_SHADOW_LINE = "Running in shadow: wires are evaluated, hits are not delivered yet.";
 
-export function firePage({ username = "", shadow = false } = {}) {
-  const body = fireBody(glyph);
+export function firePage({ username = "", shadow = false, feed = false } = {}) {
+  const body = fireBody(glyph, undefined, feed ? { feed: true, feedSrc: v("/assets/js/flows-er-fire.js") } : {});
   return flowsDocument({
     title: "Fire", description: FIRE_DESCRIPTION, active: "fire", username, chrome: false, styles: FIRE_STYLES, scripts: FIRE_SCRIPTS,
     body: shadow ? body.replace(FIRE_BANNER, () => `<p class="ffx-banner" id="ffxBanner" data-ff-mode="shadow">${FIRE_SHADOW_LINE}</p>`) : body,
