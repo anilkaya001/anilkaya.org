@@ -1614,20 +1614,20 @@ try {
       return out;
     });
     ok(marks.ORCL, "a ranked name that reports inside the window is marked on the ranked row");
-    eq(marks.ORCL.text, "3s",
-       "with the events payload's own unit — sessions, which is what the gate counted");
-    ok(marks.ORCL.glyph && marks.ORCL.near,
-       "behind a calendar glyph, and tinted as near because a print three sessions out is close");
+    eq(marks.ORCL.text, "",
+       "the nightly's 3s is counted from its own day zero, and this fixture's report is behind the reader's day, so no count is printed (the aged count is held by math-audit3)");
+    ok(marks.ORCL.glyph && !marks.ORCL.near,
+       "behind a calendar glyph, and not tinted as near: a report already behind the reader is not three sessions out");
     ok(/2026-08-27/.test(marks.ORCL.title || ""),
-       `and the date in the title, because a count with no origin is not checkable (${marks.ORCL.title})`);
-    ok(/3 sessions/.test(marks.ORCL.title || ""),
-       `spelled out rather than abbreviated (${marks.ORCL.title})`);
+       `and the date in the title (${marks.ORCL.title})`);
+    ok(!/3 sessions/.test(marks.ORCL.title || ""),
+       `and no stale count in it (${marks.ORCL.title})`);
 
-    eq(marks.CAT?.text, "15d",
-       "a board row with no calendar row falls back to the board's calendar-day count");
-    ok(/15 calendar days/.test(marks.CAT?.title || ""),
-       `and never prints one unit's number under the other's name (${marks.CAT?.title})`);
-    eq(marks.CAT?.near, false, "and a print fifteen days out is not tinted as near");
+    eq(marks.CAT?.text, "",
+       "a board row with no calendar row ages the board's calendar-day count too, and prints none once the report is behind the reader");
+    ok(!/15 calendar days/.test(marks.CAT?.title || ""),
+       `and never keeps the nightly's figure (${marks.CAT?.title})`);
+    eq(marks.CAT?.near, false, "and is not tinted as near");
     eq(marks.DE, null, "and a name that reports outside the window carries no marker at all");
 
     const ev = await moduleWhy(page, "hmEvents");

@@ -1594,7 +1594,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 288 suites: 232 that need only Node (N), 41 that also
+`tests/suites/` registers 289 suites: 233 that need only Node (N), 41 that also
 need Playwright's Chromium (C) and 15 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1653,14 +1653,15 @@ flows-universe            flows-variation           flows-vendor-budget       fl
 flows-verdict             flows-vol                 flows-voldesk             flows-voldesk-render
 flows-warnings            flows-weight              flows-write-batch         flows-ws-probe
 flows-xcheck-render       lab-write                 launch-readiness          markets
-mastery                   math-browser              math-darkpool             math-dealer
-math-duplicates           math-flow                 math-format               math-print
-math-short                math-sigma                math-site                 math-time
-math-units                math-vol                  pipeline                  route-matrix
-server-ai                 server-desk               server-desk-sc            server-ff
-server-flowlab            server-ingest             server-kernel             server-log
-server-macro              server-ops                server-oracle             server-pages
-server-router             server-rt                 server-voldesk            staging
+mastery                   math-audit3               math-browser              math-darkpool
+math-dealer               math-duplicates           math-flow                 math-format
+math-print                math-short                math-sigma                math-site
+math-time                 math-units                math-vol                  pipeline
+route-matrix              server-ai                 server-desk               server-desk-sc
+server-ff                 server-flowlab            server-ingest             server-kernel
+server-log                server-macro              server-ops                server-oracle
+server-pages              server-router             server-rt                 server-voldesk
+staging
 ```
 
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):

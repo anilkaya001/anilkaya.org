@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "434";
+export const ASSET_VERSION = "435";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -1524,7 +1524,7 @@ export function strategyPage({ username = "" } = {}) {
       <p data-k="scen-method">Every cell re-prices every leg on the fitted smile, sticky in moneyness, at the chosen basis. The ringed cell is today at spot with volatility unchanged, which equals the today line at spot.</p>
       <p data-k="legs">One row per leg. Buy and Sell switch a leg&#39;s side, the stepper sets how many contracts, and editing any of these turns the structure into a custom position.</p>
       <p data-k="legs-mid">Halfway between bid and ask; no one is obliged to trade there</p>
-      <p data-k="legs-fill">Mid plus a quarter of the spread, the engine&#39;s execution assumption</p>
+      <p data-k="legs-fill">Mid plus a quarter of the half-spread (an eighth of the spread), the engine&#39;s execution assumption</p>
       <p data-k="legs-nat">The ask on every buy and the bid on every sell: what crossing the spread costs</p>
       <p data-k="no-legs">No listed strikes on {d} reach the deltas a {s} is built from.</p>
       <p data-k="why-jade">These strikes no longer make a jade lizard: the credit does not cover the call spread&#39;s width, so the position carries upside risk the structure exists to remove.</p>

@@ -291,6 +291,7 @@ export function attachMidIv(p, { spot, readMs = null, rate = PRICING_RATE, forwa
   p.ivMid = midImpliedVol({ spot, strike: p.strike, type: p.type, mid: p.mid, years, rate, forward });
   p.cushionSigmas = p.breakeven > 0 ? sigmaMove(spot, p.breakeven, p.ivMid, years) : null;
   p.capSigmas = p.strategy === "cc" ? sigmaMove(p.strike, spot, p.ivMid, years) : null;
+  p.upSigmas = p.strategy === "cc" && p.bid > 0 ? sigmaMove(p.strike + p.bid, spot, p.ivMid, years) : null;
   return p;
 }
 
@@ -820,7 +821,7 @@ export function shortCallLine(row, { spot, delta = null, days, contracts = SC_DE
     ratio, grossRatio: bidC / col.m1C, annRatio: dayN !== null && dayN >= 1 ? ratio * DAYS_PER_YEAR / dayN : null,
     limited: bpC !== null && n < contracts, affordable: n >= 1,
     premiumC: n * bidC, timeValueC: n * tvC, collateralC: n * col.m1C, deployedC: n * col.m1C, idleC: bpC === null ? null : bpC - n * col.m1C,
-    deltaShares: d === null ? null : d * SHARES_PER_CONTRACT * contracts, deltaDollarsC: d === null ? null : roundCents(d * SHARES_PER_CONTRACT * S * contracts),
+    deltaShares: d === null ? null : d * SHARES_PER_CONTRACT * n, deltaDollarsC: d === null ? null : roundCents(d * SHARES_PER_CONTRACT * S * n),
   };
 }
 

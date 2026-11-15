@@ -167,8 +167,9 @@ export function periodic(sr, { daily }) {
   const n = p.length;
   const last = p[n - 1];
   const prev = n >= 2 ? p[n - 2] : null;
-  const change = prev && prev[1] !== 0 ? last[1] / prev[1] - 1 : null;
-  const base = { status: "ok", unit: sr.unit, interval: sr.interval, last, prev };
+  const points = sr.unit === "percent";
+  const change = !prev ? null : points ? last[1] - prev[1] : prev[1] !== 0 ? last[1] / prev[1] - 1 : null;
+  const base = { status: "ok", unit: sr.unit, interval: sr.interval, last, prev, ...(points ? { chgUnit: "pts" } : {}) };
   if (daily && sr.interval === "daily") return { ...base, chg1: change, spark: p.slice(-63) };
   return { ...base, chgPrev: change, spark: p.slice(-24) };
 }
@@ -238,7 +239,7 @@ export function parseContract(sym, product, session) {
   }
   if (y === null) return null;
   if (y < sy || (y === sy && mi + 1 < sm)) return null;
-  return { sym, product, y, m: mi + 1, label: MONTH_NAMES[mi] + " " + String(y).slice(2) };
+  return { sym, product, y, m: mi + 1, label: MONTH_NAMES[mi] + " \u2019" + String(y).slice(2) };
 }
 
 export function frontOf(contracts, product, session) {
@@ -425,6 +426,8 @@ export function binomialUpper(k, n) {
   return Math.min(1, p);
 }
 
+export const PERFORMERS_SCREENED = 500;
+
 export function performersTable(raw, keep = 10) {
   const body = unwrap(raw);
   const rows = Array.isArray(body) ? body : [];
@@ -438,12 +441,13 @@ export function performersTable(raw, keep = 10) {
     if (!w) continue;
     items.push({ t: r.ticker, sector: typeof r.sector === "string" ? text(r.sector, 40) : null, n, k, lo: w[0], hi: w[1], p: binomialUpper(k, n) });
   }
-  if (!items.length) return { tested: 0, survive: 0, rows: [] };
-  const bh = benjaminiHochberg(items.map((i) => i.p), 0.1);
+  if (!items.length) return { tested: 0, survive: 0, screened: PERFORMERS_SCREENED, rows: [] };
+  const screened = Math.max(PERFORMERS_SCREENED, items.length);
+  const bh = benjaminiHochberg(items.map((i) => i.p).concat(new Array(screened - items.length).fill(1)), 0.1);
   items.forEach((it, i) => { it.q = bh.adjusted[i]; it.ok = bh.reject[i]; });
   const survive = items.filter((i) => i.ok).length;
   items.sort((a, b) => b.lo - a.lo || (a.t < b.t ? -1 : 1));
-  return { tested: items.length, survive, rows: items.slice(0, keep).map((i) => [i.t, i.sector, i.n, i.k, i.lo, i.hi, i.q]) };
+  return { tested: items.length, survive, screened, rows: items.slice(0, keep).map((i) => [i.t, i.sector, i.n, i.k, i.lo, i.hi, i.q]) };
 }
 
 export function candidates({ unusual, smart, whales, insiders }) {
@@ -680,7 +684,7 @@ export function buildMacro(input, { test = false } = {}) {
     const body = filed("seasonality-year-month", input.seasonYearMonth && input.seasonYearMonth[t]);
     if (!body) continue;
     for (const [slot, month] of [["this", sm], ["next", nextM]]) {
-      const { changes } = monthRows(body, month, sy);
+      const { changes } = monthRows(body, month, slot === "next" && month < sm ? sy + 1 : sy);
       const c = seasonCell(changes);
       season.funds[slot].push(c.few ? [t, c.n, null, null, null, null, null, null, null] : [t, c.n, c.k, c.lo, c.hi, c.mean, c.meanLo, c.meanHi, c.median]);
     }

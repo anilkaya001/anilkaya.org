@@ -235,6 +235,10 @@ const readBattery = async () => {
     [/\n {6}<li><strong>Macro\.<\/strong>[^\n]*<\/li>/, ""],
     [/\s*<section class="fx-doc-term" id="[a-z0-9-]+" aria-labelledby="[a-z0-9-]+">(?:(?!<\/section>)[\s\S])*<a href="\/flows\/macro\/">Macro<\/a>(?:(?!<\/section>)[\s\S])*<\/section>/g, ""],
     [", each name&#39;s Ticker page and Macro, collected", " and each name&#39;s Ticker page, collected"],
+    ["Mid plus a quarter of the half-spread (an eighth of the spread), the engine&#39;s", "Mid plus a quarter of the spread, the engine&#39;s"],
+    ["The correction counts every name screened, not only the names listed.", "Names are ranked after a correction for how many were tested."],
+    ["the report: the vendor&#39;s expected earnings move, or its end-of-week implied move when that expiry spans the report; with neither there is no bar.</p><p>The gray bar", "the report; the gray bar"],
+    ["implied move to its end-of-week expiry, and that only when the expiry spans the report. A report after that expiry has no priced move here.", "implied move to its next expiry, which is a different horizon."],
   ];
   const render = async (root) => {
     const saved = Date.now;

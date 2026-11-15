@@ -28,7 +28,7 @@ export const GLOSSARY = Object.freeze([
   ] },
   { key: "coin-flip", term: "Distinguishable from a coin", ...MACRO, lines: [
     "Indistinguishable from a coin flip.",
-    "Names are ranked after a correction for how many were tested.",
+    "The correction counts every name screened, not only the names listed.",
   ] },
   { key: "disclosed-investor", term: "Disclosed investor", ...MACRO, lines: [
     "A disclosed investor is a firm the feed lists as backing private companies.",
@@ -138,13 +138,14 @@ export const GLOSSARY = Object.freeze([
     "Names past the dead band on each board, counted whole rather than to the rows this page draws.",
   ] },
   { key: "earnings-bars", term: "Earnings bars", ...EVENTS, lines: [
-    "The blue bar is the move the option market prices for the report; the gray bar is the median absolute one-day move over the name's past reports. A blue bar longer than the gray one is a report priced richer than this name usually moves.",
+    "The blue bar is the move the option market prices for the report: the vendor's expected earnings move, or its end-of-week implied move when that expiry spans the report; with neither there is no bar.",
+    "The gray bar is the median absolute one-day move over the name's past reports. A blue bar longer than the gray one is a report priced richer than this name usually moves.",
   ] },
   { key: "flagged-windows", term: "Flagged windows", ...HOME, lines: [
     "Option windows the vendor's own rules flagged in this read.",
   ] },
   { key: "implied-move", term: "Implied move", ...EVENTS, lines: [
-    "The vendor's expected earnings move where its calendar states one, otherwise the vendor's implied move to its next expiry, which is a different horizon.",
+    "The vendor's expected earnings move where its calendar states one, otherwise the vendor's implied move to its end-of-week expiry, and that only when the expiry spans the report. A report after that expiry has no priced move here.",
   ] },
   { key: "put-call", term: "Put/call volume", ...HOME, lines: [
     "Put contracts traded per call contract across the whole options market, on the vendor's daily totals.",

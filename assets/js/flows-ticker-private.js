@@ -8,6 +8,7 @@
   const COPY = {
     investor: "Disclosed investor in {n} private companies.",
     none: "Not listed as a disclosed private-markets investor.",
+    uncounted: "A disclosed investor; the feed states no company count.",
     peers: "Largest private peers in {sector}, by disclosed funding.",
     mark: "The feed's implied per-share price on {date}; not a trade.",
     coverage: "Profiles read for {p} of {l} companies listed in this sector.",
@@ -40,7 +41,7 @@
     }
     const n = num(section.match.companyCount);
     const companies = (Array.isArray(section.match.companies) ? section.match.companies : []).slice(0, 8).map((c) => ({ name: text(c && c[1]), sector: text(c && c[2]) })).filter((c) => c.name);
-    return { state: "ok", count: n, line: n === null ? say("none") : say("investor", { n: F.int(n) }), companies };
+    return { state: "ok", count: n, line: n === null ? say("uncounted") : say("investor", { n: F.int(n) }), companies };
   }
 
   function rowOf(e) {

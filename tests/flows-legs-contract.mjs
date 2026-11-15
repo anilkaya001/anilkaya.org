@@ -631,7 +631,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const econ = shapeEconomicCalendar([probe("economic-calendar"), { time: "2026-09-22T12:30:00Z", event: "CPI m/m", prev: "0.2" }], { sessionDate: S });
   eq(econ.rows.length, 1, "a release before the session's close is dropped");
   eq(econ.past, 1, "and counted");
-  eq(econ.rows[0].sd, 3, "Tuesday to Friday is three sessions");
+  eq(econ.rows[0].sd, 2, "a Friday print is two sessions after day zero, the Wednesday after the Tuesday session, the origin every earnings count uses");
   eq(econ.rows[0].prev, 50.3, "prev is coerced when numeric");
   eq(econ.rows[0].forecast, 48.8, "and forecast");
   eq(macroTag("FOMC Rate Decision"), "fomc", "FOMC is tagged");

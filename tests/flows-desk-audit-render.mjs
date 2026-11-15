@@ -224,8 +224,10 @@ try {
     };
     const [called, cushion] = await read(null);
     ok(/^0\.0%/.test(called) && /^0\.00 SD/.test(cushion), `a magnitude that rounds to zero prints unsigned, never −0.0% or −0.00 SD (${called} | ${cushion})`);
-    const [badCalled] = await read(serve(DESK, [['const minusOf = (n, magnitude) => (n < 0 && Number(magnitude) !== 0 ? MINUS : "");', 'const minusOf = (n, magnitude) => (n < 0 ? MINUS : "");']]));
-    ok(/^−0\.0%/.test(badCalled), "PLANTED WRONG BUILD IS CAUGHT: a sign decided before rounding prints −0.0%");
+    const [, badCushion] = await read(serve(DESK, [['const minusOf = (n, magnitude) => (n < 0 && Number(magnitude) !== 0 ? MINUS : "");', 'const minusOf = (n, magnitude) => (n < 0 ? MINUS : "");']]));
+    ok(/^−0\.00 SD/.test(badCushion), "PLANTED WRONG BUILD IS CAUGHT: a sign decided before rounding prints −0.00 SD");
+    const [badCalled] = await read(serve(DESK, [["const fmtPct = (v, d = 1) => F.pct(isNum(v), d);", 'const fmtPct = (v, d = 1) => { const n = isNum(v); return n === null ? DASH : (n < 0 ? MINUS : "") + (Math.abs(n) * 100).toFixed(d) + "%"; };']]));
+    ok(/^−0\.0%/.test(badCalled), "PLANTED WRONG BUILD IS CAUGHT: a percent signed before rounding prints −0.0%");
   }
 
   {

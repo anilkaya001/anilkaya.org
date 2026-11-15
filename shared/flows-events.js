@@ -1,5 +1,5 @@
 import { horizonMove } from "./flows-features.js";
-import { forward, horizonEnd, previousSession, sessionsBetween as calendarBetween, HORIZON_SESSIONS } from "./flows-calendar.js";
+import { forward, horizonEnd, previousSession, addSessions, impactSession, ahead as aheadOf, sessionsBetween as calendarBetween, HORIZON_SESSIONS } from "./flows-calendar.js";
 
 const numOrNull = (v) => {
   if (v === null || v === undefined || v === "") return null;
@@ -20,10 +20,29 @@ export function calendarDaysTo(earningsDate, origin) {
   return days < 0 ? null : days;
 }
 
-export function sessionsToEarnings(earningsDate, origin) {
+export function sessionsToEarnings(earningsDate, origin, reportTime = null) {
   if (!ISO.test(String(earningsDate || "")) || !ISO.test(String(origin || ""))) return null;
-  const n = calendarBetween(origin, earningsDate);
+  const imp = impactSession(earningsDate, reportTime);
+  if (!imp) return null;
+  const n = calendarBetween(origin, imp.early);
   return n === null || n < 0 ? null : n;
+}
+
+export function weekExpiry(origin) {
+  if (!ISO.test(String(origin || ""))) return null;
+  const ms = Date.parse(origin + "T00:00:00Z");
+  if (!Number.isFinite(ms)) return null;
+  const dow = new Date(ms).getUTCDay();
+  const sunday = new Date(ms + ((7 - dow) % 7) * 86400000).toISOString().slice(0, 10);
+  const n = calendarBetween(origin, sunday);
+  return n === null || n < 0 ? null : addSessions(origin, n);
+}
+
+export function impliedSpans(earningsDate, origin, reportTime = null) {
+  if (!ISO.test(String(earningsDate || ""))) return null;
+  const imp = impactSession(earningsDate, reportTime);
+  const end = weekExpiry(origin);
+  return !imp || !end ? null : imp.late <= end;
 }
 
 export const IV_PATH_LABELS = Object.freeze(["−1m", "−1w", "−1d", "now"]);
@@ -45,7 +64,10 @@ export function eventRow(row, tilt, {
 } = {}) {
   const t = tilt || {};
   const d = ISO.test(String(row && row.next_earnings_date || "")) ? row.next_earnings_date : null;
-  const sdte = sessionsToEarnings(d, gateOrigin);
+  const when = row && row.er_time ? row.er_time : null;
+  const sdte = sessionsToEarnings(d, gateOrigin, when);
+  const imp = d ? impactSession(d, when) : null;
+  const spans = impliedSpans(d, gateOrigin, when);
 
   const dte = calendarDaysTo(d, gateOrigin);
   const iv = numOrNull(t.iv30);
@@ -61,11 +83,13 @@ export function eventRow(row, tilt, {
 
     dte,
     sdte,
+    di: imp ? imp.early : null,
 
     when: null,
     px: close !== null && close > 0 ? round(close, 2) : null,
     ev,
     im: vendorMove,
+    imSpans: spans,
     iv: round(iv, 4),
 
     rv: round(numOrNull(features && features.rv30), 4),
@@ -73,7 +97,7 @@ export function eventRow(row, tilt, {
     ivPath: ivPathOf(t),
     rvol: round(numOrNull(t.relVolume), 2),
 
-    evp: vendorMove === null || ev === null || !(ev > 0)
+    evp: spans !== true || vendorMove === null || ev === null || !(ev > 0)
       ? null : round(vendorMove / ev, 2),
 
     pt: round(numOrNull(t.premiumTilt), 4),
@@ -154,6 +178,7 @@ export function buildEvents(withTilt, {
     through,
     gateOrigin: gateOrigin || null,
     sessionDate,
+    week: asOf ? aheadOf(asOf) : null,
     byStage,
     rvMeasured: shown.filter((r) => r.rv !== null).length,
     evMeasured: shown.filter((r) => r.ev !== null).length,
@@ -214,6 +239,8 @@ export const EVENTS_NOTES = Object.freeze({
     "published as its own column rather than left as a discrepancy.",
   eventPremium: "The event premium is the vendor's own implied move divided by " +
     "the constant-vol benchmark beside it — a ratio of two published numbers, " +
+    "published only when that implied move runs to an expiry on or after the " +
+    "session the report moves the price, " +
     "unit-free, and the only quantity on this row that is about the REPORT " +
     "rather than about the name's ambient volatility. A reading of 1 means the " +
     "vendor is charging no more than an ordinary stretch of the same length; a " +
@@ -235,7 +262,9 @@ export const EVENTS_NOTES = Object.freeze({
     "published beside the last date shown, so an empty right-hand half is never " +
     "attributed to the window when the cap is what stopped it.",
   vendorMove: "The vendor's own implied move is quoted to the vendor's own next " +
-    "expiry, which is a different horizon from the one beside it. Both are " +
+    "end-of-week expiry, which is a different horizon from the one beside it; " +
+    "when that expiry comes before the report it prices no part of the report, " +
+    "so it is not shown as the report's move. Both are " +
     "published and neither is reconciled into the other: an average of two " +
     "numbers quoted to two horizons is quoted to neither.",
   announce: "The screener carries when each report lands: before the open, after " +

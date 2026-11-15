@@ -8,7 +8,7 @@
   const C = UI.chart;
   const {
     $, ans, arr, rowsOf, cap1, capSaid, countSaid, sessionsSaid, disclose, POP, silent, hush, headMark, infoInto, table,
-    earningsMark, nameNode, readerHref, toneOf, CROSS_SAID, CROSS_WORDS, NO_CARD_SAID, SHOW, LIST_MAX, big, gone,
+    earningsMark, reportAhead, nameNode, readerHref, toneOf, CROSS_SAID, CROSS_WORDS, NO_CARD_SAID, SHOW, LIST_MAX, big, gone,
   } = kit;
 
   const CHANGE_MAX = 12;
@@ -389,22 +389,12 @@
 
   const moveSaid = (v) => {
     const im = isNum(v);
-    return im === null ? DASH : "±" + (Math.abs(im) * 100).toFixed(1) + "%";
+    return im === null ? DASH : "±" + F.pct(Math.abs(im), 1);
   };
 
-  const weekdaysAfter = (a, b) => {
-    let n = 0;
-    const end = Date.parse(b + "T12:00:00Z");
-    for (let t = Date.parse(a + "T12:00:00Z") + 864e5, i = 0; t <= end && i < 400; t += 864e5, i++) if (![0, 6].includes(new Date(t).getUTCDay())) n++;
-    return n;
-  };
-  const isDay = (d) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d);
-  function aheadOf(sd, origin, today) {
-    if (sd === null) return null;
-    if (!isDay(origin) || !isDay(today) || origin === today) return sd;
-    return today < origin ? sd + 1 : sd - weekdaysAfter(origin, today);
-  }
-  const aheadSaid = (n) => (n === null ? "" : n < 0 ? " · past" : n === 0 ? " · today" : n === 1 ? " · next session" : " · in " + n + " sessions");
+  const aheadOf = (sd, origin, today, day) => (sd === null ? null : reportAhead(sd, origin, today, day));
+  const UNPLACED = "The reader's day could not be placed on the session list, so no session count is shown.";
+  const aheadSaid = (n, known) => (n === null ? (known ? " · " + DASH : "") : n < 0 ? " · past" : n === 0 ? " · today" : n === 1 ? " · next session" : " · in " + n + " sessions");
 
   function paintEvents(into, payload) {
     if (silent(into, payload, "events calendar")) {
@@ -428,15 +418,16 @@
           "opinion on " + (opinionless === 1 ? "it" : "them") + " going into the print."
         : ", so every name here can be read against the ranking above.");
     const today = UI.freshness.market().today;
-    const ahead = (row) => aheadOf(isNum(row.sdte), payload.gateOrigin, today);
+    const ahead = (row) => aheadOf(isNum(row.sdte), payload.gateOrigin, today, row.di || row.d);
     const soon = rows.filter((row) => { const a = ahead(row); return a !== null && a >= 0 && a <= 5; }).length;
     const lastAhead = ahead(rows[rows.length - 1]);
-    big("hmEvents", (payload.capBound === true && lastAhead !== null && lastAhead <= 5 ? "≥" : "") + soon, "reports within five sessions", "ice");
+    const placed = rows.some((row) => ahead(row) !== null);
+    if (placed) big("hmEvents", (payload.capBound === true && lastAhead !== null && lastAhead <= 5 ? "≥" : "") + soon, "reports within five sessions", "ice");
+    else big("hmEvents", null, "reports within five sessions", "ice", ["unavailable", UNPLACED, "reporting soon", "day not placed"]);
     const list = drawn.map((row) => {
       return UI.listRow({
         primary: row.t || DASH,
-        secondary: (row.d ? F.day(row.d) : DASH) + aheadSaid(ahead(row)),
-        value: moveSaid(row.im),
+        secondary: (row.d ? F.day(row.d) : DASH) + aheadSaid(ahead(row), isNum(row.sdte) !== null),        value: moveSaid(row.im),
         signed: isNum(row.s) === null ? h("span", { class: "hm-tag", title: row.st === "gated" ? "The board was forbidden from holding an opinion on this name." : "No score was published for this name." }, row.st === "gated" ? "gated" : "unscored") : fmtSigned(row.s),
         signedValue: isNum(row.s), signedTone: isNum(row.s) === null ? "silent" : undefined,
         cols: "minmax(0,1fr) 60px 58px",
@@ -450,7 +441,7 @@
     ], drawn.map((row) => {
       return {
         cells: [[row.t || DASH, "cc-t"], [row.d || DASH, "cc-date"],
-          [ahead(row) === null ? DASH : ahead(row) < 0 ? "past" : String(ahead(row)), "c-num"],
+          [ahead(row) === null ? (isNum(row.sdte) === null ? DASH : DASH + " " + UNPLACED) : ahead(row) < 0 ? "past" : String(ahead(row)), "c-num"],
           [moveSaid(row.im), "c-num"],
           [fmtSigned(row.s), "c-num"], [row.st || DASH, "cc-dim"]],
       };

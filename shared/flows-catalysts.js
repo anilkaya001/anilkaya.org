@@ -174,7 +174,7 @@ export function reactionGauge(rows) {
     n: priced.length,
     medianRatio: medianOf(priced.map((p) => p.ratio)),
     beat: priced.filter((p) => p.ratio > 1).length / priced.length,
-    rows: priced.slice(0, 30).map((p) => [p.t, Number(p.realized.toFixed(4)), Number(p.em.toFixed(4)), Number(p.ratio.toFixed(3))]),
+    rows: priced.slice(0, 30).map((p) => [p.t, p.realized, p.em, p.ratio]),
     rule: "ratio = |post_earnings_close / pre_earnings_close - 1| / expected_move_perc over the reporters that reacted by the session",
   };
 }
@@ -232,7 +232,7 @@ export function shapeEconomicCalendar(rows, { sessionDate = null, cap = MACRO_RO
     out.push({
       at: new Date(ms).toISOString(),
       day,
-      sd: sessionDate && day ? sessionsBetween(sessionDate, day) : null,
+      sd: (() => { const n = sessionDate && day ? sessionsBetween(sessionDate, day) : null; return n === null ? null : Math.max(0, n - 1); })(),
       event,
       type: vstr(r.type),
       tag: macroTag(event),

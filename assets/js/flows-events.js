@@ -159,9 +159,12 @@
     const c = cal ? n(cal.em) : null;
     if (c !== null) return { v: Math.abs(c), src: "the vendor's expected earnings move" };
     if (e !== null) return { v: Math.abs(e), src: "the vendor's expected earnings move" };
-    if (n(r.im) !== null) return { v: Math.abs(n(r.im)), src: "the vendor's implied move to its next expiry" };
+    if (n(r.im) !== null && r.imSpans === true) return { v: Math.abs(n(r.im)), src: "the vendor's implied move to its end-of-week expiry, which spans the report" };
     return null;
   };
+  const NO_SPAN = { state: "unavailable", reason: "No priced move spans this report: the end-of-week implied move expires before the report moves the price." };
+  const impliedMissing = (r) => (n(r.im) !== null && r.imSpans !== true ? NO_SPAN : { state: "unavailable", reason: "The vendor published no implied move for this name." });
+  const dayOfReport = (r) => (r && ISO.test(String(r.di || "")) ? r.di : r ? r.d : null);
 
   function realizedOf(t, payload) {
     const hist = payload.history && typeof payload.history === "object" ? payload.history : null;
@@ -179,15 +182,7 @@
   function sessionDays(payload) {
     const cal = payload.earningsCalendar;
     if (cal && Array.isArray(cal.sessions) && cal.sessions.length) return cal.sessions.map((s) => s.date).filter((d) => ISO.test(String(d))).slice(0, 5);
-    const out = [];
-    let d = ISO.test(String(payload.gateOrigin || "")) ? payload.gateOrigin : null;
-    if (!d) return out;
-    while (out.length < 5) {
-      const wd = new Date(dayMs(d)).getUTCDay();
-      if (wd !== 0 && wd !== 6) out.push(d);
-      d = addDays(d, 1);
-    }
-    return out;
+    return Array.isArray(payload.week) ? payload.week.filter((d) => ISO.test(String(d))).slice(0, 5) : [];
   }
 
   const raw = (v) => (v ? String(v).replace(/^-/, UI.MINUS) : DASH);
@@ -216,7 +211,7 @@
     const list = upcoming.length ? upcoming : allDays;
     if (!list.length) {
       S.divLane = null;
-      silence(host.week, { state: "unavailable", reason: "This payload carried no gate origin and no session list, so the week has no day zero to be drawn from." }, "Week ahead", 220);
+      silence(host.week, { state: "unavailable", reason: "This payload carried no session list, so the week's sessions cannot be drawn." }, "Week ahead", 220);
       return;
     }
     const macroSt = blockState(payload.macro, "economic calendar");
@@ -225,7 +220,7 @@
     const divRows = catRows.filter((c) => /div/i.test(String(c && c.type)));
     const divSt = divRows.length ? { state: "ok" } : null;
     S.divLane = !!divSt;
-    const drawn = rows.filter((r) => r && list.includes(r.d));
+    const drawn = rows.filter((r) => r && list.includes(dayOfReport(r)));
     const earnSt = drawn.length ? { state: "ok" } : { state: "quiet", reason: "No name reports in the next five sessions." };
     const maxEm = Math.max(0.01, ...drawn.map((r) => { const i = impliedOf(r, cal.get(r.t)); return i ? i.v : 0; }));
     const grid = h("div", { class: "fe-week", style: { "--days": String(list.length), "--rows": divSt ? "5" : "4" } });
@@ -238,7 +233,7 @@
       col.append(h("div", { class: "fe-dh" }, h("b", null, weekday(d)), h("span", null, F.day(d)), d === mark ? h("i", { class: "fe-next" }, d === nowDay ? "Today" : "Next") : null));
       const mac = macroSt.state === "ok" ? (payload.macro.rows || []).filter((m) => m && m.day === d).sort((a, b) => String(a.at).localeCompare(String(b.at))) : [];
       col.append(h("div", { class: "fe-cell fe-c-macro", "data-lane": "Macro" }, mac.length ? mac.map(macroPill) : macroSt.state === "ok" ? h("span", { class: "fe-none", title: "No scheduled economic print for this day in the vendor calendar" }, "No print") : null));
-      const earn = rows.filter((r) => r && r.d === d).map((r) => ({ r, c: cal.get(r.t) || null }))
+      const earn = rows.filter((r) => r && dayOfReport(r) === d).map((r) => ({ r, c: cal.get(r.t) || null }))
         .sort((a, b) => laneRank(a.r) - laneRank(b.r) || (n(b.c && b.c.mcap) ?? -1) - (n(a.c && a.c.mcap) ?? -1) || String(a.r.t).localeCompare(String(b.r.t)));
       const cell = h("div", { class: "fe-cell fe-c-earn", "data-lane": "Earnings" });
       const cap = 6;
@@ -311,7 +306,7 @@
       "aria-haspopup": "dialog", "aria-controls": "fxPop",
       "data-info": UI.info(() => ({
         title: String(m.event || "Economic print"), asOf: m.day || null,
-        facts: [["Time", trtTime(m.at)], ["Forecast", m.forecastRaw ? raw(m.forecastRaw) : null], ["Prior", m.prevRaw ? raw(m.prevRaw) : null], ["Period", m.period || null], ["Sessions out", n(m.sd) === null ? null : String(m.sd)]],
+        facts: [["Time", trtTime(m.at)], ["Forecast", m.forecastRaw ? raw(m.forecastRaw) : null], ["Prior", m.prevRaw ? raw(m.prevRaw) : null], ["Period", m.period || null], ["Sessions out", n(m.sd) === null ? null : String(m.sd) + " after day zero" + (S.payload && S.payload.gateOrigin ? " (" + S.payload.gateOrigin + ")" : "")]],
       })),
     }, h("i", { class: "fe-dot", style: { "--c": UI.cssVar(tag ? tag[1] : "--label-3") } }), h("span", { class: "fe-time" }, trtTime(m.at, false) || ""), h("b", null, name));
   }
@@ -331,7 +326,7 @@
       asOf: payload.gateOrigin || null,
       lead: "The next five sessions: economic prints, earnings and FDA dates, day by day. Each name is a link to its page; the bar under it is its implied move against the largest this week, so the names that can move the most stand out.",
       facts: [
-        ["Day zero", payload.gateOrigin ? payload.gateOrigin + ", the run's own session date" : null],
+        ["Day zero", payload.gateOrigin ? payload.gateOrigin + ", the first session after the run's session" + (payload.sessionDate ? " (" + payload.sessionDate + ")" : "") : null],
         ["Prices", payload.sessionDate ? "closes of " + payload.sessionDate : null],
         ["Gate", n(payload.gateDays) === null ? null : "day 0 to day " + payload.gateDays + ", calendar days"],
         ["Window", windowText(payload)],
@@ -410,7 +405,7 @@
       h("span", { class: "fe-pair", ...HIDE },
         h("i", { class: "is-imp", style: { width: x.imp ? w(x.imp.v) : "0%", "--i": String(i) } }),
         x.med === null ? h("i", { class: "is-none" }) : h("i", { class: "is-real", style: { width: w(x.med), "--i": String(i) } })),
-      h("span", { class: "fu-v fu-strong" }, x.imp ? move(x.imp.v) : mark({ state: "unavailable" })),
+      h("span", { class: "fu-v fu-strong", title: x.imp ? x.imp.src : impliedMissing(x.r).reason }, x.imp ? move(x.imp.v) : mark(impliedMissing(x.r))),
       x.med === null ? h("span", V, mark(reSt)) : h("span", V, move(x.med)),
       h("span", { class: "fu-v fu-wide" }, x.hit === null ? DASH : Math.round(x.hit * 100) + "%"));
     });
@@ -433,7 +428,7 @@
     const shown = n(payload.shown) ?? rows.length, inWindow = n(payload.inWindow);
     return {
       title: "Earnings",
-      lead: "Every name reporting inside the window, nearest first. The blue bar is the move the option market prices for the report; the gray bar is the median absolute one-day move over the name's past reports. A blue bar longer than the gray one is a report priced richer than this name usually moves.",
+      lead: "Every name reporting inside the window, nearest first. The blue bar is the move the option market prices for the report: the vendor's expected earnings move, or its end-of-week implied move when that expiry spans the report; with neither there is no bar. The gray bar is the median absolute one-day move over the name's past reports. A blue bar longer than the gray one is a report priced richer than this name usually moves.",
       facts: [
         ["Names", count(shown) + (inWindow !== null && inWindow > shown ? " of " + count(inWindow) : "")],
         ["Priced moves", n(payload.evMeasured) === null ? null : count(payload.evMeasured) + " of " + count(shown)],
@@ -441,7 +436,7 @@
         ["Hit", payload.historyRule ? "share of long one-day straddles that paid" : null],
       ],
       sections: [
-        { title: "The implied move", lines: ["The vendor's expected earnings move where its calendar states one, otherwise the vendor's implied move to its next expiry, which is a different horizon.", notes.vendorMove] },
+        { title: "The implied move", lines: ["The vendor's expected earnings move where its calendar states one, otherwise the vendor's implied move to its end-of-week expiry, and that only when the expiry spans the report. A report after that expiry has no priced move here.", notes.vendorMove] },
         { title: "The priced move", lines: [notes.priced, "A name with no sessions left prints 0s: a horizon of zero, not a zero move. One with no implied volatility is not measured, and one whose move was not published is not zero."] },
         { title: "Past reports", lines: [payload.historyRule ? String(payload.historyRule) : "The past-report history is not on this payload yet."] },
         { title: "Coverage", lines: [notes.coverage] },
@@ -543,7 +538,7 @@
     universe_unavailable: "The universe was not published, so who reacted lately is not listed.",
     no_window: "This universe does not state the earnings window, so who reacted lately is not listed.",
   };
-  const typical = (z) => (n(z) === null ? DASH : (z > 0 ? "+" : z < 0 ? "\u2212" : "") + Math.abs(z).toFixed(1));
+  const typical = (z) => (n(z) === null ? DASH : F.signed(n(z), 1));
 
   function recentBlock(payload) {
     const rc = payload.recent;
@@ -613,21 +608,21 @@
       const ratio = n(x[3]), dev = ratio - 1, real = n(x[1]);
       const w = (Math.min(1, Math.abs(dev) / maxDev) * 50).toFixed(2) + "%";
       return h("a", { class: "fe-rrow", href: tickerHref(x[0]),
-        title: String(x[0]) + " " + MID + " moved " + F.pct(real, 1, true) + " against an implied " + move(n(x[2])) + " " + MID + " " + ratio.toFixed(2) + "× the priced move" },
+        title: String(x[0]) + " " + MID + " moved " + F.pct(real, 1, true) + " against an implied " + move(n(x[2])) + " " + MID + " " + F.px(ratio, 2) + "× the implied move" },
       h("span", { class: "fu-tk is-2" }, h("b", null, String(x[0])), h("small", { "data-tone": real === null ? null : real > 0 ? "up" : real < 0 ? "down" : null }, real === null ? DASH : F.pct(real, 1, true))),
       h("span", { class: "fe-dv", ...HIDE },
         h("i", { class: dev > 0 ? "is-more" : dev < 0 ? "is-less" : "is-flat", style: dev >= 0 ? { left: "50%", width: w, "--i": String(i) } : { right: "50%", width: w, "--i": String(i) } })),
-      h("span", { class: "fu-v fu-strong" }, ratio.toFixed(2) + "×"));
+      h("span", { class: "fu-v fu-strong" }, F.px(ratio, 2) + "×"));
     });
     host.react.replaceChildren(
       ...(recent ? recent.parts : []),
       UI.metrics([
-        UI.metric("Realized ÷ implied", n(r0.medianRatio) === null ? DASH : n(r0.medianRatio).toFixed(2) + "×", { sub: "median of " + (n(r0.n) ?? rows.length) }),
+        UI.metric("Realized ÷ implied", n(r0.medianRatio) === null ? DASH : F.px(n(r0.medianRatio), 2) + "×", { sub: "median of " + (n(r0.n) ?? rows.length) }),
         UI.metric("Moved more", n(r0.beat) === null ? DASH : Math.round(n(r0.beat) * 100) + "%", { sub: "than implied" }),
       ], { min: 120 }),
-      h("div", { class: "fe-rrow fu-head", ...HIDE }, h("span", null, "Name"), h("span", { class: "fe-dv-axis" }, h("span", null, "Less"), h("span", null, "Priced"), h("span", null, "More")), h("span", V, "Ratio")),
+      h("div", { class: "fe-rrow fu-head", ...HIDE }, h("span", null, "Name"), h("span", { class: "fe-dv-axis" }, h("span", null, "Less"), h("span", null, "Implied"), h("span", null, "More")), h("span", V, "Ratio")),
       withList(UI.list(items, { visible: 6, label: "Last reporters, realized over implied" })),
-      UI.legend([["--g-long", "", "Moved more than priced"], ["--g-short", "", "Moved less"]]));
+      UI.legend([["--g-long", "", "Moved more than implied"], ["--g-short", "", "Moved less"]]));
   }
 
   function reactInfo() {
@@ -678,7 +673,7 @@
     if (cap !== null && inWindow !== null && inWindow > shown) parts.push("the cap holds the list to " + cap);
     const sd = payload.sessionDate, go = payload.gateOrigin;
     parts.push("prices are the " + (sd || "last completed") + " session's closes; every day count is measured from " +
-      (go ? go + ", the run's own session date and the origin the earnings gate used" : "the run's own session date") +
+      (go ? go + ", the first session after the run's session and the origin the earnings gate used" : "the first session after the run's session") +
       (S.staleDays === null ? "" : ", which was " + S.staleDays + " " + plural(S.staleDays, "day", "days") + " ago — these counts are that run's, not today's"));
     statusEl.textContent = parts.join(" " + MID + " ") + ".";
     if (rows.length) delete statusEl.dataset.empty; else statusEl.dataset.empty = "quiet";

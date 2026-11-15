@@ -9,7 +9,7 @@ import {
   IV_PATH_LABELS, EVENT_ROWS, EVENTS_NOTES,
 } from "../shared/flows-events.js";
 import { eventsPage } from "../shared/flows-pages.js";
-import { HORIZON_SESSIONS, horizonEnd, previousSession } from "../shared/flows-calendar.js";
+import { HORIZON_SESSIONS, horizonEnd, previousSession, sessionsBetween } from "../shared/flows-calendar.js";
 import { horizonMove, TRADING_YEAR } from "../shared/flows-features.js";
 import { EARNINGS_GATE_DAYS, daysToEarnings, screenerTilt } from "../scripts/flows-pipeline.mjs";
 import { nextTradingDay } from "../shared/flows-freshness.js";
@@ -109,10 +109,10 @@ const gateDteFrom = (origin) => (date) =>
   eq(midBuilt.rows.length, 0, "so it is not published at all");
   eq(midBuilt.inWindow, 0, "and not counted as in the window");
 
-  const agrees = ROWS.filter((r) => sessionsToEarnings(r.d, PAYLOAD.gateOrigin) === r.sdte).length;
+  const agrees = ROWS.filter((r) => sessionsBetween(PAYLOAD.gateOrigin, r.di) === r.sdte).length;
   eq(agrees, ROWS.length,
-     `all ${ROWS.length} emitted rows reproduce their published sdte from gateOrigin`);
-  const differs = ROWS.filter((r) => sessionsToEarnings(r.d, PAYLOAD.sessionDate) !== r.sdte).length;
+     `all ${ROWS.length} emitted rows reproduce their published sdte from gateOrigin to the session the report moves`);
+  const differs = ROWS.filter((r) => sessionsBetween(PAYLOAD.sessionDate, r.di) !== r.sdte).length;
   eq(differs, ROWS.length,
      `and all ${ROWS.length} of them DISAGREE with the sessionDate reckoning — the corpus ` +
      `separates the two clocks on every single row, so agreeing with one is evidence`);
@@ -133,8 +133,8 @@ const gateDteFrom = (origin) => (date) =>
 
   let swept = 0, held = 0;
   for (let i = 0; i < 400; i++) {
-    const d = plusDays("2026-01-01", i);
-    const s = sessionsToEarnings(d, "2026-01-01"), c = calendarDaysTo(d, "2026-01-01");
+    const d = plusDays("2026-01-02", i);
+    const s = sessionsToEarnings(d, "2026-01-02"), c = calendarDaysTo(d, "2026-01-02");
     swept++; if (s <= c) held++;
   }
   eq(held, swept,
@@ -144,8 +144,8 @@ const gateDteFrom = (origin) => (date) =>
   eq(sessionsToEarnings("2026-08-26", "2026-08-26"), 0,
      "a name reporting on the origin itself is 0 sessions — a measurement");
   eq(calendarDaysTo("2026-08-26", "2026-08-26"), 0, "and 0 calendar days");
-  eq(sessionsToEarnings("2026-08-29", "2026-08-28"), 0,
-     "and Friday → Saturday is 0 sessions: a real count of the weekdays in between");
+  eq(sessionsToEarnings("2026-08-29", "2026-08-28"), 1,
+     "and a report dated Saturday moves Monday's price, so Friday → Saturday is one session to the session it moves");
   eq(calendarDaysTo("2026-08-29", "2026-08-28"), 1,
      "though one calendar day — the two units genuinely disagree here, which is the point");
   ok(sessionsToEarnings("2026-08-26", "2026-08-26") !== null, "neither of which is null");
@@ -455,8 +455,13 @@ const gateDteFrom = (origin) => (date) =>
     { gateOrigin: GATE_ORIGIN }).pt, 0,
     "while a MEASURED zero tilt publishes as zero — the two are different facts");
 
-  const priced = eventRow(nameAt("PREM", "2026-09-04").row,
+  const beyond = eventRow(nameAt("PREM", "2026-09-04").row,
     tiltOf({ iv30: 0.40, impliedMovePerc: 0.09 }), { gateOrigin: GATE_ORIGIN });
+  eq(beyond.imSpans, false, "the end-of-week implied move expires on Friday 28 August, before a report on 4 September");
+  eq(beyond.evp, null, "so it is no premium for that report and none is published");
+  const priced = eventRow(nameAt("PREM", "2026-08-27").row,
+    tiltOf({ iv30: 0.40, impliedMovePerc: 0.09 }), { gateOrigin: GATE_ORIGIN });
+  eq(priced.imSpans, true, "a Thursday report, before or after the close, is spanned by the Friday expiry");
   ok(priced.ev !== null && priced.im !== null, "both horizons are measured on this row");
   near(priced.evp, Number((priced.im / priced.ev).toFixed(2)),
     "the event premium is the vendor's quote over the benchmark, exactly");
@@ -946,7 +951,7 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
             glyph: use ? use.getAttribute("href") : null,
             glyphCls: use ? use.parentNode.getAttribute("class") : null,
             realized: r.dataset.realized,
-            realizedGlyph: (r.querySelector(".ui-dash .ui-state") || {}).dataset?.state || null,
+            realizedGlyph: (r.querySelector(".fu-v:not(.fu-strong) .ui-dash .ui-state") || {}).dataset?.state || null,
           };
         }
         const legend = [...document.querySelectorAll("#evWeek .fe-legend .ui-key b")].map((b) => Number(b.textContent));
@@ -1194,7 +1199,7 @@ const disclose = (page, selector) => page.evaluate(async (sel) => {
     eq(got.rows.NEWA.hit, "63%", "the hit share rides on the same digest");
     ok(got.rows.NEWA.real, "and the gray bar is drawn");
     eq(got.rows.NEWB.typical, "\u00b12.3%", "a digest with a median but no implied move still paints the median");
-    eq(got.rows.NEWB.implied, "\u00b15.0%", "and falls back to the row's implied move, as the card-x read did when impliedNext was absent");
+    eq(got.rows.NEWB.implied, "\u2014", "and does not fall back to the row's end-of-week implied move: a Friday report of unstated time may move Monday, after that expiry, so no priced move spans it");
     eq(got.rows.OLDC.realized, "ok", "an old digest without the fields still fills from the per-name read");
     eq(got.rows.OLDC.typical, "\u00b11.8%", "with the card's median move");
     eq(got.rows.OLDC.implied, "\u00b17.3%", "and the card's implied move");

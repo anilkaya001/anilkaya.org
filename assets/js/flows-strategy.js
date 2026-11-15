@@ -16,9 +16,11 @@
   const LOT = 100;
   const sg = (v) => (v < 0 ? MINUS : v > 0 ? "+" : "");
   const usd = F.unit.of("money");
-  const gusd = (v) => (isNum(v) === null ? DASH : Math.abs(v) < 10 ? usd(v, true) : sg(Math.round(v)) + "$" + Math.abs(Math.round(v)).toLocaleString("en-US"));
-  const whole = (v) => (isNum(v) === null ? DASH : Math.abs(v) >= 1e5 ? F.money(v, true) : sg(Math.round(v)) + "$" + Math.abs(Math.round(v)).toLocaleString("en-US"));
-  const kf = (K) => (isNum(K) === null ? DASH : String(+(+K).toFixed(2)));
+  const dollars = (v) => { const s = F.int(v, true); return s === DASH ? s : s.replace(/^([+−]?<?)/, "$1$"); };
+  const gusd = (v) => (isNum(v) === null ? DASH : Math.abs(v) < 10 ? usd(v, true) : dollars(v));
+  const whole = (v) => (isNum(v) === null ? DASH : Math.abs(v) >= 1e5 ? F.money(v, true) : dollars(v));
+  const kf = (K) => { if (isNum(+K) === null) return DASH; const s = F.px(+K, 2); return s.includes(".") ? s.replace(/\.?0+$/, "") : s; };
+  const tenthsOf = (v) => { if (!(v > 0)) return 0; if (v >= 0.9995) return 1000; const m = /^([\d.]+)%$/.exec(F.pct(v, 1)); return m ? Math.round(Number(m[1]) * 10) : 0; };
   const pct = F.unit.of("pct");
   const days = (a, b) => {
     const x = Date.parse(String(a).slice(0, 10) + "T00:00:00Z"), y = Date.parse(String(b).slice(0, 10) + "T00:00:00Z");
@@ -328,7 +330,10 @@
     if (bad.length || !st.legs.length || !Q) return { bad };
     const multi = new Set(st.legs.filter((l) => l.expiry).map((l) => l.expiry)).size > 1;
     if (multi) return { bad, cost, multi };
-    const norm = st.legs.map((l) => ({ type: l.type, K: l.K, side: l.side, qty: l.qty }));
+    const front = st.legs.filter((l) => l.expiry).map((l) => l.expiry).sort()[0] || st.expiry;
+    const ex = st.setup && st.setup.expiries && typeof st.setup.expiries.get === "function" ? st.setup.expiries.get(front) : null;
+    const div = S !== null && ex && ex.slice && ex.slice.D > 0 && Number.isFinite(ex.slice.F) ? S / ex.slice.D - ex.slice.F : 0;
+    const norm = st.legs.map((l) => (l.type === "S" ? { type: l.type, K: l.K, side: l.side, qty: l.qty, div } : { type: l.type, K: l.K, side: l.side, qty: l.qty }));
     return { bad, cost, prof: Q.expiryProfile(norm, cost), norm };
   }
 
@@ -386,8 +391,8 @@
     const live = c.spotSource === "stock-state";
     pxEl.append(h("span", { class: "tl-spot tl-num" }, F.px(S)));
     if (S !== null && prev !== null && prev > 0) {
-      const d = S - prev;
-      pxEl.append(UI.capsule(sg(d) + Math.abs(d).toFixed(2) + "  " + F.pct(d / prev, 2, true), { tone: d > 0 ? "up" : d < 0 ? "down" : "flat" }));
+      const d = (Math.round(S * 1e4) - Math.round(prev * 1e4)) / 1e4;
+      pxEl.append(UI.capsule(F.signed(d, 2) + "  " + F.pct(d / prev, 2, true), { tone: d > 0 ? "up" : d < 0 ? "down" : "flat" }));
     } else if (S !== null) {
       const none = UI.capsule(DASH, { tone: "flat", glyph: false });
       none.append(h("span", { class: "visually-hidden" }, " Previous close not reported"));
@@ -840,10 +845,10 @@
     fillLegs(r);
     const pr = r ? r.price : null;
     const pv = (k) => (pr && isNum(pr[k]) !== null ? usd(Math.abs(pr[k]) * LOT) : DASH);
-    const cr = pr && isNum(pr.mid) !== null && pr.mid < 0;
+    const word = (k) => (pr && isNum(pr[k]) !== null ? (pr[k] < 0 ? "credit" : pr[k] > 0 ? "debit" : "") : "");
     m.px4.replaceChildren(...[["Mid", "mid"], ["Fill", "fill"], ["Natural", "natural"], ["Model", "model"]].map(([l, k]) =>
-      h("div", { "data-on": st.basis === k ? "" : null }, h("span", null, l), h("b", null, pv(k)))));
-    m.px4.setAttribute("aria-label", "Position " + (cr ? "credit" : "debit") + " per lot at mid, fill, natural and on the smile");
+      h("div", { "data-on": st.basis === k ? "" : null, title: word(k) ? l + ": " + word(k) + " " + pv(k) + " per lot" : null }, h("span", null, l, word(k) ? h("small", null, " " + word(k)) : null), h("b", null, pv(k)))));
+    m.px4.setAttribute("aria-label", "Position price per lot at mid, fill, natural and on the smile, each named credit or debit");
   }
 
   const costOf = (r) => {
@@ -904,10 +909,10 @@
     row._p.style.setProperty("--x", at(p));
     row._seg.style.setProperty("--x", at(lo));
     row._seg.style.setProperty("--w", String((hi - lo) / (a1 - a0)));
-    const tenths = Math.round(p * 1000) - Math.round(q * 1000);
+    const tenths = tenthsOf(p) - tenthsOf(q);
     const tone = tenths > 0 ? "up" : tenths < 0 ? "down" : "flat";
     row.dataset.tone = tone;
-    const txt = sg(tenths) + (Math.abs(tenths) / 10).toFixed(1);
+    const txt = F.signed(tenths / 10, 1);
     row._val.replaceChildren(h("b", { class: "tl-num", "data-tone": tone }, txt), h("small", null, "pts"));
     row.setAttribute("aria-label", "Real world against implied: " + txt + " points of chance of profit, " + pop1(q) + " implied and " + pop1(p) + " real world, drawn on a scale from " + row._lo.textContent + " to " + row._hi.textContent);
   }
@@ -968,7 +973,7 @@
     const stt = r ? null : es;
     const t = (v) => (isNum(v) === null ? "flat" : v > 0 ? "up" : v < 0 ? "down" : "flat");
     const sh = g && S ? g.delta$ / S : null;
-    put(m.dl, sh === null ? DASH : sg(sh) + Math.abs(sh).toFixed(Math.abs(sh) < 10 ? 1 : 0), { state: stt, unit: "sh", sub: g ? F.money(g.delta$, true) + " delta" : null, tone: t(sh), animate });
+    put(m.dl, sh === null ? DASH : F.signed(sh, Math.abs(sh) < 9.95 ? 1 : 0), { state: stt, unit: "sh", sub: g ? F.money(g.delta$, true) + " delta" : null, tone: t(sh), animate });
     put(m.gm, gusd(g && g.gamma$1pct), { state: stt, unit: "/1%", tone: t(g && g.gamma$1pct), animate });
     put(m.vg, gusd(g && g.vegaPt), { state: stt, unit: "/pt", tone: t(g && g.vegaPt), animate });
     put(m.th, gusd(g && g.thetaDay), { state: stt, unit: "/day", tone: t(g && g.thetaDay), animate });
@@ -1032,7 +1037,7 @@
         h("button", { type: "button", class: "tl-bs", "data-side": l.side > 0 ? "long" : "short", "aria-label": (l.side > 0 ? "Long" : "Short") + ": switch " + legName(l) + " to " + (l.side > 0 ? "short" : "long"), onclick: () => flip(i) }, l.side > 0 ? "Buy" : "Sell"),
         h("span", { class: "tl-leg-m" }, h("b", { class: "tl-num" }, l.type === "S" ? String(l.qty * LOT) : kf(l.K)), h("span", null, l.type === "S" ? "shares at " + F.px(S) : (l.type === "C" ? "call" : "put") + " " + UI.MID + " " + F.day(l.expiry))),
         h("span", { class: "tl-leg-x" },
-          h("span", { class: "tl-leg-c tl-num", title: "Delta per share, signed by side" }, h("small", null, "Δ"), del === null ? DASH : sg(del) + Math.abs(del).toFixed(2)),
+          h("span", { class: "tl-leg-c tl-num", title: "Delta per share, signed by side" }, h("small", null, "Δ"), del === null ? DASH : F.signed(del, 2)),
           h("span", { class: "tl-leg-c tl-num", title: "Implied volatility on the fitted smile" }, h("small", null, "IV"), rl && isNum(rl.iv) !== null ? pct(rl.iv, 1) : DASH),
           h("span", { class: "tl-leg-c tl-leg-q tl-num", title: "Bid and ask" }, l.type === "S" ? DASH : F.px(bid) + " × " + F.px(ask)),
           h("span", { class: "tl-leg-c tl-num", title: "Model value on the smile" }, h("small", null, "Model"), rl && isNum(rl.model) !== null ? F.px(rl.model) : DASH)),
@@ -1401,7 +1406,7 @@
     return {
       title: "Payoff", state: es.state === "ok" ? null : es.state,
       lead: T("payoff"),
-      facts: [["Priced at", st.basis === "fill" ? "Fill: the mid plus a quarter of the spread" : st.basis === "mid" ? "The mid of each leg" : "Natural: ask on buys, bid on sells"],
+      facts: [["Priced at", st.basis === "fill" ? "Fill: the mid plus a quarter of the half-spread, an eighth of the spread" : st.basis === "mid" ? "The mid of each leg" : "Natural: ask on buys, bid on sells"],
         ["Lot", "100 shares per contract"]],
       sections: [
         { title: "Exact", lines: [T("payoff-exact")] },
@@ -1426,8 +1431,8 @@
       lead: T("odds"),
       facts: r ? [
         ["Implied", pct(p.popQ, 1)], ["Real world", p.popP === null ? DASH : pct(p.popP, 1)],
-        ["Max profit, implied", pct(p.pMaxProfitQ, 1)], ["Max profit, real world", p.pMaxProfitP === null ? DASH : pct(p.pMaxProfitP, 1)],
-        ["Max loss, implied", pct(p.pMaxLossQ, 1)], ["Max loss, real world", p.pMaxLossP === null ? DASH : pct(p.pMaxLossP, 1)],
+        ["Max profit, implied", r.profitUnbounded ? DASH + " unbounded" : pct(p.pMaxProfitQ, 1)], ["Max profit, real world", r.profitUnbounded ? DASH + " unbounded" : p.pMaxProfitP === null ? DASH : pct(p.pMaxProfitP, 1)],
+        ["Max loss, implied", r.lossUnbounded ? DASH + " unbounded" : pct(p.pMaxLossQ, 1)], ["Max loss, real world", r.lossUnbounded ? DASH + " unbounded" : p.pMaxLossP === null ? DASH : pct(p.pMaxLossP, 1)],
         ["Short strike touched, implied", (p.touchShortQ || []).map((v) => pct(v, 0)).join("  ") || DASH],
         ["EV at natural, real world", usd(e.pNatural, true)],
         ["EV range across laws", e.pBand ? usd(e.pBand[0], true) + " to " + usd(e.pBand[2], true) : DASH],
@@ -1454,9 +1459,9 @@
       title: "Greeks", state: r ? null : engineState().state,
       lead: T("greeks"),
       facts: g ? [
-        ["Delta", usd(g.delta$, true) + " " + UI.MID + " " + (sh === null ? DASH : sg(sh) + Math.abs(sh).toFixed(1) + " share-equivalents")],
+        ["Delta", usd(g.delta$, true) + " " + UI.MID + " " + (sh === null ? DASH : F.signed(sh, 1) + " share-equivalents")],
         ["Delta, smile-adjusted", usd(g.deltaAdj$, true)],
-        ["Beta-weighted delta", bw === null ? DASH : sg(bw) + Math.abs(bw).toFixed(1) + " " + idxName + " share-equivalents"],
+        ["Beta-weighted delta", bw === null ? DASH : F.signed(bw, 1) + " " + idxName + " share-equivalents"],
         ["Gamma", usd(g.gamma$1pct, true) + " of delta per 1% move"], ["Vega", usd(g.vegaPt, true) + " per volatility point"],
         ["Theta", usd(g.thetaDay, true) + " per day"], ["Vanna", usd(g.vannaPt$, true) + " of delta per vol point"], ["Charm", usd(g.charmDay$, true) + " of delta per day"],
         ["Capital", r.capital ? usd(r.capital.value) + " " + UI.MID + " " + r.capital.kind : DASH],
@@ -1465,7 +1470,7 @@
         title: "Beta-weighted delta",
         lines: [bw === null
           ? T("greeks-bw")
-          : "delta × beta × (this name's price ÷ " + idxName + "'s price) = " + sg(sh) + Math.abs(sh).toFixed(1) + " × " + beta.toFixed(2) + " × (" + F.px(S) + " ÷ " + F.px(idx) + "). Weighted to " + idxName + "; against a different index it is a different number."],
+          : "delta × beta × (this name's price ÷ " + idxName + "'s price) = " + F.signed(sh, 1) + " × " + beta.toFixed(2) + " × (" + F.px(S) + " ÷ " + F.px(idx) + "). Weighted to " + idxName + "; against a different index it is a different number."],
       }, { title: "Return", lines: [T("greeks-ror")] }],
     };
   }

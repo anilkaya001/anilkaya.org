@@ -218,8 +218,9 @@ eq(M.cryptoCheck({ status: "ok", points: [["2026-10-01", 1]] }, { data: [{ start
     const table = M.performersTable({ data: rows }, 12);
     const ps = rows.map((x) => exact(x.positive_closes, 20));
     const order = ps.map((p, i) => [p, i]).sort((a, b) => a[0] - b[0]);
-    const m = ps.length; const adj = new Array(m); let prev = 1;
-    for (let j = m - 1; j >= 0; j--) { prev = Math.min(prev, order[j][0] * m / (j + 1)); adj[order[j][1]] = prev; }
+    const m = Math.max(M.PERFORMERS_SCREENED, ps.length); const adj = new Array(ps.length); let prev = 1;
+    eq(table.screened, m, "the correction counts every name screened, at least the stated floor");
+    for (let j = ps.length - 1; j >= 0; j--) { prev = Math.min(prev, order[j][0] * m / (j + 1)); adj[order[j][1]] = prev; }
     eq(table.survive, adj.filter((a) => a <= 0.1).length, "survivors equal an independent step-up");
     eq(table.tested, 12, "tested counts every row");
   }
@@ -277,7 +278,7 @@ eq(M.cryptoCheck({ status: "ok", points: [["2026-10-01", 1]] }, { data: [{ start
 {
   const p = build(M, "ok");
   eq(p.v, 1, "the payload has a version"); eq(p.fixture, true, "a test payload carries the fixture stamp");
-  eq(p.futures.products.ES.label, "Oct 26", "the most active contract label");
+  eq(p.futures.products.ES.label, "Oct \u201926", "the most active contract label names its year, never read as a date");
   eq(p.rates.status, "ok", "the curve is read");
   ok(M.addressFree(p), "the payload holds no address");
   for (const name of Object.keys(FX.worlds)) {
@@ -494,7 +495,7 @@ const MUTANTS = [
     (m) => m.seasonCell([0.1, 0.2, 0.3, -0.1, 0.1, 0.2, 0.3]).few === true],
   ["rank-by-share", "shared/flows-macro.js", [["items.sort((a, b) => b.lo - a.lo ||", "items.sort((a, b) => b.k / b.n - a.k / a.n ||"]],
     (m) => m.performersTable({ data: [{ ticker: "SYX1", years: 3, positive_closes: 3 }, { ticker: "SYX2", years: 100, positive_closes: 90 }] }).rows[0][0] === "SYX2"],
-  ["bh-skipped", "shared/flows-macro.js", [["const bh = benjaminiHochberg(items.map((i) => i.p), 0.1);", "const bh = { adjusted: items.map((i) => i.p), reject: items.map((i) => i.p <= 0.1) };"]],
+  ["bh-skipped", "shared/flows-macro.js", [["const bh = benjaminiHochberg(items.map((i) => i.p).concat(new Array(screened - items.length).fill(1)), 0.1);", "const bh = { adjusted: items.map((i) => i.p), reject: items.map((i) => i.p <= 0.1) };"]],
     (m) => build(m, "performers-null").seasonality.performers.this.survive === 0],
   ["two-rows", "shared/flows-macro.js", [["if (!best || d < best.d) best = { i, d };", "{ const l = claim.get(i) || []; l.push(c); claim.set(i, l); taken.add(c.id); } if (!best || d < best.d) best = { i, d };"]],
     (m) => { const two = [{ at: "2026-10-29T18:00:00Z", event: "FOMC", tag: "fomc" }, { at: "2026-10-30T18:00:00Z", event: "FOMC", tag: "fomc" }]; return m.matchOdds(two, [{ id: "a", question: "Will the Fed cut rates?", outcome: "Yes", resolves: "2026-10-29T20:00:00Z", price: 0.5, volume: 1 }]).events.flatMap((e) => e.markets).length === 1; }],

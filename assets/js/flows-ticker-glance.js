@@ -150,11 +150,16 @@
   const SD_OVER_MEAN_ABS = Math.sqrt(Math.PI / 2);
   const MIN_REPORTS = 4;
   const KEEP_REPORTS = 12;
-  function eventSdQ(E, term) {
+  function pricedReport(E, term, next) {
     const sd = term && term.eventMove && num(term.eventMove.sd) !== null && term.eventMove.sd > 0 ? term.eventMove.sd : null;
-    if (sd !== null) return sd;
-    const em = E && E.impliedNext && num(E.impliedNext.em) !== null && E.impliedNext.em > 0 ? E.impliedNext.em : null;
-    return em === null ? null : em * SD_OVER_MEAN_ABS;
+    if (sd !== null) return { sd, mean: sd / SD_OVER_MEAN_ABS, src: "term" };
+    const iN = E && E.impliedNext;
+    const em = iN && num(iN.em) !== null && iN.em > 0 && next && isoOk(next.d) && iN.d === next.d ? iN.em : null;
+    return em === null ? null : { sd: em * SD_OVER_MEAN_ABS, mean: em, src: "calendar" };
+  }
+  function eventSdQ(E, term, next) {
+    const r = pricedReport(E, term, next);
+    return r ? r.sd : null;
   }
   function eventSdP(E, pb) {
     if (!pb) return { sd: null, n: 0, why: null };
@@ -313,7 +318,7 @@
     const E = X.earnings && (X.earnings.status === "ok" || X.earnings.status === "thin") ? X.earnings : null;
     const nx = E && E.next && isoOk(E.next.d) && num(E.next.sessions) !== null && E.next.sessions >= 1 && E.next.sessions <= FWD ? E.next : null;
     const term = okOf(X.term);
-    const em = eventSdQ(E, term);
+    const em = eventSdQ(E, term, E && E.next);
     const eventP = eventSdP(E, pb);
     let event = null;
     if (nx) {
@@ -474,6 +479,11 @@
     if (!pm || pm.status !== "ok" || num(pm.ivRank) === null || pm.ivRank < 0 || pm.ivRank > 1) return null;
     return pm.ivRank;
   }
+  function coneRank(cone) {
+    const t = cone && Array.isArray(cone.tenors) ? cone.tenors.find((x) => x && x.days === 30) : null;
+    const r = t ? num(t.rangePos) : null;
+    return r === null || r < 0 || r > 1 ? null : r;
+  }
   function scoreChange(card) {
     const so = okOf((card.panels || {}).scoreOverlay);
     const rows = so && Array.isArray(so.rows) ? so.rows : [];
@@ -502,13 +512,14 @@
       foot: score === null ? "No score was published on this card." : "Volatility, quality unsigned", missing: score === null });
 
     const cone = okOf(X.cone), vrp = okOf(X.vrp), skew = okOf(X.skew), sk = okOf(P.skewTerm);
-    const iv30 = cone ? numOr(cone.iv30, pm.iv30) : num(pm.iv30);
-    const rk = ivRank(card);
+    const coneIv = cone ? num(cone.iv30) : null;
+    const iv30 = coneIv !== null ? coneIv : num(pm.iv30);
+    const rk = coneIv !== null ? coneRank(cone) : ivRank(card);
     const rows = termRows(card, X);
     const prem = vrp && vrp.exAnte ? vrp.exAnte.vrp : num(pm.vrp);
     const rr = skew ? skew.rr25 : sk ? sk.skew : null;
     const dir = rows.length > 1 ? (rows[rows.length - 1].v > rows[0].v ? "upward term" : rows[rows.length - 1].v < rows[0].v ? "downward term" : "flat term") : null;
-    out.push({ id: "volatility", title: "Volatility", sub: "IV rank " + (rk === null ? DASH : Math.round(rk * 100)),
+    out.push({ id: "volatility", title: "Volatility", sub: "IV rank " + (rk === null ? DASH : F.pct(rk, 0).replace("%", "")),
       fig: iv30 === null ? fig(DASH) : fig(F.pct(iv30, 1)), unit: iv30 === null ? "" : "IV, 30 days", term: rows, iv30,
       foot: iv30 === null ? "No 30-day implied volatility on the card." : "Over realised " + (num(prem) === null ? DASH : volPts(prem) + " pts") + MID + "skew " + (num(rr) === null ? DASH : volPts(rr)) + MID + (dir || "term " + DASH), missing: iv30 === null,
       parts: { prem: num(prem), skew: num(rr), dir } });
@@ -531,7 +542,8 @@
     const E = X.earnings && (X.earnings.status === "ok" || X.earnings.status === "thin") ? X.earnings : null;
     const nx = E && E.next && isoOk(E.next.d) ? E.next : null;
     const term = okOf(X.term);
-    const em = E && E.impliedNext && num(E.impliedNext.em) !== null ? E.impliedNext.em : term && term.eventMove && num(term.eventMove.sd) !== null ? term.eventMove.sd : null;
+    const pr = pricedReport(E, term, nx);
+    const em = pr ? pr.mean : null;
     const evs = E && Array.isArray(E.events) ? E.events.filter((r) => Array.isArray(r) && isoOk(r[0])).sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-8).map((r) => ({ d: r[0], em: num(r[2]), mv: num(r[3]) })) : [];
     const beat = evs.filter((r) => r.mv !== null && r.em !== null && r.em > 0 && Math.abs(r.mv) > r.em).length;
     const both = evs.filter((r) => r.mv !== null && r.em !== null && r.em > 0).length;
@@ -539,14 +551,14 @@
     const w = nx ? String(nx.when || "") : "";
     out.push({ id: "earnings", title: "Earnings", sub: /post|after|amc|close/i.test(w) ? "after the close" : /pre|before|bmo|open/i.test(w) ? "before the open" : nx ? (nx.confirmed ? "confirmed" : "estimated") : "",
       fig: nx ? fig(F.day(nx.d), "warn") : rp ? fig(rp.d ? F.day(rp.d) : rp.sessions + "d", "warn") : fig(DASH), unit: nx ? (num(nx.sessions) === null ? "" : "in " + plural(nx.sessions, "session")) : rp && rp.sessions !== null ? "in " + plural(rp.sessions, "session") : "", events: evs, next: em, bars: evs,
-      foot: !nx ? (rp ? "Report " + (rp.d ? "date" : "timing") + " from the nightly screen; no report history on the card." : E ? "No upcoming report on the calendar." : card && (card.depth === "fund" || card.depth === "index") ? "Not applicable to " + (card.depth === "index" ? "an index" : "a fund") + ": it has no earnings." : "Not on the card: no report history for this name.") : "Priced " + (em === null ? DASH : "±" + F.pct(em, 1)) + MID + "realised " + (E && num(E.medianAbsMove) !== null ? "±" + F.pct(E.medianAbsMove, 1) : DASH) + MID + (both ? beat + " of " + both + " beat it" : DASH + " beat it"),
+      foot: !nx ? (rp ? "Report " + (rp.d ? "date" : "timing") + " from the nightly screen; no report history on the card." : E ? "No upcoming report on the calendar." : card && (card.depth === "fund" || card.depth === "index") ? "Not applicable to " + (card.depth === "index" ? "an index" : "a fund") + ": it has no earnings." : "Not on the card: no report history for this name.") : "Priced " + (em === null ? DASH + (E && E.impliedNext && num(E.impliedNext.em) !== null ? " (the priced move is for another report date)" : "") : "±" + F.pct(em, 1)) + MID + "realised " + (E && num(E.medianAbsMove) !== null ? "±" + F.pct(E.medianAbsMove, 1) : DASH) + MID + (both ? beat + " of " + both + " beat it" : DASH + " beat it"),
       missing: !nx && !rp, parts: { priced: em, realised: E ? num(E.medianAbsMove) : null, beat, of: both } });
 
     const ctx = okOf(P.context) || {};
     const yr = candles(card).slice(-252);
     const S = spotOf(card);
     const lo = yr.length ? Math.min(...yr.map((r) => numOr(r.l, r.c))) : null, hi = yr.length ? Math.max(...yr.map((r) => numOr(r.h, r.c))) : null;
-    const pos = num(ctx.week52Pos) !== null ? ctx.week52Pos : hi !== null && hi > lo && S !== null ? (S - lo) / (hi - lo) : null;
+    const pos = hi !== null && lo !== null && hi > lo && S !== null ? (S - lo) / (hi - lo) : null;
     const r63 = yr.length > 63 ? yr[yr.length - 1].c / yr[yr.length - 64].c - 1 : null;
     const cg = okOf(P.congress);
     out.push({ id: "range", title: "Range", sub: "52 weeks", fig: pos === null ? fig(DASH) : fig(F.pct(pos, 0)), unit: pos === null ? "" : "of the way to the high", lo, hi, pos,

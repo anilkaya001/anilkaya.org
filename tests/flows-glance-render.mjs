@@ -37,7 +37,7 @@ function makeX() {
   x.earnings.next = { d: "2026-08-31", when: "postmarket", source: "company", confirmed: true, sessions: SIM_SESSIONS };
   x.earnings.impliedNext = { em: 0.042 };
   x.earnings.medianAbsMove = 0.01;
-  x.cone = { status: "ok", iv30: 0.4003, slope30_90: 0.02 };
+  x.cone = { status: "ok", iv30: 0.4003, slope30_90: 0.02, tenors: [{ days: 30, min: 0.3, max: 0.5, rangePos: 0.5015 }] };
   x.term = { status: "ok", expiries: [7, 14, 30, 60, 90, 180].map((d, i) => ({ dte: d, iv: [0.36, 0.38, 0.4003, 0.41, 0.42, 0.43][i] })), eventMove: { sd: 0.042 } };
   x.skew = { status: "ok", rr25: 0.005, z: 0.4 };
   x.vrp = { status: "ok", exAnte: { vrp: 0.096 }, hitRate: 0.6 };
@@ -180,12 +180,16 @@ const Q_FALLBACK = 0.042 * Math.sqrt(Math.PI / 2);
   const alt = await page.evaluate(({ card, x }) => {
     const G = window.FlowsUI.tickerGlance.model, y = JSON.parse(JSON.stringify(x));
     delete y.term.eventMove;
+    y.earnings.impliedNext = { ...y.earnings.impliedNext, d: "1999-01-04" };
+    const other = G(card, "1M", { cardX: y }).event.q;
+    y.earnings.impliedNext.d = y.earnings.next.d;
     const a = G(card, "1M", { cardX: y });
     y.earnings.events = y.earnings.events.slice(0, 3);
     const b = G(card, "1M", { cardX: y });
-    return { q: a.event.q, p: a.event.p, bq: b.event.q, bp: b.event.p, bwhy: b.why.eventP, bPair: b.p.filter((o) => o.h === b.event.h).length, bStep: Math.log(b.p.filter((o) => o.h === b.event.h)[1].up / b.S) ** 2 - Math.log(b.p.filter((o) => o.h === b.event.h)[0].up / b.S) ** 2 };
+    return { other, q: a.event.q, p: a.event.p, bq: b.event.q, bp: b.event.p, bwhy: b.why.eventP, bPair: b.p.filter((o) => o.h === b.event.h).length, bStep: Math.log(b.p.filter((o) => o.h === b.event.h)[1].up / b.S) ** 2 - Math.log(b.p.filter((o) => o.h === b.event.h)[0].up / b.S) ** 2 };
   }, { card, x: X });
-  near(alt.q, Q_FALLBACK, 1e-12, "without a term-structure event move the quoted expected move is read as a mean absolute move and scaled by the square root of pi over two to a standard deviation");
+  near(alt.q, Q_FALLBACK, 1e-12, "without a term-structure event move the quoted expected move of the same report is read as a mean absolute move and scaled by the square root of pi over two to a standard deviation");
+  ok(alt.other === null, "and a quoted move dated for another report steps nothing");
   eq(alt.bp, null, "fewer than four past reports give the real-world band no step");
   ok(/Fewer than 4 past reports/.test(alt.bwhy), "and say why");
   near(alt.bStep, 0, 1e-12, "so the P cone is continuous through the report");
@@ -297,7 +301,7 @@ const CARD_IDS = ["signal", "volatility", "flow", "positioning", "earnings", "ra
   const page = await boot({ width: 1440, height: 900 }, { chartW: 868 });
   const got = await page.evaluate(() => [...document.querySelectorAll(".ftg-card")].map((n) => ({ id: n.dataset.card, f: n.querySelector(".ftg-f").textContent, tone: n.querySelector(".ftg-f").dataset.tone, u: n.querySelector(".ftg-u").textContent, sub: n.querySelector(".ftg-sub").textContent, foot: n.querySelector(".ftg-foot").textContent, h: n.getBoundingClientRect().height, w: n.getBoundingClientRect().width, tab: n.tabIndex, d: document.getElementById(n.getAttribute("aria-describedby")).textContent, t: n.querySelector("h3").textContent, svgs: n.querySelectorAll("svg").length, rows: n.querySelectorAll(".ftg-fam").length, chips: [...n.querySelectorAll(".ftg-chip")].map((c) => c.textContent) })));
   const fmt = await page.evaluate(({ card }) => { const F = window.FlowsUI.F, c = card.panels; return {
-    score: F.signed(card.score), net: F.money(c.path.netPremium, true), nd: F.num(c.path.netDelta, true), p52: F.pct(c.context.week52Pos, 0), r5: F.pct(c.context.r5, 1, true), r21: F.pct(c.context.r21, 1, true),
+    score: F.signed(card.score), net: F.money(c.path.netPremium, true), nd: F.num(c.path.netDelta, true), p52: (() => { const k = c.context.candleKeys || ["date", "open", "high", "low", "close", "volume"]; const yr = c.context.candles.slice().sort((a, b) => (a[k.indexOf("date")] < b[k.indexOf("date")] ? -1 : 1)).slice(-252); const v = (r, n) => (typeof r[k.indexOf(n)] === "number" ? r[k.indexOf(n)] : r[k.indexOf("close")]); const lo = Math.min(...yr.map((r) => v(r, "low"))), hi = Math.max(...yr.map((r) => v(r, "high"))); const S = c.pricedMove.spot; return F.pct((S - lo) / (hi - lo), 0); })(), r5: F.pct(c.context.r5, 1, true), r21: F.pct(c.context.r21, 1, true),
     iv: F.pct(0.4003, 1), vrp: F.signed(9.6, 1), cg: c.congress, fams: ["F", "P", "D", "V", "O"].map((k) => (card.fam[k] === null || card.fam[k] === undefined ? null : F.num(card.fam[k], k === "F" || k === "P" || k === "D"))),
     nope: F.pct(0.968, 1, true), day: F.day("2026-08-31"), sv: F.pct(0.54, 0), z: F.signed(2.2, 1), mean: F.pct(0.46, 0) }; }, { card });
   eq(got.map((g) => g.id), CARD_IDS, "six cards in the canvas's order");
@@ -307,7 +311,7 @@ const CARD_IDS = ["signal", "volatility", "flow", "positioning", "earnings", "ra
   ok(by.signal.sub === "conviction " + card.conviction + " of 100", `and the card's conviction (${by.signal.sub})`);
   eq(by.signal.rows, 5, "five components");
   eq(by.volatility.f, fmt.iv, "Volatility prints the 30-day implied volatility");
-  ok(by.volatility.sub === "IV rank " + Math.round(pm.ivRank * 100), `and the card's IV rank (${by.volatility.sub})`);
+  ok(by.volatility.sub === "IV rank 50", `and the rank of the IV it prints, from the same cone: 0.5015 of its year is 50 (${by.volatility.sub})`);
   ok(by.volatility.foot.includes("+9.6 pts") && by.volatility.foot.includes("skew +0.5") && by.volatility.foot.includes("upward term"), `with premium over realised, skew and the term direction (${by.volatility.foot})`);
   eq(by.flow.f, fmt.net, "Flow prints the session's net premium");
   ok(by.flow.foot.includes("Net delta " + fmt.nd) && by.flow.foot.includes("NOPE " + fmt.nope), `with net delta and NOPE (${by.flow.foot})`);
@@ -317,11 +321,11 @@ const CARD_IDS = ["signal", "volatility", "flow", "positioning", "earnings", "ra
   eq(by.earnings.f, fmt.day, "Earnings prints the next report date");
   eq(by.earnings.u, "in 6 sessions", "and the sessions away");
   ok(by.earnings.sub === "after the close", "after the close");
-  ok(by.earnings.foot.startsWith("Priced ±4.2%") && by.earnings.foot.includes("realised ±1.0%") && /\d of 8 beat it/.test(by.earnings.foot), `with priced, realised and the beat count (${by.earnings.foot})`);
+  ok(by.earnings.foot.startsWith("Priced ±3.4%") && by.earnings.foot.includes("realised ±1.0%") && /\d of 8 beat it/.test(by.earnings.foot), `with priced (the term deviation of 4.2% on the mean-move basis of the past markers), realised and the beat count (${by.earnings.foot})`);
   const evs = X.earnings.events.slice().sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(-8);
   const beat = evs.filter((r) => Math.abs(r[3]) > r[2]).length;
   ok(by.earnings.foot.includes(beat + " of 8 beat it"), `and the count agrees with the card's rows (${beat})`);
-  eq(by.range.f, fmt.p52, "Range prints the 52-week position");
+  eq(by.range.f, fmt.p52, "Range prints the position between the low and the high it prints, from the same candles");
   eq(by.range.chips[0], "1W " + fmt.r5, "its 1W chip is the card's five-session return");
   eq(by.range.chips[1], "1M " + fmt.r21, "its 1M chip is the card's 21-session return");
   ok(/^3M [+−]\d/.test(by.range.chips[2]), `and a 3M chip from the closes (${by.range.chips[2]})`);
@@ -576,7 +580,7 @@ async function coreFailures(src) {
         pairP: (() => { const pp = m.p.filter((o) => o.h === m.event.h); return Math.log(pp[1].up / m.S) ** 2 - Math.log(pp[0].up / m.S) ** 2; })(),
         pTiny: (() => { const y = JSON.parse(JSON.stringify(x)); y.earnings.events = y.earnings.events.map((r) => [r[0], r[1], r[2], 0.001, r[4], r[5], r[6], r[7]]); const e = M(card, "1M", { cardX: y }); return { p: e.event.p, why: e.why.eventP, said: M.describe(e) }; })(),
         pFew: (() => { const y = JSON.parse(JSON.stringify(x)); y.earnings.events = y.earnings.events.slice(0, 3); return M(card, "1M", { cardX: y }).event.p; })(),
-        qAlt: (() => { const y = JSON.parse(JSON.stringify(x)); delete y.term.eventMove; return M(card, "1M", { cardX: y }).event.q; })(),
+        qAlt: (() => { const y = JSON.parse(JSON.stringify(x)); delete y.term.eventMove; y.earnings.impliedNext.d = y.earnings.next.d; return M(card, "1M", { cardX: y }).event.q; })(),
         h5: m.q.find((o) => o.h === 2), h14: m.q.find((o) => o.h === 6), pair: m.q.filter((o) => o.h === m.event.h), n: m.q.length, gap: ys.slice(1).map((y, i) => y - ys[i]),
         bars: L.bars.map((b) => [b.g, b.w]), mg: m.bars.map((b) => Math.abs(b.g)), sbars: L.score.bars.filter(Boolean).map((b) => [b.v, b.h]), k: L.score.k, gmax: L.profW,
         longs: [...document.querySelectorAll(".ftg-svg .ftg-gl")].length, shorts: [...document.querySelectorAll(".ftg-svg .ftg-gs")].length, signalTone: neg.fig.tone, signalFig: cs[0].fig.text, signalMissing: cs[0].missing, hist: m.hist.length,
@@ -633,8 +637,8 @@ const MUTANTS = [
   ["the ordinary session left in the report move", "const extra = Math.max(0, second - (pb.dUp + pb.dDn) / 2);", "const extra = Math.max(0, second);"],
   ["simple returns squared where the band is on log returns", "Math.log1p(r[3]) ** 2", "r[3] * r[3]"],
   ["a zero step drawn for reports quieter than a day", "if (!(extra > 0)) return { sd: null, n: rows.length, why: \"Past reports moved no more than an ordinary day, so the real-world band takes no step.\" };", ""],
-  ["the mean absolute expected move taken as a standard deviation", "return em === null ? null : em * SD_OVER_MEAN_ABS;", "return em === null ? null : em;"],
-  ["the quoted move ahead of the term structure's", "const sd = term && term.eventMove && num(term.eventMove.sd) !== null && term.eventMove.sd > 0 ? term.eventMove.sd : null;\n    if (sd !== null) return sd;", "const sd = null;"],
+  ["the mean absolute expected move taken as a standard deviation", 'return em === null ? null : { sd: em * SD_OVER_MEAN_ABS, mean: em, src: "calendar" };', 'return em === null ? null : { sd: em, mean: em, src: "calendar" };'],
+  ["the quoted move ahead of the term structure's", "const sd = term && term.eventMove && num(term.eventMove.sd) !== null && term.eventMove.sd > 0 ? term.eventMove.sd : null;\n    if (sd !== null) return { sd, mean: sd / SD_OVER_MEAN_ABS, src: \"term\" };", "const sd = null;"],
   ["a step from fewer than four reports", "if (rows.length < MIN_REPORTS) return", "if (rows.length < 1) return"],
   ["labels overlapping", "if (a.top + a.n * gap > b.top + 1e-9) {", "if (false) {"],
   ["short and long gamma swapped", 'class: b.g > 0 ? "ftg-gl" : "ftg-gs"', 'class: b.g > 0 ? "ftg-gs" : "ftg-gl"'],

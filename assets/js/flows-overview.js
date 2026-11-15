@@ -188,19 +188,37 @@
     return h("a", { class: "cc-open", href: readerHref(t), title: "Open the full reader for " + t }, t);
   }
 
+  const dayOk = (d) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d);
+  function passed(from, to) {
+    if (!dayOk(from) || !dayOk(to)) return null;
+    if (from === to) return 0;
+    if (to < from) { const back = passed(to, from); return back === null ? null : -back; }
+    const list = dayOk(FOCUS.asOf) && Array.isArray(FOCUS.ahead) ? [FOCUS.asOf, ...FOCUS.ahead.filter(dayOk)] : null;
+    if (!list || from < list[0] || to > list[list.length - 1]) return null;
+    return list.filter((x) => x > from && x <= to).length;
+  }
+  const calendarPassed = (from, to) => (dayOk(from) && dayOk(to) ? Math.round((Date.parse(to + "T12:00:00Z") - Date.parse(from + "T12:00:00Z")) / 864e5) : null);
+  const reportAhead = (sdte, origin, today, day) => {
+    const s = isNum(sdte), p = passed(origin, today);
+    if (s !== null && p !== null) return s - p;
+    return s !== null && dayOk(day) && dayOk(today) && day < today ? -1 : null;
+  };
+
   function earningsMark(row, ev) {
-    const s = isNum(ev && ev.sdte);
-    const d = isNum(row && row.edte);
+    const today = UI.freshness.market().today, origin = FOCUS.origin;
+    const s = reportAhead(ev && ev.sdte, origin, today, ev && (ev.di || ev.d));
+    const d0 = isNum(row && row.edte), dp = calendarPassed(origin, today);
+    const d = d0 === null || dp === null ? null : d0 - dp;
     const date = (ev && ev.d) || (row && row.ed) || null;
     let text = null, said = null;
-    if (s !== null) { text = s + "s"; said = sessionsSaid(s) + " away"; }
-    else if (d !== null) { text = d + "d"; said = daysSaid(d) + " away"; }
+    if (s !== null && s >= 0) { text = s + "s"; said = s === 0 ? "reports this session" : sessionsSaid(s) + " away"; }
+    else if (s === null && d !== null && d >= 0) { text = d + "d"; said = d === 0 ? "reports today" : daysSaid(d) + " away"; }
     else if (date) { text = ""; said = null; }
     if (text === null) return null;
     const title = "Reports " + (date || "inside the events window") +
       (said ? " · " + said : "") +
       ". A signal carried into a print stops being the signal that was ranked.";
-    const near = (s !== null && s <= 5) || (s === null && d !== null && d <= 7);
+    const near = (s !== null && s >= 0 && s <= 5) || (s === null && d !== null && d >= 0 && d <= 7);
     return h("span", { class: "hm-tag cc-ern" + (near ? " is-near" : ""), title, "aria-label": title }, glyph("cal"), text);
   }
 
@@ -364,7 +382,7 @@
   }
 
   function pair(a, b, word) {
-    const whole = a !== null && b !== null && a + b > 0 ? Math.round((a / (a + b)) * 100) + "%" : null;
+    const whole = a !== null && b !== null && a + b > 0 ? F.pct(a / (a + b), 0) : null;
     return [h("span", { class: "hm-v-full" },
       h("span", { class: "hm-half", "data-tone": a === null ? null : "up" }, a === null ? DASH : String(a)), h("span", { class: "hm-sl" }, " / "),
       h("span", { class: "hm-half", "data-tone": b === null ? null : "down" }, b === null ? DASH : String(b)), h("span", { class: "visually-hidden" }, " " + word)),
@@ -1166,7 +1184,7 @@
       h("i", { class: "cc-ln-fill", "data-tone": toneOf(r), style: { width: (frac * 50) + "%", left: r < 0 ? (50 - frac * 50) + "%" : "50%" } }));
   }
 
-  const FOCUS = { focus: null, strips: null, series: null, live: null, lk: false, ed: new Map(), hz: null, words: null, ahead: null, asOf: null, nightly: new Map(), streamed: false, lead: new URLSearchParams(location.search).get("lead"), pills: {} };
+  const FOCUS = { focus: null, strips: null, series: null, live: null, lk: false, ed: new Map(), hz: null, words: null, ahead: null, asOf: null, origin: null, nightly: new Map(), streamed: false, lead: new URLSearchParams(location.search).get("lead"), pills: {} };
   const leadOn = () => { const m = $("hmLeaders"); if (m) m.dataset.lead = FOCUS.lead || "mag7"; };
   leadOn();
   const readOf = (s) => Date.parse(s.fresh && s.fresh.readAt);
@@ -1645,7 +1663,7 @@
   const paintVolLater = (regime, liveVol, liveBreadth) => later("vol", (b) => b.paintVol(regime, liveVol, liveBreadth));
   const homeKit = Object.freeze({
     $, ans, arr, rowsOf, cap1, capSaid, countSaid, sessionsSaid, disclose, POP, silent, hush, headMark, infoInto, table, big, gone, usd,
-    earningsMark, nameNode, readerHref, toneOf, CROSS_SAID, CROSS_WORDS, NO_CARD_SAID, SHOW, LIST_MAX,
+    earningsMark, reportAhead, nameNode, readerHref, toneOf, CROSS_SAID, CROSS_WORDS, NO_CARD_SAID, SHOW, LIST_MAX,
     get attached() { return below.fns !== null; },
     attach(fns) {
       if (below.fns) return;
@@ -2065,7 +2083,12 @@
     paintVolLater(regime, lk.vol, lk.breadth);
   });
 
-  when(["track", "events"], ({ track }) => later("chg", (b) => {
+  const eventsOrigin = (ivd, events) => {
+    ivdIndex(ivd);
+    FOCUS.origin = ans(events) && dayOk(events.gateOrigin) ? events.gateOrigin : null;
+  };
+  when(["track", "events", "ivd"], ({ track, events, ivd }) => later("chg", (b) => {
+    eventsOrigin(ivd, events);
     const { cards, evBy, boardBy } = index(R);
     fill("ccChgNote", b.paintChanged, track, cards, evBy, boardBy);
   }));
@@ -2096,7 +2119,8 @@
       rows && (floor ? shown + " of at least " + of : capSaid(shown, of)) + " flagged windows — open the unusual flow page");
   });
 
-  when(["b", "events"], ({ events }) => {
+  when(["b", "events", "ivd"], ({ events, ivd }) => {
+    eventsOrigin(ivd, events);
     const { evBy } = index(R);
     for (const { t, row, name } of drawn) name.append(earningsMark(row, evBy.get(t)) || "");
     later("events", (b) => fill("ccEvents", b.paintEvents, events));

@@ -142,11 +142,18 @@ export async function runPrivateSectors({ uw, session, now = Date.now(), prior =
       if (iv.status === "ok") { const rows = unwrap(iv.body); d.company = { ...d.company, investorCount: Array.isArray(rows) ? rows.length : null }; }
     }
   }
-  const top = list.filter((c) => details.has(c.npm)).map((c) => topEntry(c, details.get(c.npm)));
+  const fresh = list.filter((c) => details.has(c.npm)).map((c) => topEntry(c, details.get(c.npm)));
   const full = list.length >= 200;
   const nextCursor = full ? cursor + 200 : 0;
+  const walking = cursor > 0 || (full && before.complete);
+  const seen = new Set(fresh.map((e) => e[0]));
+  const top = walking ? fresh.concat((before.top || []).filter((e) => Array.isArray(e) && !seen.has(e[0]))) : fresh;
+  const listedNow = cursor + list.length;
+  const profiledNow = (before.profiled || 0) * (cursor ? 1 : 0) + profiled + [...details.values()].filter((d) => d.kept).length;
+  const refresh = full && before.complete;
   out.sectors[sector] = sectorEntry({
-    status: "ok", listed: cursor + list.length, cursor: nextCursor, profiled: (before.profiled || 0) * (cursor ? 1 : 0) + profiled + [...details.values()].filter((d) => d.kept).length,
+    status: "ok", listed: refresh ? Math.max(before.listed || 0, listedNow) : listedNow, cursor: nextCursor,
+    profiled: refresh ? Math.max(before.profiled || 0, profiledNow) : profiledNow,
     complete: full ? before.complete || null : session, top,
   });
   const investorsAge = out.investors.asOf ? sessionAge(out.investors.asOf, session) : Infinity;
