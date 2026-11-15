@@ -1,6 +1,6 @@
 import {
-  RT_LIMITS, RT_CLOSE, RT_TOPICS, RT_TOPIC_KEYS, RT_UPSTREAM, RT_REST_SHAPE, RT_ROW_FIELDS,
-  frame, ctlFrame, pendingStream, streamEntry, worstEntry, entryHeaders, inSession, closedInfo, parseClientMessage,
+  RT_LIMITS, RT_CLOSE, RT_TOPICS, RT_TOPIC_KEYS, RT_DEFAULT_TOPICS, RT_SOCKET_ONLY, RT_UPSTREAM, RT_REST_SHAPE, RT_ROW_FIELDS,
+  frame, ctlFrame, pendingStream, socketOnlyStream, streamEntry, worstEntry, entryHeaders, inSession, closedInfo, parseClientMessage,
   createCounter, createBudget, createLagStats, createTopicState, mergeTopic, snapshotRows, setPxNames, flowQuery,
   rosterPlan, pickFocus, rtSwitches, rtCadenceMs, createRedactor, rtSecretsOf,
 } from "./flows-rt.js";
@@ -10,6 +10,7 @@ import { normalizeClock, FOCUS_NIGHTLY_SQL } from "./flows-live-worker.js";
 import { MEMBER_NAME, readMembers, memberOf, memberActive } from "./flows-auth.js";
 import { vendorBaseInfo, vendorUrl, classifyStatus, retryAfterMs, vendorMeter, newerMeter } from "./flows-vendor-core.js";
 import { failureEntry } from "./flows-log.js";
+import { eventRiskHalts } from "./flows-er-switch.js";
 import {
   SOCKET_LIMITS, socketUrl, socketWindowOk, wantChannels, parseMessage, backoffMs, shapePxTicks, shapeSocketFrame, mergePxRow, tickerOfPayload,
 } from "./flows-rt-socket.js";
@@ -238,10 +239,10 @@ export function createSocketUpstream({
 }) {
   const redact = createRedactor(cfg.secrets);
   const L = SOCKET_LIMITS;
-  const fresh = () => ({ px: new Map(), fl: [], gx: new Map(), nw: [] });
+  const fresh = () => ({ px: new Map(), fl: [], gx: new Map(), nw: [], ht: [] });
   const zero = () => ({
     messages: 0, bytes: 0, flushes: 0, frames: 0, joins: 0, connects: 0, reconnects: 0, malformed: 0, oversize: 0, unsolicited: 0,
-    mismatch: 0, noBase: 0, shed: { px: 0, fl: 0, gx: 0, nw: 0 },
+    mismatch: 0, noBase: 0, shed: { px: 0, fl: 0, gx: 0, nw: 0, ht: 0 },
   });
   let plan = null;
   let handlers = null;
@@ -262,7 +263,7 @@ export function createSocketUpstream({
   let joined = new Set();
   let acked = new Map();
   let pending = fresh();
-  let lastData = { fl: null, nw: null, px: null };
+  let lastData = { fl: null, nw: null, px: null, ht: null };
   let lastGx = new Map();
   let counters = zero();
 
@@ -324,6 +325,10 @@ export function createSocketUpstream({
       const f = shapeSocketFrame("nw", batch.nw, { at, session });
       if (f.items.length) frames.push(f);
     }
+    if (batch.ht.length) {
+      const f = shapeSocketFrame("ht", batch.ht, { at, session });
+      if (f.items.length || f.meta.dropped) frames.push(f);
+    }
     for (const f of frames) {
       if (!plan.topics.has(f.k)) continue;
       counters.frames++;
@@ -336,7 +341,7 @@ export function createSocketUpstream({
   }
 
   function ingest(k, name, payload, at) {
-    if (k === "fl" || k === "nw") {
+    if (k === "fl" || k === "nw" || k === "ht") {
       lastData[k] = at;
       if (pending[k].length >= L.pendingMax[k]) { counters.shed[k]++; return; }
       pending[k].push(payload);
@@ -447,6 +452,7 @@ export function createSocketUpstream({
       const names = plan.gex().names.slice(0, L.gxMax);
       return names.length > 0 && names.every((n) => acked.get("gex:" + n) === "ok" && lastGx.has(n) && at - lastGx.get(n) <= L.silentMs.gx);
     }
+    if (k === "ht") return acked.get("trading_halts") === "ok" && lastMsgAt !== null && at - lastMsgAt <= L.silentMs.ht;
     return false;
   }
 
@@ -480,7 +486,7 @@ export function createSocketUpstream({
       lastMsgAt = null;
       eligible = false;
       pending = fresh();
-      lastData = { fl: null, nw: null, px: null };
+      lastData = { fl: null, nw: null, px: null, ht: null };
       lastGx = new Map();
       counters = zero();
     },
@@ -502,7 +508,7 @@ export function createSocketUpstream({
     },
     async tick(at) {
       if (!running || !plan) return;
-      if (flushTimer === null && (pending.px.size || pending.fl.length || pending.gx.size || pending.nw.length)) flush(at);
+      if (flushTimer === null && (pending.px.size || pending.fl.length || pending.gx.size || pending.nw.length || pending.ht.length)) flush(at);
       const phase = typeof plan.phase === "function" ? plan.phase() : null;
       eligible = !!cfg.key && plan.ready() && socketWindowOk(cfg.socketHours, phase);
       if (!eligible) {
@@ -615,6 +621,7 @@ export function createCompositeUpstream({ rest, socket, held, now = () => Date.n
     park() {
       socket.park();
     },
+    covered: (k, at) => socket.covered(k, at),
     async tick(at) {
       await socket.tick(at);
       await rest.tick(at);
@@ -681,7 +688,7 @@ function newTopic(k) {
 
 const VENDOR_REASONS = new Set(["vendor-lag", "vendor-skew", "vendor-unstamped"]);
 
-const heldCount = (k, s) => (k === "fl" || k === "nw" ? s.ring.length : s.rows.size);
+const heldCount = (k, s) => (Array.isArray(s.ring) ? s.ring.length : s.rows.size);
 
 export class RtHub {
   constructor({ env, now, host, loadRoster = loadRosterFromD1, random = Math.random, log = null, upstreamFactory } = {}) {
@@ -743,6 +750,7 @@ export class RtHub {
     this.phase = null;
     this.acctAt = null;
     this.unobservedMs = 0;
+    this.haltsSince = null;
   }
 
   logOnce(key, raw) {
@@ -770,7 +778,7 @@ export class RtHub {
       const a = this.attachment(ws);
       st = {
         u: typeof a.u === "string" ? a.u : "", exp: Number(a.exp) || 0,
-        topics: new Set(Array.isArray(a.k) ? a.k.filter((k) => RT_TOPIC_KEYS.includes(k)) : RT_TOPIC_KEYS),
+        topics: new Set(Array.isArray(a.k) ? a.k.filter((k) => RT_TOPIC_KEYS.includes(k)) : RT_DEFAULT_TOPICS),
         f: typeof a.f === "string" ? a.f : null, uep: Number.isSafeInteger(a.uep) ? a.uep : null,
         have: new Set(), lastRs: Object.create(null), burst: [],
       };
@@ -817,6 +825,9 @@ export class RtHub {
     this.running = true;
     this.startedAt = now;
     this.lastBroadcastAt = now;
+    this.haltsSince = now;
+    this.topics.ht.hasData = true;
+    this.topics.ht.meta = { since: new Date(now).toISOString(), dropped: 0 };
     for (const ws of this.liveSockets()) this.sockState(ws).have.clear();
     this.upstream.start(this.plan, { onFrame: (up) => this.onUpstream(up), onError: (err) => this.onError(err) });
     if (notify) this.broadcastCtl("resync", { reason: notify, k: RT_TOPIC_KEYS.slice() });
@@ -863,7 +874,7 @@ export class RtHub {
     t.hasData = true;
     t.readAt = at;
     t.vendorAt = out.vendorAt;
-    t.meta = out.meta;
+    t.meta = up.k === "ht" ? { ...out.meta, since: new Date(this.haltsSince ?? at).toISOString() } : out.meta;
     t.full = out.full;
     t.lastOkAt = at;
     t.fails = 0;
@@ -883,8 +894,21 @@ export class RtHub {
     if (this.waiters.length) for (const w of this.waiters.slice()) w.check();
   }
 
+  haltsOn() {
+    return eventRiskHalts(this.env);
+  }
+
+  haltsFresh(now) {
+    const phase = this.phase || phaseAt(now, this.clock);
+    if (!inSession(phase)) return socketOnlyStream("ht", this.session, "closed", "market-closed");
+    const covered = typeof this.upstream.covered === "function" && this.upstream.covered("ht", now);
+    if (!covered) return socketOnlyStream("ht", this.session);
+    return streamEntry({ k: "ht", readAt: now, session: this.session, now, clock: this.clock, updatedAt: this.topics.ht.readAt });
+  }
+
   freshOf(k, now) {
     const t = this.topics[k];
+    if (k === "ht") return this.haltsFresh(now);
     if (!t.hasData) return pendingStream(k);
     return streamEntry({ k, readAt: t.readAt, vendorAt: t.vendorAt, session: this.session, now, clock: this.clock, updatedAt: t.readAt });
   }
@@ -972,7 +996,7 @@ export class RtHub {
     });
   }
 
-  admit(ws, { u, exp, uep = null, topics = RT_TOPIC_KEYS, f = null }) {
+  admit(ws, { u, exp, uep = null, topics = RT_DEFAULT_TOPICS, f = null }) {
     const now = this.now();
     if (this.cfg.mode !== "on") { this.bye(ws, RT_CLOSE.off, "rt-off"); return false; }
     const others = this.liveSockets().filter((x) => x !== ws);
@@ -1074,6 +1098,7 @@ export class RtHub {
     this.focus = pickFocus(focus);
     this.gxNames = pickFocus(gx).slice(0, GX_NAMES);
     if (!this.gxNames.length) want.delete("gx");
+    if (!this.haltsOn()) want.delete("ht");
     this.setDemand(want, now);
     return n;
   }
@@ -1169,6 +1194,7 @@ export class RtHub {
     const down = [];
     let reason = null;
     for (const k of this.demanded) {
+      if (RT_SOCKET_ONLY.includes(k)) continue;
       const t = this.topics[k];
       const limit = Math.max(3 * rtCadenceMs(k, this.phase ? this.phase.phase : null), RT_LIMITS.degradeAfterMs) * this.cfg.scale;
       const since = Math.max(t.lastOkAt ?? this.startedAt, t.demandAt ?? -Infinity);
@@ -1269,6 +1295,7 @@ export class RtHub {
     if (dt <= 0) return;
     if (dt > 3 * RT_LIMITS.alarmMaxMs * this.cfg.scale) { this.unobservedMs += dt; return; }
     for (const k of this.demanded) {
+      if (RT_SOCKET_ONLY.includes(k)) continue;
       const t = this.topics[k];
       const span = Math.min(dt, now - Math.max(last, t.demandAt ?? last));
       if (!(span > 0)) continue;
@@ -1323,7 +1350,7 @@ export class RtHub {
     if (typeof f === "string" && TICKER_RE.test(f) && (f in this.snapFocus || Object.keys(this.snapFocus).length < RT_LIMITS.focusMax)) this.snapFocus[f] = now;
     if (!this.running) this.start(now);
     const phase = phaseAt(now, this.clock);
-    const polled = ks.filter((k) => k !== "gx" || this.gxNames.length > 0);
+    const polled = ks.filter((k) => !RT_SOCKET_ONLY.includes(k) && (k !== "gx" || this.gxNames.length > 0));
     if (inSession(phase) && polled.some((k) => !this.topics[k].hasData)) {
       this.host.wake(10);
       await this.waitData(polled, RT_LIMITS.snapWaitMs);
@@ -1365,7 +1392,7 @@ export class RtHub {
         emptyFrames: t.emptyFrames, time: { ...t.time },
         window: { klass: RT_TOPICS[k].klass, liveMs: (FRESH_CLASSES[RT_TOPICS[k].klass].liveS + RT_TOPICS[k].barS) * 1000,
           staleMs: (FRESH_CLASSES[RT_TOPICS[k].klass].staleS + RT_TOPICS[k].barS) * 1000 },
-        calls: { minute: minute[k], hour: hour[k] },
+        calls: { minute: minute[k] ?? 0, hour: hour[k] ?? 0 },
         fresh: t.hasData ? this.freshOf(k, now) : pendingStream(k),
       };
     }
@@ -1467,7 +1494,7 @@ export class Pulse {
     if (url.pathname === "/snap") {
       const ks = (url.searchParams.get("k") || "").split(",").filter((k) => RT_TOPIC_KEYS.includes(k));
       const f = (url.searchParams.get("f") || "").trim().toUpperCase();
-      const out = await this.hub.snap(ks.length ? Array.from(new Set(ks)) : RT_TOPIC_KEYS.slice(), TICKER_RE.test(f) ? f : null);
+      const out = await this.hub.snap(ks.length ? Array.from(new Set(ks)) : RT_DEFAULT_TOPICS.slice(), TICKER_RE.test(f) ? f : null);
       return jsonResponse(out.frames, 200, out.headers);
     }
     if (url.pathname === "/status") return jsonResponse(this.hub.status());
@@ -1491,7 +1518,7 @@ export class Pulse {
     const [client, server] = Object.values(pair);
     this.ctx.acceptWebSocket(server, ["u:" + u]);
     const ok = this.hub.admit(server, {
-      u, exp, uep, topics: asked.length ? Array.from(new Set(asked)) : RT_TOPIC_KEYS.slice(), f: TICKER_RE.test(f) ? f : null,
+      u, exp, uep, topics: asked.length ? Array.from(new Set(asked)) : RT_DEFAULT_TOPICS.slice(), f: TICKER_RE.test(f) ? f : null,
     });
     if (ok) this.arm(10);
     return new Response(null, { status: 101, webSocket: client });
