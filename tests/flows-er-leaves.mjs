@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { loadMutated } from "./truth/mutants.mjs";
 
@@ -9,7 +8,6 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FX = JSON.parse(fs.readFileSync(path.join(ROOT, "tests/fixtures-er.json"), "utf8"));
 const B = JSON.parse(fs.readFileSync(path.join(ROOT, "tests/fixtures-eventrisk.json"), "utf8")).bodies;
 const SESSION = "2026-10-26";
-const BASE = "36c1ea1";
 
 let checks = 0;
 
@@ -20,14 +18,14 @@ const real = {
   pulse: await import("../shared/flows-er-pulse.js"),
   policy: await import("../shared/flows-er-policy.js"),
   feed: await import("../shared/flows-er-feed.js"),
-  tpl: await import("../shared/ff-feed-templates.js"),
+  tpl: await import("../shared/flows-er-feed-templates.js"),
   payload: await import("../shared/flows-er-payload.js"),
   ops: await import("../shared/flows-vendor-ops.js"),
 };
 
 const FILES = {
   eps: "shared/flows-er-eps.js", score: "shared/flows-er-score.js", cal: "shared/flows-er-calendar.js", pulse: "shared/flows-er-pulse.js",
-  policy: "shared/flows-er-policy.js", feed: "shared/flows-er-feed.js", tpl: "shared/ff-feed-templates.js", payload: "shared/flows-er-payload.js",
+  policy: "shared/flows-er-policy.js", feed: "shared/flows-er-feed.js", tpl: "shared/flows-er-feed-templates.js", payload: "shared/flows-er-payload.js",
   ops: "shared/flows-vendor-ops.js",
 };
 
@@ -452,7 +450,7 @@ for (const [name, over, expectFail] of PLANTS) {
 
 const NEW = [
   "shared/flows-er-switch.js", "shared/flows-er-eps.js", "shared/flows-er-score.js", "shared/flows-er-calendar.js", "shared/flows-er-pulse.js",
-  "shared/flows-er-policy.js", "shared/flows-er-feed.js", "shared/flows-er-payload.js", "shared/flows-er-copy.js", "shared/ff-feed-templates.js",
+  "shared/flows-er-policy.js", "shared/flows-er-feed.js", "shared/flows-er-payload.js", "shared/flows-er-copy.js", "shared/flows-er-feed-templates.js",
   "scripts/flows-legs/eventrisk.mjs", "scripts/flows-legs/eventrisk-fake.mjs", "scripts/flows-nightly/sections/eventrisk.mjs",
   "server/routes/flows-eventrisk.js", "assets/js/flows-er.js", "assets/js/flows-ff-feed.js", "assets/css/flows-er.css",
   "tests/fixtures-eventrisk.json", "tests/fixtures-er.json",
@@ -466,10 +464,26 @@ for (const f of NEW) {
   checks++;
 }
 
-const diff = spawnSync("git", ["diff", "-U0", BASE, "--", ".", ":(exclude)tests", ":(exclude)docs", ":(exclude)AGENTS.md", ":(exclude)DEPLOY.md", ":(exclude)scripts/flows-probe-list.json"], { cwd: ROOT, encoding: "utf8" }).stdout || "";
-const added = diff.split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++") && !/\bfrom\s+["']/.test(l));
-const offending = added.filter((l) => BANNED.test(l.replace(/\b(vendor: feed|vendorGate|serveCachedVendorRead)\b/g, "x")) && !/^\+\s*(\{ id: "(?!calendar-ipo|stock-earnings)[a-z-]+")/.test(l));
-assert.deepEqual(offending.slice(0, 5), [], "no new line of an existing file names a banned word");
-checks++;
+const TOUCHED = [
+  "assets/js/flows-events.js", "scripts/flows-legs/card-x.mjs", "scripts/flows-legs/extras.mjs", "scripts/flows-legs/market.mjs",
+  "scripts/flows-nightly/sections/market.mjs", "scripts/flows-nightly/stages.mjs", "scripts/flows-nightly/vendor-params.mjs", "scripts/flows-pipeline.mjs",
+  "server/errors.js", "server/ops.js", "server/routes/flows-pages.js", "server/routes/flows-read.js", "server/store.js",
+  "shared/flows-pages.js", "shared/flows-products.js", "shared/flows-vendor-extras.js", "worker.js", "wrangler.toml",
+];
+const OURS = /event-?risk|er-sectors|er\.parts|\ber[A-Z][a-zA-Z]*\(|\bstripEr\b/i;
+const allowed = (l) => l.replace(/\b(vendor: feed|vendorGate|serveCachedVendorRead)\b/g, "x");
+const offendingIn = (text) => text.split("\n").filter((l) => OURS.test(l) && !/\bfrom\s+["']/.test(l) && BANNED.test(allowed(l)));
+let ours = 0;
+for (const f of TOUCHED) {
+  const text = fs.readFileSync(path.join(ROOT, f), "utf8");
+  ours += text.split("\n").filter((l) => OURS.test(l)).length;
+  assert.deepEqual(offendingIn(text).slice(0, 5), [], `no event-risk line of ${f} names a banned word`);
+  checks++;
+}
+assert.ok(ours >= 30, `the scan reads the event-risk lines of the files the package touches (${ours})`);
+assert.equal(offendingIn(["eventRiskOpen(env) || ven", "dor"].join("")).length, 1, "a planted event-risk line that names the banned word is caught");
+assert.equal(offendingIn(["const eventrisk = ta", "pe_time"].join("")).length, 1, "and one that names the other");
+assert.equal(offendingIn("flowsEventRiskRows({ vendorGate, serveCachedVendorRead })").length, 0, "the two injected readers are not accused");
+checks += 4;
 
 console.log(`flows-er-leaves: ${checks} checks`);

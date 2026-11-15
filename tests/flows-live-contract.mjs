@@ -16,7 +16,7 @@ import { upgradeColumns, applySchema, FLOWS_REGISTRY, FLOWS_SCHEMA_SQL as REGIST
 import * as FAKE from "../scripts/flows-legs/live-fake.mjs";
 import {
   readHeldAlerts, boardPlan, liveWindow, runLive, runLiveLoop, chainDispatch, nextSlot, LIVE_LOOP, readLiveClock,
-  sessionClock, liveRunVerdict, passOutcome, focusStripNames, FOCUS_FALLBACK,
+  sessionClock, liveRunVerdict, passOutcome, focusStripNames, FOCUS_FALLBACK, universeReader,
 } from "../scripts/flows-legs/live.mjs";
 import {
   healthChecks, runHealthGate, refusalOf, refusalTally, tallyRefusal, tallyAnswer, HEALTH, LAB_SIGN_IN, SIGN_IN_ADVICE,
@@ -84,6 +84,14 @@ const cronMinutes = (cron) => {
     "Workers Free 10 ms CPU cap once the session's rows filled in");
   deep(L.TIER1_CALLS[0].params, { interval_5m: "true" }, "the tide is read at five-minute resolution, 78 rows a session");
   deep([...L.BREADTH_ETFS], ["SPY", "QQQ", "IWM", "DIA"], "Tier 2 carries the four index ETF tides in one shape");
+  deep([L.LIVE_BUDGET.capChunk, L.LIVE_BUDGET.capCalls], [160, 8],
+    "the cap-weighted tide reads the universe in chunks of 160 tickers, at most eight a pass: 1,280 names, above the 856 the widest universe has held");
+  ok(L.LIVE_BUDGET.capChunk <= 500, "and a chunk is inside the 500 rows the screener returns for one call");
+  eq(L.LIVE_KEYS["live:breadth"].reads, 17 + L.LIVE_BUDGET.capCalls,
+    "LIVE:BREADTH COUNTS ITS OWN READS: eleven sector tides, four ETF tides, two expiry net flows and at most eight universe chunks");
+  const actionsReads = Object.values(L.LIVE_KEYS).filter((k) => k.writer === "actions").reduce((n, k) => n + k.reads, 0);
+  ok(actionsReads <= L.LIVE_BUDGET.tier2MaxCalls,
+    `and every Actions key at its registered ceiling is ${actionsReads} calls a pass, inside the ${L.LIVE_BUDGET.tier2MaxCalls} a Tier 2 pass may spend`);
 }
 
 {
@@ -549,14 +557,17 @@ const cronMinutes = (cron) => {
 
   const kinds = [];
   for (const kind of ["live", "nightly"]) {
-    for (const key of ["live:breadth", "board:long", "board:long:2026-09-22", "scores:2026-09-22", "card:X", "flowalerts", "meta"]) {
+    for (const key of ["live:breadth", "board:long", "board:long:2026-09-22", "scores:2026-09-22", "card:X", "flowalerts", "meta", "universe"]) {
       for (const method of ["GET", "POST", "DELETE"]) kinds.push([kind, key, method, W.ingestScope(key, method, kind).ok]);
     }
   }
   const allowed = kinds.filter((k) => k[3]).map((k) => k.slice(0, 3).join(" "));
   deep(allowed.filter((a) => a.startsWith("live ")), ["live live:breadth GET", "live live:breadth POST", "live board:long GET",
-    "live meta GET"],
-    "THE LIVE TOKEN reads and writes live:* keys, reads only the board and meta it plans from, and deletes nothing");
+    "live meta GET", "live universe GET"],
+    "THE LIVE TOKEN reads and writes live:* keys, reads only the board, the meta and the universe it plans from, and deletes nothing");
+  deep([W.ingestScope("universe", "GET", "live").ok, W.ingestScope("universe", "POST", "live").ok, W.ingestScope("universe", "DELETE", "live").ok,
+    W.ingestScope("regime", "GET", "live").ok], [true, false, false, false],
+  "the universe is the cap-weighted tide's ticker list: the live token may read it, never write or delete it, and no other nightly key opened with it");
   ok(!allowed.includes("nightly live:breadth POST") && allowed.includes("nightly live:breadth GET"),
     "THE NIGHTLY TOKEN can read the live union it merges but cannot write a live key");
 }
@@ -1096,8 +1107,17 @@ const cronMinutes = (cron) => {
     deep(keys.sort(), ["live:alerts", "live:alerts:head", "live:breadth", "live:heartbeat", "live:movers", "live:news", "live:strips", "live:strips:series", "live:vol"],
       "and that is nine keys: live:alerts:head is the ninth, live:funds is the Worker's Tier 1 key now, and live:gex and live:tape are no longer written");
     const calls = [...out.matchAll(/live: (\d+) call\(s\)/g)].map((m) => Number(m[1]));
-    ok(calls.length === 2 && calls.every((c) => c <= 24),
-      `each dry tick spends ${calls.join(" and ")} vendor calls, inside the 24 a pass needs without the retired legs`);
+    const chunks = [...out.matchAll(/cap tide over (\d+) universe name\(s\) in (\d+) screener call\(s\)/g)].map((m) => [Number(m[1]), Number(m[2])]);
+    ok(chunks.length === 2 && chunks.every(([n, k]) => n >= 150 && k === Math.ceil(n / L.LIVE_BUDGET.capChunk) && k <= L.LIVE_BUDGET.capCalls),
+      `each dry tick reads the cap-weighted tide over the fake universe in chunks of ${L.LIVE_BUDGET.capChunk}: ${JSON.stringify(chunks)}`);
+    ok(calls.length === 2 && calls.every((c, i) => c <= 24 + chunks[i][1] && c <= L.LIVE_BUDGET.tier2MaxCalls),
+      `each dry tick spends ${calls.join(" and ")} vendor calls, inside the 24 a pass needs without the retired legs plus its universe chunks`);
+    const dryCap = JSON.parse(readFileSync(join(dir, "p-live-breadth.json"), "utf8")).cap;
+    ok(dryCap && typeof dryCap.value === "number" && Math.abs(dryCap.value) <= 1 && dryCap.reason === null && dryCap.of === chunks[1][0] &&
+       dryCap.n >= 30 && dryCap.n <= dryCap.of && dryCap.coverage >= 0.5 && dryCap.coverage <= 1 && dryCap.effN >= 1 && dryCap.effN <= dryCap.n &&
+       Number.isInteger(dryCap.dollarNet) && Math.abs(dryCap.equal) <= 1 && !Number.isNaN(Date.parse(dryCap.at)),
+    `and the dry live:breadth carries the cap block the pages read: ${JSON.stringify(dryCap)}`);
+    deep(Object.keys(dryCap), ["value", "coverage", "n", "of", "effN", "dollarNet", "equal", "at", "reason"], "with exactly the nine fields of its contract, in order");
     ok(/sent newer_than=2026-08-24T/.test(out), "and the second tick resumes the alert cursor the first one stored");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -1237,6 +1257,196 @@ const cronMinutes = (cron) => {
       { fetchVendor: (p, params) => fake(p, params, { envelope: true }), log: { error() {} } });
     ok(alive.tier1.written === true && statements.some((q) => /INSERT INTO flows_live/.test(q)),
       "while a tick whose feeds answered writes it");
+  }
+
+  {
+    const scale = 1e-8;
+    const stored = { status: "ok", sessionDate: "2026-09-22", t: ["SYA001", "syb002", "SYA001", "not a ticker", "SYC003", "SYD004"],
+      units: { mcap: ["usd", scale] }, cols: { mcap: [3000, 100, 3000, 5, null, 0] } };
+    const list = L.capUniverse(stored);
+    deep([list.names, list.asked, Object.keys(list.caps), list.sessionDate], [["SYA001", "SYB002", "SYC003", "SYD004"],
+      ["SYA001", "SYB002", "SYC003", "SYD004"], ["SYA001", "SYB002"], "2026-09-22"],
+    "THE CAP TIDE'S TICKER LIST is the stored universe's names, upper-cased, once each, in the stored order, a string that is not a " +
+      "ticker dropped, and it lends the nightly market cap only of the names that carry a positive one");
+    ok(Math.abs(list.caps.SYA001 - 3e11) < 1 && Math.abs(list.caps.SYB002 - 1e10) < 1, "decoded from the column's own unit, never from a constant");
+    deep([L.capUniverse(null).names, L.capUniverse({ status: "pending", t: ["SYA001"] }).names, L.capUniverse({ status: "ok" }).names], [[], [], []],
+      "a read that returned nothing, a pending universe and one with no name list all list nothing");
+    deep(L.capUniverse({ status: "ok", t: ["SYA001"] }).caps, {}, "and a universe with no market cap column lends no cap");
+    const many = Array.from({ length: 1300 }, (_, i) => "SY" + String.fromCharCode(65 + Math.floor(i / 1000)) + String(i % 1000).padStart(3, "0"));
+    const wide = L.capUniverse({ status: "ok", t: many });
+    deep([wide.names.length, wide.asked.length, wide.asked[0], wide.asked.at(-1)], [1300, L.LIVE_BUDGET.capChunk * L.LIVE_BUDGET.capCalls, many[0], many[1279]],
+      "A UNIVERSE PAST THE CALL CAP keeps every name in the count and asks for the first 1,280 in the stored order, which is the largest market value first");
+    deep([L.capChunks([]).length, L.capChunks(many.slice(0, 160)).length, L.capChunks(many.slice(0, 161)).map((c) => c.length), L.capChunks(many).length,
+      L.capChunks(many).every((c) => c.length === 160), L.capChunks(null).length], [0, 1, [160, 1], 8, true, 0],
+    "the chunks are 160 names each, the last one the remainder, never more than eight, and nothing for no list");
+    deep(L.capChunks(wide.asked).flat(), wide.asked, "and together they are the asked list, each name once, in order");
+
+    const session = "2026-09-23";
+    const at = easternInstant(session, 11 * 60 + 7);
+    const row = (ticker, marketcap, ncp, npp, cp, pp, date = session) => ({ ticker, date, marketcap, net_call_premium: ncp, net_put_premium: npp,
+      call_premium: cp, put_premium: pp, close: "10.00" });
+    const names = Array.from({ length: 40 }, (_, i) => "SYE" + String(i).padStart(3, "0"));
+    const universe = { names: [...names, "SYF900", "SYF901", "SYF902"], caps: { SYF901: 5e9, SYE039: 123 } };
+    const rows = names.map((t, i) => row(t, String(1e9 * (i + 1)), String(100 * (i % 7) - 150), String(20 * (i % 5) - 40), String(400 + i), String(300 + 2 * i)));
+    const hand = (() => {
+      let all = 0, used = 0, sum = 0, eqSum = 0, sq = 0, net = 0;
+      const taus = rows.map((r, i) => ({ m: 1e9 * (i + 1), net: (100 * (i % 7) - 150) - (20 * (i % 5) - 40), gross: (400 + i) + (300 + 2 * i) }));
+      for (const x of taus) { all += x.m; used += x.m; }
+      for (const x of taus) { const w = x.m / used; sum += w * x.net / x.gross; eqSum += x.net / x.gross; sq += w * w; net += x.net; }
+      all += 5e9;
+      return { value: sum, equal: eqSum / taus.length, effN: 1 / sq, coverage: used / all, dollarNet: net };
+    })();
+    const two = L.shapeCapTide([{ data: rows.slice(0, 25) }, { data: [...rows.slice(25), row("SYF900", null, "5", "1", "10", "10"), row("SYE003", "999", "0", "0", "1", "1")] }],
+      { at, session, universe });
+    ok(two.cap.reason === null && two.cap.n === 40 && two.cap.of === 43 && Math.abs(two.cap.value - hand.value) < 1e-6 &&
+       Math.abs(two.cap.equal - hand.equal) < 1e-6 && Math.abs(two.cap.effN - hand.effN) < 0.006 && Math.abs(two.cap.coverage - hand.coverage) < 1e-6 &&
+       two.cap.dollarNet === hand.dollarNet,
+    `SHAPECAPTIDE IS THE LEAF OVER THE ROWS THE CHUNKS RETURNED: forty names worked by hand give ${JSON.stringify(hand)}, the block is ${JSON.stringify(two.cap)}`);
+    eq(two.cap.at, new Date(at).toISOString(), "stamped with the read instant it was handed");
+    deep([two.calls, two.failed, two.returned, two.off, two.rowDate, two.excluded], [2, 0, 41, 0, session, { noCap: 2, missing: 1, inconsistent: 0, quiet: 0 }],
+      "a fund the feed returned with no market cap and a name it never returned with none on the nightly are outside it (no cap), a name it " +
+      "never returned keeps the nightly's cap in the coverage and counts as missing, and a ticker repeated in a later chunk is read once");
+    deep(Object.keys(two.cap), ["value", "coverage", "n", "of", "effN", "dollarNet", "equal", "at", "reason"], "the block is the nine fields of its contract");
+    ok(JSON.stringify(two.cap).length < 220, "and it adds under 220 bytes to live:breadth");
+    const noNight = L.shapeCapTide([{ data: rows }], { at, session, universe: { names: universe.names } });
+    ok(noNight.cap.coverage === 1 && noNight.excluded.noCap === 3 && noNight.excluded.missing === 0,
+      "without the nightly caps an unreturned name has no cap at all, so the coverage is of the names the feed priced");
+    const thin = L.shapeCapTide([{ data: rows.slice(0, 29) }], { at, session, universe: { names: names.slice(0, 29), caps: {} } });
+    deep([thin.cap.value, thin.cap.reason, thin.cap.n, thin.cap.equal], [null, "thin", 29, null], "twenty-nine names are too few: the value is withheld as thin, with the count kept");
+    const low = L.shapeCapTide([{ data: rows.slice(0, 30) }], { at, session, universe: { names, caps: Object.fromEntries(names.map((t, i) => [t, i < 30 ? 1e9 * (i + 1) : 1e11])) } });
+    ok(low.cap.value === null && low.cap.reason === "coverage" && low.cap.n === 30 && low.cap.coverage < 0.5 && low.excluded.missing === 10,
+      `and thirty names that hold under half the universe's market value are withheld for coverage (${low.cap.coverage})`);
+    const stale = L.shapeCapTide([{ data: rows.map((r) => ({ ...r, date: "2026-09-22" })) }], { at, session, universe });
+    deep([stale.cap.value, stale.cap.reason, stale.cap.n, stale.rowDate], [null, "vendor-prior-session", 0, "2026-09-22"],
+      "ROWS DATED BEFORE THE SESSION ARE NOT TODAY'S FLOW: when most are, the block says the feed still holds the previous session");
+    const mixed = L.shapeCapTide([{ data: rows.map((r, i) => (i < 3 ? { ...r, date: "2026-09-22" } : r)) }],
+      { at, session, universe: { names, caps: Object.fromEntries(names.map((t, i) => [t, 1e9 * (i + 1)])) } });
+    ok(mixed.cap.reason === null && mixed.cap.n === 37 && mixed.off === 3 && mixed.returned === 37 && mixed.excluded.missing === 3,
+      "and a few stale rows among today's are held out one by one and counted as missing");
+    deep([L.shapeCapTide([{ __failed: "HTTP 502" }, { __failed: "HTTP 502" }], { at, session, universe }).cap.reason,
+      L.shapeCapTide([], { at, session, universe }).cap.reason, L.shapeCapTide([{ data: rows }], { at, session, universe: { names: [] } }).cap.reason,
+      L.shapeCapTide(null, { at: null, session }).cap.at, L.shapeCapTide([], { at, session, universe }).cap.at],
+    ["vendor-failed", "not-read", "not-read", null, null],
+    "every chunk failing is a failed read, no chunk or no list is a read that was not made, and a read that was not made has no read time");
+    const half = L.shapeCapTide([{ data: rows.slice(0, 35) }, { __failed: "HTTP 502" }], { at, session, universe: { names, caps: {} } });
+    ok(half.cap.n === 35 && half.failed === 1 && half.calls === 2 && half.cap.reason === null, "one failed chunk leaves the names of the chunks that answered");
+    const breadthBare = L.shapeBreadth({}, { at, session });
+    deep(breadthBare.cap, { value: null, coverage: null, n: 0, of: 0, effN: null, dollarNet: null, equal: null, at: null, reason: "not-read" },
+      "LIVE:BREADTH ALWAYS CARRIES THE BLOCK: shaped with no cap read it says so, never a zero");
+    ok(L.shapeBreadth({}, { at, session, cap: two.cap }).cap === two.cap && /funds and index options are outside it/.test(breadthBare.units.cap),
+      "it carries the block it is handed, and its unit line says what the measure leaves out");
+
+    const boards = FAKE.fakeBoards();
+    const storedUniverse = FAKE.fakeUniverse({ boards });
+    const held = L.capUniverse(storedUniverse);
+    const plans = L.capChunks(held.asked).map((c) => c.join(","));
+    ok(held.names.length > 160 && held.names.length <= 320 && plans.length === 2, `the fake universe is ${held.names.length} names, two chunks`);
+    const pass = async ({ fails = () => false, universe: handed = held } = {}) => {
+      let clock = at;
+      const fake = FAKE.fakeLiveVendor({ now: () => (clock += 250), session });
+      const spans = [];
+      const uw = async (path, params, opts) => {
+        const start = clock;
+        if (fails(path, params)) { spans.push({ path, params, start, end: clock, body: null }); throw new Error(`${path} -> HTTP 502`); }
+        const body = await fake(path, params, opts);
+        spans.push({ path, params, start, end: clock, body });
+        return body;
+      };
+      const published = {};
+      const notes = [];
+      const result = await runLive({ uw, now: () => (clock += 250), log: (line) => notes.push(String(line)), warn: () => {}, force: true, shapeNews, universe: handed,
+        publish: async (k, p) => { published[k] = p; },
+        readStored: async (k) => (k.startsWith("board:") ? { payload: boards[k.slice(6)] } : { payload: null }) });
+      const chunkCalls = spans.filter((c) => c.path === "/api/screener/stocks" && plans.includes(String(c.params.ticker)));
+      return { published, result, spans, chunkCalls, notes };
+    };
+    const isChunk = (path, params) => path === "/api/screener/stocks" && plans.includes(String(params.ticker));
+    const bare = await pass({ universe: null });
+    const full = await pass();
+    deep([bare.chunkCalls.length, bare.published["live:breadth"].cap.reason, bare.published["live:breadth"].cap.at, bare.result.run.capTide.calls], [0, "not-read", null, 0],
+      "A PASS HANDED NO UNIVERSE makes no cap read and says so in the block");
+    ok(bare.notes.some((n) => /cap tide: not read/.test(n)), "and in its notes");
+    eq(full.spans.length, bare.spans.length + plans.length, `WITH ONE, THE PASS COSTS ITS CHUNKS AND NOTHING ELSE: ${full.spans.length} calls against ${bare.spans.length}`);
+    ok(full.spans.length <= 24 + L.LIVE_BUDGET.capCalls && full.spans.length <= L.LIVE_BUDGET.tier2MaxCalls, "inside the pass's ceiling");
+    deep(full.chunkCalls.map((c) => [String(c.params.ticker).split(",").length <= L.LIVE_BUDGET.capChunk, c.params.limit, Object.keys(c.params).sort().join()]),
+      plans.map(() => [true, 500, "limit,ticker"]), "each chunk is one screener call for at most 160 tickers with the documented ticker and limit parameters only");
+    deep(full.chunkCalls.flatMap((c) => String(c.params.ticker).split(",")), held.names, "and together they ask for every universe name once");
+    const answered = full.chunkCalls.flatMap((c) => L.rowsOf(c.body));
+    const num = (v) => (v === null || v === undefined || v === "" ? null : Number(v));
+    const worked = (rowsIn, list) => {
+      const by = new Map(rowsIn.map((r) => [r.ticker, r]));
+      let all = 0, used = 0;
+      const kept = [];
+      for (const t of list.names) {
+        const r = by.get(t);
+        const m = r ? num(r.marketcap) : (Object.hasOwn(list.caps, t) ? list.caps[t] : null);
+        if (m === null || !(m > 0)) continue;
+        all += m;
+        if (!r) continue;
+        const [ncp, npp, cp, pp] = ["net_call_premium", "net_put_premium", "call_premium", "put_premium"].map((f) => num(r[f]));
+        if ([ncp, npp, cp, pp].some((x) => x === null || !Number.isFinite(x))) continue;
+        if (cp < 0 || pp < 0 || Math.abs(ncp - npp) > cp + pp || !(cp + pp > 0)) continue;
+        kept.push({ m, net: ncp - npp, tau: (ncp - npp) / (cp + pp) });
+        used += m;
+      }
+      return { n: kept.length, of: list.names.length, coverage: all > 0 ? used / all : null, value: kept.reduce((a, k) => a + (k.m / used) * k.tau, 0),
+        equal: kept.reduce((a, k) => a + k.tau, 0) / kept.length, effN: 1 / kept.reduce((a, k) => a + (k.m / used) ** 2, 0), dollarNet: kept.reduce((a, k) => a + k.net, 0) };
+    };
+    const want = worked(answered, held);
+    const got = full.published["live:breadth"].cap;
+    ok(got.reason === null && got.n === want.n && got.of === want.of && Math.abs(got.value - want.value) < 1e-6 && Math.abs(got.coverage - want.coverage) < 1e-6 &&
+       Math.abs(got.equal - want.equal) < 1e-6 && Math.abs(got.effN - want.effN) < 0.006 && Math.abs(got.dollarNet - want.dollarNet) <= 1,
+    `THE PUBLISHED BLOCK IS THE MEASURE OVER THE ROWS THE FEED ANSWERED, worked here from those rows: ${JSON.stringify(want)} against ${JSON.stringify(got)}`);
+    ok(want.n >= 30 && want.n < want.of && want.coverage > 0.5, "on a universe that leaves its funds and some inconsistent names outside");
+    const chunkEnd = Math.max(...full.chunkCalls.map((c) => c.end));
+    const stripCall = full.spans.find((c) => c.path === "/api/screener/stocks" && !plans.includes(String(c.params.ticker)));
+    const tideEnd = Math.max(...full.spans.filter((c) => /sector-tide|etf-tide|net-flow\/expiry/.test(c.path)).map((c) => c.end));
+    const stamped = Date.parse(full.published["live:breadth"].fresh.readAt);
+    ok(Math.min(...full.chunkCalls.map((c) => c.start)) >= tideEnd && stamped >= chunkEnd && stamped <= stripCall.start && got.at === full.published["live:breadth"].fresh.readAt,
+      "PER-KEY READ TIME: the chunks are read after the tides, live:breadth is stamped when the last of them returned and before the strip is asked, and the block carries that instant");
+    deep(full.result.run.capTide, { n: got.n, of: got.of, coverage: got.coverage, reason: null, calls: plans.length, failed: 0 },
+      "and the heartbeat's run record carries the read's counts");
+    ok(JSON.stringify(full.published["live:breadth"]).length <= L.LIVE_KEYS["live:breadth"].maxBytes, "inside the key's byte cap");
+
+    const down = await pass({ fails: isChunk });
+    deep([down.published["live:breadth"].cap.value, down.published["live:breadth"].cap.reason, down.result.run.capTide.failed, Boolean(down.published["live:strips"])],
+      [null, "vendor-failed", plans.length, true],
+      "EVERY CHUNK FAILING withholds the figure as a failed read while the tides and the strip, with their own answered reads, are published");
+    const lastDown = await pass({ fails: (path, params) => isChunk(path, params) && String(params.ticker) === plans[1] });
+    const wantLast = worked(lastDown.chunkCalls.filter((c) => c.body).flatMap((c) => L.rowsOf(c.body)), held);
+    ok(lastDown.published["live:breadth"].cap.reason === null && lastDown.published["live:breadth"].cap.n === wantLast.n &&
+       Math.abs(lastDown.published["live:breadth"].cap.coverage - wantLast.coverage) < 1e-6 && wantLast.coverage < want.coverage &&
+       Math.abs(lastDown.published["live:breadth"].cap.value - wantLast.value) < 1e-6 && lastDown.result.run.capTide.failed === 1,
+    `ONE FAILED CHUNK lowers the coverage by the nightly market value of the names it did not return (${wantLast.coverage.toFixed(4)} against ${want.coverage.toFixed(4)}), never raising it`);
+    const firstDown = await pass({ fails: (path, params) => isChunk(path, params) && String(params.ticker) === plans[0] });
+    ok(firstDown.published["live:breadth"].cap.value === null && firstDown.published["live:breadth"].cap.reason === "coverage" &&
+       firstDown.published["live:breadth"].cap.coverage < 0.5,
+    "and losing the chunk that holds the largest names withholds the figure for coverage");
+    const noTides = await pass({ fails: (path) => /sector-tide|etf-tide|net-flow\/expiry/.test(path) });
+    ok(!noTides.published["live:breadth"] && noTides.chunkCalls.length === plans.length,
+      "THE CAP READ ALONE DOES NOT RE-STAMP THE KEY: with no tide answered live:breadth is not written, so it goes stale on its own clock as before");
+
+    let asked = 0;
+    const answers = [{ payload: null, failed: true, status: 403 }, null, { payload: null, absent: true }, { payload: { status: "pending" } }, { payload: storedUniverse }];
+    const reader = universeReader(async (key) => {
+      asked++;
+      eq(key, "universe", "the reader asks for the universe key");
+      const next = answers.shift();
+      if (next === null) throw new Error("socket hang up");
+      return next;
+    });
+    const whys = [];
+    for (let i = 0; i < 4; i++) whys.push((await reader()).why);
+    deep(whys, ["the stored universe could not be read (HTTP 403)", "the stored universe could not be read", "no universe is stored yet", "the stored universe lists no name"],
+      "A UNIVERSE THAT CANNOT BE READ SAYS WHY (refused, thrown, absent, empty) and is asked for again on the next pass");
+    const first = await reader();
+    const again = await reader();
+    ok(first.names.length === held.names.length && first.why === null && again === first && asked === 5 && (await reader()) === first && asked === 5,
+      "and once it has been read it is held for the run: one ingest read, however many passes follow");
+    const refused = await pass({ universe: universeReader(async () => ({ payload: null, failed: true, status: 403 })) });
+    ok(refused.chunkCalls.length === 0 && refused.published["live:breadth"].cap.reason === "not-read" && refused.spans.length === bare.spans.length &&
+       refused.notes.some((n) => /cap tide: not read — the stored universe could not be read \(HTTP 403\)/.test(n)),
+    "a pass whose universe read was refused (a Worker that does not yet let the live token read it) makes no cap read, publishes everything else, and notes the reason");
   }
 
   const plan = boardPlan({ long: { payload: { rows: [{ t: "AAA", s: 90 }, { t: "BBB", s: 10 }] } },
@@ -2473,9 +2683,15 @@ const cronMinutes = (cron) => {
      /runLiveLoop\(\{\s*readClock,/.test(pipeline) &&
      /const clock = force \? null : await readClock\(\);/.test(pipeline),
   "and --live gates both the loop and a single pass on the Worker's clock, the witness's copy of it set only by a read that parsed");
-  ok(/runLive\(\{ uw, publish, readStored, shapeNews, origin, skipRecent: first, clock \}\)/.test(pipeline) &&
+  ok(/runLive\(\{ uw, publish, readStored, shapeNews, origin, skipRecent: first, clock, universe \}\)/.test(pipeline) &&
      /chainDispatch\(\{ env: process\.env, at \}\)/.test(pipeline) && /process\.env\.FLOWS_LIVE_LOOP !== "1"/.test(pipeline),
   "--live runs the loop when the workflow asks for it, each pass after the first ignoring the heartbeat skip");
+  ok((pipeline.match(/universeReader\(readStored\)/g) || []).length === 1 &&
+     pipeline.indexOf("const universe = universeReader(readStored);") > 0 &&
+     pipeline.indexOf("const universe = universeReader(readStored);") < pipeline.indexOf("const loop = await runLiveLoop({") &&
+     /runLive\(\{ uw, publish, readStored, shapeNews, origin, force, clock, universe \}\)/.test(pipeline),
+  "THE UNIVERSE LIST IS READ ONCE A RUN: one reader is built before the loop and handed to every pass and to the single forced pass, " +
+    "so the cap-weighted tide's names cost one stored read a run and not one a pass");
 }
 
 {
@@ -4133,5 +4349,7 @@ console.log(`✓ flows-live: ${checks} assertions — one threshold table in cod
   `vendor sent none (from the boards and the nightly focus closes, only when they are the prior session's and the vendor's own ` +
   `prev_close agrees), every strip row with its own quote age, the newest quote as vendorAt and the spread of the ages per ` +
   `column, the count of stamps that run ahead of the read, a row dated before the session standing as an all-null row ` +
-  `instead of taking its module off the live read, the nightly gate's note of that spread; and a client helper that ` +
+  `instead of taking its module off the live read, the nightly gate's note of that spread; the cap-weighted tide's block in ` +
+  `live:breadth, read over the stored universe in chunks of 160 inside the pass's call ceiling, worked from the rows the ` +
+  `feed answered, withheld with its reason and never a zero, its universe list read once a run; and a client helper that ` +
   `only compares clocks`);

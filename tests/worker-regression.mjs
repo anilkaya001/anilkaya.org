@@ -266,16 +266,16 @@ try {
     "that no static document emits an unversioned CSS/JS/font URL is proven in tests/contracts.mjs (every CSS/JS reference must carry ?v=<assets/version.txt>, " +
     "every woff2 reference ?v=<assets/fonts-version.txt>), and Worker-rendered Flows pages go through v() in shared/flows-pages.js");
   assertSecurity(unversioned, false);
-  for (const asset of [`/assets/js/nav.js?v=${assetVersion}`, `/assets/fonts/LM-regular.woff2?v=${fontsVersion}`, "/assets/img/og.png"]) {
+  for (const asset of [`/assets/js/nav.js?v=${assetVersion}`, `/assets/fonts/GoogleSans-italic-latin.woff2?v=${fontsVersion}`, "/assets/img/og.png"]) {
     const response = await fetch(base + asset);
     assert.equal(response.status, 200, `${asset}: missing`);
     assertSecurity(response, false);
   }
-  const font = await fetch(base + `/assets/fonts/Inter-latin.woff2?v=${fontsVersion}`);
+  const font = await fetch(base + `/assets/fonts/GoogleSans-latin.woff2?v=${fontsVersion}`);
   assert.equal(font.status, 200);
   assert.equal(font.headers.get("cache-control"), "public, max-age=31536000, immutable",
     "a woff2 URL carries the fonts token, so an asset bump leaves it, and the year-long cache behind it, untouched");
-  assert.equal((await font.arrayBuffer()).byteLength, (await readFile(path.join(REPO_ROOT, "assets/fonts/Inter-latin.woff2"))).byteLength,
+  assert.equal((await font.arrayBuffer()).byteLength, (await readFile(path.join(REPO_ROOT, "assets/fonts/GoogleSans-latin.woff2"))).byteLength,
     "response cloning changed font bytes");
   for (const [token, file] of [["/assets/version.txt", assetVersion], ["/assets/fonts-version.txt", fontsVersion]]) {
     const response = await fetch(base + token);

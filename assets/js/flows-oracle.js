@@ -329,7 +329,7 @@
     if (S.pref === "off") return;
     U.defer("nn-orb", { when: "idle" }).then(function () { if (window.FlowsUI.nnOrb) window.FlowsUI.nnOrb.scan(); });
     say("Neuron shown.");
-    try { orb.focus(); } catch (e) {   }
+    if (!S.open) { try { orb.focus(); } catch (e) {   } }
   }
 
   function say(text) {

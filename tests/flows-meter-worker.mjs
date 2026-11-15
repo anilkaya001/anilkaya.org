@@ -5,6 +5,7 @@ import { fakeD1 } from "./lib/d1-fake.mjs";
 import { nightlyEmit } from "./lib/nightly-emit.mjs";
 import { emitKeys } from "./lib/emit-keys.mjs";
 import { moduleSource, workerSource } from "./lib/source-scan.mjs";
+import { loadMutated } from "./truth/mutants.mjs";
 
 let checks = 0;
 const ok = (c, m) => { assert.ok(c, m); checks++; };
@@ -23,6 +24,8 @@ globalThis.fetch = async (input, init) => {
   if (u.origin !== "http://vendor.test") return realFetch(input, init);
   vendorLog.push(u.pathname);
   if (u.pathname.includes("/BOOM/")) return new Response("{}", { status: 503, headers: { "Content-Type": "application/json" } });
+  if (u.pathname.endsWith("/flow-per-strike-intraday")) return new Response("[" + " ".repeat(5 * 1048576) + "]", { status: 200, headers: { "Content-Type": "application/json" } });
+  if (u.pathname.endsWith("/flow-per-strike")) return new Response("{not json", { status: 200, headers: { "Content-Type": "application/json" } });
   if (u.pathname.includes("/SLOW/")) {
     const signal = init && init.signal;
     return new Promise((resolve, reject) => { if (signal) signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "TimeoutError" }))); });
@@ -30,11 +33,11 @@ globalThis.fetch = async (input, init) => {
   return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
 };
 
-async function client(extra = {}, D1 = undefined) {
+async function client(extra = {}, D1 = undefined, load = null) {
   const env = { SESSION_SECRET, FLOWS_READ_MODE: "off", FLOWS_CREDENTIALS: JSON.stringify({ [OWNER]: "x".repeat(43) }), UW_API_KEY: "stub", UW_BASE: "http://vendor.test",
     FLOWS_RT_USERS: OWNER, ...(D1 ? { DB: D1 } : {}), ...extra };
   const token = await signFlowsSession(OWNER, env.SESSION_SECRET, 3600, sessionEpoch(env));
-  const worker = (await import("../worker.js?meter=" + (++instance))).default;
+  const worker = load ? await load() : (await import("../worker.js?meter=" + (++instance))).default;
   return async (route, init = {}) => {
     const ctx = { waitUntil: () => {} };
     const res = await worker.fetch(new Request("https://anilkaya.org" + route, { ...init, headers: { cookie: FLOWS_COOKIE + "=" + token, "Sec-Fetch-Site": "same-origin" } }), env, ctx);
@@ -92,6 +95,21 @@ async function client(extra = {}, D1 = undefined) {
   const withBad = await on("/api/flows/coverage");
   ok(withBad.body.calls.bad >= 1 && withBad.body.calls.slowest.some((s) => (s.classes["5xx"] || 0) >= 1), "a 503 from the vendor is counted as a 5xx");
   ok(boom.res.status >= 500 || boom.res.status === 429 || boom.res.status === 404, "and still reaches the reader as the error it was: " + boom.res.status);
+
+  const sized = async (load) => {
+    const c = await client({ FLOWS_METER: "on", FLOWS_COVERAGE: "on", FLOWS_FLOWLAB: "on" }, f.D1, load);
+    const read = await c("/api/flows/flowlab/name?t=NVDA&view=strikes");
+    const report = await c("/api/flows/coverage");
+    const fails = (report.body && report.body.calls && report.body.calls.fails) || [];
+    const codes = (op) => (fails.find((q) => q.op === op) || { codes: {} }).codes;
+    return { read, minute: codes("strike-flow-intraday"), day: codes("flow-per-strike") };
+  };
+  const real = await sized(null);
+  ok(real.read.res.status >= 500 && real.read.body && real.read.body.read, "a Flow Lab read that fails names its class to the reader: " + real.read.text.slice(0, 120));
+  eq(real.minute, { size: 1 }, "a body past its cap is metered as size, not network");
+  eq(real.day, { parse: 1 }, "a body that is not JSON is metered as parse, not network");
+  const planted = await sized(async () => (await loadMutated("worker.js", [["too_large: \"size\"", "too_large: \"network\""]], { salt: ++instance })).default);
+  ok(JSON.stringify(planted.minute) !== JSON.stringify({ size: 1 }), "PLANTED BUILD 93 (the meter files size as network) fails the size check: " + JSON.stringify(planted.minute));
 
   const quiet = await client({ FLOWS_COVERAGE: "on" }, f.D1);
   await quiet("/api/flows/chain?t=NVDA");

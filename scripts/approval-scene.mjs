@@ -323,7 +323,7 @@ export function networkSvg(scene, o = {}) {
       out.push(`<g class="flare"><circle cx="${n.x}" cy="${n.y}" r="${r1(n.r + 11)}" fill="none" stroke="#ffffff" stroke-opacity="0.8" stroke-width="2"${o.animate ? ` style="animation:flare 1.2s ease-out 1"` : ""}/><circle cx="${n.x}" cy="${n.y}" r="${r1(n.r + 22)}" fill="none" stroke="#9ecbff" stroke-opacity="0.35" stroke-width="1.5"/></g>`);
     }
   }
-  out.push(`<g class="labels" font-family="Inter,system-ui,sans-serif">`);
+  out.push(`<g class="labels" font-family="Google Sans,system-ui,sans-serif">`);
   for (const l of scene.labels) {
     const dim = dimmed(l.id);
     out.push(`<g class="chip" data-chip="${esc(l.id)}" opacity="${dim ? 0.4 : 1}"><rect x="${l.x}" y="${l.y}" width="${l.w}" height="${l.h}" rx="${vertical ? 7 : 11}" fill="rgba(11,17,32,0.82)" stroke="rgba(255,255,255,0.10)"/><text x="${r1(l.x + l.w / 2)}" y="${r1(l.y + l.h / 2 + l.fs * 0.35)}" text-anchor="middle" font-size="${l.fs}" fill="#f5f5f7">${esc(l.text)}</text></g>`);

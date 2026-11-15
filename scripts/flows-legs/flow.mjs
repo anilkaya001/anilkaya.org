@@ -14,7 +14,7 @@ export const FLOW_LEG = Object.freeze({
   ALERT_MAX_PAGES: 8,
   ALERT_CLOSE_SLACK_MS: 5 * 60 * 1000,
   MULTI_LIMIT: 500,
-  MULTI_MAX_OFFSET: 500,
+  MULTI_MAX_PAGES: 2,
   LIFELINES: 3,
   LIFE_LIMIT: 60,
   CARD_X_CAP: 100 * 1024,
@@ -80,30 +80,46 @@ export async function readAlertBatch(read, names, win, { limit = FLOW_LEG.ALERT_
   };
 }
 
-export async function readMultiLeg(read, ticker, win, { limit = FLOW_LEG.MULTI_LIMIT, maxOffset = FLOW_LEG.MULTI_MAX_OFFSET } = {}) {
+export async function readMultiLeg(read, ticker, win, { limit = FLOW_LEG.MULTI_LIMIT, maxPages = FLOW_LEG.MULTI_MAX_PAGES } = {}) {
   const rows = [];
+  const seen = new Set();
   let truncated = false, calls = 0, full = false;
-  for (let offset = 0; offset <= maxOffset; offset += limit) {
+  let olderThan = win.closeIso;
+  for (let page = 0; page < maxPages; page++) {
     const body = await read(pathFor("multi-leg"), {
-      ticker_symbol: ticker, limit, newer_than: win.openIso, older_than: win.closeIso,
-      ...(offset ? { offset } : {}),
+      ticker_symbol: ticker, limit, newer_than: win.openIso, older_than: olderThan,
     });
     calls++;
     if (body && typeof body === "object" && !Array.isArray(body) && typeof body.__failed === "string") {
-      if (!rows.length) return { rows: body, truncated: false, calls, full, failedAt: offset };
+      if (!rows.length) return { rows: body, truncated: false, calls, full, failedAt: page };
       truncated = true;
-      return { rows, truncated, calls, full, failedAt: offset };
+      return { rows, truncated, calls, full, failedAt: page };
     }
     const got = rowsOf(body, "data");
     if (got === null) {
-      if (!rows.length) return { rows: null, truncated: false, calls, full, failedAt: offset };
+      if (!rows.length) return { rows: null, truncated: false, calls, full, failedAt: page };
       truncated = true;
-      return { rows, truncated, calls, full, failedAt: offset };
+      return { rows, truncated, calls, full, failedAt: page };
     }
-    for (const r of got) rows.push(r);
+    let fresh = 0, oldest = null;
+    for (const r of got) {
+      const id = r && typeof r === "object" && (typeof r.id === "string" || typeof r.id === "number") ? String(r.id) : null;
+      if (id !== null) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+      }
+      rows.push(r);
+      fresh++;
+      const t = r && typeof r === "object" ? toMs(r.executed_at) : null;
+      if (t !== null && (oldest === null || t < oldest)) oldest = t;
+    }
     truncated = got.length >= limit;
-    if (offset === 0) full = truncated;
+    if (page === 0) full = truncated;
     if (!truncated) break;
+    if (oldest === null || fresh === 0) break;
+    const next = new Date(oldest + 1).toISOString();
+    if (next === olderThan) break;
+    olderThan = next;
   }
   return { rows, truncated, calls, full, failedAt: null };
 }

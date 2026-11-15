@@ -98,7 +98,7 @@
     const hz = F.horizon(u.hz) ? u.hz : null;
     const row = { sig: pos(sig), f2: cell("f2") ?? null, f3: cell("f3") ?? null, ed: cell("ed") ?? null, rd: cell("rd") ?? null, rdMax: num(unstated[ticker]), edMax: F.later(edUn, u.edUnstatedThrough, ticker, cell("ed") ?? null), hz, j: hz === null ? null : F.elapsed(u.sessionDate, u.ahead, F.etDay(now)), why: null };
     if (sig === undefined) row.why = "The nightly run does not publish a typical daily move yet.";
-    else if (row.sig === null) row.why = "No typical daily move is published for " + ticker + ": it needs " + MIN_RETURNS + " clean sessions of history, with report days, splits and data breaks left out.";
+    else if (row.sig === null) row.why = "No typical daily move is published for " + ticker + ": it needs " + MIN_RETURNS + " clean sessions of history, with data breaks left out.";
     return row;
   }
 
@@ -187,7 +187,7 @@
           title: "How the counts are made",
           lead: "Each size is a multiple of the typical daily move. The count is how many of the last " + SESSIONS + " sessions moved at least that far, up or down.",
           sections: [
-            { title: "Two and three times", lines: ["The nightly run's own count, with report sessions left out, scaled to " + SESSIONS + " sessions."] },
+            { title: "Two and three times", lines: ["The nightly run's own count, report days kept in, scaled to " + SESSIONS + " sessions."] },
             { title: "One and four times", lines: ["Counted here on the daily closes this card carries, report days kept in, scaled to " + SESSIONS + " sessions when fewer are held. A card with fewer than " + MIN_RETURNS + " usable returns gives no count."] },
             { title: "How rare", lines: ["Printed as one in N sessions from the count alone, with a 95% interval from five hits. Nothing rarer than 1 in " + FLOOR_N + " is claimed; a count of zero or one reads as rarer than that."] },
           ],
@@ -207,7 +207,7 @@
         c.hits === undefined
           ? h("p", { class: "ft-ml-n" }, DASH + " ", h("span", { class: "ft-ml-cap" }, c.why))
           : [h("p", { class: "ft-ml-n" }, h("b", null, c.hits + " per " + SESSIONS + " sessions"),
-            h("span", { class: "ft-ml-cap" }, c.basis === "nightly" ? " nightly count, report days left out" : " counted on this card's closes" + (c.n === SESSIONS ? "" : " (" + c.n + " returns, scaled)") + ", report days kept in")),
+            h("span", { class: "ft-ml-cap" }, c.basis === "nightly" ? " nightly count, report days kept in" : " counted on this card's closes" + (c.n === SESSIONS ? "" : " (" + c.n + " returns, scaled)") + ", report days kept in")),
           h("p", { class: "ft-ml-how" }, c.how)]);
     })));
     return box;
@@ -247,12 +247,12 @@
     }
     if (r.state === "reacted") {
       box.append(h("p", { class: "ft-ml-big" }, "Reported", h("span", { class: "ft-ml-cap" }, (r.age === 0 ? ", the price reaction is today" : ", the price reaction was the session before"))),
-        h("p", { class: "ft-ml-flag" }, "The move over the sessions since the report carries the report. The ladder above leaves report days out of its nightly counts."));
+        h("p", { class: "ft-ml-flag" }, "The move over the sessions since the report carries the report. The ladder above counts past report days with ordinary days."));
       return box;
     }
     if (r.state === "unclear") {
       box.append(h("p", { class: "ft-ml-big" }, "Report time not stated", h("span", { class: "ft-ml-cap" }, r.date ? ", " + F.day(r.date) : "")),
-        h("p", { class: "ft-ml-flag" }, "The report is on the latest session or beside it, and it may not have come out yet. The ladder above leaves report days out of its nightly counts, so it does not describe that day."));
+        h("p", { class: "ft-ml-flag" }, "The report is on the latest session or beside it, and it may not have come out yet. The ladder above counts past report days with ordinary days, so it does not describe that day apart."));
       return box;
     }
     const away = r.gate && r.sessions === null ? "inside the earnings gate" : r.sessions + (r.sessions === 1 ? " session" : " sessions") + " away";
@@ -265,7 +265,7 @@
     }
     box.append(
       r.em === null ? why("The card carries no implied report move.") : h("p", { class: "ft-ml-cap" }, "The options market prices ±" + pctText(r.em) + " for the report. That is its number, not a forecast."),
-      h("p", { class: "ft-ml-flag" }, "Event-contaminated: any expiry past the report prices the report too, and the report day is not an ordinary day. The ladder above leaves report days out of its nightly counts, so it does not describe that day."));
+      h("p", { class: "ft-ml-flag" }, "Event-contaminated: any expiry past the report prices the report too, and the report day is not an ordinary day. The ladder above counts past report days with ordinary days, so it does not describe that day apart."));
     return box;
   }
 

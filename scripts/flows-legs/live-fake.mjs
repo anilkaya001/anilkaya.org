@@ -1,5 +1,6 @@
 import { sessionOpen, easternInstant, PHASE_MINUTES, prevWeekdayDay } from "../../shared/flows-freshness.js";
 import { SECTOR_TIDES, INDEX_NAMES } from "../../shared/flows-live.js";
+import { FOCUS_FUNDS } from "../../shared/flows-focus.js";
 import { touch } from "./taint.mjs";
 
 function mulberry(seed) {
@@ -131,9 +132,13 @@ export function fakeSectorEtfs({ session } = {}) {
   }) };
 }
 
+export const fakeCap = (ticker) => (INDEX_NAMES.includes(ticker) || FOCUS_FUNDS.includes(ticker) ? null
+  : Math.round(2e9 + mulberry(seedOf("cap-" + ticker))() * 9e11));
+
 export function fakeScreenerRows(tickers, { session, dated = false, now = NaN, nullPrev = false, aheadS = 0 } = {}) {
   return { data: tickers.map((ticker) => {
     const rand = mulberry(seedOf("scr-" + ticker + session));
+    const cap = fakeCap(ticker);
     const prev = 20 + rand() * 400;
     const close = prev * (1 + (rand() - 0.5) * 0.06);
     const v30 = 0.15 + rand() * 0.5;
@@ -161,6 +166,7 @@ export function fakeScreenerRows(tickers, { session, dated = false, now = NaN, n
       bid: null, ask: null, bid_quantity: null, ask_quantity: null, quote_time: null, full_name: null,
       etf_share_flow: null, is_index: INDEX_NAMES.includes(ticker), has_options: true,
       cum_dir_delta: (rand() - 0.5) * 1e6, cum_dir_gamma: (rand() - 0.5) * 1e4, cum_dir_vega: (rand() - 0.5) * 1e6,
+      marketcap: cap === null ? null : String(cap),
     };
     const lagDraw = rand();
     const nullDraw = rand();
@@ -315,6 +321,24 @@ export function fakeBoards({ n = 40, sessionDate = null, session = null } = {}) 
       const t = `SYW${String(i + 1).padStart(3, "0")}`;
       return { t, s: 10 - i, ...priced(t) };
     }) },
+  };
+}
+
+export function fakeUniverse({ boards = null, extra = 150, sessionDate = null } = {}) {
+  touch("fakeUniverse");
+  const held = boards || fakeBoards();
+  const names = new Set();
+  for (const side of ["long", "short", "watch"]) for (const r of (held[side] && held[side].rows) || []) if (r && r.t) names.add(r.t);
+  for (let i = 0; i < extra; i++) names.add("SYN" + String(i).padStart(3, "0"));
+  const scale = 1e-8;
+  const rows = [...names].map((t) => ({ t, cap: fakeCap(t) }))
+    .sort((a, b) => (b.cap ?? -1) - (a.cap ?? -1) || (a.t < b.t ? -1 : a.t > b.t ? 1 : 0));
+  return {
+    v: 1, sessionDate: sessionDate || held.long.sessionDate || null, status: "ok", n: rows.length,
+    order: "marketcap desc, then ticker",
+    t: rows.map((r) => r.t),
+    units: { mcap: ["usd", scale] },
+    cols: { mcap: rows.map((r) => (r.cap === null ? null : Math.round(r.cap * scale))) },
   };
 }
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { loadMutated } from "./truth/mutants.mjs";
 import { performance } from "node:perf_hooks";
 import * as D from "../shared/flows-dossier.js";
 import * as R from "../shared/flows-reading.js";
@@ -343,11 +344,14 @@ const hasWhy = (r, section, code) => r.refused.some((x) => x.section === section
   const huge = vet(JSON.stringify(patch({ now: { text: "The last price is $127.40. ".repeat(400), cites: ["price.last"] } })));
   ok(!huge.ok && hasWhy(huge, "reply", "oversize"), "OVERSIZE OUTPUT: a reply of " + JSON.stringify(patch({ now: { text: "x ".repeat(4000), cites: ["price.last"] } })).length + " characters is refused before it is read");
   const long = vet(patch({ drivers: [{ text: GOOD.drivers[3].text + " " + "Flow stays on the call side of the book. ".repeat(10), cites: ["flow.strip.lean"] }, ...GOOD.drivers.slice(0, 3)] }));
-  ok(long.ok && hasWhy(long, "drivers.0", "length") && long.sections.drivers.length === 3, "a sentence over its length cap is dropped and the rest stand");
+  ok(long.ok && hasWhy(long, "drivers.0", "length") && long.sections.drivers.length === 4, "a driver over its length cap is not dropped: the trim is recorded");
+  ok(long.sections.drivers[0].text.length <= R.SECTION_CAPS.driver && long.sections.drivers[0].text.startsWith(GOOD.drivers[3].text) && /book\.$/.test(long.sections.drivers[0].text), "and it keeps the whole sentences that fit, in order");
+  const oneLong = vet(patch({ drivers: [{ text: "Flow stays on the call side of the book and " + "stays there ".repeat(40) + "all session.", cites: ["flow.strip.lean"] }, ...GOOD.drivers.slice(0, 3)] }));
+  ok(oneLong.ok && hasWhy(oneLong, "drivers.0", "length") && oneLong.sections.drivers.length === 3, "a single sentence over the cap cannot be shortened and is dropped");
   const many = vet(patch({ drivers: [...GOOD.drivers, GOOD.drivers[0], GOOD.drivers[1]] }));
   ok(many.ok && many.sections.drivers.length === 4 && hasWhy(many, "drivers", "length"), "more than four drivers: the first four stand, the overflow is recorded");
   const nowLong = vet(patch({ now: { text: GOOD.now.text + " " + GOOD.now.text + " " + GOOD.now.text, cites: GOOD.now.cites } }));
-  ok(!nowLong.ok && hasWhy(nowLong, "now", "length") && hasWhy(nowLong, "reply", "now-dropped"), "a now section over its cap drops it, and without now the reply is refused");
+  ok(nowLong.ok && hasWhy(nowLong, "now", "length") && nowLong.sections.now.text.length <= R.SECTION_CAPS.now && nowLong.sections.now.text.startsWith(GOOD.now.text), "a now section over its cap keeps the sentences that fit, so the reply stands");
   eq(JSON.stringify(vet(GOOD)), JSON.stringify(vet(GOOD)), "vetting is deterministic");
 }
 
@@ -512,7 +516,14 @@ const hasWhy = (r, section, code) => r.refused.some((x) => x.section === section
   const engineIdea = vet(patch({ drivers: [{ text: "The engine ranks a put credit spread first.", cites: ["options.idea.S1"] }, ...GOOD.drivers.slice(1)] }));
   ok(hasWhy(engineIdea, "drivers.0", "unknown-id"), "A RANKED STRUCTURE CANNOT BE CITED: structures stay with the engine");
   const noCites = vet(patch({ drivers: [{ text: "The next report is dated 2026-10-07.", cites: [] }, { text: "x", cites: Array(9).fill("events.next") }, { text: "The next report is dated 2026-10-07." }, ...GOOD.drivers.slice(1)] }));
-  eq(noCites.refused.filter((x) => x.why === "schema").length, 3, "no cites, nine cites and a missing cites field are all schema refusals");
+  eq(noCites.refused.filter((x) => x.why === "schema").length, 2, "no cites and a missing cites field are schema refusals; one id written nine times is one cite");
+  const nineIds = [...MP.shown].filter((id) => !/^options\.|dealer|gamma|vanna|charm|^news\./.test(id)).slice(0, 9);
+  const nine = vet(patch({ now: { text: GOOD.now.text, cites: [...GOOD.now.cites, ...nineIds.filter((id) => !GOOD.now.cites.includes(id))].slice(0, 12) } }));
+  ok(nineIds.length === 9 && nine.ok && nine.sections.now.cites.length === 8 && nine.refused.some((x) => x.section === "now" && x.why === "schema" && x.cites >= 1), "MORE THAN EIGHT CITES: the first eight stand and the surplus is recorded, where the whole section was refused before");
+  const strayCite = vet(patch({ now: { text: GOOD.now.text, cites: [...GOOD.now.cites.slice(0, 6), "events.nonsense", "price.hi52"] } }));
+  ok(strayCite.ok && !strayCite.sections.now.cites.includes("events.nonsense") && !strayCite.sections.now.cites.includes("price.hi52") && strayCite.refused.some((x) => x.section === "now" && x.why === "unknown-id" && x.cites === 2), "A CITE THAT DOES NOT EXIST OR WAS NEVER SHOWN IS DROPPED when the text stands on the others");
+  const leaning = vet(patch({ drivers: [{ text: "The 52-week high is $171.90.", cites: ["price.last", "price.hi52"] }, ...GOOD.drivers.slice(1)] }));
+  ok(hasWhy(leaning, "drivers.0", "invented") && !leaning.sections.drivers.some((d) => /171\.90/.test(d.text)), "but a figure that only the dropped cite carried is still refused: the text is checked against the cites that remain");
 }
 
 {
@@ -580,6 +591,67 @@ const hasWhy = (r, section, code) => r.refused.some((x) => x.section === section
   const p = R.promptForReading(M, MT);
   ok(/copied word for word inside that same sentence/.test(p.system) && /A sentence without the clause is removed/.test(p.system), "THE PROMPT ASKS FOR THE CLAUSE IN EVERY DEALER SENTENCE and says what happens without it");
   ok(/Never open with the company's name followed by the description's first words/.test(p.system), "and for an identity in the model's own sentence structure, never the description's opening");
+}
+
+const repairBattery = (Rx) => {
+  const out = [];
+  const t = (name, pass) => out.push([name, !!pass]);
+  const vetT = (reply, trim) => Rx.vetReading(JSON.stringify(reply), M, MT, { shown: MP.shown, rendered: MP.user, trim });
+  const spare = [...MP.shown].filter((id) => !GOOD.now.cites.includes(id) && !/^options\.|^news\.|^identity\.description/.test(id)).slice(0, 4);
+  const strayFigure = { text: GOOD.now.text + " Volume is 27.6 times its average.", cites: GOOD.now.cites };
+  const forecastTail = { text: GOOD.now.text + " The shares will extend the move into the report.", cites: GOOD.now.cites };
+  const crowded = { text: GOOD.now.text, cites: [...GOOD.now.cites, ...spare, "events.nonsense"] };
+  const unitSlip = { text: "Option flow leans to calls: bullish against bearish premium is +0.62. Relative volume is 2.1 x the norm.", cites: ["flow.strip.lean"] };
+  const stranger = { text: "Option flow leans to calls: bullish against bearish premium is +0.62. Globex Capital is the buyer.", cites: ["flow.strip.lean"] };
+  const culprits = [];
+  for (const now of [null, strayFigure, forecastTail, crowded]) for (const dr of [null, unitSlip, stranger]) {
+    if (!now && !dr) continue;
+    culprits.push(patch({ ...(now ? { now } : {}), drivers: [GOOD.drivers[0], dr || GOOD.drivers[3]], tensions: [], watch: [] }));
+  }
+  const before = culprits.filter((c) => !vetT(c, false).ok).length;
+  const results = culprits.map((c) => vetT(c, true));
+  const after = results.filter((r) => !r.ok).length;
+  out.before = before;
+  out.after = after;
+  out.n = culprits.length;
+  t("without the repair most of them are refused whole", before >= 9);
+  t("with it none is refused whole", after === 0);
+  const texts = (r) => [r.sections.identity, r.sections.now, ...r.sections.drivers, ...r.sections.tensions, ...r.sections.watch].filter(Boolean);
+  t("no accepted text keeps the figure, the unit slip, the forecast or the stranger", results.every((r) => texts(r).every((x) => !/27\.6|2\.1 x|will extend|Globex/.test(x.text))));
+  t("no accepted item cites an id that does not exist", results.every((r) => texts(r).every((x) => !x.cites.includes("events.nonsense") && x.cites.length <= 8)));
+  const one = vetT(patch({ now: strayFigure }), true);
+  t("the repaired now is the model's own sentences, word for word", one.ok && one.sections.now.text === GOOD.now.text);
+  t("and the trim is recorded with its reason and count", one.refused.some((x) => x.section === "now" && x.why === "invented" && x.trimmed === 1));
+  const headline = vetT(patch({ drivers: [{ text: "Reuters reports that the shares will rally on the news. The company lifts guidance.", cites: ["news.h1"] }, GOOD.drivers[3]] }), true);
+  t("a remainder that fails a whole-text rule is refused, not kept", !headline.sections.drivers.some((d) => /lifts guidance/.test(d.text)) && headline.refused.some((x) => x.section === "drivers.0"));
+  const leaning = vetT(patch({ drivers: [{ text: "The 52-week high is $171.90.", cites: ["price.last", "price.hi52"] }, GOOD.drivers[3]] }), true);
+  t("a figure only a dropped cite carried is refused", !leaning.sections.drivers.some((d) => /171\.90/.test(d.text)));
+  const allBad = vetT(patch({ now: { text: "Volume is 27.6 times its average. The shares will extend the move.", cites: GOOD.now.cites } }), true);
+  t("a section with no sentence left is refused, never rewritten", !allBad.ok && allBad.sections.now === null);
+  const nine = vetT(patch({ now: { text: GOOD.now.text, cites: [...GOOD.now.cites, ...spare] } }), true);
+  t("more than eight cites keep the first eight", spare.length === 4 && nine.ok && nine.sections.now.cites.length === 8);
+  return out;
+};
+
+{
+  const base = repairBattery(R);
+  console.log("  culprit replies of 2026-11-10 refused whole: " + base.before + " of " + base.n + " without the repair, " + base.after + " with it");
+  for (const [name, pass] of base) ok(pass, "REPAIR: " + name);
+  const plants = [
+    ["a trimmed remainder is not checked again", [["if (keep.length && keep.length < parts.length && ids.length && !run(text, ids)) {", "if (keep.length && keep.length < parts.length && ids.length) {"]], "a remainder that fails a whole-text rule is refused, not kept"],
+    ["only quotes and dealer sentences are trimmed", [["const TRIMMABLE = new Set([\"quote\", \"dealer-sign\", \"invented\", \"mislabeled\", \"unit\", \"forecast\", \"entity\"]);", "const TRIMMABLE = new Set([\"quote\", \"dealer-sign\"]);"]], "with it none is refused whole"],
+    ["a bad cite sinks the section", [["const c = checkCites(item, index, shown, trim);", "const c = checkCites(item, index, shown, false);"]], "with it none is refused whole"],
+    ["the eight-cite cap is not applied", [["    if (ids.length >= SECTION_COUNTS.cites) { dropped++; continue; }\n", ""]], "more than eight cites keep the first eight"],
+    ["a sentence is judged on quotes alone", [["const keep = parts.filter((s) => !sentenceFault(s));", "const keep = parts.filter((s) => !checkQuote(s, grams));"]], "with it none is refused whole"],
+    ["a dropped cite is kept in the list", [["      if (!first) first = fault;\n      dropped++;\n      continue;", "      if (!first) first = fault;\n      dropped++;\n      ids.push(normaliseId(String(entry)));\n      continue;"]], "no accepted item cites an id that does not exist"],
+  ];
+  let n = 0;
+  for (const [title, transforms, must] of plants) {
+    const mod = await loadMutated("shared/flows-reading.js", transforms, { salt: 40 + n++ });
+    let failedNames;
+    try { failedNames = repairBattery(mod).filter(([, pass]) => !pass).map(([name]) => name); } catch (error) { failedNames = [must, "threw: " + error.message]; }
+    ok(failedNames.includes(must), "PLANTED BUILD (" + title + ") fails its check (" + must + "): " + failedNames.join(" | "));
+  }
 }
 
 {

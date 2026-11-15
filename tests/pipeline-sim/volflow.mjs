@@ -28,20 +28,23 @@ const json = (body, status = 200) => {
   return new Response(text, { status, headers: { "Content-Type": "application/json", "Content-Length": String(text.length) } });
 };
 
-function multiLegAnswer(script, offset) {
+function multiLegAnswer(script, page, params) {
+  if (params.has("offset")) return json({ error: "unprocessable" }, 422);
   if (script.kind === "first-500") return new Response("internal error", { status: 500, headers: { "Content-Type": "text/plain" } });
-  if (script.kind === "first-422" && offset === 0) return json({ error: "unprocessable" }, 422);
-  if (script.kind === "full-then-422" && offset > 0) return json({ error: "unprocessable" }, 422);
-  const full = script.kind !== "short" && offset === 0;
+  if (script.kind === "first-422" && page === 0) return json({ error: "unprocessable" }, 422);
+  if (script.kind === "full-then-422" && page > 0) return json({ error: "unprocessable" }, 422);
+  const full = script.kind !== "short" && page === 0;
   const n = full ? 500 : 7;
-  return json({ data: Array.from({ length: n }, (_, i) => ({ id: `m${offset}-${i}` })) });
+  const top = Date.parse(params.get("older_than"));
+  return json({ data: Array.from({ length: n }, (_, i) => ({ id: `m${page}-${i}`, executed_at: new Date(top - 1000 * (i + 1)).toISOString() })) });
 }
 
 export function expectedMultiLeg(plan) {
-  const out = { names: 0, full: 0, firstBad: 0, laterBad: 0, codes: {} };
+  const out = { names: 0, full: 0, pages: 0, firstBad: 0, laterBad: 0, codes: {} };
   const add = (code, n) => { out.codes[code] = (out.codes[code] || 0) + n; };
   for (const p of plan) {
     out.names++;
+    out.pages += p.ml.kind === "full" || p.ml.kind === "full-then-422" ? 2 : 1;
     if (p.ml.kind === "full" || p.ml.kind === "full-then-422") out.full++;
     if (p.ml.kind === "first-500") { out.firstBad++; add("500", 5); }
     if (p.ml.kind === "first-422") { out.firstBad++; add("422", 1); }
@@ -91,7 +94,9 @@ export async function volflowScenario(seed, { time, vendor: mod, flow, store }) 
     await new Promise((r) => setTimeout(r, lo + w.int(hi - lo)));
     if (op === "multi-leg") {
       const p = byTicker.get(url.searchParams.get("ticker_symbol"));
-      return multiLegAnswer(p.ml, Number(url.searchParams.get("offset")) || 0);
+      const asked = url.searchParams.get("older_than");
+      if (p.mlTop === undefined) p.mlTop = asked;
+      return multiLegAnswer(p.ml, asked === p.mlTop ? 0 : 1, url.searchParams);
     }
     return json({ data: [] });
   };
@@ -159,7 +164,7 @@ export async function volflowScenario(seed, { time, vendor: mod, flow, store }) 
 
   const want = expectedMultiLeg(plan);
   const got = summary.multiLeg || {};
-  w.check(got.names === want.names && got.full === want.full && got.firstBad === want.firstBad && got.laterBad === want.laterBad,
+  w.check(got.names === want.names && got.full === want.full && got.pages === want.pages && got.firstBad === want.firstBad && got.laterBad === want.laterBad,
     `the multi-leg tally ${JSON.stringify(got)} differs from the script ${JSON.stringify(want)}`);
   const after = mod.wire.snapshot();
   const codes = {};

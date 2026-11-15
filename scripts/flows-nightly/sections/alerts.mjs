@@ -1,12 +1,16 @@
 import { sessionPrints, sessionPrintParams } from "../../../shared/flows-positioning.js";
 import { buildPulse, PULSE_FEEDS, PULSE_CAPS } from "../../../shared/flows-pulse.js";
-import { buildPolitical, POLITICAL_FEEDS, unwrapRows as unwrapVendorRows } from "../../../shared/flows-political.js";
+import { POLITICAL_FEEDS, unwrapRows as unwrapVendorRows } from "../../../shared/flows-political.js";
+import { buildPoliticalWithLayers, fitPolitical } from "../../../shared/flows-pol-build.js";
+import { positioningNightly } from "../../../shared/flows-pos-switch.js";
+import { readPoliticalLayers } from "../../flows-legs/pol-layers.mjs";
+import { fakePositioningUw } from "../../flows-legs/positioning-fake.mjs";
 import { totalsHistory } from "../../flows-legs/market.mjs";
 import { makeFakeVendor } from "../../flows-legs/fake-vendor.mjs";
 import { stampNow } from "../../flows-legs/stamp.mjs";
 import { DRY_RUN } from "../flags.mjs";
-import { MARKET_CROSS_LIMIT, NEWS_VENDOR_LIMIT, deepNames } from "../vendor-params.mjs";
-import { uw } from "../vendor.mjs";
+import { DEADLINE_MS, MARKET_CROSS_LIMIT, NEWS_VENDOR_LIMIT, deepNames } from "../vendor-params.mjs";
+import { poolWidth, runPooled, stats, uw } from "../vendor.mjs";
 import { publish } from "../store.mjs";
 import { PIPELINE_CADENCE, readDayOf } from "../clock.mjs";
 import { BOARD_SCHEMA_VERSION, NEWS_ROWS, SECTOR_ETFS, holdersRefusal, sectorLean, shapeNews } from "../rank.mjs";
@@ -321,7 +325,23 @@ export async function runAlerts(ctx) {
       if (!raws.holders) raws.holders = holders;
     }
 
-    const political = buildPolitical(raws);
+    let layerRead = null;
+    if (positioningNightly(process.env)) {
+      try {
+        const names = [...new Set([...(payloads.long.rows || []), ...(payloads.short.rows || [])].map((r) => r.t))];
+        const priorPolitical = DRY_RUN ? null : await fetchStoredPayload("political");
+        layerRead = await readPoliticalLayers({
+          uw: DRY_RUN ? fakePositioningUw() : uw, sessionDate: sessionDate || stampNow().slice(0, 10), tickers: names,
+          prior: priorPolitical, deadline: stats.startedAt + DEADLINE_MS, pool: runPooled, width: poolWidth(2).width,
+          log: (line) => console.log(line),
+        });
+        raws.layers = layerRead.layers;
+        raws.sessionDate = sessionDate;
+      } catch (error) {
+        console.warn(`  political layers: ${error.message} — the page keeps its existing feeds`);
+      }
+    }
+    const political = buildPoliticalWithLayers(raws);
 
     if (political.buyers.status === "quiet") {
       const first = unwrapVendorRows(raws.filings)[0];
@@ -330,7 +350,13 @@ export async function runAlerts(ctx) {
           Object.keys(first).slice(0, 24).join(", "));
       }
     }
-    await publish("political", {
+    if (layerRead) {
+      stages.detail({
+        plRefused: layerRead.layers.refusedCount, plLate: political.late ? political.late.rows.length : 0,
+        plUnusual: political.unusual ? political.unusual.rows.length : 0,
+      });
+    }
+    await publish("political", fitPolitical({
       v: BOARD_SCHEMA_VERSION,
       generatedAt, sessionDate,
       readAt: stampNow(),
@@ -346,7 +372,7 @@ export async function runAlerts(ctx) {
         windowed: !fellBack,
       },
       ...political,
-    });
+    }));
     const okCount = POLITICAL_FEEDS.filter((f) => political[f].status === "ok").length;
     console.log(`  political: ${okCount} of ${POLITICAL_FEEDS.length} feeds ok — ` +
       `${political.filings ?? 0} filing(s) over ${pagesRead === null ? "no" : pagesRead} ` +

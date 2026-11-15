@@ -360,7 +360,7 @@ for (const file of referenceFiles) {
   }
 }
 assert(referenceCount >= 40, "too few versioned asset references were checked");
-assert(fontReferenceCount >= 16, "too few versioned font references were checked: eight @font-face URLs and the Inter preloads");
+assert(fontReferenceCount >= 14, "too few versioned font references were checked: six @font-face URLs and the Google Sans preloads");
 
 for (const file of filesUnder("assets/js", (name) => name.endsWith(".js"))) {
 
@@ -1106,10 +1106,10 @@ const isFontAsset = (file) => /^assets\/fonts\/(?!.*\.(?:md|txt)$)/.test(file);
 for (const file of ["assets/css/base.css", "assets/js/nav.js", "assets/data/review-bank.json"]) {
   assert(isBrowserAsset(file) && !isFontAsset(file), `${file} is versioned by assets/version.txt`);
 }
-for (const file of ["assets/fonts/Inter-latin.woff2", "assets/fonts/LM-regular.woff2"]) {
+for (const file of ["assets/fonts/GoogleSans-latin.woff2", "assets/fonts/GoogleSans-italic-latin.woff2"]) {
   assert(isFontAsset(file) && !isBrowserAsset(file), `${file} is versioned by assets/fonts-version.txt: an asset bump never re-downloads a font, and a font bump is tracked by its own token (the asset bump it also causes comes from base.css's rewritten @font-face URLs)`);
 }
-for (const file of ["assets/version.txt", "assets/fonts-version.txt", "assets/fonts/NOTICE.md", "assets/fonts/JBM-OFL.txt", "assets/img/og.png"]) {
+for (const file of ["assets/version.txt", "assets/fonts-version.txt", "assets/fonts/NOTICE.md", "assets/fonts/JBM-OFL.txt", "assets/fonts/GoogleSans-OFL.txt", "assets/img/og.png"]) {
   assert(!isBrowserAsset(file) && !isFontAsset(file), `${file} is not a versioned browser asset: no bump rule applies to it`);
 }
 
@@ -1148,20 +1148,36 @@ if (diffBase) {
     "minus sign on the site falls back to the system font");
   assert(/JBM-greek\.woff2/.test(base),
     "and the greek subset ships too — the Academy's notation is σ, β and ε, and " +
-    "Latin Modern draws none of the three");
+    "code that prints them must not change face mid-line");
 
-  for (const face of ["Inter-latin.woff2", "Inter-greek.woff2"]) {
+  for (const face of ["GoogleSans-latin.woff2", "GoogleSans-greek.woff2", "GoogleSans-italic-latin.woff2", "GoogleSans-italic-greek.woff2"]) {
     const fp = path.join(ROOT, "assets/fonts", face);
-    assert(existsSync(fp), `${face} is committed — Flows is set entirely in Inter`);
+    assert(existsSync(fp), `${face} is committed — the whole site is set in Google Sans`);
     const buf2 = readFileSync(fp);
     assert.equal(buf2.subarray(0, 4).toString("latin1"), "wOF2", `${face} is a woff2 container`);
     assert(buf2.subarray(0, 512).toString("latin1").includes("cmap") || buf2.length > 8 * 1024,
       `${face} carries a character map`);
   }
-  const interLatin = base.slice(base.indexOf("Inter-latin.woff2"));
-  assert(/U\+2212/.test(interLatin.slice(0, interLatin.indexOf("}"))),
-    "base.css must declare U+2212 in Inter's latin unicode-range, or every minus sign " +
-    "in Flows falls back to the system face");
+  assert(existsSync(path.join(ROOT, "assets/fonts/GoogleSans-OFL.txt")), "the Open Font License travels with the Google Sans files");
+  const declares = (list, cp) => list.split(",").some((part) => {
+    const m = part.trim().match(/^U\+([0-9A-Fa-f]+)(?:-([0-9A-Fa-f]+))?$/);
+    return m && parseInt(m[1], 16) <= cp && cp <= parseInt(m[2] || m[1], 16);
+  });
+  for (const face of ["GoogleSans-latin.woff2", "GoogleSans-italic-latin.woff2"]) {
+    const sansLatin = base.slice(base.indexOf(face));
+    const sansRange = (sansLatin.slice(0, sansLatin.indexOf("}")).match(/unicode-range:([^;]+);/) || [])[1] || "";
+    assert(declares(sansRange, 0x2212),
+      `base.css must declare U+2212 in the unicode-range of ${face}, or every minus sign ` +
+      "on the site falls back to the system face");
+    for (const cp of [0x11E, 0x11F, 0x130, 0x131, 0x15E, 0x15F, 0xD6, 0xF6, 0xDC, 0xFC, 0xC7, 0xE7]) {
+      assert(declares(sansRange, cp), `and ${face} must declare U+${cp.toString(16).toUpperCase().padStart(4, "0")}: Turkish text may not change face mid-word`);
+    }
+    for (const cp of [0x2013, 0x2014, 0x2026, 0x2190, 0x2191, 0x2192, 0x2193, 0x2197, 0x25B2, 0x25CF, 0x2713, 0x2715, 0x2264, 0x2265, 0x2248, 0x221E]) {
+      assert(declares(sansRange, cp), `and ${face} must declare U+${cp.toString(16).toUpperCase()}, a mark the interface prints`);
+    }
+    assert(!declares(sansRange, 0x3C3), `and ${face} leaves Greek to its own file`);
+  }
+  assert(!/Inter-|LM-|"Inter"|"Latin Modern"/.test(base), "base.css declares no face but Google Sans and JetBrains Mono");
 
   for (const block of base.match(/@font-face\s*\{[^}]*\}/g) || []) {
     const face = (block.match(/font-family:\s*"([^"]+)"/) || [])[1] || "a face";
@@ -1178,25 +1194,22 @@ if (diffBase) {
     }
   }
 
-  const interGreek = base.slice(base.indexOf("Inter-greek.woff2"));
+  const interGreek = base.slice(base.indexOf("GoogleSans-greek.woff2"));
   const greekRange = interGreek.slice(0, interGreek.indexOf("}"));
-  assert(/U\+038E-03A1/.test(greekRange),
-    "and the greek subset must declare U+038E-03A1 — that is the range carrying " +
+  assert(declares((greekRange.match(/unicode-range:([^;]+);/) || [])[1] || "", 0x393) && declares((greekRange.match(/unicode-range:([^;]+);/) || [])[1] || "", 0x394),
+    "and the greek subset must declare U+0393 and U+0394 — the letters " +
     "\u0393 (the gamma regime) and \u0394 (every score move and open-interest change), " +
     "both of which Flows prints beside a figure");
 
-  for (const face of ["LM-regular.woff2", "LM-bold.woff2", "LM-italic.woff2", "LM-bold-italic.woff2"]) {
-    const lmPath = path.join(ROOT, "assets/fonts", face);
-    assert(existsSync(lmPath), `${face} is committed — the Academy's prose is set in Latin Modern`);
-    const lm = readFileSync(lmPath);
-    assert.equal(lm.subarray(0, 4).toString("latin1"), "wOF2", `${face} is a woff2 container`);
-    assert(lm.subarray(0, 512).toString("latin1").includes("cmap") || lm.length > 8 * 1024,
-      `${face} carries a character map`);
+  for (const face of ["Inter-latin.woff2", "Inter-greek.woff2", "LM-regular.woff2", "LM-bold.woff2", "LM-italic.woff2", "LM-bold-italic.woff2"]) {
+    assert(!existsSync(path.join(ROOT, "assets/fonts", face)), `${face} is gone: no rule names its family any more`);
   }
   const flowsCss = read("assets/css/flows.css");
-  assert(/--font-text:\s*-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", "Helvetica Neue", system-ui, sans-serif;/.test(flowsCss),
-    "flows.css must lead with the system stack so Apple devices draw SF Pro natively, " +
-    "with the self-hosted Inter as the face every other device falls back to");
+  assert(/--font-text:\s*"Google Sans", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;/.test(flowsCss) &&
+    /--font-display:\s*"Google Sans", system-ui, -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;/.test(flowsCss),
+    "flows.css must lead with the self-hosted Google Sans on every device, " +
+    "with the system stack only as the fallback while it loads");
+  assert(/--font-ui:\s*"Google Sans", system-ui/.test(base), "and base.css leads --font-ui with the same face for the landing page, the articles and the Lab");
   assert(/--font-figure:\s*var\(--font-text\)/.test(flowsCss),
     "and --font-figure must resolve through that stack — it is what the section's " +
     "figures, tickers, labels and axis text all resolve through");
@@ -1217,8 +1230,7 @@ if (diffBase) {
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/^\s*\/\/.*$/gm, "");
     assert(!code.includes("σ"),
-      `${file} must not emit σ: Latin Modern does not draw it, so it would fall back ` +
-      "to the system face for one glyph. Distances are printed in ATR (the card) or " +
+      `${file} must not emit σ. Distances are printed in ATR (the card) or ` +
       "SD (the desk) — two different denominators the one glyph used to hide");
   }
 }

@@ -402,7 +402,7 @@ first), skipping events whose `em` or `m1d` is null (counted in `missing`) and e
   read. With `configured: false` the view says so (section 11) rather than showing an empty list as "no
   halts".
 
-### 6.7 `shared/ff-feed-templates.js` (read-only feed templates)
+### 6.7 `shared/flows-er-feed-templates.js` (read-only feed templates)
 
 A leaf that imports `shared/ff-contract.js` (for `templateById`) and nothing else. `FEED_TEMPLATES` is a
 frozen table, each entry `{ id, title, type, target, fields, closest, differs }`:

@@ -1,4 +1,5 @@
 import { easternInstant, closeMinutes, PHASE_MINUTES, LIVE_CLOCK, prevTradingDay } from "../../shared/flows-freshness.js";
+import { fakeUniverse } from "./live-fake.mjs";
 
 const iso = (ms) => new Date(ms).toISOString();
 const BOT = "github-actions[bot]";
@@ -150,6 +151,7 @@ export function fakeWorld({ day, start, landOnDispatch = 15 * 60 * 1000, landAt 
   });
 
   let lastClockAt = -Infinity;
+  let universe = null;
   const readOnce = async (key) => {
     stat.reads.push({ key, at: t });
     const clockGap = key === "clock" ? t - lastClockAt : 0;
@@ -166,6 +168,7 @@ export function fakeWorld({ day, start, landOnDispatch = 15 * 60 * 1000, landAt 
       if (inside(t, metaPending)) return { payload: null, absent: true, status: 200 };
       return { payload: { sessionDate: metaSession(), generatedAt: iso(t) }, status: 200 };
     }
+    if (key === "universe") return { payload: (universe = universe || fakeUniverse()), status: 200 };
     return { payload: null, absent: true, status: 200 };
   };
 

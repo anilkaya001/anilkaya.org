@@ -925,6 +925,28 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   deep(fundOut.depth, { SPY: "index", QQQ: "index", IWM: "index", GLD: "fund", COPX: "fund" }, "and the run is told which depth each got");
   deep(cardDepths, { SPY: "index", QQQ: "index", IWM: "index", GLD: "fund", COPX: "fund" },
     "the card builder is told the depth too, so a fund's missing-chain reason names a fund chain and not an index one");
+  {
+    const wrote = [];
+    const chainArgs = [];
+    const pricedOut = await buildIndexDossiers({
+      tickers: ["SPY", "GLD", "SLV"], depthOf: (t) => (t === "SPY" ? "index" : "fund"),
+      indexRows: new Map(["SPY", "GLD", "SLV"].map((t) => [t, { close: "100" }])),
+      enrich: async () => ({ strikes: [1] }), features: () => ({ spot: 101, atr: 2 }), perName: async () => ({}),
+      chain: async (ticker, spot, raw, features) => { chainArgs.push([ticker, spot, raw.strikes.length, features.atr]); return null; },
+      card: ({ ticker }) => ({ ticker, panels: {} }),
+      engine: ({ ticker, card }) => (ticker === "SLV" ? null
+        : ticker === "GLD" ? { card: { ...card, engine: { status: "split" } }, extra: { ticker, engine: { ideas: ["a"] } } }
+          : { card: { ...card, engine: { ideas: ["a"] } }, extra: null }),
+      publish: async (key, body) => wrote.push([key, body.depth || null, body.engine ? (body.engine.status || "whole") : "none"]),
+    });
+    deep(wrote, [["card:SPY", "index", "whole"], ["card-x:GLD", null, "whole"], ["card:GLD", "fund", "split"], ["card:SLV", "fund", "none"]],
+      "a fund or index dossier carries the engine block when one was priced, its split half written first, and publishes without one when none was");
+    deep(chainArgs[0], ["SPY", 101, 1, 2], "the chain reader is handed the features, so the smile fit has the name's range");
+    deep(pricedOut.built, ["SPY", "GLD", "SLV"], "and a name with no engine block is still built");
+    const src = nightlySource();
+    ok(/!\(deadline && Date\.now\(\) > deadline\)/.test(src) && /rowsByTicker: new Map\(\[\[ticker, merged\.rows\]\]\)/.test(src) && !/complete: false, pages: 1 \}/.test(src),
+      "the fund and index path reads the chain page by page and runs the engine, and no longer stops at one page");
+  }
 }
 
 {

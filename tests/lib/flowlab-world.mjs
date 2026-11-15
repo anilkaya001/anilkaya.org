@@ -14,25 +14,29 @@ export const CONTRACT = FX.contract;
 const MIME = { ".js": "text/javascript", ".css": "text/css", ".woff2": "font/woff2", ".svg": "image/svg+xml", ".png": "image/png", ".json": "application/json" };
 const NOW = Date.parse("2026-10-23T19:45:00Z");
 
-export function feedOf(world) {
-  return async (p) => {
+export function feedOf(world, seen = null) {
+  const pick = (key, p, q) => (typeof world[key] === "function" ? world[key](p, q) : world[key]);
+  return async (p, q = {}) => {
+    if (seen) seen.push({ p, q });
+    const at = (key) => pick(key, p, q);
     const has = (s) => p.includes(s);
-    if (p === "/api/screener/option-contracts") return world["contract-screener"];
-    if (has("/volume-profile")) return world["contract-profile"];
-    if (has("/intraday") && has("/api/option-contract/")) return world["contract-intraday"];
-    if (p.startsWith("/api/option-contract/") && p.endsWith("/flow")) return world["contract-flow"];
-    if (p.startsWith("/api/option-trades/flow-alerts/")) return world["flow-alert-trades"];
-    if (p.endsWith("/legs")) return world["multi-leg-legs"];
-    if (p === "/api/option-trades/multi-leg") return world["multi-leg"];
-    if (p.startsWith("/api/option-trades/exchange-breakdown/")) return world["exchange-breakdown"];
-    if (p.endsWith("/flow-per-strike-intraday")) return world["strike-flow-intraday"];
-    if (p.endsWith("/flow-recent")) return world["flow-recent"];
-    if (p.startsWith("/api/group-flow/")) return world["group-greek-flow-expiry"];
-    if (p.includes("/greek-flow/")) return world["greek-flow-expiry"];
-    if (p.endsWith("/option/stock-price-levels")) return world["option-price-levels"];
-    if (p.endsWith("/stock-volume-price-levels")) return world["stock-price-levels"];
-    if (p === "/api/lit-flow/recent") return world["lit-recent"];
-    if (p.startsWith("/api/lit-flow/")) return world["lit-ticker"];
+    if (p === "/api/screener/option-contracts") return at("contract-screener");
+    if (has("/volume-profile")) return at("contract-profile");
+    if (has("/intraday") && has("/api/option-contract/")) return at("contract-intraday");
+    if (p.startsWith("/api/option-contract/") && p.endsWith("/flow")) return at("contract-flow");
+    if (p.startsWith("/api/option-trades/flow-alerts/")) return at("flow-alert-trades");
+    if (p.endsWith("/legs")) return at("multi-leg-legs");
+    if (p === "/api/option-trades/multi-leg") return at("multi-leg");
+    if (p.startsWith("/api/option-trades/exchange-breakdown/")) return q.by_trade_code ? at("exchange-breakdown-codes") : at("exchange-breakdown");
+    if (p.endsWith("/flow-per-strike-intraday")) return at("strike-flow-intraday");
+    if (p.endsWith("/flow-per-strike")) return at("flow-per-strike");
+    if (p.endsWith("/flow-per-expiry")) return at("flow-per-expiry");
+    if (p.startsWith("/api/group-flow/")) return at("group-greek-flow-expiry");
+    if (p.includes("/greek-flow/")) return at("greek-flow-expiry");
+    if (p.endsWith("/option/stock-price-levels")) return at("option-price-levels");
+    if (p.startsWith("/api/darkpool/") && p.endsWith("/price-levels")) return at("darkpool-levels");
+    if (p === "/api/lit-flow/recent") return at("lit-recent");
+    if (p.startsWith("/api/lit-flow/")) return at("lit-ticker");
     throw new Error("unexpected feed path " + p);
   };
 }
@@ -66,10 +70,19 @@ export async function memberBody(url, world, now = NOW) {
     if (part === "legs") return B.buildLegs(vf, { id: q("id"), c: q("c"), ...common });
     return B.buildStructure(vf, { c: q("c"), ...common });
   }
-  if (p === "name") return B.buildNameView(vf, { t: q("t"), view: q("view"), exp: q("exp"), spot: null, ...common });
+  if (p === "name") return B.buildNameView(vf, { t: q("t"), view: q("view"), exp: q("exp"), ...common });
   if (p === "group") return B.buildGroup(vf, { g: q("g"), exp: q("exp"), ...common });
   if (p === "lit") return B.buildLitMarket(vf, common);
   if (p === "venues") return B.buildVenuesToday(vf, { t: q("t"), ...common });
+  return null;
+}
+
+export async function onDemandBody(k, world, now = NOW) {
+  const B = createFlowlab({ isRefusal: () => false });
+  const vf = feedOf(world);
+  const common = { session: SESSION, now, closed: false };
+  if (k === "groups") return B.buildGroups(vf, common);
+  if (k === "venues") return B.buildVenuesUniverse(vf, common);
   return null;
 }
 
@@ -78,13 +91,14 @@ export const entryBody = (slug) => `<main class="flows-main" id="main"><h1 id="f
 export async function open(browser, o = {}) {
   const {
     width = 1440, height = 820, reduced = false, world = FX.worlds.normal, nightly = null, url = "/flows/flowlab/", failing = [], extraRoutes = null, time = "2026-10-23T15:30:00Z",
-    touch = false, mutate = {},
+    touch = false, mutate = {}, responses = {}, held = {},
   } = o;
   const context = await browser.newContext({ viewport: { width, height }, reducedMotion: reduced ? "reduce" : "no-preference", hasTouch: touch, isMobile: touch, deviceScaleFactor: 1 });
   const log = { requests: [], errors: [] };
   const page = await context.newPage();
   page.on("pageerror", (e) => log.errors.push(String(e)));
   page.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) log.errors.push(m.text()); });
+  const stored = nightly !== null;
   const nightlyAll = nightly || (await nightlyBodies(world));
   const html = PAGES.flowlabPage({ username: "test" });
   const shell = (body, slug) => body;
@@ -102,13 +116,23 @@ export async function open(browser, o = {}) {
     if (extraRoutes) { const r = await extraRoutes(route, u); if (r !== false) return r; }
     if (u.pathname.startsWith("/api/flows/flowlab/")) {
       const name = u.pathname.replace("/api/flows/flowlab/", "");
-      if (failing.includes(name) || failing.includes(name + ":" + (u.searchParams.get("view") || u.searchParams.get("part") || u.searchParams.get("k") || ""))) return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: { code: "internal", message: "x" } }) });
+      const sub = name + ":" + (u.searchParams.get("view") || u.searchParams.get("part") || u.searchParams.get("k") || "");
+      if (failing.includes(name) || failing.includes(sub)) return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: { code: "internal", message: "x" } }) });
+      const canned = responses[sub] || responses[name];
+      if (canned) return route.fulfill({ status: canned.status || 200, contentType: "application/json", headers: canned.headers || {}, body: JSON.stringify(canned.body) });
       if (name === "nightly") {
         const k = u.searchParams.get("k");
+        if (held[k]) return route.fulfill({ contentType: "application/json", headers: { "X-Flowlab-Held": held[k] }, body: JSON.stringify(nightlyAll["flowlab-" + k]) });
+        if (!stored && (k === "groups" || k === "venues")) return route.fulfill({ contentType: "application/json", body: JSON.stringify(await onDemandBody(k, world)) });
         return route.fulfill({ contentType: "application/json", body: JSON.stringify(nightlyAll["flowlab-" + k] || { status: "pending" }) });
       }
-      const body = await memberBody(u.pathname + u.search, world);
-      return route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
+      try {
+        const body = await memberBody(u.pathname + u.search, world);
+        return route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
+      } catch (e) {
+        if (!(e && Number.isInteger(e.status) && typeof e.code === "string")) throw e;
+        return route.fulfill({ status: e.status, contentType: "application/json", body: JSON.stringify({ error: { code: e.code, message: e.message }, ...(e.details || {}) }) });
+      }
     }
     if (u.pathname === "/api/flows/universe") return route.fulfill({ contentType: "application/json", body: JSON.stringify({ t: FX.tickers }) });
     if (u.pathname.startsWith("/api/")) return route.fulfill({ contentType: "application/json", body: JSON.stringify({ status: "pending" }) });

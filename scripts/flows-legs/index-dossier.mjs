@@ -43,7 +43,7 @@ export function shedToFit(card, { budgetBytes = INDEX_CARD_BUDGET_BYTES, order =
 
 export async function buildIndexDossiers({
   tickers = [], depthOf = () => INDEX_DEPTH, indexRows = new Map(), deadline = null,
-  enrich, features, perName, chain, card, publish, log = () => {},
+  enrich, features, perName, chain, card, engine = null, publish, log = () => {},
 } = {}) {
   const out = { built: [], failed: [], skipped: [], shed: {}, depth: {} };
   for (const ticker of tickers) {
@@ -61,13 +61,15 @@ export async function buildIndexDossiers({
       const raw = await enrich(ticker, spot, row);
       const f = features(raw, ticker, spot, row);
       const reads = await perName(ticker, f.spot || spot, raw);
-      const panels = await chain(ticker, f.spot || spot, raw);
+      const panels = await chain(ticker, f.spot || spot, raw, f);
       const built = card({ ticker, row, raw, features: f, reads, chain: panels, depth });
       built.depth = depth;
       const fit = shedToFit(built);
       if (fit.dropped.length) out.shed[ticker] = fit.dropped;
       if (fit.bytes > INDEX_CARD_BUDGET_BYTES) throw new Error(`card is ${fit.bytes} bytes after shedding, over the cap`);
-      await publish("card:" + ticker, built);
+      const priced = engine ? engine({ ticker, card: built, raw, features: f, row }) : null;
+      if (priced && priced.extra) await publish("card-x:" + ticker, priced.extra);
+      await publish("card:" + ticker, priced ? priced.card : built);
       out.built.push(ticker);
       out.depth[ticker] = depth;
     } catch (error) {

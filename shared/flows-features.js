@@ -798,7 +798,7 @@ export function conviction({ familyScores = [], coverage = 1, persistence = 0 })
     CONVICTION_WEIGHTS.persistence * per;
 
   return {
-    conviction: Math.round(100 * Math.min(Math.max(value, 0), 1)),
+    conviction: Math.round(100 * Math.min(Math.max(value, 0), 1) + 1e-9),
     agreement,
 
     agree,

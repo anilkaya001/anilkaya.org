@@ -16,6 +16,8 @@ import { flowsIngestRows } from "../server/routes/flows-ingest.js";
 import { flowsReadyRows } from "../server/routes/flows-ready.js";
 import { flowsOpsRows } from "../server/routes/flows-ops.js";
 import { flowsLedgerRows, LEDGER_ROW_CEILING } from "../server/routes/flows-ledger.js";
+import { flowsVoldeskRows } from "../server/routes/flows-voldesk.js";
+import { flowsPositioningRows } from "../server/routes/flows-positioning.js";
 import { flowsEventRiskRows, EVENTRISK_ROW_CEILING } from "../server/routes/flows-eventrisk.js";
 import { flowsFlowlabRows } from "../server/routes/flows-flowlab.js";
 import { createRouter } from "../server/router.js";
@@ -796,7 +798,8 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   await get("/api/flows/meta");
   W.memoClock({ day: SESSION, closedDays: [] }, Date.now());
   for (const key of ["ideas", "movers", "political", "unusual", "record", "sector:trix", "calib", "dispersion"]) f.put(key, { ...NIGHTLY, rows: [], state: { pending: [] } });
-  f.put("card-x:NVDA", { ...NIGHTLY, ticker: "NVDA", engine: { v: 1 } });
+  f.put("card-x:NVDA", { ...NIGHTLY, ticker: "NVDA", engine: { v: 1 }, ps: { v: 1, status: "ok", parts: { ftd: { at: 1, rv: 1, x: { rows: [["2026-10-01", 100, 1000]] } } } } });
+  f.put("positioning", { v: 1, ...NIGHTLY, rotation: { status: "quiet" } });
   f.put("brief", { v: 1, ...NIGHTLY, facts: [], silences: { pending: [], unreadable: [], quiet: [], unavailable: [] } });
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
@@ -807,14 +810,18 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   const getVendor = await client(f.D1, { UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
   const getCoverage = await client(f.D1, { FLOWS_COVERAGE: "on", FLOWS_RT_USERS: FIXTURE_ROSTER[0] });
   const ASK = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const getOwner = await client(f.D1, { FLOWS_RT_USERS: FIXTURE_ROSTER[0], FLOWS_OPS: "on", FLOWS_READY: "on", FLOWS_RT_MODE: "off" });
+  const getOwner = await client(f.D1, { FLOWS_RT_USERS: FIXTURE_ROSTER[0], FLOWS_OPS: "on", FLOWS_READY: "on", FLOWS_VOLDESK: "on", FLOWS_RT_MODE: "off" });
   const getBook = await client(f.D1, { FLOWS_RT_USERS: FIXTURE_ROSTER[0], FLOWS_LEDGER_LIVE: "owner" });
   const getLab = await client(f.D1, { FLOWS_FLOWLAB: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
+  const getLabOpen = await client(f.D1, { FLOWS_FLOWLAB: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test", UW_NOW: "2026-10-23T15:00:00Z" });
+  const getLabShut = await client(f.D1, { FLOWS_FLOWLAB: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test", UW_NOW: "2026-10-24T15:00:00Z" });
+  const getLabCorr = await client(f.D1, { FLOWS_FLOWLAB: "on", FLOWS_FLOWLAB_ANALYTICS: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
   const getFunds = await client(f.D1, { FLOWS_FLOOR_FUNDS: "on", UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test" });
+  const getPos = await client(f.D1, { FLOWS_POSITIONING: "on" });
   const getOwnerVendor = await client(f.D1, { UW_API_KEY: "stub-uw-key", UW_BASE: "http://vendor.test", FLOWS_RT_USERS: FIXTURE_ROSTER[0] });
-  const cost = async (path, { init, vendor = false, owner = false, coverage = false, book = false, lab = false, funds = false, ownerVendor = false } = {}) => {
+  const cost = async (path, { init, vendor = false, owner = false, coverage = false, book = false, lab = false, labOpen = false, labShut = false, labCorr = false, funds = false, pos = false, ownerVendor = false } = {}) => {
     const n = f.trips.length;
-    const r = await (ownerVendor ? getOwnerVendor : funds ? getFunds : lab ? getLab : book ? getBook : coverage ? getCoverage : owner ? getOwner : vendor ? getVendor : get)(path, init);
+    const r = await (ownerVendor ? getOwnerVendor : pos ? getPos : funds ? getFunds : labCorr ? getLabCorr : labOpen ? getLabOpen : labShut ? getLabShut : lab ? getLab : book ? getBook : coverage ? getCoverage : owner ? getOwner : vendor ? getVendor : get)(path, init);
     return { rows: f.rowsRead(n), trips: f.trips.length - n, status: r.res.status };
   };
   const CEILING = [
@@ -837,9 +844,13 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
     ["/api/flows/ready", 8, { owner: true }],
     ["/api/flows/ops", 24, { owner: true }],
     ["/api/flows/ops?part=ai", 280, { owner: true }],
+    ["/api/flows/voldesk", 1, { owner: true }],
     ["/api/flows/ledger", LEDGER_ROW_CEILING],
     ["/api/flows/ledger?part=book&v=1", LEDGER_ROW_CEILING, { book: true }],
     ["/api/flows/ledger?scope=sector%3AEnergy&period=session", LEDGER_ROW_CEILING],
+    ["/api/flows/positioning", 1, { pos: true }],
+    ["/api/flows/positioning?t=NVDA", 1, { pos: true }],
+    ["/api/flows/positioning?t=ZZZZ", 1, { pos: true }],
     ["/api/flows/eventrisk", EVENTRISK_ROW_CEILING, { owner: true }],
     ["/api/flows/eventrisk?part=sectors", EVENTRISK_ROW_CEILING, { owner: true }],
     ["/api/flows/eventrisk?t=NVDA", EVENTRISK_ROW_CEILING, { owner: true }],
@@ -851,6 +862,14 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
     ["/api/flows/flowlab/lit", 0, { lab: true }],
     ["/api/flows/flowlab/venues?t=NVDA", 0, { lab: true }],
     ["/api/flows/flowlab/nightly?k=roots", 1, { lab: true }],
+    ["/api/flows/flowlab/nightly?k=corr", 0, { lab: true }],
+    ["/api/flows/flowlab/nightly?k=corr", 1, { labCorr: true }],
+    ["/api/flows/flowlab/nightly?k=groups", 0, { labOpen: true }],
+    ["/api/flows/flowlab/nightly?k=groups", 1, { labShut: true }],
+    ["/api/flows/flowlab/nightly?k=venues", 0, { labOpen: true }],
+    ["/api/flows/flowlab/nightly?k=venues", 1, { labShut: true }],
+    ["/api/flows/flowlab/name?t=NVDA&view=strikes", 0, { lab: true }],
+    ["/api/flows/flowlab/name?t=NVDA&view=recent", 0, { lab: true }],
   ];
   let home = 0;
   for (const [path, ceiling, opts = {}] of CEILING) {
@@ -880,7 +899,7 @@ const PRAGMA_RE = /^PRAGMA table_info\(flows_(clock|ledger)\)/;
   const source = workerSource();
   expect(source, /path === "(\/api\/flows\/[a-z-]+)"/, { min: 3, why: "the Flows routes not yet in the table are declared in the Worker chain" });
   const stub = new Proxy({}, { get: () => () => null });
-  const routerPaths = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub), flowsIngestRows(stub), flowsReadyRows(stub), flowsPipelineRows(stub), flowsOpsRows(stub), flowsLedgerRows(stub), flowsFlowlabRows(stub), flowsEventRiskRows(stub))
+  const routerPaths = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub), flowsIngestRows(stub), flowsReadyRows(stub), flowsPipelineRows(stub), flowsOpsRows(stub), flowsLedgerRows(stub), flowsVoldeskRows(stub), flowsFlowlabRows(stub), flowsPositioningRows(stub), flowsEventRiskRows(stub))
     .rows.map((r) => r.path).filter((path) => path.startsWith("/api/flows/"));
   ok(routerPaths.length >= 24 && routerPaths.every((path) => /^\/api\/flows\/[a-z-]+(?:\/[a-z-]+)?$/.test(path)), "the router table holds the flows-read, flows-desk, flows-ai, ingest, ready and ops families: " + routerPaths.length + " rows");
   ok(routerPaths.includes("/api/flows/ready") && routerPaths.includes("/api/flows/ops"), "and the ready and ops routes are among them, so neither can escape the enumeration");
