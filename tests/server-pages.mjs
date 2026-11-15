@@ -358,7 +358,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
       const text = (await ffAs("digest", member, FF_ON))[2];
       ok(!text.includes('data-ff-absent="not_released">') || !text.includes("is not released yet."), "digest: the Digest is built, not the not-released placeholder");
       ok(/<p class="ffx-banner" id="ffxDigBanner" hidden><\/p>/.test(text), "digest: with FF_MODE on its shadow banner is hidden and empty");
-      ok(/<p class="ffx-banner" id="ffxDigBanner" data-ff-mode="shadow">Running in shadow: /.test((await ffAs("digest", member, { ...FF_ON, FF_MODE: "shadow" }))[2]), "digest: in shadow the banner is shown");
+      ok(/<p class="ffx-banner" id="ffxDigBanner" data-ff-mode="shadow" data-past="Running in shadow: [^"]*">Running in shadow: /.test((await ffAs("digest", member, { ...FF_ON, FF_MODE: "shadow" }))[2]), "digest: in shadow the banner is shown");
     }
     for (const slug of ["inbox", "wires"]) {
       const text = (await ffAs(slug, member, FF_ON))[2];
