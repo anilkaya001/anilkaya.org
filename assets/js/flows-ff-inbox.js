@@ -35,6 +35,8 @@
   var allList = $("ffxIbAllList");
   var loadBtn = $("ffxIbLoad");
   var live = $("ffxIbLive");
+  var allNote = $("ffxIbAllNote");
+  var hitTitle = $("ffxIbHitT");
 
   var S = {
     filter: "all", hits: [], next: null, more: false, heads: null, shadow: root.getAttribute("data-mode") === "shadow",
@@ -79,6 +81,19 @@
     return DASH + " unavailable: " + String((err && err.message) || "the request failed");
   }
 
+  var REASONS = {
+    run_failed: "the run failed", run_late: "the run was late", source_stale: "a source was stale", source_missing: "a source was missing",
+    record_truncated: "the record was cut short", switch_off: "the wire was switched off", switch_hold: "the wire was on hold",
+    metric_warming: "a metric was still warming up", metric_hidden: "a metric is hidden", evaluator_error: "the evaluator failed",
+    registry_conflict: "the metric list disagreed", metrics_superseded: "the metrics were replaced", registry_version: "the metric list changed version",
+    no_looks: "no look was due",
+  };
+
+  function reasonSay(code) {
+    if (typeof code !== "string" || !code) return "no reason stored";
+    return Object.prototype.hasOwnProperty.call(REASONS, code) ? REASONS[code] : code.replace(/_/g, " ");
+  }
+
   function sd(t) { return String(t).replace(/\s*\u03c3/g, " SD"); }
 
   function txt(v) {
@@ -109,12 +124,17 @@
     if (!S.unread) return { text: DASH + " reading your hits", absent: "reading" };
     var u = S.unread;
     if (!u.total) return { text: "Nothing unread", absent: null };
-    return { text: u.label + " unread · " + u.member + " yours · " + u.house + " house", absent: null };
+    var full = u.label + " unread · " + u.member + " yours · " + u.house + " house";
+    return { text: full, absent: null, shorter: [u.label + " unread · " + u.member + " yours", u.label + " unread"] };
   }
 
   function paintCap() {
     var c = capText();
-    if (cap.textContent !== c.text) cap.textContent = c.text;
+    var ways = [c.text].concat(c.shorter || []);
+    for (var i = 0; i < ways.length; i++) {
+      if (cap.textContent !== ways[i]) cap.textContent = ways[i];
+      if (i === ways.length - 1 || cap.scrollWidth <= cap.clientWidth + 0.5) break;
+    }
     if (c.absent) cap.setAttribute("data-ff-absent", c.absent);
     else cap.removeAttribute("data-ff-absent");
     cap.setAttribute("title", c.text);
@@ -151,13 +171,17 @@
     var names = members.map(who);
     var shown = names.slice(0, 4).join(", ") + (names.length > 4 ? " +" + (names.length - 4) : "");
     var title = first.wire && first.wire.title ? first.wire.title : DASH;
+    var last = S.hits[S.hits.length - 1];
+    var open = S.more && last && last.session === first.session;
+    var n = members.length + (open ? "+" : "");
+    var said = open ? title + " · " + n + " hits so far this session" : title + " · " + n + " hits this session";
     var btn = el("button", {
       type: "button", class: "ffx-ib-row ffx-ib-group", "data-group": key, "aria-expanded": "false",
       "data-unread": members.some(function (h) { return h.unread; }) ? "1" : null,
-      "aria-label": title + ": " + members.length + " hits in the " + first.session + " session. Show them.",
+      "aria-label": title + ": " + (open ? "at least " + members.length : members.length) + " hits in the " + first.session + " session. Show them.",
     }, [
-      el("span", { class: "ffx-ib-sym", text: String(members.length) }),
-      el("span", { class: "ffx-ib-sent", title: title + " · " + members.length + " hits this session", text: title + " · " + members.length + " hits this session" }),
+      el("span", { class: "ffx-ib-sym", text: n }),
+      el("span", { class: "ffx-ib-sent", title: said, text: said }),
       el("span", { class: "ffx-ib-meta" }, [
         chip(first.kind),
         el("span", { class: "ffx-ib-wt", title: names.join(", "), text: shown }),
@@ -257,6 +281,12 @@
     loadBtn.hidden = !S.more;
   }
 
+  function allSay(text) {
+    if (allNote.textContent !== text) allNote.textContent = text;
+    if (text) allNote.setAttribute("data-ff-absent", "unavailable");
+    else allNote.removeAttribute("data-ff-absent");
+  }
+
   function load(append) {
     var mine = ++S.ticket;
     if (!append) {
@@ -266,6 +296,7 @@
       S.more = false;
       paintList();
     }
+    if (append) allSay("");
     var q = "/api/ff/hits?state=" + encodeURIComponent(S.filter) + "&limit=" + PAGE_LIMIT + (append && S.next ? "&cursor=" + encodeURIComponent(S.next) : "");
     return net.get(q).then(function (body) {
       if (mine !== S.ticket) return;
@@ -293,6 +324,7 @@
       S.error = err;
       if (append) {
         moreLine.textContent = errText(err);
+        if (allDlg.open) allSay(errText(err));
         loadBtn.hidden = false;
         return;
       }
@@ -329,7 +361,7 @@
       var row = hitById(h.id);
       if (row && row !== h) { row.mark = h.mark; row.feedback = h.feedback; }
       paintList();
-      paintDetail(h);
+      if (S.selected === h.id) paintDetail(h);
       say(change.mark === "pinned" ? "Pinned." : change.mark === "dismissed" ? "Dismissed." : change.feedback === "useful" ? "Marked useful." : change.feedback === "noise" ? "Marked as noise." : "Cleared.");
     }, function (err) { say(errText(err)); actionsNote(errText(err)); });
   }
@@ -337,6 +369,11 @@
   function actionsNote(text) {
     var n = $("ffxIbActNote");
     if (n) n.textContent = text;
+  }
+
+  function receiptLine(r) {
+    if (r.status === "evaluated") return "evaluated";
+    return DASH + " not evaluated: " + reasonSay(r.reason);
   }
 
   function receiptsInto(host, h) {
@@ -352,7 +389,7 @@
         var counts = r.status === "evaluated" ? (typeof r.hits === "number" ? r.hits + " hit" + (r.hits === 1 ? "" : "s") : "") + (r.hitsCapped ? ", " + r.hitsCapped + " more over the cap" : "") : "";
         host.appendChild(el("li", { class: "ffx-ib-rc", "data-status": r.status, "data-ff-absent": r.status === "evaluated" ? null : r.reason || "missing" }, [
           el("span", { class: "ffx-ib-rs", text: String(r.session || DASH) + (r.version ? " · v" + r.version : "") }),
-          el("span", { class: "ffx-ib-rl", title: r.line || DASH, text: (r.line || DASH) + (counts ? " · " + counts : "") + (r.late ? " · late" : "") }),
+          el("span", { class: "ffx-ib-rl", title: receiptLine(r), text: receiptLine(r) + (counts ? " · " + counts : "") + (r.late ? " · late" : "") }),
         ]));
       });
       fitDetail();
@@ -364,6 +401,8 @@
   }
 
   function paintDetail(h) {
+    var f = document.activeElement;
+    var kept = f && f.classList && f.classList.contains("ffx-ib-act") && hitHost.contains(f) ? f.textContent : null;
     clear(hitHost);
     hitN.textContent = h.unread ? "Unread" : "";
     var head = el("div", { class: "ffx-ib-hh" }, [
@@ -381,7 +420,7 @@
     var wireLine = (w.title || DASH) + " · version " + (w.version || DASH);
     if (w.isCurrent === false && w.currentVersion) wireLine += " · the wire is at version " + w.currentVersion + " now";
     fact(dl, "Wire", wireLine);
-    if (h.withdrawn) fact(dl, "Withdrawn", (h.withdrawn.at && h.withdrawn.at.text ? h.withdrawn.at.text + " · " : "") + (h.withdrawn.reason || DASH));
+    if (h.withdrawn) fact(dl, "Withdrawn", (h.withdrawn.at && h.withdrawn.at.text ? h.withdrawn.at.text + " · " : "") + reasonSay(h.withdrawn.reason));
     hitHost.appendChild(dl);
     var ev = el("div", { class: "ffx-ib-evh", "data-ff-wire": w.id || null });
     hitHost.appendChild(ev);
@@ -402,6 +441,10 @@
     hitHost.appendChild(rc);
     receiptsInto(rl, h);
     fitDetail();
+    if (kept) {
+      var again = [].filter.call(acts.querySelectorAll(".ffx-ib-act"), function (b) { return b.textContent === kept; })[0];
+      if (again) again.focus();
+    }
   }
 
   function fitDetail() {
@@ -431,7 +474,7 @@
     } catch (e) { void e; }
   }
 
-  function select(id, focusPanel) {
+  function select(id, focusPanel, moveFocus) {
     if (!HIT_RE.test(id)) return;
     S.selected = id;
     writeUrl(id);
@@ -439,7 +482,10 @@
       if (b.getAttribute("data-ff-hit") === id) b.setAttribute("aria-current", "true");
       else b.removeAttribute("aria-current");
     });
-    if (focusPanel) view("hit");
+    if (focusPanel) {
+      view("hit");
+      if (moveFocus) hitTitle.focus();
+    }
     if (S.shadow) {
       clear(hitHost);
       hitHost.appendChild(el("p", { class: "ffx-ib-wait", "data-ff-absent": "held", text: DASH + " held: in shadow a hit is not opened here." }));
@@ -582,7 +628,7 @@
     }
     var id = b.getAttribute("data-ff-hit");
     if (allDlg.open) allDlg.close();
-    select(id, narrow());
+    select(id, narrow(), true);
   }
 
   function rowKeys(e) {
@@ -617,7 +663,7 @@
     });
     hooks.on("ff:health", function (d) { hooks.state(healthBox, d.state); });
   }
-  if (fit) fit.watch($("ffxIbStage"), function () { layout(); fitDetail(); });
+  if (fit) fit.watch($("ffxIbStage"), function () { layout(); fitDetail(); paintCap(); });
 
   var deep = null;
   try { deep = new URL(location.href).searchParams.get("hit"); } catch (e) { void e; }

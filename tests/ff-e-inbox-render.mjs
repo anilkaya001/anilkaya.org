@@ -1,10 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { launch } from "./lib/browser.mjs";
 import { COPY_BANNED, LIMITS } from "../shared/ff-contract.js";
 import { evidenceRows } from "../shared/ff-sentence.js";
 import { INBOX_SHADOW_LINE } from "../shared/ff-pages-inbox.js";
-import { mount as mountRaw, apiFor, evidenceOf, health, hitRows, ROOT, SIZES, STANDARD } from "./lib/ff-e-inbox-world.mjs";
+import { mount as mountRaw, apiFor, evidenceOf, health, hitRows, pageHtml, ROOT, SIZES, STANDARD } from "./lib/ff-e-inbox-world.mjs";
+
+const AXE = fs.readFileSync(createRequire(import.meta.url).resolve("axe-core/axe.min.js"), "utf8");
 
 let checks = 0;
 const failures = [];
@@ -23,6 +26,11 @@ const plant = (file, from, to) => {
   const src = read(file);
   if (src.split(from).length !== 2) throw new Error("plant anchor must occur exactly once in " + file + ": " + from.slice(0, 70));
   return { path: file, body: src.replace(from, to) };
+};
+const plantHtml = (from, to) => {
+  const src = pageHtml();
+  if (src.split(from).length !== 2) throw new Error("plant anchor must occur exactly once in the page: " + from.slice(0, 70));
+  return src.replace(from, to);
 };
 const handled = (api) => (x) => api.handle(x);
 const SD = (t) => String(t).replace(/\s*σ/g, " SD");
@@ -165,7 +173,7 @@ S.detail = async (b) => {
   const got = await m.page.evaluate(() => [...document.querySelectorAll("#ffxIbHit .ffx-ib-ev tbody tr")].map((tr) => [...tr.children].map((c) => c.textContent)));
   eq(got, want, "the evidence table equals the server's formatting of the frozen clauses");
   const recs = await m.page.evaluate(() => [...document.querySelectorAll("#ffxIbHit .ffx-ib-rc")].filter((e) => !e.classList.contains("ffx-cut")).map((e) => e.querySelector(".ffx-ib-rl").textContent));
-  ok(recs[0] === "evaluated · 1 hit, 2 more over the cap" && recs[1] === DASH + " not evaluated: run_late", "receipts say evaluated or not evaluated with the reason, and the hits over the cap");
+  ok(recs[0] === "evaluated · 1 hit, 2 more over the cap" && recs[1] === DASH + " not evaluated: the run was late", "receipts say evaluated or not evaluated with the reason in words, and the hits over the cap");
   ok(m.calls.some((c) => c.path === "/api/ff/receipts" && c.query.includes("wire=" + r0.wire_id)), "the receipts are the selected hit's wire");
   ok(new URL(m.page.url()).searchParams.get("hit") === r0.hit_id, "the address carries the selected hit");
   await m.page.click("#ffxIbHit .ffx-ib-act >> text=Pin");
@@ -315,6 +323,121 @@ S.keys = async (b) => {
   await p.ctx.close();
 };
 
+S.race = async (b) => {
+  const api = apiFor({ total: 12 });
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const m = await mount(b, 1440, 820, { api: async (x) => { if (x.path === "/api/ff/hits" && x.method === "POST") await gate; return api.handle(x); } });
+  await m.page.waitForSelector("#ffxIbHit .ffx-ib-ev");
+  await m.page.click("#ffxIbHit .ffx-ib-act >> text=Pin");
+  const second = api.world.rows[1];
+  await m.page.click(`#ffxIbList .ffx-ib-row[data-ff-hit="${second.hit_id}"]`);
+  await m.page.waitForFunction((sym) => document.querySelector("#ffxIbHit .ffx-ib-hsym")?.textContent === sym && document.querySelector("#ffxIbHit .ffx-ib-ev"), second.symbol);
+  await m.page.waitForTimeout(300);
+  release();
+  await m.page.waitForTimeout(500);
+  const after = await m.page.evaluate(() => ({
+    sym: document.querySelector("#ffxIbHit .ffx-ib-hsym").textContent, current: document.querySelector("#ffxIbList [aria-current=true]")?.getAttribute("data-ff-hit"),
+    receipts: [...document.querySelectorAll("#ffxIbHit .ffx-ib-rc")].map((e) => e.textContent),
+  }));
+  ok(after.sym === second.symbol && after.current === second.hit_id && new URL(m.page.url()).searchParams.get("hit") === second.hit_id, "a mark that resolves late leaves the newly opened hit in the pane " + JSON.stringify(after.sym));
+  ok(!after.receipts.some((t) => /reading the receipts/.test(t)), "and its receipts are read, never left reading");
+  ok(m.errors.length === 0, "race: no page error " + m.errors.join(";"));
+  await m.ctx.close();
+};
+
+S.loadFail = async (b) => {
+  const api = apiFor({ total: 40 });
+  const m = await mount(b, 1440, 820, { api: (x) => (x.method === "GET" && /cursor=/.test(x.query) ? x.json({ error: { code: "service_unavailable", message: "Service is temporarily unavailable" } }, 503) : api.handle(x)) });
+  await m.page.click("#ffxIbAll");
+  await m.page.waitForSelector("#ffxIbAllDlg[open]");
+  await m.page.click("#ffxIbLoad");
+  await m.page.waitForTimeout(400);
+  const note = await m.page.evaluate(() => { const n = document.getElementById("ffxIbAllNote"); if (!n) return { text: null }; const r = n.getBoundingClientRect(); return { text: n.textContent, inside: document.getElementById("ffxIbAllDlg").contains(n), shown: r.width > 0 && r.height > 0 }; });
+  ok(note.inside && note.shown && /^— unavailable: Service is temporarily unavailable/.test(note.text), "a Load more failure is said inside the dialog " + JSON.stringify(note.text));
+  ok(!(await m.page.isHidden("#ffxIbLoad")), "and Load more stays offered");
+  await m.ctx.close();
+};
+
+S.groupCount = async (b) => {
+  const api = apiFor({ total: 40, groupOf: 35 });
+  const m = await mount(b, 1440, 820, { api: handled(api) });
+  const g = await m.page.evaluate(() => { const r = document.querySelector("#ffxIbList .ffx-ib-group"); return { sent: r.querySelector(".ffx-ib-sent").textContent, sym: r.querySelector(".ffx-ib-sym").textContent }; });
+  ok(g.sent === "Earnings run-up · 30+ hits so far this session" && g.sym === "30+", "a group that may run past the loaded page says so far, never a final count " + JSON.stringify(g));
+  await m.page.click("#ffxIbAll");
+  await m.page.click("#ffxIbLoad");
+  await m.page.waitForTimeout(400);
+  const all = await m.page.evaluate(() => document.querySelector("#ffxIbList .ffx-ib-group .ffx-ib-sent").textContent);
+  ok(all === "Earnings run-up · 35 hits this session", "once the stream has no more, the group gives its count " + JSON.stringify(all));
+  await m.ctx.close();
+};
+
+S.reasons = async (b) => {
+  const m = await mount(b, 1440, 820, { api: handled(apiFor({ total: 12, withdrawn: [0] })) });
+  await m.page.waitForSelector("#ffxIbHit .ffx-ib-rc[data-status]");
+  const facts = await m.page.textContent("#ffxIbHit .ffx-ib-facts");
+  ok(/Withdrawn.*a source was missing/.test(facts), "a withdrawn hit gives its reason in words " + JSON.stringify(facts.slice(-60)));
+  const lines = await m.page.evaluate(() => [...document.querySelectorAll("#ffxIbHit .ffx-ib-rc, #ffxIbHit .ffx-ib-facts dd")].map((e) => e.textContent));
+  ok(lines.every((t) => !/_/.test(t)), "no machine code reaches the receipts or the facts " + JSON.stringify(lines.filter((t) => /_/.test(t))));
+  await m.ctx.close();
+};
+
+S.focus = async (b) => {
+  const m = await mount(b, 1440, 820, { api: handled(apiFor({ total: 12 })) });
+  await m.page.waitForSelector("#ffxIbHit .ffx-ib-ev");
+  await m.page.focus("#ffxIbHit .ffx-ib-act >> text=Pin");
+  await m.page.keyboard.press("Enter");
+  await m.page.waitForTimeout(400);
+  const f = await m.page.evaluate(() => { const a = document.activeElement; return { cls: a.className, text: a.textContent, pressed: a.getAttribute("aria-pressed"), inPane: document.getElementById("ffxIbHit").contains(a) }; });
+  ok(f.cls === "ffx-ib-act" && f.text === "Pin" && f.pressed === "true" && f.inPane, "the pressed toggle keeps keyboard focus after its mark lands " + JSON.stringify(f));
+  await m.ctx.close();
+};
+
+S.narrowFocus = async (b) => {
+  for (const [w, h] of [[1024, 768], [390, 844]]) {
+    const m = await mount(b, w, h, { api: handled(apiFor({ total: 12 })) });
+    const tabs = await m.page.evaluate(() => ["ffxIbTabHits", "ffxIbTabHit"].map((id) => document.getElementById(id).tabIndex));
+    eq(tabs, [0, -1], `${w}x${h}: the panel tabs are one Tab stop on first paint`);
+    await m.page.focus("#ffxIbList .ffx-ib-li:nth-child(3) .ffx-ib-row");
+    await m.page.keyboard.press("Enter");
+    await m.page.waitForTimeout(400);
+    const f = await m.page.evaluate(() => ({ view: document.getElementById("ffxInbox").getAttribute("data-view"), id: document.activeElement.id }));
+    ok(f.view === "hit" && f.id === "ffxIbHitT", `${w}x${h}: opening a row by keyboard moves focus into the hit panel ` + JSON.stringify(f));
+    await m.ctx.close();
+  }
+};
+
+S.pressed = async (b) => {
+  for (const [w, h] of [[1920, 1080], [1440, 820]]) {
+    const m = await mount(b, w, h, { api: handled(apiFor({ total: 12 })) });
+    await m.page.waitForSelector("#ffxIbHit .ffx-ib-ev");
+    await m.page.click("#ffxIbHit .ffx-ib-act >> text=Pin");
+    await m.page.waitForTimeout(300);
+    await m.page.click("#ffxIbHit .ffx-ib-act >> text=Useful");
+    await m.page.waitForTimeout(400);
+    const pressed = await m.page.evaluate(() => document.querySelectorAll('#ffxIbHit .ffx-ib-act[aria-pressed="true"]').length);
+    ok(pressed === 2, `${w}x${h}: two marks are pressed`);
+    await m.page.addScriptTag({ content: AXE });
+    const v = await m.page.evaluate(() => window.axe.run(document.querySelector("#ffxIbHit .ffx-ib-acts"), { runOnly: ["color-contrast"] }).then((r) => r.violations.flatMap((x) => x.nodes.map((n) => n.target.join(" ") + " " + (n.any[0] && n.any[0].message)))));
+    eq(v, [], `${w}x${h}: a pressed mark keeps text contrast`);
+    await m.ctx.close();
+  }
+};
+
+S.phone = async (b) => {
+  for (const coarse of [false, true]) {
+    const m = await mount(b, 390, 844, { api: handled(apiFor({ total: 30 })), context: coarse ? { hasTouch: true, isMobile: true } : {} });
+    const rows = await m.page.evaluate(() => [...document.querySelectorAll("#ffxIbList .ffx-ib-li:not(.ffx-cut) .ffx-ib-row[data-ff-hit] .ffx-ib-sent")].map((e) => ({ text: e.textContent, cut: e.scrollHeight > e.clientHeight + 1 || e.scrollWidth > e.clientWidth + 1 })));
+    ok(rows.length >= 2 && rows.every((r) => !r.cut), `390x844${coarse ? " coarse" : ""}: every shown row sentence is whole, so no figure is cut ` + JSON.stringify(rows.filter((r) => r.cut).map((r) => r.text)));
+    const c = await m.page.evaluate(() => { const e = document.getElementById("ffxIbCap"); return { text: e.textContent, title: e.title, cut: e.scrollWidth > e.clientWidth + 1 }; });
+    const parts = c.title.split(" · ");
+    const ways = parts.map((_, i) => parts.slice(0, i + 1).join(" · "));
+    ok(!c.cut && ways.includes(c.text) && /^\d+\+? unread/.test(c.text), `390x844${coarse ? " coarse" : ""}: the caption drops whole segments, never cuts one ` + JSON.stringify(c));
+    eq(await geometry(m.page), [], `390x844${coarse ? " coarse" : ""}: still one screen`);
+    await m.ctx.close();
+  }
+};
+
 const PLANTS = [
   ["Mark all read sends all and swallows hits that arrived after the read", ["readAll"], () => ({ js: plant(INBOX_JS, "var asked = { readSeq: S.heads.m, houseReadSeq: S.heads.h };", "var asked = { all: true, readSeq: 1e15, houseReadSeq: 1e15 };") })],
   ["the house cursor is not moved", ["readAll"], () => ({ js: plant(INBOX_JS, "var asked = { readSeq: S.heads.m, houseReadSeq: S.heads.h };", "var asked = { readSeq: S.heads.m, houseReadSeq: 0 };") })],
@@ -325,17 +448,29 @@ const PLANTS = [
   ["hits are never grouped", ["list"], () => ({ js: plant(INBOX_JS, "if (groups[k].length > GROUP_AFTER && !S.expanded[k]) {", "if (false) {") })],
   ["the unread marker is drawn on every row", ["list"], () => ({ js: plant(INBOX_JS, '"data-unread": h.unread ? "1" : null,', '"data-unread": "1",') })],
   ["Load more restarts from the top", ["list"], () => ({ js: plant(INBOX_JS, '(append && S.next ? "&cursor=" + encodeURIComponent(S.next) : "")', '""') })],
-  ["the current version's sentence is shown for an old hit", ["detail"], () => ({ js: plant(INBOX_JS, 'if (w.isCurrent === false && w.currentVersion) wireLine += " · the wire is at version " + w.currentVersion + " now";', "void 0;") })],
+  ["an old version's hit does not say the wire has moved on", ["detail"], () => ({ js: plant(INBOX_JS, 'if (w.isCurrent === false && w.currentVersion) wireLine += " · the wire is at version " + w.currentVersion + " now";', "void 0;") })],
   ["the evidence is printed raw", ["detail"], () => ({ js2: plant(EVIDENCE_JS, 'case "sigma": return F.px(v, 2) + " SD";', 'case "sigma": return String(v) + " SD";') })],
   ["an absent baseline is a zero", ["detail"], () => ({ js2: plant(EVIDENCE_JS, "baseline: n === null ? null :", 'baseline: n === null ? "0/20 sessions" :') })],
-  ["receipts drop the not-evaluated reason", ["detail"], () => ({ js: plant(INBOX_JS, 'el("span", { class: "ffx-ib-rl", title: r.line || DASH, text: (r.line || DASH)', 'el("span", { class: "ffx-ib-rl", title: r.line || DASH, text: (r.status === "evaluated" ? r.line : "no hit")') })],
+  ["receipts drop the not-evaluated reason", ["detail"], () => ({ js: plant(INBOX_JS, 'el("span", { class: "ffx-ib-rl", title: receiptLine(r), text: receiptLine(r)', 'el("span", { class: "ffx-ib-rl", title: receiptLine(r), text: (r.status === "evaluated" ? r.line : "no hit")') })],
   ["health is never read", ["health"], () => ({ js: plant(INBOX_JS, "  paintCap();\n  readHealth();", "  paintCap();") })],
   ["an unreachable health endpoint looks fine", ["health"], () => ({ js: plant(INBOX_JS, '      if (hooks) hooks.state(healthBox, "down");\n      else healthBox.setAttribute("data-ff-state", "down");', "      void 0;") })],
   ["every row is drawn and the list scrolls", ["layout"], () => ({ css: plant(INBOX_CSS, ".ffx-ib-list { list-style: none; margin: 0; padding: 2px 6px; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }", ".ffx-ib-list { list-style: none; margin: 0; padding: 2px 6px; flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 2px; overflow: auto; }"), js: plant(INBOX_JS, "var r = fit.rows(list, { keep: 1 });", "var r = { cut: 0 };") })],
   ["the phone shows both panels at once", ["layout"], () => ({ css: plant(INBOX_CSS, '.ffx-ib[data-view="hits"] .ffx-ib-hp, .ffx-ib[data-view="hit"] .ffx-ib-lp { display: none; }', "") })],
   ["the filters ignore the arrow keys", ["list"], () => ({ js: plant(INBOX_JS, 'var j = e.key === "ArrowRight" ? i + 1 :', 'var j = e.key === "ArrowRightX" ? i + 1 :') })],
   ["the member is sent with a mark", ["detail"], () => ({ js: plant(INBOX_JS, "var body = { id: h.id };", 'var body = { id: h.id, member: "x" };') })],
-  ["a time without TRT in the copy", ["copy", "readAll"], () => ({ js: plant(INBOX_JS, 'if (!u.total) return { text: "Nothing unread", absent: null };', 'if (!u.total) return { text: "Nothing unread at 09:30", absent: null };') })],
+  ["a row's time without TRT", ["copy"], () => ({ js: plant(INBOX_JS, 'var at = h.at && typeof h.at.text === "string" ? h.at.text : DASH;', 'var at = h.at && typeof h.at.text === "string" ? h.at.text.replace(" TRT", "") : DASH;') }), /every clock time is in TRT/],
+  ["a mark that lands late repaints the hit it was sent for", ["race"], () => ({ js: plant(INBOX_JS, "if (S.selected === h.id) paintDetail(h);", "paintDetail(h);") }), /resolves late|never left reading/],
+  ["a Load more failure is written only behind the dialog", ["loadFail"], () => ({ js: plant(INBOX_JS, "if (allDlg.open) allSay(errText(err));", "void 0;") }), /said inside the dialog/],
+  ["a group on an unfinished page prints a final count", ["groupCount"], () => ({ js: plant(INBOX_JS, "var open = S.more && last && last.session === first.session;", "var open = false;") }), /so far/],
+  ["a receipt prints the raw reason code", ["detail", "reasons"], () => ({ js: plant(INBOX_JS, 'return DASH + " not evaluated: " + reasonSay(r.reason);', "return r.line || DASH;") }), /reason in words|machine code/],
+  ["a withdrawn hit prints the raw reason code", ["reasons"], () => ({ js: plant(INBOX_JS, "reasonSay(h.withdrawn.reason));", "(h.withdrawn.reason || DASH));") }), /withdrawn hit gives its reason/],
+  ["a mark drops keyboard focus", ["focus"], () => ({ js: plant(INBOX_JS, "if (again) again.focus();", "void again;") }), /keeps keyboard focus/],
+  ["a row opened by keyboard on a narrow screen drops focus", ["narrowFocus"], () => ({ js: plant(INBOX_JS, "if (moveFocus) hitTitle.focus();", "void moveFocus;") }), /moves focus into the hit panel/],
+  ["both panel tabs are Tab stops on first paint", ["narrowFocus"], () => ({ html: plantHtml('aria-selected="false" tabindex="-1" aria-controls="ffxIbHitPanel"', 'aria-selected="false" aria-controls="ffxIbHitPanel"') }), /one Tab stop/],
+  ["a pressed mark is drawn in the hit colour on the light fill", ["pressed"], () => ({ css: plant(INBOX_CSS, "box-shadow: var(--mat-edge); color: var(--label-1); font-weight: 600; text-decoration: underline;", "box-shadow: var(--mat-edge); color: var(--ff-hit, var(--accent-ink)); font-weight: 600; text-decoration: underline;") }), /keeps text contrast/],
+  ["a phone row sentence is cut on one line", ["phone"], () => ({ css: plant(INBOX_CSS, "  .ffx-ib-sent { white-space: normal; overflow-wrap: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; text-overflow: clip; }\n", "") }), /row sentence is whole/],
+  ["the caption is cut inside a segment", ["phone"], () => ({ js: plant(INBOX_JS, "if (i === ways.length - 1 || cap.scrollWidth <= cap.clientWidth + 0.5) break;", "break;") }), /drops whole segments/],
+  ["the list row's sentence is shown in place of the version's", ["detail"], () => ({ js: plant(INBOX_JS, 'hitHost.appendChild(put(el("p", { class: "ffx-ib-big", "data-ff-hit": h.id }), h.sentence));', 'hitHost.appendChild(put(el("p", { class: "ffx-ib-big", "data-ff-hit": h.id }), (hitById(h.id) || h).sentence));') }), /sentence of the version that fired it/],
 ];
 
 const browser = await launch();
@@ -351,7 +486,7 @@ let survivors = 0;
 if (process.env.FF_E_PLANTS && production.length === 0) {
   let ran = 0;
   const wanted = process.env.FF_E_PLANT ? process.env.FF_E_PLANT.split(",").map(Number) : null;
-  for (const [index, [name, scenarios, opts]] of PLANTS.entries()) {
+  for (const [index, [name, scenarios, opts, want]] of PLANTS.entries()) {
     if (wanted && !wanted.includes(index)) continue;
     ran++;
     let patch;
@@ -360,12 +495,13 @@ if (process.env.FF_E_PLANTS && production.length === 0) {
     const before = failures.length;
     const savedChecks = checks;
     for (const s of scenarios) { try { await S[s](browser); } catch (e) { failures.push("threw " + e.message); } }
-    const caught = failures.length > before;
+    const mine = failures.slice(before);
+    const caught = want ? mine.some((f) => want.test(f)) : mine.length > 0;
     failures.length = before;
     checks = savedChecks;
     PATCH = {};
     if (!caught) survivors++;
-    console.log((caught ? "killed   " : "SURVIVED ") + name);
+    console.log((caught ? "killed   " : "SURVIVED ") + name + (mine.length ? " :: " + mine[0].slice(0, 140) : ""));
   }
   console.log(ran + " of " + PLANTS.length + " planted wrong builds run, " + survivors + " survived");
 }

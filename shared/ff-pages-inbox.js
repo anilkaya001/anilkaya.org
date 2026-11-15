@@ -39,7 +39,7 @@ export function inboxBody(glyph, { shadow = false } = {}) {
     <div class="ffx-ib-bar">
       <div class="ffx-ib-filters" role="tablist" aria-label="Which hits" id="ffxIbFilters">${INBOX_FILTERS.map(filterButton).join("")}</div>
       <div class="ffx-ib-tabs" role="tablist" aria-label="Inbox panels" id="ffxIbTabs">
-        <button type="button" role="tab" id="ffxIbTabHits" aria-selected="true" aria-controls="ffxIbListPanel" data-v="hits">Hits</button><button type="button" role="tab" id="ffxIbTabHit" aria-selected="false" aria-controls="ffxIbHitPanel" data-v="hit">Hit</button>
+        <button type="button" role="tab" id="ffxIbTabHits" aria-selected="true" tabindex="0" aria-controls="ffxIbListPanel" data-v="hits">Hits</button><button type="button" role="tab" id="ffxIbTabHit" aria-selected="false" tabindex="-1" aria-controls="ffxIbHitPanel" data-v="hit">Hit</button>
       </div>
     </div>
     <div class="ffx-ib-stage" id="ffxIbStage">
@@ -50,7 +50,7 @@ export function inboxBody(glyph, { shadow = false } = {}) {
         <footer class="ffx-ib-lfoot"><span id="ffxIbMore"></span><button type="button" class="ffx-ib-link" id="ffxIbAll" hidden>Show all</button><button type="button" class="ffx-ib-link" id="ffxIbRetry" hidden>Retry</button></footer>
       </section>
       <section class="ffx-ib-panel ffx-ib-hp" id="ffxIbHitPanel" role="tabpanel" aria-labelledby="ffxIbHitT">
-        <header class="ffx-ib-ph"><h2 id="ffxIbHitT">Hit</h2><span class="ffx-ib-ph-n" id="ffxIbHitN"></span></header>
+        <header class="ffx-ib-ph"><h2 id="ffxIbHitT" tabindex="-1">Hit</h2><span class="ffx-ib-ph-n" id="ffxIbHitN"></span></header>
         <div class="ffx-ib-hit" id="ffxIbHit"><p class="ffx-ib-wait" data-ff-absent="none_selected">${ABSENT_MARK} no hit selected</p></div>
       </section>
     </div>
@@ -59,7 +59,7 @@ export function inboxBody(glyph, { shadow = false } = {}) {
   <dialog class="ffx-ib-dlg" id="ffxIbAllDlg" aria-labelledby="ffxIbAllT">
     <div class="ffx-ib-dg"><h2 id="ffxIbAllT">All hits</h2>
       <ul class="ffx-ib-list ffx-ib-list-all" id="ffxIbAllList"></ul>
-      <div class="ffx-ib-dx"><button type="button" class="ffx-ib-link" id="ffxIbLoad" hidden>Load more</button><button type="button" class="ffx-ib-link" data-close>Close</button></div>
+      <div class="ffx-ib-dx"><p class="ffx-ib-dn" id="ffxIbAllNote" role="status"></p><button type="button" class="ffx-ib-link" id="ffxIbLoad" hidden>Load more</button><button type="button" class="ffx-ib-link" data-close>Close</button></div>
     </div>
   </dialog>
   <dialog class="ffx-ib-dlg" id="ffxIbInfo" aria-labelledby="ffxIbInfoT">

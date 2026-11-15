@@ -93,7 +93,7 @@
 .ffx-ib-evn, .ffx-ib-evcut { margin: 4px 0 0; font: var(--t-caption); color: var(--label-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ffx-ib-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; flex: none; }
 .ffx-ib-act { min-height: 32px; padding: 0 12px; border-radius: var(--r-pill); background: var(--fill-3); font-size: 13px; color: var(--label-1); }
-.ffx-ib-act[aria-pressed="true"] { background: var(--fill-1); box-shadow: var(--mat-edge); color: var(--ff-hit, var(--accent-ink)); font-weight: 600; }
+.ffx-ib-act[aria-pressed="true"] { background: var(--fill-1); box-shadow: var(--mat-edge); color: var(--label-1); font-weight: 600; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 4px; }
 .ffx-ib-actn { font: var(--t-caption); color: var(--label-3); min-width: 0; }
 .ffx-ib-actn:empty { display: none; }
 .ffx-ib-rcs { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -110,7 +110,11 @@
 .ffx-ib-dg { padding: var(--sp-5); display: flex; flex-direction: column; gap: 10px; font: var(--t-footnote); }
 .ffx-ib-dg h2 { margin: 0; font: 600 18px / 1.2 var(--font-text); }
 .ffx-ib-dg p { margin: 0; }
-.ffx-ib-dx { display: flex; justify-content: flex-end; gap: 8px; }
+.ffx-ib-dx { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+.ffx-ib-dn { margin: 0 auto 0 0; min-width: 0; font: var(--t-caption); color: var(--ff-absent, var(--label-3)); }
+.ffx-ib-dn:empty { display: none; }
+.ffx-ib-ph h2:focus { outline: none; }
+.ffx-ib-ph h2:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
 .ffx-ib-list-all { overflow: auto; max-height: min(64vh, 560px); flex: none; padding: 0; }
 
 @media (max-width: 1099.98px) {
@@ -125,6 +129,7 @@
   .ffx-ib-bar { flex-wrap: wrap; gap: 6px; }
   .ffx-ib-hv { display: none; }
   .ffx-ib-at { display: none; }
+  .ffx-ib-sent { white-space: normal; overflow-wrap: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; text-overflow: clip; }
 }
 @media (max-width: 599.98px) {
   .ffx-ib-filters button { padding: 0 9px; }
