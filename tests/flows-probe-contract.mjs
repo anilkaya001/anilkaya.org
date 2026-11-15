@@ -183,7 +183,7 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
     return [...by].filter(([, group]) => group.length > 1 && group.filter((e) => e.path === e.op).length > 1).map(([op]) => op);
   };
   deep(sharedOp(OPS), ["/api/companies/listings"], "TWO ENTRIES MAY SHARE ONE SPEC OPERATION only when all but one carry an op of their own (the treasury yield and the general economy entry), the listings path aside, whose active and delisted reads are two queries of one operation");
-  deep(sharedOp([...OPS, { ...opById("economy"), id: "economy-again" }]), ["/api/companies/listings", "/api/economy/{indicator}"], "and a planted duplicate of the general entry with no op of its own is refused");
+  deep(sharedOp([...OPS, { ...opById("economy"), id: "economy-again" }]).sort(), ["/api/companies/listings", "/api/economy/{indicator}"], "and a planted duplicate of the general entry with no op of its own is refused");
   ok(PLANS.includes("addon:private") && !PLANS.includes("addon:made-up"), "the private-markets add-on is a declared plan and an unknown plan is not");
   ok(OPS.filter((e) => e.plan === "addon:private").length === 9, "nine private-markets operations carry it");
   deep(list.liveOnly.filter((op) => registered.has(op)).sort(), OPS.filter((e) => e.liveOnly && e.envelope !== null).map((e) => e.op).sort(),
@@ -300,7 +300,7 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
     "each per-name route is asked for AAPL and NVDA");
   ok(expanded.filter((p) => entitled.includes(p.op)).every((p) => p.entitlement && !p.gated),
     "and each carries the entitlement mark into its run");
-  eq(expanded.length + 1, 300, "a weekly strict run is 299 list calls plus the session call: the 22 the event-risk reads added, the volatility desk's and the Flow Lab's probes beside the positioning package's planned ones, five of them per name for AAPL and NVDA, and the 36 macro and private-markets operations, each once");
+  eq(expanded.length + 1, 302, "a weekly strict run is 301 list calls plus the session call: the 22 the event-risk reads added, the volatility desk's and the Flow Lab's probes beside the positioning package's planned ones, five of them per name for AAPL and NVDA, and the 36 macro and private-markets operations, each once");
   ok(list.enums["/api/option-trades"].report_flags.includes("intermarket_sweep") &&
      list.enums["/api/option-trades"].upstream_condition_detail.includes("isoi"),
     "the sweep question is asked of both encodings the spec documents: report_flags and the OPRA code isoi");
