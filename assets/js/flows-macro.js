@@ -62,10 +62,10 @@
     if (x === null) return `<span class="mc-chg mut" title="${esc(why("few"))}">${DASH}</span>`;
     return `<span class="mc-chg ${toneOf(x)}">${glyphOf(x)} ${F.pct(x, dp, true)}</span>`;
   };
-  const bp = (v) => {
+  const bp = (v, tag = true) => {
     const x = num(v);
     if (x === null) return `<span class="mc-chg mut">${DASH}</span>`;
-    return `<span class="mc-chg ${toneOf(x)}" title="${esc(say("rates.horizon"))}">${glyphOf(x)} ${F.signed(x, 0)} bp <small>${esc(say("rates.horizon.short"))}</small></span>`;
+    return `<span class="mc-chg ${toneOf(x)}" title="${esc(say("rates.horizon"))}">${glyphOf(x)} ${F.signed(x, 0)} bp${tag ? ` <small>${esc(say("rates.horizon.short"))}</small>` : ""}</span>`;
   };
   const pts = (v) => {
     const x = num(v);
@@ -157,11 +157,11 @@
       const row = r.curve.find((c) => c[0] === k);
       if (!row) return `<div class="mc-row"><span>${MATS[k]}</span><span class="r">${DASH}</span><span class="r"></span><span></span></div>`;
       const d = num(row[3]) === null ? null : (row[1] - row[3]) * 100;
-      return `<div class="mc-row"><span><b>${MATS[k]}</b></span><span class="r">${px(row[1], 2)}%</span><span class="r">${bp(d)}</span><span class="r"><small>${esc(F.day(row[2]))}</small></span></div>`;
+      return `<div class="mc-row"><span><b>${MATS[k]}</b></span><span class="r">${px(row[1], 2)}%</span><span class="r">${bp(d, false)}</span><span class="r"><small>${esc(F.day(row[2]))}</small></span></div>`;
     });
     const sp = num(r.spreads.s2s10);
     rows.push(`<div class="mc-row"><span><b>2s10s</b></span><span class="r">${sp === null ? dashEl("dates") : F.signed(sp, 0) + " bp"}</span><span class="r"><span class="mc-chip">${esc(r.spreads.state || "")}</span></span><span></span></div>`);
-    put("rt", `<div class="mc-rows">${rows.join("")}</div><p class="mc-note">${esc(say("rates.state." + (r.spreads.state || "flat")))}</p>`);
+    put("rt", `<div class="mc-rows">${rows.join("")}</div><p class="mc-note">${esc(say("rates.horizon"))} ${esc(say("rates.state." + (r.spreads.state || "flat")))}</p>`);
     srcSet("rt", srcNightly());
   }
 
