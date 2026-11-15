@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "431";
+export const ASSET_VERSION = "432";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -1093,7 +1093,7 @@ const feedHead = (key, title) => `
     <p class="fd-meta" id="${key}Meta"></p>
   </header>`;
 
-export function eventsPage({ username = "", odds = false } = {}) {
+export function eventsPage({ username = "", odds = false, ipo = false } = {}) {
   return `${head("Flows — Events", "What reports next, what is priced into it, and what else is on the calendar.", FEEDS_CSS)}
 ${shell("Events", "events", username, `${feedHead("ev", "Events")}
   <p class="visually-hidden" id="evStatus" role="status">Loading the calendar…</p>
@@ -1106,13 +1106,13 @@ ${shell("Events", "events", username, `${feedHead("ev", "Events")}
     completed session&#39;s close. Nothing here is a forecast.</p>
   </div>
   <div class="fd-chips" id="evChips"></div>
-${feedTabs([["week", "Week", "evWeekCard"], ["earn", "Earnings", "evEarnCard"], ["macro", "Macro", "evMacroCard"], ["fda", "FDA", "evFdaCard"], ["react", "Reaction", "evReactCard"]])}
+${feedTabs([["week", "Week", "evWeekCard"], ["earn", "Earnings", "evEarnCard"], ["macro", "Macro", "evMacroCard"], ["fda", "FDA", "evFdaCard"], ...(ipo ? [["ipo", "IPOs", "evIpoCard"]] : []), ["react", "Reaction", "evReactCard"]])}
   <div class="fd-stage" id="fdStage" data-view="week">
 ${feedModule("evWeekCard", "Week ahead", `<div class="fd-body" id="evWeek"></div>`, { tab: "week" })}
 ${feedModule("evEarnCard", "Earnings", `<div class="fd-body" id="evEarn"></div>`, { tab: "earn" })}
 ${feedModule("evMacroCard", "Macro", `<div class="fd-body" id="evMacro"></div>`, { tab: "macro" }).replace('id="evMacroCard"', odds ? 'id="evMacroCard" data-odds="on"' : 'id="evMacroCard"')}
 ${feedModule("evFdaCard", "FDA", `<div class="fd-body" id="evFda"></div>`, { tab: "fda" })}
-${feedModule("evReactCard", "Reaction", `<div class="fd-body" id="evReact"></div>`, { tab: "react" })}
+${ipo ? feedModule("evIpoCard", "IPOs", `<div class="fd-body" id="evIpo"></div>`, { tab: "ipo" }) + "\n" : ""}${feedModule("evReactCard", "Reaction", `<div class="fd-body" id="evReact"></div>`, { tab: "react" })}
   </div>
 `, { chrome: false })}
 ${UI_SCRIPT}

@@ -7,6 +7,13 @@ import { addDays, vnum, compactNumbers, SILENCE } from "../../shared/flows-cross
 import { addSessions } from "../../shared/flows-calendar.js";
 import { reactionPlan } from "../../shared/flows-reports.js";
 import { pathFor } from "../../shared/flows-vendor-ops.js";
+import { shapeIpoCalendar } from "../../shared/flows-ipo.js";
+
+export const IPO_NIGHTLY_SWITCH = "FLOWS_IPO_NIGHTLY";
+
+export function ipoEnabled(env = process.env) {
+  return String((env && env[IPO_NIGHTLY_SWITCH]) || "on").trim().toLowerCase() !== "off";
+}
 
 export const FDA_LIMIT = 200;
 
@@ -38,7 +45,7 @@ export function fitEventsAdditions(additions, { budgetBytes = EVENTS_ADDITIONS_B
     bytes = sizeOf(additions);
   };
   for (const cap of CALENDAR_SHED_CAPS) for (const [name, route] of routes) trim(name, route, cap);
-  for (const key of ["fda", "macro"]) trim(key, additions[key], 20);
+  for (const key of ["fda", "macro", "ipo"]) trim(key, additions[key], 20);
   if (cal) trim("earningsCalendar tonight", cal.tonight, 20);
   additions.additionsBudget = { budgetBytes, shed };
   additions.additionsBudget.bytes = sizeOf(additions);
@@ -58,6 +65,7 @@ export function calendarPlan(sessionDate, { sessions = CALENDAR_SESSIONS, ledger
 
 export async function readCatalysts(uw, {
   sessionDate = null, earningsTickers = [], deadline = null, pool = null, width = 1, reactions = null, ledgerAsOf = null,
+  ipo = ipoEnabled(),
 } = {}) {
   const raw = { calls: 0, calendar: [], earnings: new Map() };
   const get = async (path, params, opts) => {
@@ -70,6 +78,7 @@ export async function readCatalysts(uw, {
     ...(sessionDate ? { target_date_min: sessionDate, target_date_max: addDays(sessionDate, FDA_HORIZON_DAYS) } : {}),
     limit: FDA_LIMIT,
   });
+  raw.ipo = ipo ? await get(pathFor("ipo-calendar"), {}, { envelope: true }) : { ok: false, off: true, body: null, status: null, error: IPO_NIGHTLY_SWITCH + " is off" };
   for (const step of calendarPlan(sessionDate, { ledgerAsOf })) {
     const held = step.role === "reaction" && reactions && reactions.byKey ? reactions.byKey.get(`${step.route}|${step.date}`) : null;
     if (held) { raw.calendar.push(held); continue; }
@@ -96,6 +105,9 @@ export function assembleCatalysts(raw, {
     : silenceOf(r.econ || { ok: false, error: "not read" }, { what: "economic-calendar" });
   const fda = r.fda && r.fda.ok ? shapeFdaCalendar(rowsOf(r.fda.body), { sessionDate, carded })
     : silenceOf(r.fda || { ok: false, error: "not read" }, { what: "fda-calendar" });
+  const ipo = r.ipo && r.ipo.ok ? shapeIpoCalendar(r.ipo.body, { sessionDate })
+    : r.ipo && r.ipo.off ? { status: "unavailable", reason: SILENCE.unread, why: "off" }
+      : silenceOf(r.ipo || { ok: false, error: "not read" }, { what: "ipo-calendar" });
 
   const sessions = new Map();
   const reactionRows = [];
@@ -149,7 +161,7 @@ export function assembleCatalysts(raw, {
   }
   return {
     additions: fitEventsAdditions(compactNumbers({
-      macro, fda, earningsCalendar: calendar,
+      macro, fda, ipo, earningsCalendar: calendar,
       catalysts: reportCatalysts || { status: "unavailable", reason: SILENCE.unread },
       history,
       historyRule: "r = median |1d move| / expected move over the last reports; beat = share above 1; hit = share of long 1d straddles that paid; drift = median continuation; mv = median |1d move|; em = the calendar's expected move for the next report, null where none was priced",

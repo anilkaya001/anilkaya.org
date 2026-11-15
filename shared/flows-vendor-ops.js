@@ -4,7 +4,7 @@ export const LICENCES = Object.freeze(["aggregate", "derived", "print", "quote",
 
 export const PLANS = Object.freeze(["advanced", "addon:volatility", "addon:futures", "addon:private", "enterprise", "premium"]);
 
-const DEFAULTS = Object.freeze({ method: "GET", plan: "advanced", envelope: "data", limiter: null, liveOnly: false, deprecated: false, maxBytes: null, reads: null });
+const DEFAULTS = Object.freeze({ method: "GET", plan: "advanced", envelope: "data", limiter: null, liveOnly: false, planned: false, deprecated: false, maxBytes: null, reads: null });
 
 const RAW = [
   { id: "ohlc-1d", path: "/api/stock/{ticker}/ohlc/1d", op: "/api/stock/{ticker}/ohlc/{candle_size}", licence: "quote", klass: "static", limiter: "ondemand", reads: ["open", "high", "low", "close", "volume"] },
@@ -69,6 +69,9 @@ const RAW = [
   { id: "etf-tide", path: "/api/market/{ticker}/etf-tide", licence: "aggregate", klass: "breadth", reads: ["timestamp", "net_call_premium", "net_put_premium", "net_volume", "underlying_price"] },
   { id: "group-flow-greek", path: "/api/group-flow/{flow_group}/greek-flow", licence: "aggregate", klass: "nightly" },
   { id: "sector-tide", path: "/api/market/{sector}/sector-tide", licence: "aggregate", klass: "breadth", reads: ["timestamp", "net_call_premium", "net_put_premium", "net_volume"] },
+  { id: "ipo-calendar", path: "/api/calendar/ipo", licence: "aggregate", klass: "nightly", maxBytes: 131072, reads: ["ipos", "ticker", "name", "exchange", "ipo_date", "price_range_low", "price_range_high", "currency"] },
+  { id: "listings", path: "/api/companies/listings", planned: true, licence: "aggregate", klass: "slow", maxBytes: 4194304, reads: ["listings", "ticker", "name", "exchange", "asset_type", "status", "ipo_date", "delisting_date", "date"] },
+  { id: "potus-schedule", path: "/api/potus/schedule", planned: true, licence: "text", klass: "nightly", maxBytes: 131072, reads: ["date", "time", "type", "coverage", "location", "details"] },
   { id: "fda-calendar", path: "/api/market/fda-calendar", licence: "aggregate", klass: "nightly" },
   { id: "option-activity-unusual", path: "/api/option-activity/unusual", licence: "print", klass: "nightly" },
   { id: "options-pulse-total", path: "/api/options-pulse/total", licence: "aggregate", klass: "nightly" },

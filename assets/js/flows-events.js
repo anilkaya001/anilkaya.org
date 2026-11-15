@@ -17,6 +17,7 @@
     earn: document.getElementById("evEarn"),
     macro: document.getElementById("evMacro"),
     fda: document.getElementById("evFda"),
+    ipo: document.getElementById("evIpo"),
     react: document.getElementById("evReact"),
   };
 
@@ -516,6 +517,54 @@
       UI.legend([key(h("i", { class: "is-dia", style: { "--c": UI.cssVar("--lvl-pain") } }), "Dated"), key(h("i", { class: "fe-key-span" }), "Window")]));
   }
 
+  const IPO_RANGE_WHY = {
+    unpriced: "The feed states no price range for this listing yet.",
+    range: "The feed's price range is not two positive, ordered ends, so it is not printed.",
+    currency: "The feed states no currency for this range, so it is not printed.",
+  };
+  const ipoRange = (r) => {
+    if (r.why || n(r.lo) === null || n(r.hi) === null) {
+      const why = IPO_RANGE_WHY[r.why] || IPO_RANGE_WHY.unpriced;
+      return h("span", { class: "fu-v", title: why, "aria-label": "None: " + why }, DASH);
+    }
+    const text = r.cur === "USD" ? "$" + F.px(n(r.lo), 2) + "\u2013$" + F.px(n(r.hi), 2) : F.px(n(r.lo), 2) + "\u2013" + F.px(n(r.hi), 2) + " " + String(r.cur);
+    return h("span", { class: "fu-v fu-strong", title: "Price range " + text }, text);
+  };
+
+  function paintIpo(payload) {
+    if (!host.ipo) return;
+    const st = blockState(payload.ipo, "IPO calendar");
+    if (st.state !== "ok") {
+      const reason = payload.ipo && payload.ipo.why === "off" ? "The nightly run did not read the IPO calendar tonight: its switch is off." : st.state === "quiet" ? "Read, and the feed dates no listing inside the horizon." : st.reason;
+      silence(host.ipo, { state: st.state, reason }, "IPOs", 200);
+      return;
+    }
+    const rows = (payload.ipo.rows || []).filter((r) => r && ISO.test(String(r.d || "")));
+    if (!rows.length) { silence(host.ipo, { state: "quiet", reason: "Read, and the feed dates no listing inside the horizon." }, "IPOs", 200); return; }
+    setModuleState(host.ipo, { state: "ok" }, "IPOs");
+    const items = rows.map((r) => {
+      const dd = n(r.dd);
+      return h("div", { class: "fe-mrow fe-irow", role: "listitem", title: String(r.t || DASH) + " " + MID + " " + String(r.name || DASH) + " " + MID + " " + String(r.ex || "no venue stated") },
+        h("span", { class: "fe-edate", title: dd === null ? null : "In " + days(dd) }, h("b", null, weekday(r.d)), h("small", null, F.day(r.d))),
+        h("span", { class: "fe-mname" }, h("b", { title: r.t ? null : "No ticker stated yet" }, r.t ? String(r.t) : DASH), r.name ? h("small", null, String(r.name)) : null),
+        r.ex ? h("span", { class: "fe-iex", title: String(r.ex) }, String(r.ex)) : h("span", { class: "fe-iex", title: "No exchange stated", "aria-label": "None: no exchange stated" }, DASH),
+        ipoRange(r));
+    });
+    host.ipo.replaceChildren(
+      h("div", { class: "fe-mrow fe-irow fu-head", ...HIDE }, h("span", null, "When"), h("span", null, "Listing"), h("span", null, "Venue"), h("span", V, "Range")),
+      withList(UI.list(items, { visible: 7, label: "Listings the feed dates next" })));
+  }
+
+  function ipoInfo() {
+    const f = (S.payload || {}).ipo || {};
+    return {
+      title: "IPOs",
+      lead: "Listings the feed dates on or after the session and inside the horizon, earliest first. A range is the offering's stated price range, printed only when both ends are positive and in order and the row names its currency.",
+      facts: [["Inside the horizon", n(f.inWindow) === null ? null : count(f.inWindow)], ["Read", n(f.read) === null ? null : count(f.read)], ["Undated", n(f.undated) === null ? null : count(f.undated)], ["Already past", n(f.past) === null ? null : count(f.past)], ["Beyond the horizon", n(f.outside) === null ? null : count(f.outside)], ["Horizon", n(f.horizonDays) === null ? null : days(n(f.horizonDays))]],
+      notes: ["The date is the feed's expected first trading day; offerings are often moved or pulled, so a listing can leave this list without trading."],
+    };
+  }
+
   function windowLabel(tgt) {
     const y = String(tgt.from || tgt.to || "").slice(0, 4);
     const p = String(tgt.p || "");
@@ -725,6 +774,7 @@
     setModuleInfo(host.earn, "earnings", earnInfo);
     setModuleInfo(host.macro, "macro prints", macroInfo);
     setModuleInfo(host.fda, "FDA dates", fdaInfo);
+    if (host.ipo) setModuleInfo(host.ipo, "IPOs", ipoInfo);
     setModuleInfo(host.react, "the reaction", reactInfo);
   }
 
@@ -734,7 +784,7 @@
     statusEl.textContent = what;
     statusEl.dataset.empty = kind;
     const st = { state: kind === "unreadable" ? "withheld" : kind === "pending" ? "pending" : "unavailable", reason: what };
-    for (const [el, label, hh] of [[host.week, "Week ahead", 220], [host.earn, "Earnings", 240], [host.macro, "Macro", 200], [host.fda, "FDA", 200], [host.react, "Reaction", 200]]) silence(el, st, label, hh);
+    for (const [el, label, hh] of [[host.week, "Week ahead", 220], [host.earn, "Earnings", 240], [host.macro, "Macro", 200], [host.fda, "FDA", 200], [host.ipo, "IPOs", 200], [host.react, "Reaction", 200]]) if (el) silence(el, st, label, hh);
     host.chips.replaceChildren(UI.chips(["Reporting", "Gated", "Macro", "FDA", "Reaction"].map((label) =>
       UI.gaugeChip({ g: muted(st), value: DASH, label, info: { title: label, state: st.state, lead: what } })), "Calendar"));
   }
@@ -784,6 +834,7 @@
     paintMacro(payload);
     loadOdds();
     paintFda(payload);
+    paintIpo(payload);
     paintReact(payload);
     wireInfos();
   }).catch((error) => {

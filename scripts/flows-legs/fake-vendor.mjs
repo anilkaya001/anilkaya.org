@@ -412,6 +412,14 @@ export function makeFakeVendor({ sessionDate, screenerRows = [], carded = [] } =
         date_string: tgt, nic_number: "", outcome_brief: "", unique_identifier: "fda-" + i,
       })) };
     }],
+    [/^\/api\/calendar\/ipo$/, () => ({ data: { ipos: [
+      { ticker: "SYX401", name: "Synthetic Listing One", exchange: "NASDAQ", ipo_date: addDays(S, 3), price_range_low: 14, price_range_high: 16, currency: "USD" },
+      { ticker: "SYX402", name: "Synthetic Listing Two", exchange: "NYSE", ipo_date: addDays(S, 9), price_range_low: 21.5, price_range_high: 23.5, currency: "USD" },
+      { ticker: "SYX403", name: "Synthetic Listing Three", exchange: "NASDAQ", ipo_date: addDays(S, 17), price_range_low: null, price_range_high: null, currency: "USD" },
+      { ticker: "SYX404", name: "Synthetic Listing Four", exchange: "NYSE", ipo_date: addDays(S, 30), price_range_low: 10, price_range_high: 12, currency: null },
+      { ticker: null, name: "Synthetic Listing Five", exchange: null, ipo_date: null, price_range_low: null, price_range_high: null, currency: null },
+      { ticker: "SYX405", name: "Synthetic Listing Six", exchange: "NASDAQ", ipo_date: addDays(S, -2), price_range_low: 8, price_range_high: 9, currency: "USD" },
+    ] } })],
     [/^\/api\/earnings\/(premarket|afterhours)$/, (p, m) => {
       const rnd = prng(hash("cal:" + m[1] + p.date));
       const n = isWeekdayIso(p.date) ? Math.floor(rnd() * 7) : 0;

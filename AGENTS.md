@@ -348,6 +348,7 @@ full generated index, and `docs/map-2026-10-05.md` is the frozen system map
 | `scripts/prepush.mjs` | The local gate before a push: `node scripts/prepush.mjs [--base=<ref>] [--jobs=n] [--list]` names the suites a change can break and runs them in parallel with the always-on set (`contracts`, `docs`, `flows-weight`, `architecture`, `run`, `lib-contract` and the five Worker-table suites `server-kernel`, `server-rt`, `server-pages`, `server-router` and `route-matrix`, which scan whole trees the import closure cannot see). It joins `node run.mjs --affected-list` with a table of path rules for the render suites that a stylesheet or page change reaches but the import closure does not (`flows-pages-render`, `flows-glass-render`, `flows-overview`, `flows-home-onescreen` and their neighbours), prints one line per suite and the last 25 lines of each failure, and exits 1 on any failure. It reads no network and no vendor; the sandbox needs `PLAYWRIGHT_BROWSERS_PATH` and, for workerd suites, `FLOWS_TEST_SANDBOX=1`. |
 | `assets/js/flows-status.js`, `assets/js/flows-status-latency.js`, `assets/js/flows-status-capacity.js`, `assets/js/flows-status-coverage.js`, `assets/css/flows-status.css`, `tests/flows-status-render.mjs`, `tests/lib/status-world.mjs` | The owner-only Status and Capacity page, `/flows/status/` (`statusPage`, a row in `server/routes/flows-pages.js` marked `ownerOnly`: a signed-in member who is not an owner gets the unknown-page 404, an anonymous visitor the sign-in page, and no switch opens it to members). It fits one screen with no page scroll at 1440x820, 1024x768 and 390x844: a title row, a readiness line (its blockers behind a button and a dialog), four slim tiles, a tablist of four tabs (Health, Capacity, Latency, Coverage; `FlowsUI.segmented` with arrow, Home and End keys, `aria-controls` and `aria-labelledby` to four tabpanels, the address `#view=` written with `replaceState` and read on load and on `hashchange`, the old `usage` landing on Capacity) over a grid of cards. Every card is a summary that fits its box: a state line, one or two gauges or a compact table whose rows are trimmed to the height the card has by `fit` (a `data-what` table loses trailing rows until nothing overflows and says `+N more <what> in Details`), re-run on resize; a Details button opens a native `dialog` that holds the full module, painted by the same code (the long tables, the stage ledger, the plan lines, the switches), so nothing is dropped, only moved. Below 641 px one card shows at a time, chosen by a second segmented switch (`aria-controls` the card). No sidebar links it: an owner reaches it from the Fire & Forget mark in the sidebar footer or by its address. Reads, each polled only for the tab that shows it and only while the page is visible (one timer, no read and no timer while hidden, one immediate read on return, the interval doubled after an error up to five minutes): `/api/rt/status` (30 s, 10 s on Latency), `/api/flows/ops` (60 s), `/api/flows/ops?part=ai` (once, Capacity and Latency), `/api/flows/ops?part=coverage` (5 min, Coverage), `/api/flows/lk?k=heartbeat` (60 s), `/api/flows/lk?k=strips:series` (5 min, Latency), `/api/flows/meta`, `/api/flows/ready` and `/api/flows/ai-usage` (5 min). It makes no vendor call and no model call, adds no payload and no global (`FlowsUI.statusKit` is a property). Health: the engines (nightly, Tier 1, focus, Tier 2, worst stale key, the GitHub dispatch refusal), the rail (each topic's lag from `lagMs` for stamped topics and `itemLagMs` for flagged alerts and news), the nightly run with its slowest stages, the read-only switches. Capacity: the vendor key's calls today (a reading counts as today's only while its vendor window, from the ops view, holds the page's clock, and the turn of that window is printed in TRT with the dashboard it is stated on) and the rail's minute against their lines, the model neurons and calls against the enforced 30,000 cap with the free allowance and the dollars beyond it, the platform meters (D1, Durable Objects, Workers requests: the allowance and a dash for use with its reason) and the cron ticks from the ledger, and the limits enforced. Latency: feed p50 and p95, the Tier 2 quote age per pass as a chart whose numbers are in a dialog, the stored feeds worst first, the timing of the engines, the socket and this browser. Coverage: every declared nightly and shared key by its size against the 100 KiB budget, its session against the nightly's, and the keys missing, then the nightly's cards built, failed and skipped. Every time is written `HH:MM TRT` (`HH:MM:SS TRT` for reads) by a local formatter that adds three hours (Türkiye has no daylight time), with the date only when it is not today, and no other zone is named. A source that cannot be read, or a value it does not carry, is a dash with its reason, never zero; what cannot be measured on the site (D1 rows, Durable Object use, Workers requests, option prints, the vendor's per-minute counter, the card rows' count) says so. Nothing is invented: there is no governor, no toggle and no projection. The panels are the deferred group `status-panels` (`flows-chart.js`, `flows-status-latency.js`, `flows-status-capacity.js`, `flows-status-coverage.js`, requested the first time a tab other than Health opens). `tests/lib/status-world.mjs` builds the fixtures, the Worker's real `opsBody` among them, and serves the page. The suite is Chromium with `page.route` stubs, no server: the routes each tab asks and no others, no page scroll, no clipped card and no horizontal scroll for four tabs at three viewports, every printed figure against its fixture, the dialogs, the phone's card switch, nulls and failures as dashes with reasons, TRT only, the refresh census over a paused clock, hidden-tab silence, error backoff, axe, and planted wrong builds (an unfitted card, a lost note, a frame lag for alerts, an Eastern clock, a fixed source count, the free allowance as the cap, a missing key as zero bytes, a share against the wrong budget, a zero for an absent figure) that must each fail. |
 | `scripts/uw-spec-diff.mjs` | Reads two copies of the vendor's OpenAPI document in the layout `docs/uw-openapi.yaml` has and names what moved between them: operations added and removed, parameters added, removed or flipped between required and optional, new deprecations (a `deprecated: true` line or a description that says so), changed plan sentences and new changelog entries. `--check` exits 1 on any difference, 2 on a document it cannot read. It prints no response data; `docs/uw-openapi.md` says when to run it. |
+| `shared/flows-ipo.js`, `tests/flows-ipo.mjs`, `tests/flows-events-ipo-render.mjs`, `tests/gen-intel-fixtures.py`, `tests/fixtures-intel.json` | The IPO calendar, the one family the endpoint census built (docs/vendor-coverage.md, Endpoint census). `shapeIpoCalendar(body, { sessionDate })` reads the feed's `{data: {ipos}}` envelope: listings dated on or after the session and within `IPO_HORIZON_DAYS` (92 calendar days), earliest first, at most 40, with whole calendar days `dd` from the session; a price range is kept only when both ends are positive, ordered and the row names a three-letter currency, else both ends are null and `why` is `unpriced`, `range` or `currency`; names and venues are cleaned by the dossier's `cleanLabel`; undated, past, beyond-horizon, duplicate and nameless rows are counted, and an unshaped body is unavailable, never quiet. The events leg makes one call a night (`CALL_COST.ipo`; `FLOWS_IPO_NIGHTLY=off` makes none) and publishes `events.ipo`; the Events page draws it on an IPOs tab only when `FLOWS_IPO` (`wrangler.toml`, shipped `owner`; `on` opens it to members) allows, and is byte for byte the page it was otherwise. `listings` and `potus-schedule` are registered as planned (`planned: true`, read lists from the spec, probed weekly, read by no production code). `tests/gen-intel-fixtures.py` writes the three spec-derived bodies with invented tickers; `flows-ipo` holds the census table to the spec and the registry, the shaper to worked answers, the leg's switch, envelope, failure and deadline, and twelve planted wrong builds; `flows-events-ipo-render` (Chromium, `page.route`, no server) holds every printed row, range and dash with its reason, four states, headings over their columns and one screen at four sizes, and six planted builds of the served files. |
 | `tests/lib/affected.mjs`, `tests/ci-affected.mjs` | Affected-suite selection for pull requests: `node run.mjs --affected <base-ref>` (from `tests/`) reads `git diff --name-only <base>...HEAD`, joins each changed file to the suites whose import closure (the registry's walker, static and literal dynamic imports) or `covers` globs reach it, and runs those plus the whole `fast` group; `--affected-list` prints the selection without running, and with `--shard i/n` the shard keeps only its affected suites. Any doubt selects everything: an unreadable or empty diff, a file that maps to no suite (a deletion included), a file under `tests/lib/`, `tests/run.mjs`, the lockfile and `tests/package.json`, `.github/`, `wrangler*.toml`, `worker.js`, `.assetsignore` or `_headers`, or a file that reaches more than 40% of the suites. The workflow's `plan` job runs the list on pull requests only; the push-to-main run, the weekly schedule and manual dispatch never select, and a partial pull-request run writes no `tested-tree` status, so `scripts/ci-reuse.mjs` can never skip the push gate on a partial run. `ci-affected` proves exact selections on a miniature repository (leaf, transitive, literal dynamic import, covers, registry file), every fallback, the real `git diff`, and that selectors ignoring `covers` or transitive imports fail the same expectations. |
 | `tests/lab-write-contract.mjs` | The Lab write limiter and the attempt ledgers with no server: `worker.js` in Node over `node:sqlite`, a counting `LAB_WRITE` fake (the 31st mutation in a window is a 429 with `Retry-After`, every mutation route is behind it, reads are not, a missing or failing limiter admits the write, a refused request makes no D1 trip), the attempt statements planned by primary key only, the `received_at` indexes and the 03:00 ET prune. |
 | `tests/flows-pages-render.mjs`, `tests/fixtures-pages-render-baseline.json` | Every page function in `FLOWS_PAGES` (fifteen) rendered in Chromium at 320, 390 and 1440 px against the pipeline's dry-run emit, served from `page.route` with no server (about 2.5 minutes, 60 s of it the emit). Hard assertions: one `h1`, no skipped heading level, no page error, and the Ask dock (a dialog with `aria-modal`, nothing outside it focusable, focus inside and the main region `inert` when narrow; a complementary landmark beside a usable page when wide; Escape closes and focus returns to the tab). Counted against the committed baseline, which may fall but not rise: axe-core `color-contrast`, unnamed controls, structure rules, horizontal-overflow pixels, targets under 24 px, and (coarse pointer) targets under 44 px. `PAGES_RENDER_UPDATE=1` rewrites the baseline; the metrics go to `$GITHUB_STEP_SUMMARY`; no screenshot is kept. `axe-core` is pinned in `tests/package.json`; where `tests/node_modules` predates the pin, `NODE_PATH` can point at a directory that has it. |
@@ -1593,7 +1594,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 280 suites: 225 that need only Node (N), 40 that also
+`tests/suites/` registers 282 suites: 227 that need only Node (N), 40 that also
 need Playwright's Chromium (C) and 15 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1616,49 +1617,49 @@ flows-chain-panels        flows-contracts           flows-conviction          fl
 flows-coverage            flows-d1-budget           flows-data-fixes          flows-decisions-closed
 flows-deepen              flows-defer-render        flows-desk-audit          flows-desk-calls
 flows-desk-sc             flows-dispatch-check      flows-dispersion          flows-door-v2
-flows-dossier             flows-dossier-reads       flows-engine-budget       flows-events-odds-render
-flows-evt                 flows-fact-ids            flows-feeds-onescreen     flows-film
-flows-floor-funds         flows-floor-funds-live    flows-flow-below-render   flows-flow-registry
-flows-flowlab             flows-flowlab-nightly     flows-flowlab-onescreen   flows-flowlab-render
-flows-forward             flows-forward-lab         flows-freshness           flows-garch
-flows-glass-render        flows-guard-lexicon       flows-home-below-render   flows-home-composition
-flows-home-net-render     flows-home-onescreen      flows-horizon             flows-horizon-lint
-flows-lean                flows-ledger              flows-ledger-book         flows-ledger-live
-flows-ledger-live-plants-a flows-ledger-live-plants-b flows-ledger-live-render  flows-ledger-live-render-b
-flows-legs                flows-live                flows-macro               flows-macro-render
-flows-market-below-render flows-market-floor-render flows-market-onescreen    flows-market-river-render
-flows-market-visual       flows-member-export       flows-member-mutants      flows-member-onescreen
-flows-member-render       flows-member-shell        flows-member-since        flows-member-state
-flows-member-worker       flows-meter-worker        flows-mint                flows-moves-render
-flows-moves-sig           flows-net-map-render      flows-neuron              flows-neuron-screen
-flows-nn-render           flows-now-render          flows-oracle              flows-oracle-core
-flows-oracle-home-render  flows-oracle-live         flows-oracle-render       flows-oracle-restore-render
-flows-overlay             flows-payload-shape       flows-permits             flows-pipeline-chaos
-flows-pipeline-mutants    flows-plan-facts          flows-political           flows-political-render
-flows-popout-render       flows-pos-firstpaint      flows-pos-leaves          flows-pos-nightly
-flows-pos-plan            flows-pos-render          flows-pos-route           flows-pos-switch
-flows-positioning         flows-premium-rank        flows-private-render      flows-probe
-flows-public              flows-pulse               flows-quant               flows-quant-audit
-flows-quant-card          flows-read-failures       flows-readers             flows-reading
-flows-reading-worker      flows-reads               flows-ready               flows-record
-flows-registry-contract   flows-relations-render    flows-reports             flows-round
-flows-rt                  flows-scores              flows-sfc                 flows-sfc-render
-flows-sfc-route           flows-sfc-view            flows-sides               flows-sign
-flows-skyline-render      flows-starts              flows-stats               flows-stock
-flows-tape-stats          flows-targets             flows-time                flows-transport
-flows-truth               flows-universe            flows-variation           flows-vendor-budget
-flows-vendor-extras       flows-verdict             flows-vol                 flows-voldesk
-flows-voldesk-render      flows-warnings            flows-weight              flows-write-batch
-flows-ws-probe            flows-xcheck-render       lab-write                 launch-readiness
-markets                   mastery                   math-browser              math-darkpool
-math-dealer               math-duplicates           math-flow                 math-format
-math-print                math-short                math-sigma                math-site
-math-time                 math-units                math-vol                  pipeline
-route-matrix              server-ai                 server-desk               server-desk-sc
-server-ff                 server-flowlab            server-ingest             server-kernel
-server-log                server-macro              server-ops                server-oracle
-server-pages              server-router             server-rt                 server-voldesk
-staging
+flows-dossier             flows-dossier-reads       flows-engine-budget       flows-events-ipo-render
+flows-events-odds-render  flows-evt                 flows-fact-ids            flows-feeds-onescreen
+flows-film                flows-floor-funds         flows-floor-funds-live    flows-flow-below-render
+flows-flow-registry       flows-flowlab             flows-flowlab-nightly     flows-flowlab-onescreen
+flows-flowlab-render      flows-forward             flows-forward-lab         flows-freshness
+flows-garch               flows-glass-render        flows-guard-lexicon       flows-home-below-render
+flows-home-composition    flows-home-net-render     flows-home-onescreen      flows-horizon
+flows-horizon-lint        flows-ipo                 flows-lean                flows-ledger
+flows-ledger-book         flows-ledger-live         flows-ledger-live-plants-a flows-ledger-live-plants-b
+flows-ledger-live-render  flows-ledger-live-render-b flows-legs                flows-live
+flows-macro               flows-macro-render        flows-market-below-render flows-market-floor-render
+flows-market-onescreen    flows-market-river-render flows-market-visual       flows-member-export
+flows-member-mutants      flows-member-onescreen    flows-member-render       flows-member-shell
+flows-member-since        flows-member-state        flows-member-worker       flows-meter-worker
+flows-mint                flows-moves-render        flows-moves-sig           flows-net-map-render
+flows-neuron              flows-neuron-screen       flows-nn-render           flows-now-render
+flows-oracle              flows-oracle-core         flows-oracle-home-render  flows-oracle-live
+flows-oracle-render       flows-oracle-restore-render flows-overlay             flows-payload-shape
+flows-permits             flows-pipeline-chaos      flows-pipeline-mutants    flows-plan-facts
+flows-political           flows-political-render    flows-popout-render       flows-pos-firstpaint
+flows-pos-leaves          flows-pos-nightly         flows-pos-plan            flows-pos-render
+flows-pos-route           flows-pos-switch          flows-positioning         flows-premium-rank
+flows-private-render      flows-probe               flows-public              flows-pulse
+flows-quant               flows-quant-audit         flows-quant-card          flows-read-failures
+flows-readers             flows-reading             flows-reading-worker      flows-reads
+flows-ready               flows-record              flows-registry-contract   flows-relations-render
+flows-reports             flows-round               flows-rt                  flows-scores
+flows-sfc                 flows-sfc-render          flows-sfc-route           flows-sfc-view
+flows-sides               flows-sign                flows-skyline-render      flows-starts
+flows-stats               flows-stock               flows-tape-stats          flows-targets
+flows-time                flows-transport           flows-truth               flows-universe
+flows-variation           flows-vendor-budget       flows-vendor-extras       flows-verdict
+flows-vol                 flows-voldesk             flows-voldesk-render      flows-warnings
+flows-weight              flows-write-batch         flows-ws-probe            flows-xcheck-render
+lab-write                 launch-readiness          markets                   mastery
+math-browser              math-darkpool             math-dealer               math-duplicates
+math-flow                 math-format               math-print                math-short
+math-sigma                math-site                 math-time                 math-units
+math-vol                  pipeline                  route-matrix              server-ai
+server-desk               server-desk-sc            server-ff                 server-flowlab
+server-ingest             server-kernel             server-log                server-macro
+server-ops                server-oracle             server-pages              server-router
+server-rt                 server-voldesk            staging
 ```
 
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):
