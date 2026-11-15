@@ -197,6 +197,9 @@ const EVENTS_ER = { od: "WP6", gzip: 160, why: "the Events page asks for the eve
 GZIP_KIB.eventsPage += (EVENTS_RECENT.gzip + EVENTS_ER.gzip) / 1024;
 CSS_KIB.eventsPage += EVENTS_RECENT.cssBytes / 1024;
 CSS_GZIP_KIB.eventsPage += EVENTS_RECENT.cssGzip / 1024;
+const ER_HALTS_CSS = { od: "WP6-HALTS", cssBytes: 543, cssGzip: 129, why: "the Events page header carries the halts channel's state chip and hides the filter chips on the four event-risk views (flows-feeds.css 33,112 to 33,655 B raw and 6,441 to 6,570 B gzip)" };
+CSS_KIB.eventsPage += ER_HALTS_CSS.cssBytes / 1024;
+CSS_GZIP_KIB.eventsPage += ER_HALTS_CSS.cssGzip / 1024;
 GZIP_KIB.eventsPage += 190 / 1024;
 CEILING_KIB.tickerPage += (TICKER_DEALER_LABELS.bytes + TICKER_PRINTS_MOVE.bytes) / 1024;
 GZIP_KIB.tickerPage += (TICKER_DEALER_LABELS.gzip + TICKER_PRINTS_MOVE.gzip) / 1024;
@@ -218,6 +221,11 @@ for (const name of Object.keys(CSS_KIB)) { CSS_KIB[name] += RAIL_FIT.bytes / 102
 for (const name of ["deskPage", "sidePage", "watchPage"]) {
   CEILING_KIB[name] += MEMBER_EXPORT_JS.bytes / 1024;
   GZIP_KIB[name] += MEMBER_EXPORT_JS.gzip / 1024;
+}
+const RT_HALTS = { od: "WP6-HALTS", bytes: 884, gzip: 206, routes: ["marketPage", "movesPage", "networkPage", "nowPage", "overviewPage", "sidePage", "tickerPage", "unusualPage", "watchPage"], why: "WP6 halts channel: the rail client carries the sixth topic (its ring, grace and default list), a heartbeat that tells a page when the channel's state turns, and the halts() adapter the Events page reads; flows-rt.js is eager on these nine routes, so each carries the same bytes" };
+for (const name of RT_HALTS.routes) {
+  CEILING_KIB[name] += RT_HALTS.bytes / 1024;
+  GZIP_KIB[name] += RT_HALTS.gzip / 1024;
 }
 
 const VOLDESK_MARKET = { od: "WP3", bytes: 1500, gzip: 600, cssBytes: 110, cssGzip: 120, why: "WP3 volatility structure: flows-market.js opens the Vol desk tab on first use (one optional fetch, the deferred volDesk group and the short sub-switch labels) and flows-market.css shows the tab's panel and sizes eleven tabs on a phone; the desk itself and the cross-check strip are deferred groups with their own sheets and add nothing eager" };
@@ -329,6 +337,8 @@ DEFERRED_KIB.marketPage += VOLDESK_DEFERRED.marketBytes / 1024;
 const NETMAP_FOCUS = { bytes: 596, why: "shell follow-ups: flows-net-map.js finds the focused chip again by id after every repaint, falls back to the selected chip and keeps the phone layer switch focused (25,222 to 25,818 B raw); a deferred group on every page that draws the condensed map" };
 for (const name of Object.keys(DEFERRED_KIB)) if (DEFERRED[name] && JSON.stringify(DEFERRED[name]).includes("flows-net-map.js")) DEFERRED_KIB[name] += NETMAP_FOCUS.bytes / 1024;
 DEFERRED_KIB.tickerPage += FLOWLAB_LINK.networkBytes / 1024;
+const ER_HALTS_LIVE = { od: "WP6-HALTS", bytes: 301, why: "the Events page connects the rail for the halts channel when the halts switch is on, and its halts pane follows the channel's state as it turns instead of the state at first paint (flows-er.js, a deferred group file)" };
+DEFERRED_KIB.eventsPage += ER_HALTS_LIVE.bytes / 1024;
 DEFERRED_KIB.unusualPage += FLOWLAB_LINK.belowBytes / 1024;
 DEFERRED_KIB.flowlabPage = 80 + NN_ASK.bytes / 1024;
 
@@ -488,7 +498,7 @@ for (const m of measured) {
 }
 
 {
-  const base = { name: "marketPage", raw: 240782, gzip: 72969, css: 137186, cssGzip: 28551 };
+  const base = { name: "marketPage", raw: 240782 + RT_HALTS.bytes, gzip: 72969 + RT_HALTS.gzip, css: 137186, cssGzip: 28551 };
   eq(judge(base).join("; "), "", "the ledger judge passes today's market route");
   ok(judge({ ...base, gzip: base.gzip + 8 * 1024 }).length > 0,
      "the judge fails a route inflated by 8 KiB of gzip");
@@ -500,7 +510,7 @@ for (const m of measured) {
   ok(judge({ ...base, raw: base.raw - 13 * 1024 }).length > 0,
      "the ratchet fails a route that saved 13 KiB raw and left its ceiling where it was");
   ok(judge({ ...base, name: "nowhere" }).length === 4, "a route with no ceilings fails on all four bases");
-  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 40627 + NN_KERNEL.gzip + EVENTS_ER.gzip, css: 119045 + NN_FLOWS_CSS.bytes + RAIL_FIT.bytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip + RAIL_FIT.gzip };
+  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 40627 + NN_KERNEL.gzip + EVENTS_ER.gzip, css: 119045 + NN_FLOWS_CSS.bytes + RAIL_FIT.bytes + ER_HALTS_CSS.cssBytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip + RAIL_FIT.gzip + ER_HALTS_CSS.cssGzip };
   eq(judge(events).join("; "), "", "events, whose ceiling is held for the earnings strip, passes with its wide raw headroom");
   eq(Object.keys(HELD_RAW_KIB).join(", "), "eventsPage", "events is the only route whose raw ceiling is held above the ratchet");
 }
