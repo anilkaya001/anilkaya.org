@@ -89,7 +89,7 @@
       ratio, grossRatio: bidC / col.m1C, annRatio: dayN !== null && dayN >= 1 ? ratio * DAYS_PER_YEAR / dayN : null,
       limited: bpC !== null && n < contracts, affordable: n >= 1,
       premiumC: n * bidC, timeValueC: n * tvC, collateralC: n * col.m1C, deployedC: n * col.m1C, idleC: bpC === null ? null : bpC - n * col.m1C,
-      deltaShares: d === null ? null : d * SHARES_PER_CONTRACT * contracts, deltaDollarsC: d === null ? null : roundCents(d * SHARES_PER_CONTRACT * S * contracts),
+      deltaShares: d === null ? null : d * SHARES_PER_CONTRACT * n, deltaDollarsC: d === null ? null : roundCents(d * SHARES_PER_CONTRACT * S * n),
     };
   }
 
@@ -115,7 +115,7 @@
 
   const K = window.FlowsUI && window.FlowsUI.deskKit;
   if (!K) return;
-  const { UI, h, s, F, glyph, DASH, MINUS, C, T, Q, isNum, fmt2, fmtPct, fmtInt, fmtSd, kf, colorOf, frontierOf, netDelta, mods, WIN_Q, WIN_P, EV_P, ratioText, centsText, ratioFraction } = K;
+  const { UI, h, s, F, glyph, DASH, MINUS, C, T, Q, isNum, fmt2, fmtPct, fmtInt, fmtSd, kf, colorOf, frontierOf, netDelta, mods, WIN_Q, WIN_P, EV_P, ratioText, centsText, ratioFraction, exactPct } = K;
 
   const SIGNS = { "-1": MINUS, "0": "", "1": "+" };
   const pcOf = (sc) => (sc && sc.ok ? ratioText(sc.bidC, sc.m1C) : null) || DASH;
@@ -139,15 +139,22 @@
   const fmtRatio = (v) => {
     const n = isNum(v);
     if (n === null) return DASH;
-    const p = n * 100;
-    return (p >= 10 ? p.toFixed(1) : p.toFixed(2)) + "%";
+    return F.pct(n, Math.abs(n) >= 0.1 ? 1 : 2);
   };
   const fmtAnn = (v) => {
     const n = isNum(v);
     if (n === null) return DASH;
-    const p = n * 100;
-    return p > 99999 ? "> 99,999%" : groupN(p) + "%";
+    return n * 100 > 99999 ? "> 99,999%" : F.int(n * 100) + "%";
   };
+  const ratioOf = (sc) => (sc && sc.ok ? exactPct(sc.tvC, sc.m1C, sc.tvC * 10 >= sc.m1C ? 1 : 2) || fmtRatio(sc.ratio) : DASH);
+  const annOf = (sc, days) => {
+    if (!sc || !sc.ok) return DASH;
+    const d = isNum(days);
+    if (d === null || !Number.isInteger(d) || d < 1) return fmtAnn(sc.annRatio);
+    if (sc.tvC * 365 * 100 > 99999 * sc.m1C * d) return "> 99,999%";
+    return exactPct(sc.tvC * 365, sc.m1C * d, 0, true) || fmtAnn(sc.annRatio);
+  };
+  const cushionOf = (r) => (terms.cv === "shares" ? r.cushionSigmas : isNum(r.upSigmas));
   const signedD = (v) => { const n = isNum(v); if (n === null) return DASH; const a = Math.abs(n).toFixed(2); return (Number(a) === 0 ? "" : SIGNS[Math.sign(n)]) + a; };
 
   const convText = () => (terms.cv === "delta" ? "Delta " + pctWord(terms.h) + " of notional, floor " + pctWord(terms.f) : terms.cv === "regt" ? "Reg-T style" : "shares held");
@@ -238,8 +245,8 @@
     annualized: (r) => (r.__sc ? r.__sc.annRatio : null),
     ratio: (r) => (r.__sc ? r.__sc.ratio : null),
     premiumRatio: (r) => (r.__sc && r.__sc.ok && r.__sc.m1C > 0 ? r.__sc.bidC / r.__sc.m1C : null),
-    premium: (r) => r.premium,
-    cushionSigmas: (r) => r.cushionSigmas,
+    premium: (r) => (r.__sc && r.__sc.ok ? r.__sc.premiumC : null),
+    cushionSigmas: (r) => cushionOf(r),
     collectible: (r) => (r.__sc && r.__sc.ok && r.__sc.timeValueC !== null ? r.__sc.timeValueC : null),
     edge: (r) => (r.__sc ? r.__sc.evN : null),
   };
@@ -300,7 +307,7 @@
       h("span", { class: "dk-meta" }, F.day(r.expiry) + " · " + r.days + "d" + (away ? " · " + away : ""))),
     h("span", { class: "dk-cells" },
       sc.ok ? cellOf("dk-ratio", "Premium ÷ collateral", pcOf(sc), sc.intrC * 2 > sc.bidC ? "silent" : null, sc.intrC * 2 > sc.bidC ? T("t-pc-itm") : T("t-ratio"), centsText(sc.bidC, true) + " ÷ " + centsText(sc.m1C)) : cellOf("dk-ratio", "Premium ÷ collateral", DASH, "silent", bad),
-      sc.ok ? cellOf("dk-ann", "Ann.", fmtAnn(sc.annRatio), null, T("t-ann")) : cellOf("dk-ann", "Ann.", DASH, "silent", bad),
+      sc.ok ? cellOf("dk-ann", "Ann.", annOf(sc, r.days), null, T("t-ann")) : cellOf("dk-ann", "Ann.", DASH, "silent", bad),
       premium, collat,
       cellOf("dk-nd", "Net Δ", nd === null ? DASH : signedD(nd) + band, null, ndTitle),
       cellOf("dk-pq", WIN_Q, wq.text, null, wq.title || noEng || T("t-pq")),
@@ -350,12 +357,12 @@
         ["Reg-T style", sc.regtM1C === null || sc.regtM1C === undefined ? DASH : money(sc.regtM1C * n) + " on " + groupN(n) + ": 100 × max(20% × " + fmt2(S) + " − " + fmt2(Math.max(0, r.strike - S)) + ", 10% × " + fmt2(S) + "). The strategy lab adds the option's value (" + lab + ") to this requirement; this desk nets it against the premium you collect."],
         ["Shares held", S === null ? DASH : "$" + groupN(S * SHARES_PER_CONTRACT * n) + " of stock for " + groupN(n) + " contract" + (n === 1 ? "" : "s")],
         ["Premium ÷ collateral", sc.ok ? pcOf(sc) + " = " + centsText(sc.bidC, true) + " ÷ " + centsText(sc.m1C, true) + " a contract, intrinsic value included" + (sc.intrC > 0 ? " (" + centsText(Math.min(sc.intrC, sc.bidC), true) + " of it intrinsic)" : "") + " · " + T("sc-conv-" + terms.cv) : DASH],
-        ["Time value ÷ collateral", sc.ok ? fmtRatio(sc.ratio) + " per trade, " + fmtAnn(sc.annRatio) + " annualised over " + r.days + " days, time value only" : DASH],
-        ["Net delta", sc.netDelta === null || sc.netDelta === undefined ? (K.dashed(r) ? DASH + " " + K.bandNote(r) : DASH) : signedD(sc.netDelta) + (r.__band && r.__band.band === "pm" ? " ± " + fmt2(r.__band.half) : "") + (terms.cv === "shares" ? "" : " · short " + groupN(sc.deltaShares || 0) + " shares-equivalent on " + groupN(terms.n) + " contracts") + " · forward delta on the chain's own forward, with a floor of 0.05 in the collateral"],
+        ["Time value ÷ collateral", sc.ok ? ratioOf(sc) + " per trade, " + annOf(sc, r.days) + " annualised over " + r.days + " days, time value only" : DASH],
+        ["Net delta", sc.netDelta === null || sc.netDelta === undefined ? (K.dashed(r) ? DASH + " " + K.bandNote(r) : DASH) : signedD(sc.netDelta) + (r.__band && r.__band.band === "pm" ? " ± " + fmt2(r.__band.half) : "") + (terms.cv === "shares" ? "" : " · short " + groupN(sc.deltaShares || 0) + " shares-equivalent on " + groupN(sc.n || 0) + " contracts") + " · forward delta on the chain's own forward, with a floor of 0.05 in the collateral"],
         ["Forward", K.forwardText(r)],
-        ["Delta-equivalent exposure", sc.deltaDollarsC === null || sc.deltaDollarsC === undefined ? DASH : money(sc.deltaDollarsC)],
+        ["Delta-equivalent exposure", sc.deltaDollarsC === null || sc.deltaDollarsC === undefined ? DASH : money(sc.deltaDollarsC) + " on " + groupN(sc.n || 0) + " contracts"],
         ["Distance", m === null ? DASH : Math.abs(m) < 5e-5 ? "at the money" : fmtPct(Math.abs(m), 1) + " " + (m < 0 ? "below" : "above") + " spot" + (S === null ? "" : " of " + fmt2(S))],
-        ["Cushion", fmtSd(r.cushionSigmas)],
+        ["Cushion", fmtSd(cushionOf(r)) + (terms.cv === "shares" ? "" : " above spot, to the strike plus the bid")],
         ["Chance of profit", e ? (K.dashed(r) ? DASH + " " + K.bandNote(r) : fmtPct(e.prob.popQ, 1) + " implied · " + (e.prob.popP === null ? DASH : fmtPct(e.prob.popP, 1)) + " real world" + (K.bandNote(r) ? " · " + K.bandNote(r) : "")) : DASH],
         ["Neighbouring quotes", rangeLine(r, sc)],
         ["Expected value", e ? T("ev-measure") + " " + K.usd(e.ev.p === null ? null : e.ev.p) + " per contract, " + (sc.evN === null || sc.evN === undefined ? DASH : K.usd(sc.evN)) + " on " + groupN(n) + ". " + T("ev-implied", { x: K.usd(e.ev.q) }) : DASH],
@@ -502,9 +509,9 @@
       onMove: (i) => {
         const p = order[i], r = p.r, sc = r.__sc;
         return {
-          noLine: true, top: Math.max(0, y(Math.min(p.y, cap)) - 40), say: r.ticker + " " + kf(r.strike) + ", " + fmtAnn(sc.annRatio) + " annualised time value over collateral, premium over collateral " + pcOf(sc),
+          noLine: true, top: Math.max(0, y(Math.min(p.y, cap)) - 40), say: r.ticker + " " + kf(r.strike) + ", " + annOf(sc, r.days) + " annualised time value over collateral, premium over collateral " + pcOf(sc),
           parts: [C.part(r.ticker + " " + kf(r.strike) + " call", null), C.part(F.day(r.expiry), "k"), C.part(pcOf(sc) + " of collateral", "k"),
-            h("b", null, fmtAnn(sc.annRatio)), C.part(axis === 0 ? "Net Δ " + signedD(sc.netDelta) : "Win " + fmtPct(p.x, 0), "k")],
+            h("b", null, annOf(sc, r.days)), C.part(axis === 0 ? "Net Δ " + signedD(sc.netDelta) : "Win " + fmtPct(p.x, 0), "k")],
         };
       },
     });

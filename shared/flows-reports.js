@@ -257,11 +257,10 @@ export function recentReporters(universe, { within = RD_RECENT, max = 8, older =
   late.sort((a, b) => a[1] - b[1] || (a[0] < b[0] ? -1 : 1));
   const n = counts[0] + counts[1] + notStated + late.length;
   const unsure = cut.includes(0) || cut.includes(1);
-  const round4 = (v) => (v === null ? null : Math.round(v * 1e4) / 1e4);
   return {
     status: n ? "ok" : "quiet", ...(n ? {} : { reason: "none_recent" }), asOf, ...head, hz, n,
     counts: counts.map((c, k) => (cut.includes(k) ? null : c)), cut, unstated: unsure ? null : notStated, older: late.length,
-    rows: today.slice(0, max).map(([t, c, z]) => [t, round4(c), z === null ? null : Math.round(z * 100) / 100]),
+    rows: today.slice(0, max).map(([t, c, z]) => [t, c, z]),
     laterRows: late.slice(0, older),
   };
 }

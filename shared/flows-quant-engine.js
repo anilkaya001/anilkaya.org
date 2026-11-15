@@ -649,10 +649,10 @@ function priceCandidate(cand, ctx) {
     greeks: Object.fromEntries(Object.keys(greeks).map((k) => [k, r$(greeks[k])])),
     prob: {
       popQ: rpr(popQ), popP: rpr(popP),
-      pMaxProfitQ: rpr(lawIntervalsProb(qLaw, prof.maxProfitAt)),
-      pMaxProfitP: laws.main ? rpr(lawIntervalsProb(laws.main, prof.maxProfitAt)) : null,
-      pMaxLossQ: rpr(lawIntervalsProb(qLaw, prof.maxLossAt)),
-      pMaxLossP: laws.main ? rpr(lawIntervalsProb(laws.main, prof.maxLossAt)) : null,
+      pMaxProfitQ: prof.maxProfit === null ? null : rpr(lawIntervalsProb(qLaw, prof.maxProfitAt)),
+      pMaxProfitP: laws.main && prof.maxProfit !== null ? rpr(lawIntervalsProb(laws.main, prof.maxProfitAt)) : null,
+      pMaxLossQ: prof.maxLoss === null ? null : rpr(lawIntervalsProb(qLaw, prof.maxLossAt)),
+      pMaxLossP: laws.main && prof.maxLoss !== null ? rpr(lawIntervalsProb(laws.main, prof.maxLossAt)) : null,
       touchShortQ: touchShortQ.map(rpr),
     },
     ev: {

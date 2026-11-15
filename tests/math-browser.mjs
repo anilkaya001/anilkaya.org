@@ -266,7 +266,7 @@ const PLANTS = [
   ["the Move lab does not scale a short history", movelab, { "flows-ticker-movelab.js": [["returns.length === SESSIONS ? hits : Math.round((hits * SESSIONS) / returns.length)", "hits"]] }],
   ["the glance ranges widen with time, not its square root", glance, { "flows-ticker-glance.js": [["const sUp = Math.sqrt(hh * b.dUp + (ev ? J * J : 0))", "const sUp = hh * Math.sqrt(b.dUp) + (ev ? J : 0)"]] }],
   ["the glance realised step keeps the ordinary session in", glance, { "flows-ticker-glance.js": [["const extra = Math.max(0, second - (pb.dUp + pb.dDn) / 2);", "const extra = Math.max(0, second);"]] }],
-  ["the glance turns an expected move into a deviation with no factor", glance, { "flows-ticker-glance.js": [["return em === null ? null : em * SD_OVER_MEAN_ABS;", "return em;"]] }],
+  ["the glance turns an expected move into a deviation with no factor", glance, { "flows-ticker-glance.js": [["return em === null ? null : { sd: em * SD_OVER_MEAN_ABS, mean: em, src: \"calendar\" };", "return em === null ? null : { sd: em, mean: em, src: \"calendar\" };"]] }],
 ];
 for (const [name, run, patches] of PLANTS) ok(run(patches).length > 0, `PLANTED WRONG BUILD FAILS: ${name}`);
 

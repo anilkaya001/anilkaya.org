@@ -218,8 +218,9 @@ eq(M.cryptoCheck({ status: "ok", points: [["2026-10-01", 1]] }, { data: [{ start
     const table = M.performersTable({ data: rows }, 12);
     const ps = rows.map((x) => exact(x.positive_closes, 20));
     const order = ps.map((p, i) => [p, i]).sort((a, b) => a[0] - b[0]);
-    const m = ps.length; const adj = new Array(m); let prev = 1;
-    for (let j = m - 1; j >= 0; j--) { prev = Math.min(prev, order[j][0] * m / (j + 1)); adj[order[j][1]] = prev; }
+    const m = Math.max(M.PERFORMERS_SCREENED, ps.length); const adj = new Array(ps.length); let prev = 1;
+    eq(table.screened, m, "the correction counts every name screened, at least the stated floor");
+    for (let j = ps.length - 1; j >= 0; j--) { prev = Math.min(prev, order[j][0] * m / (j + 1)); adj[order[j][1]] = prev; }
     eq(table.survive, adj.filter((a) => a <= 0.1).length, "survivors equal an independent step-up");
     eq(table.tested, 12, "tested counts every row");
   }

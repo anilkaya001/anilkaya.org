@@ -388,7 +388,7 @@ def glance(rng):
         card = dict(ticker="SYX%d" % (500 + i), sessionDate="2026-11-02",
                     panels=dict(pricedMove=dict(status="ok", spot=S, sessions=Hs, impliedHigh=qh, impliedLow=ql, realizedHigh=ph, realizedLow=pl)))
         cardx = dict(earnings=dict(status="ok", next=None if sessions is None else dict(d="2026-11-20", sessions=sessions, when=when),
-                                   impliedNext=None if em is None else dict(em=em), events=reports),
+                                   impliedNext=None if em is None else dict(em=em, d="2026-11-20"), events=reports),
                      term=None if term_sd is None else dict(status="ok", eventMove=dict(sd=term_sd)))
         out.append(dict(card=card, cardX=cardx, q=cone(q, jq), p=cone(p, jp), eventQ=fl(jq) if inside else None, eventP=fl(jp) if inside else None,
                         eventH=fl(tE)))

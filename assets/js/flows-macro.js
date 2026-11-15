@@ -65,7 +65,17 @@
   const bp = (v) => {
     const x = num(v);
     if (x === null) return `<span class="mc-chg mut">${DASH}</span>`;
-    return `<span class="mc-chg ${toneOf(x)}">${glyphOf(x)} ${F.signed(x, 0)} bp</span>`;
+    return `<span class="mc-chg ${toneOf(x)}" title="${esc(say("rates.horizon"))}">${glyphOf(x)} ${F.signed(x, 0)} bp <small>${esc(say("rates.horizon.short"))}</small></span>`;
+  };
+  const pts = (v) => {
+    const x = num(v);
+    if (x === null) return `<span class="mc-chg mut">${DASH}</span>`;
+    return `<span class="mc-chg ${toneOf(x)}">${glyphOf(x)} ${F.signed(x, 2)} pts</span>`;
+  };
+  const sinceClose = (rate, n) => {
+    const r = num(rate), c = n && n.status === "ok" && Array.isArray(n.last) ? num(n.last[1]) : null;
+    if (r === null || c === null || !(c > 0)) return "";
+    return `<span title="${esc(say("fx.sinceclose", { date: F.day(n.last[0]) }))}">${chg(r / c - 1)}</span>`;
   };
   const dashEl = (code) => `<span class="mc-why" title="${esc(say("state.withheld", { reason: why(code) }))}">${DASH}<span class="visually-hidden"> ${esc(say("state.withheld", { reason: why(code) }))}</span></span>`;
   const pend = () => `<p class="mc-pend">${esc(say("state.pending"))}</p>`;
@@ -109,7 +119,7 @@
     set("gc", gc && gc.status === "ok" ? px(gc.last[1], 2) : dashEl(gc ? gc.why || gc.status : "failed"), gc && gc.status === "ok" ? chg(gc.chg1) : "", srcNightly(), say("commodities.gold"));
     const bf = S.live.board && S.live.board.fx ? S.live.board.fx.EURUSD : null;
     const nf = m.fx && m.fx.pairs ? m.fx.pairs.EURUSD : null;
-    if (bf && bf.status === "ok") set("eur", px(bf.rate, 4), nf && nf.status === "ok" ? chg(nf.chg1) : "", bf.at ? srcHero(bf.at) : say("fx.zone"), "");
+    if (bf && bf.status === "ok") set("eur", px(bf.rate, 4), sinceClose(bf.rate, nf), bf.at ? srcHero(bf.at) : say("fx.zone"), nf && nf.status === "ok" ? say("fx.sinceclose", { date: F.day(nf.last[0]) }) : "");
     else set("eur", nf && nf.status === "ok" ? px(nf.last[1], 4) : dashEl(nf ? nf.why || nf.status : "failed"), nf && nf.status === "ok" ? chg(nf.chg1) : "", srcNightly(), "");
     const bc = S.live.board && S.live.board.crypto ? S.live.board.crypto["BTC-USD"] : null;
     const nb = m.crypto ? m.crypto.BTC : null;
@@ -166,7 +176,7 @@
     if (!m) return put("fx", pend());
     const tiles = ["EURUSD", "USDJPY", "GBPUSD", "USDCNY"].map((p) => {
       const { n, b } = fxCell(p);
-      if (b && b.status === "ok") return tile(p, px(b.rate, PAIR_DP(p)), n && n.status === "ok" ? chg(n.chg1) : "", b.at ? F.time(b.at) : "", n && n.status === "ok" ? pointsOf(n.spark) : null);
+      if (b && b.status === "ok") return tile(p, px(b.rate, PAIR_DP(p)), sinceClose(b.rate, n), b.at ? F.time(b.at) : "", n && n.status === "ok" ? pointsOf(n.spark) : null);
       if (!n || n.status !== "ok") return tile(p, dashEl(n ? n.why || n.status : "failed"), "", "", null);
       return tile(p, px(n.last[1], PAIR_DP(p)), chg(n.chg1), F.day(n.last[0]), pointsOf(n.spark));
     });
@@ -269,9 +279,9 @@
     if (!m) return put("ind", pend());
     const rows = ECON.map(([k, name]) => {
       const e = m.economy[k];
-      if (!e || e.status !== "ok") return `<div class="mc-eco"><span><b>${esc(name)}</b></span><span class="r">${dashEl(e ? e.why || e.status : "failed")}</span><span></span><span class="r"><small>${esc(say("series.unit"))}</small></span><span></span></div>`;
-      const ch = num(e.chgPrev);
-      return `<div class="mc-eco" title="${esc(say("series.age", { date: F.day(e.last[0]), days: e.ageDays }) + " " + say("series.prevrelease", { chg: ch === null ? DASH : F.pct(ch, 2, true), date: F.day(e.prev[0]) }))}"><span><b>${esc(name)}</b></span><span class="r">${px(e.last[1], 2)} <small>${esc(e.unit)}</small></span><span class="r">${ch === null ? DASH : chg(ch)}</span><span class="r"><small>${esc(F.day(e.last[0]))} · ${e.ageDays} d</small></span><span class="r">${sparkOf(pointsOf(e.spark))}</span></div>`;
+      if (!e || e.status !== "ok") return `<div class="mc-eco"><span><b>${esc(name)}</b></span><span class="r">${dashEl(e ? e.why || e.status : "failed")}</span><span></span><span class="r"><small>${e && e.why === "unit" ? esc(say("series.unit")) : ""}</small></span><span></span></div>`;
+      const ch = num(e.chgPrev), inPts = e.chgUnit === "pts";
+      return `<div class="mc-eco" title="${esc(say("series.age", { date: F.day(e.last[0]), days: e.ageDays }) + " " + say("series.prevrelease", { chg: ch === null ? DASH : inPts ? F.signed(ch, 2) + " pts" : F.pct(ch, 2, true), date: F.day(e.prev[0]) }))}"><span><b>${esc(name)}</b></span><span class="r">${px(e.last[1], 2)} <small>${esc(e.unit)}</small></span><span class="r">${ch === null ? DASH : inPts ? pts(ch) : chg(ch)}</span><span class="r"><small>${esc(F.day(e.last[0]))} · ${e.ageDays} d</small></span><span class="r">${sparkOf(pointsOf(e.spark))}</span></div>`;
     });
     put("ind", `<div class="mc-rows">${rows.join("")}</div>`);
     srcSet("ind", srcNightly());
@@ -287,7 +297,7 @@
       const live = b && b.status === "ok" ? `${px(b.rate, PAIR_DP(p))}` : null;
       const val = live || (n && n.status === "ok" ? px(n.last[1], PAIR_DP(p)) : dashEl(n ? n.why || n.status : "failed"));
       const when = live ? (b.at ? F.time(b.at) : say("fx.zone")) : n && n.status === "ok" ? F.day(n.last[0]) : "";
-      return `<button type="button" class="mc-row mc-pick" data-pair="${p}" aria-pressed="${p === S.pair}"><span><b>${p}</b> <small>${esc(when)}</small></span><span class="r">${val}</span><span class="r">${n && n.status === "ok" ? chg(n.chg1) : ""}</span><span class="r">${n && n.status === "ok" ? sparkOf(pointsOf(n.spark)) : ""}</span></button>`;
+      return `<button type="button" class="mc-row mc-pick" data-pair="${p}" aria-pressed="${p === S.pair}"><span><b>${p}</b> <small>${esc(when)}</small></span><span class="r">${val}</span><span class="r">${live ? sinceClose(b.rate, n) : n && n.status === "ok" ? chg(n.chg1) : ""}</span><span class="r">${n && n.status === "ok" ? sparkOf(pointsOf(n.spark)) : ""}</span></button>`;
     });
     put("fxg", head + `<div class="mc-rows">${rows.join("")}</div>`);
     srcSet("fxg", S.live.board ? srcLive(S.live.board) : srcNightly());
@@ -325,7 +335,7 @@
       if (!n || n.status !== "ok") return `<div class="mc-row"><span><b>${s}</b></span><span class="r">${dashEl(n ? n.why || n.status : "failed")}</span><span></span><span></span></div>`;
       const val = b && b.status === "ok" ? px(b.close, s === "SOL" ? 2 : 0) : px(n.last[1], s === "SOL" ? 2 : 0);
       const ck = n.check;
-      const chip = ck.v === "agree" ? `<span class="mc-chip ok" title="${esc(say("crypto.check.agree"))}">✓</span>` : ck.v === "differs" ? `<span class="mc-chip bad" title="${esc(say("crypto.check.differs", { gap: F.pct(ck.gap, 1) }))}">✕ ${F.pct(ck.gap, 1)}</span>` : `<span class="mc-chip" title="${esc(why("dates"))}">${DASH}</span>`;
+      const chip = ck.v === "agree" ? `<span class="mc-chip ok" title="${esc(say("crypto.check.agree"))}">✓</span>` : ck.v === "differs" ? `<span class="mc-chip bad" title="${esc(say("crypto.check.differs", { gap: F.pct(ck.gap, 2) }))}">✕ ${F.pct(ck.gap, 2)}</span>` : `<span class="mc-chip" title="${esc(why("dates"))}">${DASH}</span>`;
       return `<div class="mc-row"><span><b>${s}</b> <small>${esc(b && b.status === "ok" ? "24h" : F.day(n.last[0]))}</small></span><span class="r">${val}</span><span class="r">${b && b.status === "ok" ? chg(b.chg24) : chg(n.chg1)}</span><span class="r">${chip}</span></div>`;
     });
     const detail = CRYPTO.map(([s]) => { const n = m.crypto[s]; return n && n.status === "ok" ? `${s} 21d ${num(n.chg21) === null ? DASH : F.pct(n.chg21, 1, true)} · rv ${num(n.rv21) === null ? DASH : F.pct(n.rv21, 0)}` : ""; }).filter(Boolean).join(" · ");
@@ -440,9 +450,9 @@
     const mk = all.find((x) => x.id === S.oddId) || all[0];
     if (!mk) return put("odd", `<p class="mc-note">${esc(say("odds.none"))}</p>`);
     const kv = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
-    put("odd", `<p class="mc-line"><b>${esc(mk.question)}</b></p><p class="mc-line">${esc(say("odds.price", { p: F.pct(mk.price, 0) }))}${mk.thin ? " " + esc(say("odds.thin")) : ""}${mk.basis === "last" ? " " + esc(say("odds.last")) : ""}${mk.resolved ? " " + esc(say("odds.resolved")) : ""}</p><dl class="mc-kv">${kv("Resolves", esc(mk.resolves ? F.day(F.trtDay(mk.resolves)) + " " + F.time(mk.resolves) : DASH))}${kv("Bid / ask", num(mk.bid) === null ? DASH : F.pct(mk.bid, 0) + " / " + F.pct(mk.ask, 0))}${kv("Spread", num(mk.spread) === null ? DASH : F.pct(mk.spread, 1))}${kv("Liquidity", num(mk.liquidity) === null ? DASH : F.money(mk.liquidity))}${kv("Volume", num(mk.volume) === null ? DASH : F.money(mk.volume))}</dl>` +
+    put("odd", `<p class="mc-line"><b>${esc(mk.question)}</b></p><p class="mc-line">${esc(say("odds.price", { p: F.pct(mk.price, 0) }))}${mk.thin ? " " + esc(say("odds.thin")) : ""}${mk.basis === "last" ? " " + esc(say("odds.last")) : ""}${mk.resolved ? " " + esc(say("odds.resolved")) : ""}</p><dl class="mc-kv">${kv("Resolves", esc(mk.resolves ? F.day(F.trtDay(mk.resolves)) + " " + F.time(mk.resolves) : DASH))}${kv("Bid / ask", num(mk.bid) === null ? DASH : F.pct(mk.bid, 0) + " / " + F.pct(mk.ask, 0))}${kv("Spread", num(mk.spread) === null ? DASH : F.pct(mk.spread, 1).replace("%", " pts"))}${kv("Liquidity", num(mk.liquidity) === null ? DASH : F.money(mk.liquidity))}${kv("Volume", num(mk.volume) === null ? DASH : F.money(mk.volume))}</dl>` +
       (num(mk.top5Share) === null ? "" : `<p class="mc-note">${esc(say("odds.concentration", { s: F.pct(mk.top5Share, 0) }))} ${esc(say("odds.bots", { s: F.pct(mk.botShare, 0) }))}</p>`) +
-      (mk.holders ? `<p class="mc-note">${esc(say("odds.holders", { w: F.pct(mk.holders.median, 0), cat: "Finance" }))}</p>` : "") + `<div class="mc-curvewrap" id="mcOddHist"></div>`);
+      (mk.holders && mk.holders.n >= 3 ? `<p class="mc-note">${esc(say("odds.holders", { w: F.pct(mk.holders.median, 0), cat: "Finance" }))}</p>` : "") + `<div class="mc-curvewrap" id="mcOddHist"></div>`);
     srcSet("odd", srcNightly());
     if (S.painters) S.painters.histBig($("mcOddHist"), mk.history);
   }
@@ -473,7 +483,7 @@
     if (!m) return put("sep", pend());
     const p = m.seasonality.performers[S.seg.season];
     if (!p || !p.rows.length) return put("sep", `<p class="mc-note">${esc(say("state.withheld", { reason: why("empty") }))}</p>`);
-    const head = `<p class="mc-line">${esc(say("season.screen", { s: p.survive, n: p.tested }))} <span class="mc-why">${esc(say("season.rank"))}</span></p>`;
+    const head = `<p class="mc-line">${esc(say("season.screen", { s: p.survive, n: p.tested, m: p.screened || p.tested }))} <span class="mc-why">${esc(say("season.rank"))}</span></p>`;
     const rows = p.rows.map((r) => {
       const ok = r[6] !== null && r[6] <= 0.1;
       const lo = r[4], hi = r[5];
