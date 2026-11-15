@@ -273,13 +273,14 @@ function rigHub(page, R, { roster = async () => null } = {}) {
     now: () => clock.t, fetchImpl: fetchFor(vendor), random: () => 0.5, log: () => {},
     host: { sockets: () => socks.filter((x) => x.readyState === 1), wake() {} }, loadRoster: roster,
   });
-  const lose = { px: 0, skip: new Set() };
+  const lose = { px: 0, skip: new Set(), pb: 0, pbSkip: new Set() };
   R.onConn = (conn) => {
     const sock = {
       readyState: 1, att: null, sentFrames: 0,
       send(text) {
         const f = JSON.parse(text);
         if (f.k === "px" && !f.snap && lose.skip.has(f.sq)) { lose.px++; return; }
+        if (f.k === "pb" && !f.snap && lose.pbSkip.has(f.sq)) { lose.pb++; return; }
         sock.sentFrames++;
         conn.ws.send(text);
       },
@@ -321,7 +322,7 @@ try {
     const { ctx, page, R } = await mount(browser, { html: coreHtml() });
     eq(await rt(page, "typeof window.FlowsUI.rt"), "object", "FlowsUI.rt is attached to the allowlisted global, no new global");
     deep(await rt(page, "Object.keys(window.FlowsUI.rt).sort()"),
-      ["alerts", "connect", "feeds", "fresh", "gex", "market", "measure", "news", "on", "quote", "status", "strips", "transport"],
+      ["alerts", "beats", "connect", "feeds", "fresh", "gex", "market", "measure", "news", "on", "quote", "status", "strips", "transport"],
       "and offers connect, on and transport with the adapters the pages read");
     eq(await transport(page), "off", "before any page asks for a topic the rail is off and nothing is opened");
     eq(R.conns.length, 0, "no socket without a connect");
@@ -1259,6 +1260,80 @@ try {
     ok(frames > 40, `(${frames} topic frames, ${(await measure(page)).bytes} bytes received in all)`);
     deep(page.errors, [], "nothing threw");
     await ctx.close();
+  }
+
+
+  if (want("pulse")) {
+    const served = fs.readFileSync(path.join(ROOT, "assets/js/flows-rt.js"), "utf8");
+    const pulseCheck = async (mutate) => {
+      const problems = [];
+      const bad = (cond, why) => { if (!cond) problems.push(why); };
+      let rig = null;
+      const { ctx, page, R } = await mount(browser, {
+        html: coreHtml(),
+        setup: async (R2, page2) => {
+          rig = rigHub(page2, R2);
+          if (mutate) await page2.route("**/assets/js/flows-rt.js*", (route) => route.fulfill({ contentType: "text/javascript", body: mutate(served) }));
+        },
+      });
+      const { clock, hub, lose, step } = rig;
+      const agree = async () => {
+        const got = await page.evaluate(() => window.FlowsUI.rt.beats());
+        if (!got) return { ok: false, why: "no pulse" };
+        const cells = got.cells;
+        const contiguous = cells.every((row, i) => i === 0 || row[0] === cells[i - 1][0] + 1);
+        const differ = cells.filter((row) => RT.RT_TOPIC_KEYS.some((k, i) => row[1 + i] !== hub.beats.cell(k, row[0], clock.t)));
+        const lagS = cells.length ? Math.floor(clock.t / 1000) - cells[cells.length - 1][0] : Infinity;
+        return { ok: cells.length > 0 && cells.length <= 60 && contiguous && differ.length === 0 && lagS <= 7, why: `${cells.length} cells, contiguous ${contiguous}, ${differ.length} differ from the hub, the newest ${lagS} s behind it`, got };
+      };
+      await connect(page, { topics: ["px", "pb"] });
+      await R.nextConn();
+      await step(70);
+      let a = await agree();
+      bad(a.ok, "the page's cells are the hub's, second for second: " + a.why);
+      bad(a.got && a.got.cells.length === 60, `and the page keeps exactly sixty (${a.got && a.got.cells.length})`);
+      bad(a.got && a.got.pv === 1 && a.got.cols.join() === "s,px,fl,gx,mk,nw", "the adapter states pv 1 and the six columns");
+      bad(a.got && a.got.cells.some((row) => Number.isInteger(row[1])) && a.got.cells.every((row) => row[2] === null), "px is counted and an unasked topic is null, never zero");
+      bad(a.got && a.got.live === true, "the pulse is live while frames arrive");
+      bad(a.got && Number.isInteger(a.got.bpm.px) && a.got.why.fl === "undemanded", "the minute's beats and the reasons travel with it");
+      const st = await status(page);
+      bad(st.topics.pb.state === null && st.topics.pb.synced, "pb carries no fresh entry, so the pill never reads it");
+      const sq = hub.counter.peek("pb");
+      lose.pbSkip.add(sq + 1);
+      await step(20);
+      bad(lose.pb === 1, "one pb frame was lost in transit");
+      bad((await measure(page)).gaps >= 1, "the page saw the gap");
+      bad(R.messages().some((m) => m.t === "rs" && m.k === "pb"), "and asked for pb again by name");
+      await step(8);
+      a = await agree();
+      bad(a.ok, "the snapshot that answered it left the page equal to the hub: " + a.why);
+      deep(page.errors, [], "nothing threw");
+      await ctx.close();
+      return problems;
+    };
+    const good = await pulseCheck(null);
+    for (const p of good) ok(false, "PULSE: " + p);
+    eq(good.length, 0, "PULSE: the real hub's pb topic reaches the page cell for cell, sixty seconds kept, a lost frame healed by a resync");
+
+    const def = await mount(browser, { html: coreHtml() });
+    const defRig = rigHub(def.page, def.R);
+    await connect(def.page, {});
+    const dc = await def.R.nextConn();
+    eq(new URL(dc.url).searchParams.get("k"), "px,fl,gx,mk,nw", "PULSE: a connect that names no topic asks for the five, never pb");
+    await defRig.step(2);
+    eq(await def.page.evaluate(() => window.FlowsUI.rt.beats()), null, "PULSE: and the adapter is null for a page that did not ask for it");
+    await def.ctx.close();
+
+    const plants = [
+      ["deltas ignored", (src) => src.replace("        T.rows.set(r[0], r);\n        if (!cell || !sameJson(cell, r)) ids.push(r[0]);", "        if (!cell) ids.push(r[0]);")],
+      ["the window never trimmed", (src) => src.replace("    if (map.size <= CELLS) return;", "    return;")],
+    ];
+    for (const [name, mutate] of plants) {
+      const once = mutate(served);
+      eq(once !== served, true, `PULSE planted build (${name}) applies to the served file`);
+      const got = await pulseCheck(mutate);
+      ok(got.length > 0, `PULSE planted build (${name}) fails: ${got[0] || "it passed"}`);
+    }
   }
 
   if (process.env.RT_ONLY && want("measure")) {

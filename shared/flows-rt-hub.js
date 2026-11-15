@@ -1,5 +1,5 @@
 import {
-  RT_LIMITS, RT_CLOSE, RT_TOPICS, RT_TOPIC_KEYS, RT_UPSTREAM, RT_REST_SHAPE, RT_ROW_FIELDS,
+  RT_LIMITS, RT_CLOSE, RT_TOPICS, RT_TOPIC_KEYS, RT_STREAM_KEYS, RT_PULSE, createBeatLedger, RT_UPSTREAM, RT_REST_SHAPE, RT_ROW_FIELDS,
   frame, ctlFrame, pendingStream, streamEntry, worstEntry, entryHeaders, inSession, closedInfo, parseClientMessage,
   createCounter, createBudget, createLagStats, createTopicState, mergeTopic, snapshotRows, setPxNames, flowQuery,
   rosterPlan, pickFocus, rtSwitches, rtCadenceMs, createRedactor, rtSecretsOf,
@@ -728,6 +728,10 @@ export class RtHub {
   resetRun() {
     this.topics = Object.fromEntries(RT_TOPIC_KEYS.map((k) => [k, newTopic(k)]));
     this.counter.reset();
+    this.beats = createBeatLedger();
+    this.pulseAt = 0;
+    this.pulseS = null;
+    this.pulseWanted = false;
     this.session = null;
     this.base = null;
     this.gxNames = [];
@@ -770,7 +774,7 @@ export class RtHub {
       const a = this.attachment(ws);
       st = {
         u: typeof a.u === "string" ? a.u : "", exp: Number(a.exp) || 0,
-        topics: new Set(Array.isArray(a.k) ? a.k.filter((k) => RT_TOPIC_KEYS.includes(k)) : RT_TOPIC_KEYS),
+        topics: new Set(Array.isArray(a.k) ? a.k.filter((k) => RT_STREAM_KEYS.includes(k)) : RT_TOPIC_KEYS),
         f: typeof a.f === "string" ? a.f : null, uep: Number.isSafeInteger(a.uep) ? a.uep : null,
         have: new Set(), lastRs: Object.create(null), burst: [],
       };
@@ -879,6 +883,7 @@ export class RtHub {
       if (Number.isFinite(newest)) t.itemLag.add(at - newest);
     }
     if (up.k === "px") for (const r of out.rows) if (r[1] !== null) t.rowLag.add(at - r[1]);
+    if (out.rows.length > 0) this.beats.count(up.k, this.now());
     this.emit(up.k, out.rows);
     if (this.waiters.length) for (const w of this.waiters.slice()) w.check();
   }
@@ -889,7 +894,53 @@ export class RtHub {
     return streamEntry({ k, readAt: t.readAt, vendorAt: t.vendorAt, session: this.session, now, clock: this.clock, updatedAt: t.readAt });
   }
 
+  ready(k) {
+    return k === RT_PULSE.k || this.topics[k].hasData;
+  }
+
+  pulseMeta(now) {
+    return { ...this.beats.summary(now), cols: RT_PULSE.cols, periodS: RT_PULSE.periodMs / 1000 };
+  }
+
+  pulseFrame(now, snap) {
+    const rows = snap ? this.beats.window(now) : this.beats.rows(this.pulseS === null ? -Infinity : this.pulseS + 1, Infinity, now);
+    const sq = snap ? this.counter.peek(RT_PULSE.k) : this.counter.next(RT_PULSE.k);
+    return frame(RT_PULSE.k, { ep: this.ep || now, sq, at: now, snap, meta: this.pulseMeta(now), rows });
+  }
+
+  emitPulse(now) {
+    const hi = Math.floor(now / 1000) - 1;
+    const delta = JSON.stringify(this.pulseFrame(now, false));
+    this.pulseS = hi;
+    this.pulseAt = now;
+    let snap = null;
+    let sent = 0;
+    for (const ws of this.liveSockets()) {
+      const st = this.sockState(ws);
+      if (!st.topics.has(RT_PULSE.k)) continue;
+      if (st.have.has(RT_PULSE.k)) this.send(ws, delta);
+      else {
+        if (snap === null) snap = JSON.stringify(this.pulseFrame(now, true));
+        this.send(ws, snap);
+        st.have.add(RT_PULSE.k);
+      }
+      sent++;
+    }
+    if (sent) this.lastBroadcastAt = now;
+  }
+
+  observe(now, open) {
+    const down = this.degraded ? this.degraded.k : [];
+    for (const k of RT_TOPIC_KEYS) {
+      if (!open) this.beats.observe(k, now, false, "closed");
+      else if (!this.demanded.has(k)) this.beats.observe(k, now, false, "undemanded");
+      else if (down.includes(k)) this.beats.observe(k, now, false, "degraded");
+      else this.beats.observe(k, now, true);
+    }
+  }
+
   snapshotFrame(k, now) {
+    if (k === RT_PULSE.k) return this.pulseFrame(now, true);
     const t = this.topics[k];
     const sq = this.counter.peek(k);
     if (!t.hasData) return frame(k, { ep: this.ep, sq, at: now, snap: true, fresh: pendingStream(k), meta: { cold: true }, rows: [] });
@@ -958,14 +1009,14 @@ export class RtHub {
     const frames = [];
     for (const k of st.topics) {
       frames.push(this.snapshotFrame(k, now));
-      if (this.topics[k].hasData) st.have.add(k);
+      if (this.ready(k)) st.have.add(k);
     }
     const phase = this.phase || phaseAt(now, this.clock);
     return ctlFrame("hello", {
       ep: this.ep, at: now,
       meta: {
         transport: "ws", upstream: this.upstream.kind, mode: this.cfg.mode, audience: this.cfg.audience,
-        topics: Array.from(st.topics), hbS: RT_LIMITS.hbMs / 1000, cold: Array.from(st.topics).some((k) => !this.topics[k].hasData),
+        topics: Array.from(st.topics), hbS: RT_LIMITS.hbMs / 1000, cold: Array.from(st.topics).some((k) => !this.ready(k)),
         phase: phase ? phase.phase : null, session: this.session || (phase && phase.session) || null, f: st.f,
       },
       rows: frames,
@@ -981,7 +1032,7 @@ export class RtHub {
     if (others.length >= RT_LIMITS.sockets) { this.bye(ws, RT_CLOSE.full, "hub-full"); return false; }
     const st = {
       u, exp, uep: Number.isSafeInteger(uep) ? uep : null,
-      topics: new Set(topics.filter((k) => RT_TOPIC_KEYS.includes(k))), f: f && TICKER_RE.test(f) ? f : null,
+      topics: new Set(topics.filter((k) => RT_STREAM_KEYS.includes(k))), f: f && TICKER_RE.test(f) ? f : null,
       have: new Set(), lastRs: Object.create(null), burst: [],
     };
     this.socks.set(ws, st);
@@ -1022,13 +1073,13 @@ export class RtHub {
       for (const k of st.topics) {
         if (before.has(k) && st.have.has(k)) continue;
         this.send(ws, JSON.stringify(this.snapshotFrame(k, now)));
-        if (this.topics[k].hasData) st.have.add(k);
+        if (this.ready(k)) st.have.add(k);
       }
       return;
     }
     if (m.t === "p") {
       for (const [k, n] of Object.entries(m.sq)) {
-        if (st.topics.has(k) && this.topics[k].hasData && this.counter.peek(k) - n > RT_LIMITS.laggardFrames) {
+        if (st.topics.has(k) && this.ready(k) && this.counter.peek(k) - n > RT_LIMITS.laggardFrames) {
           this.bye(ws, RT_CLOSE.laggard, "laggard");
           return;
         }
@@ -1039,7 +1090,7 @@ export class RtHub {
     if (now - (st.lastRs[m.k] || 0) < RT_LIMITS.rsMinGapMs * this.cfg.scale) return;
     st.lastRs[m.k] = now;
     this.send(ws, JSON.stringify(this.snapshotFrame(m.k, now)));
-    if (this.topics[m.k].hasData) st.have.add(m.k);
+    if (this.ready(m.k)) st.have.add(m.k);
   }
 
   onClose(ws) {
@@ -1065,7 +1116,8 @@ export class RtHub {
       }
     }
     const linger = RT_LIMITS.snapLingerMs * this.cfg.scale;
-    for (const k of RT_TOPIC_KEYS) if (now - (this.snapAt[k] ?? -Infinity) < linger) want.add(k);
+    for (const k of RT_STREAM_KEYS) if (now - (this.snapAt[k] ?? -Infinity) < linger) want.add(k);
+    this.pulseWanted = want.has(RT_PULSE.k);
     for (const t of Object.keys(this.snapFocus)) {
       if (now - this.snapFocus[t] < linger) focus.push(t);
       else delete this.snapFocus[t];
@@ -1211,6 +1263,7 @@ export class RtHub {
         fresh: t.hasData ? this.freshOf(k, now) : pendingStream(k),
       };
     }
+    if (this.pulseWanted) topics[RT_PULSE.k] = { sq: this.counter.peek(RT_PULSE.k) };
     const sent = this.broadcastCtl("hb", {
       upstream: closed ? "closed" : this.degraded ? "down" : "up", phase: this.phase ? this.phase.phase : null,
       sockets: this.socketCount, degraded: this.degraded ? { reason: this.degraded.reason, k: this.degraded.k } : null, topics,
@@ -1235,6 +1288,7 @@ export class RtHub {
     this.phase = phase;
     if (!inSession(phase)) {
       this.acctAt = null;
+      this.observe(now, false);
       if (typeof this.upstream.park === "function") this.upstream.park();
       const info = closedInfo(phase);
       const key = closedKeyOf(info);
@@ -1252,11 +1306,14 @@ export class RtHub {
     this.session = session;
     this.refreshSession(session);
     this.refreshNames();
+    this.observe(now, true);
     await this.upstream.tick(now);
     const end = this.now();
     if (!this.demand(end)) { this.stop(); return null; }
     this.evaluate(end);
+    this.observe(end, true);
     this.account(end);
+    if (this.pulseWanted && end - this.pulseAt >= RT_PULSE.periodMs * this.cfg.scale) this.emitPulse(end);
     this.beat(end, false);
     return this.untilNext(end);
   }
@@ -1287,6 +1344,10 @@ export class RtHub {
     let wait = ceiling;
     const beatIn = this.lastBroadcastAt + RT_LIMITS.hbMs * scale - now;
     if (beatIn < wait) wait = beatIn;
+    if (this.pulseWanted) {
+      const pulseIn = this.pulseAt + RT_PULSE.periodMs * scale - now;
+      if (pulseIn < wait) wait = pulseIn;
+    }
     const up = this.upstream.state();
     if (up && up.topics) {
       const barrier = up.pausedUntil && up.pausedUntil > now ? up.pausedUntil : 0;
@@ -1323,7 +1384,7 @@ export class RtHub {
     if (typeof f === "string" && TICKER_RE.test(f) && (f in this.snapFocus || Object.keys(this.snapFocus).length < RT_LIMITS.focusMax)) this.snapFocus[f] = now;
     if (!this.running) this.start(now);
     const phase = phaseAt(now, this.clock);
-    const polled = ks.filter((k) => k !== "gx" || this.gxNames.length > 0);
+    const polled = ks.filter((k) => RT_TOPIC_KEYS.includes(k) && (k !== "gx" || this.gxNames.length > 0));
     if (inSession(phase) && polled.some((k) => !this.topics[k].hasData)) {
       this.host.wake(10);
       await this.waitData(polled, RT_LIMITS.snapWaitMs);
@@ -1383,6 +1444,7 @@ export class RtHub {
       },
       calls: { minuteTotal: this.budget.used(now), perMinute: this.budget.perMinute },
       degraded: this.degraded,
+      pulse: { sq: this.counter.peek(RT_PULSE.k), wanted: this.pulseWanted, lastFrameAt: this.pulseAt || null, ...this.beats.summary(now) },
       killSwitches: { FLOWS_RT_MODE: this.cfg.mode, FLOWS_RT_AUDIENCE: this.cfg.audience, FLOWS_RT_UPSTREAM: this.cfg.upstream },
       topics,
     });
@@ -1465,7 +1527,7 @@ export class Pulse {
     if (this.hub.cfg.mode !== "on") return jsonResponse({ error: { code: "rt_off", message: "Real-time rail is off" } }, 404);
     if (url.pathname === "/ws") return this.upgrade(request, url);
     if (url.pathname === "/snap") {
-      const ks = (url.searchParams.get("k") || "").split(",").filter((k) => RT_TOPIC_KEYS.includes(k));
+      const ks = (url.searchParams.get("k") || "").split(",").filter((k) => RT_STREAM_KEYS.includes(k));
       const f = (url.searchParams.get("f") || "").trim().toUpperCase();
       const out = await this.hub.snap(ks.length ? Array.from(new Set(ks)) : RT_TOPIC_KEYS.slice(), TICKER_RE.test(f) ? f : null);
       return jsonResponse(out.frames, 200, out.headers);
@@ -1485,7 +1547,7 @@ export class Pulse {
     if (!MEMBER_NAME.test(u) || !Number.isFinite(exp)) {
       return jsonResponse({ error: { code: "unauthorized", message: "Authentication required" } }, 401);
     }
-    const asked = (url.searchParams.get("k") || "").split(",").filter((k) => RT_TOPIC_KEYS.includes(k));
+    const asked = (url.searchParams.get("k") || "").split(",").filter((k) => RT_STREAM_KEYS.includes(k));
     const f = (url.searchParams.get("f") || "").trim().toUpperCase();
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);

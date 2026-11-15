@@ -44,7 +44,10 @@ const rtFlat = (o) => JSON.stringify(Object.keys(o).sort());
 
 {
   deep(RT.RT_TOPIC_KEYS, ["px", "fl", "gx", "mk", "nw"], "five data topics");
-  deep(RT.RT_KINDS, ["px", "fl", "gx", "mk", "nw", "ctl"], "five data topics and the control channel");
+  deep(RT.RT_KINDS, ["px", "fl", "gx", "mk", "nw", "pb", "ctl"], "five data topics, the derived pulse topic and the control channel");
+  deep([RT.RT_DERIVED_KEYS, RT.RT_STREAM_KEYS], [["pb"], ["px", "fl", "gx", "mk", "nw", "pb"]], "one derived topic, pb, added after the five and never among the polled topics");
+  ok(!RT.RT_TOPIC_KEYS.includes("pb") && !("pb" in RT.RT_TOPICS) && !("pb" in RT.RT_UPSTREAM), "pb has no upstream request, socket channel or topic spec, so nothing can poll it");
+  deep([RT.RT_PULSE.pv, RT.RT_PULSE.periodMs, RT.RT_PULSE.cells, RT.RT_PULSE.cols], [1, 5000, 60, ["s", "px", "fl", "gx", "mk", "nw"]], "pulse v1: a frame every 5 s, sixty one-second cells, a second then one count per topic");
   deep(RT.RT_CTL, ["hello", "hb", "resync", "degraded", "closed", "bye"], "six control frames");
   deep(RT.RT_ENVELOPE_KEYS, ["v", "k", "ep", "sq", "at", "snap", "fresh", "meta", "rows"], "the envelope keys, in order");
   for (const [name, v] of Object.entries({ RT_TOPICS: RT.RT_TOPICS, RT_LIMITS: RT.RT_LIMITS, RT_CLOSE: RT.RT_CLOSE, RT_ROW_FIELDS: RT.RT_ROW_FIELDS })) {
@@ -3056,6 +3059,235 @@ const rowsOfK = (ws, k) => wsFrames(ws, k).flatMap((f) => f.rows);
   const hub = moduleSource("shared/flows-rt-hub.js");
   expect(hub, /upstream: \{ kind: this\.upstream\.kind, asked: this\.cfg\.upstreamAsked, \.\.\.up \}/, { min: 1, max: 1, why: "the status names the upstream by kind and the ask, then its state, never a URL" });
   expect(hub, /createCompositeUpstream\(\{ rest: restUp, socket, held,/, { min: 1, max: 1, why: "createHub builds the composite only for the socket upstream" });
+}
+
+const PULSE_COLS = ["s", "px", "fl", "gx", "mk", "nw"];
+
+function pulseRig(mod, { start = SESSION_NOW, env = {} } = {}) {
+  const state = { t: start };
+  const vendor = createFakeVendor({ session: DAY, clock: () => state.t });
+  const sockets = [];
+  const hub = mod.createHub({
+    env: { FLOWS_RT_MODE: "on", UW_API_KEY: "k", UW_BASE: "http://uw.test", ...env },
+    now: () => state.t, fetchImpl: fetchFor(vendor), random: () => 0.5, log: () => {},
+    host: { sockets: () => sockets.filter((s) => s.readyState === 1), wake: () => {} },
+    loadRoster: async () => null,
+  });
+  const join = (topics, f = null) => {
+    const ws = mkSocket("anilkaya");
+    sockets.push(ws);
+    hub.admit(ws, { u: "anilkaya", exp: ws.exp, uep: null, topics, f });
+    return ws;
+  };
+  const run = async (seconds, step = 1000) => {
+    for (let i = 0; i < seconds * 1000 / step; i++) { const d = await hub.tick(); state.t += step; if (d === null) return; }
+  };
+  return { hub, state, vendor, sockets, join, run };
+}
+
+const pulseCells = (ws) => {
+  const map = new Map();
+  for (const f of ws.sent) {
+    const frames = f.k === "ctl" && f.t === "hello" ? f.rows : [f];
+    for (const x of frames) if (x.k === "pb") for (const row of x.rows) map.set(row[0], row);
+  }
+  return map;
+};
+
+const beatOracle = (ws) => {
+  const firstSeen = {};
+  const per = {};
+  for (const f of ws.sent) {
+    if (f.k === "ctl" || f.k === "pb") continue;
+    if (!(f.k in firstSeen)) { firstSeen[f.k] = f.at; continue; }
+    if (f.snap) continue;
+    const s = Math.floor(f.at / 1000);
+    per[f.k] = per[f.k] || new Map();
+    per[f.k].set(s, (per[f.k].get(s) || 0) + (f.rows.length > 0 ? 1 : 0));
+  }
+  return { firstSeen, per };
+};
+
+async function pulseWorld(mod) {
+  const problems = [];
+  const facts = {};
+  const bad = (cond, why) => { if (!cond) problems.push(why); };
+  const r = pulseRig(mod);
+  const watcher = r.join(["px", "fl", "gx", "mk", "nw"], "NVDA");
+  const ws = r.join(["px", "fl", "gx", "mk", "nw", "pb"], "NVDA");
+  await r.run(70);
+  const pb = ws.sent.filter((f) => f.k === "pb");
+  const deltas = pb.filter((f) => !f.snap);
+  facts.pbFrames = pb.length;
+  bad(deltas.length >= 12 && deltas.length <= 15, `pb: a frame every 5 s over 70 s, ${deltas.length}`);
+  bad(pb.every((f) => RT.checkFrame(f).length === 0), "pb: every frame is a clean envelope");
+  bad(deltas.every((f, i) => i === 0 || f.sq === deltas[i - 1].sq + 1), "pb: sq rises by one per delta");
+  bad(pb.every((f) => f.ep === r.hub.ep && !("fresh" in f)), "pb: every frame is in the epoch and carries no fresh entry, so no pill reads it");
+  bad(pb.every((f) => f.meta.pv === 1 && JSON.stringify(f.meta.cols) === JSON.stringify(PULSE_COLS)), "pb: meta names pv 1 and the six columns");
+  const seconds = deltas.flatMap((f) => f.rows.map((row) => row[0]));
+  bad(seconds.length > 0 && seconds.every((s, i) => i === 0 || s === seconds[i - 1] + 1), "pb: delta rows are consecutive seconds with no overlap and no hole");
+  bad(deltas.every((f) => f.rows.every((row) => row[0] <= Math.floor(f.at / 1000) - 1)), "pb: no frame carries the second it is still in");
+  const cells = pulseCells(ws);
+  const { firstSeen, per } = beatOracle(watcher);
+  let compared = 0;
+  let zeroAfterEmptyPoll = 0;
+  let wrong = 0;
+  for (const [s, row] of cells) {
+    RT.RT_TOPIC_KEYS.forEach((k, i) => {
+      const c = row[1 + i];
+      if (!(k in firstSeen) || s <= Math.floor(firstSeen[k] / 1000)) return;
+      const want = per[k] ? per[k].get(s) || 0 : 0;
+      compared++;
+      if (c !== want && wrong++ < 3) problems.push(`pb: ${k} at ${s} counts ${c}, the frames that changed say ${want}`);
+      const emptyPolled = watcher.sent.some((f) => f.k === k && !f.snap && f.rows.length === 0 && Math.floor(f.at / 1000) === s);
+      if (emptyPolled && c === 0) zeroAfterEmptyPoll++;
+    });
+  }
+  facts.compared = compared;
+  facts.zeroAfterEmptyPoll = zeroAfterEmptyPoll;
+  bad(compared >= 200, `pb: at least 200 observed cells compared with the frames, ${compared}`);
+  bad(zeroAfterEmptyPoll >= 3, `pb: a poll that changed nothing is not a beat (${zeroAfterEmptyPoll} observed seconds whose frames were empty count 0)`);
+  const startS = Math.floor(SESSION_NOW / 1000);
+  bad(cells.has(startS - 1) && cells.get(startS - 1).slice(1).every((c) => c === null), "pb: a second before the hub started is null, never zero");
+  const st = r.hub.status().pulse;
+  const lastDelta = deltas[deltas.length - 1];
+  const nowS = Math.floor(lastDelta.at / 1000);
+  const minute = Array.from(cells.values()).filter((row) => row[0] >= nowS - 60 && row[0] <= nowS - 1);
+  bad(st && Number.isInteger(st.bpm.px) && st.obsS.px === 60, "status: px observed the whole last minute and states its beats a minute");
+  bad(minute.length === 60 && lastDelta.meta.bpm.px === minute.reduce((n, row) => n + row[1], 0), `pb: the beats a minute a frame states are the sum of the sixty cells before it (${lastDelta.meta.bpm.px})`);
+  const hb = ws.sent.filter((f) => f.k === "ctl" && f.t === "hb");
+  bad(hb.length === 0 || hb.every((f) => f.meta.topics.pb && f.meta.topics.pb.sq <= r.hub.counter.peek("pb")), "hb: carries pb's sq so a quiet socket sees a lost frame");
+
+  const solo = pulseRig(mod);
+  const lone = solo.join(["pb"]);
+  await solo.run(30);
+  const loneCells = Array.from(pulseCells(lone).values());
+  bad(solo.vendor.calls.length === 0, `pb alone: zero vendor calls, ${solo.vendor.calls.length}`);
+  bad(solo.hub.budget.used(solo.state.t) === 0, "pb alone: no token of the rail's budget is taken");
+  bad(lone.sent.filter((f) => f.k === "pb" && !f.snap).length >= 5, "pb alone: frames still flow");
+  bad(loneCells.length > 0 && loneCells.every((row) => row.slice(1).every((c) => c === null)), "pb alone: every cell is null, because no topic was observed");
+  const lastPb = lone.sent.filter((f) => f.k === "pb").slice(-1)[0];
+  bad(lastPb && lastPb.meta.why.px === "undemanded" && lastPb.meta.bpm.px === null, "pb alone: and the meta says why, with no beats a minute");
+
+  const pair = [pulseRig(mod), pulseRig(mod)];
+  pair[0].join(["px", "mk"]);
+  pair[1].join(["px", "mk", "pb"]);
+  await pair[0].run(40);
+  await pair[1].run(40);
+  const callsOf = (x) => JSON.stringify(x.vendor.calls.map((c) => c.path + "@" + c.at));
+  bad(pair[0].vendor.calls.length > 0 && callsOf(pair[0]) === callsOf(pair[1]), "budget: adding pb to a socket changes no vendor call, path or time");
+
+  const part = pulseRig(mod);
+  const pws = part.join(["px", "pb"]);
+  await part.run(30);
+  const prow = Array.from(pulseCells(pws).values()).filter((row) => row[0] >= startS + 5);
+  bad(prow.length > 0 && prow.every((row) => row[2] === null && row[3] === null && row[5] === null), "pb: a topic no socket asks for is null in every cell");
+  bad(prow.some((row) => Number.isInteger(row[1])), "pb: while the topic that is asked for is counted");
+
+  const deg = pulseRig(mod);
+  const dws = deg.join(["px", "pb"]);
+  await deg.run(15);
+  deg.vendor.fault = "500";
+  const failAt = deg.state.t;
+  await deg.run(40);
+  const after = Array.from(pulseCells(dws).values()).filter((row) => row[0] * 1000 >= failAt + 25000);
+  bad(after.length > 0 && after.every((row) => row[1] === null), "degraded: a topic in a degraded episode is unobserved, not quiet");
+  const dmeta = dws.sent.filter((f) => f.k === "pb").slice(-1)[0];
+  bad(dmeta && dmeta.meta.why.px === "degraded", "degraded: and the meta names the reason");
+
+  const night = pulseRig(mod, { start: at(21, 0) });
+  const nws = night.join(["px", "pb"]);
+  await night.run(30);
+  bad(nws.sent.filter((f) => f.k === "pb" && !f.snap).length === 0, "closed: no pb frame is sent outside the session");
+  bad(night.vendor.calls.length === 0, "closed: and no vendor call");
+
+  const msg = pulseRig(mod);
+  const mws = msg.join(["px"]);
+  await msg.run(6);
+  msg.hub.onMessage(mws, JSON.stringify({ t: "sub", k: ["px", "pb"] }));
+  const subbed = mws.sent.slice(-1)[0];
+  bad(subbed.k === "pb" && subbed.snap === true && subbed.rows.length === 60, "sub: adding pb sends its sixty-cell snapshot at once");
+  await msg.run(12);
+  msg.state.t += 3000;
+  msg.hub.onMessage(mws, JSON.stringify({ t: "rs", k: "pb" }));
+  const rsLast = mws.sent.slice(-1)[0];
+  bad(rsLast.k === "pb" && rsLast.snap === true && rsLast.sq === msg.hub.counter.peek("pb"), "rs: a resync of pb is its snapshot at the current sq");
+  const snapped = await msg.hub.snap(["pb"]);
+  bad(snapped.frames.length === 1 && snapped.frames[0].k === "pb" && snapped.frames[0].rows.length === 60, "snap: pb answers its sixty-cell window at once");
+  return { problems, facts };
+}
+
+{
+  const L = RT.createBeatLedger();
+  const t0 = 1_800_000_000_000;
+  deep(L.cell("px", t0 / 1000, t0 + 5000), null, "ledger: a second no span covers is null");
+  eq(L.count("px", t0 + 100), false, "ledger: a beat outside every span is refused");
+  L.observe("px", t0 + 500, true);
+  eq(L.count("px", t0 + 400), false, "ledger: a beat before its span opened is refused");
+  eq(L.count("px", t0 + 1200), true, "ledger: a beat inside the span is counted");
+  L.count("px", t0 + 1900);
+  L.count("px", t0 + 3100);
+  const now = t0 + 4500;
+  deep(L.rows(t0 / 1000, t0 / 1000 + 10, now).map((row) => [row[0] - t0 / 1000, row[1], row[2]]), [[0, null, null], [1, 2, null], [2, 0, null], [3, 1, null]],
+    "ledger: the half-covered first second is null, an observed quiet second is 0, beats land in their second, the current second is not sent, an unobserved topic is null");
+  L.observe("px", t0 + 6300, false, "degraded");
+  deep(L.rows(t0 / 1000 + 4, t0 / 1000 + 9, t0 + 9000).map((row) => row[1]), [0, 0, null, null, null], "ledger: a closed span keeps its whole seconds and nulls the partial and later ones");
+  eq(L.count("px", t0 + 7000), false, "ledger: a beat after the span closed is refused");
+  eq(L.summary(t0 + 9000).why.px, "degraded", "ledger: the reason the span closed is kept");
+  eq(L.summary(t0 + 9000).bpm.px, null, "ledger: beats a minute are null until sixty whole seconds were observed");
+  const M = RT.createBeatLedger();
+  M.observe("mk", t0, true);
+  for (let i = 0; i < 600; i++) M.count("mk", t0 + i * 1000 + 10);
+  const sm = M.summary(t0 + 600000);
+  deep([sm.obsS.mk, sm.bpm.mk, sm.obsS.px, sm.bpm.px, sm.why.px, sm.pv], [60, 60, 0, null, "undemanded", 1], "ledger: a minute of one beat a second is 60 a minute; a topic never observed is null with its reason");
+  ok(typeof sm.last.mk === "string" && sm.last.mk.endsWith("Z") && sm.last.px === null, "ledger: last beat as an ISO instant, null when none");
+  eq(M.window(t0 + 600000).length, 60, "ledger: the window is sixty cells");
+  for (let i = 0; i < 300; i++) { M.observe("mk", t0 + 600000 + i * 2000, i % 2 === 0); M.count("mk", t0 + 600000 + i * 2000 + 500); }
+  ok(M.window(t0 + 1300000).length === 60, "ledger: memory stays bounded across a long run of spans");
+}
+
+{
+  const live = await pulseWorld({ createHub });
+  for (const p of live.problems) ok(false, p);
+  ok(live.problems.length === 0, `pulse: the hub's pb topic holds every check (${JSON.stringify(live.facts)})`);
+  const pbParse = [
+    RT.parseClientMessage(JSON.stringify({ t: "sub", k: ["px", "pb"] })),
+    RT.parseClientMessage(JSON.stringify({ t: "rs", k: "pb" })),
+    RT.parseClientMessage(JSON.stringify({ t: "p", sq: { pb: 3 } })),
+    RT.parseClientMessage(JSON.stringify({ t: "sub", k: ["px", "fl", "gx", "mk", "nw", "pb"] })),
+    RT.parseClientMessage(JSON.stringify({ t: "sub", k: ["pq"] })),
+  ];
+  deep(pbParse.map((p) => p.ok), [true, true, true, true, false], "parse: pb is a topic a client may subscribe to, resync and report; an unknown one is refused");
+  deep([rtTopics(null).topics, rtTopics("px,pb").topics, rtTopics("pb").ok, rtTopics("pz").ok], [["px", "fl", "gx", "mk", "nw"], ["px", "pb"], true, false], "routes: pb is accepted by name, and the default stays the five topics, so no existing client receives it");
+  const hubSrc = moduleSource("shared/flows-rt-hub.js");
+  expect(hubSrc, /topics: new Set\(Array\.isArray\(a\.k\) \? a\.k\.filter\(\(k\) => RT_STREAM_KEYS\.includes\(k\)\) : RT_TOPIC_KEYS\)/, { min: 1, max: 1, why: "an attachment with no list defaults to the five topics, never pb" });
+
+  const plants = [
+    ["every poll is a beat", "shared/flows-rt-hub.js", [["if (out.rows.length > 0) this.beats.count(up.k, this.now());", "this.beats.count(up.k, this.now());"]]],
+    ["a degraded topic counted as quiet", "shared/flows-rt-hub.js", [['else if (down.includes(k)) this.beats.observe(k, now, false, "degraded");', 'else if (false) this.beats.observe(k, now, false, "degraded");']]],
+    ["the emitted second not advanced", "shared/flows-rt-hub.js", [["    this.pulseS = hi;\n", ""]]],
+    ["a delta reusing the sq", "shared/flows-rt-hub.js", [["const sq = snap ? this.counter.peek(RT_PULSE.k) : this.counter.next(RT_PULSE.k);", "const sq = this.counter.peek(RT_PULSE.k);"]]],
+    ["pb polled as an upstream topic", "shared/flows-rt-hub.js", [["this.demanded = new Set(RT_TOPIC_KEYS.filter((k) => want.has(k)));", "this.demanded = new Set(RT_TOPIC_KEYS.filter((k) => want.has(k) || want.has(\"pb\")));"]]],
+    ["the open second sent", "shared/flows-rt.js", [["const hi = Math.min(toS, Math.floor(now / 1000) - 1);", "const hi = Math.min(toS, Math.floor(now / 1000));"]]],
+  ];
+  const sharedDir = new URL("../shared/", import.meta.url);
+  const dataUrl = (text) => "data:text/javascript;base64," + Buffer.from(text).toString("base64");
+  const absolutise = (text) => text.replace(/(\bfrom\s*)(["'])(\.{1,2}\/[^"'\n]+)\2/g, (m, head, quote, spec) => head + quote + new URL(spec, sharedDir).href + quote);
+  const applyTransforms = (text, transforms, label) => transforms.reduce((out, [from, to]) => {
+    eq(out.split(from).length - 1, 1, `planted build: the anchor in ${label} matches exactly once`);
+    return out.replace(from, () => to);
+  }, text);
+  const loadMutated = (target, transforms) => import(dataUrl(absolutise(applyTransforms(read(target), transforms, target))));
+  for (const [name, target, transforms] of plants) {
+    let mod;
+    if (target === "shared/flows-rt.js") {
+      const leaf = dataUrl(absolutise(applyTransforms(read(target), transforms, target)));
+      const hubText = applyTransforms(read("shared/flows-rt-hub.js"), [['} from "./flows-rt.js";', '} from "' + leaf + '";']], "the hub's import");
+      mod = await import(dataUrl(absolutise(hubText)));
+    } else mod = await loadMutated(target, transforms);
+    const res = await pulseWorld(mod);
+    ok(res.problems.length > 0, `planted build (${name}) fails the pulse checks: ${res.problems[0] || "it passed"}`);
+  }
 }
 
 console.log(`✓ flows-rt: ${checks} assertions — the real-time rail's pure half: a frozen envelope and topic table whose rows equal the stored live-key shapers' rows value for value, per-topic sequences with a gap detector (and the false gaps a shared counter breeds), latest-wins and append-dedupe merges bounded by construction, three freshness classes with a lag guard, a 240-call budget, a REST adapter proven against a stub vendor (deadline, 429 pause with Retry-After and jitter, backoff, no overlap, no key), and a hub driven on a fake clock through demand, closed sessions, degrade and recovery, hibernation and the kill switches, and the vendor socket upstream behind FLOWS_RT_UPSTREAM: the URL and channels it joins (per-ticker only, never a firehose), socket payloads shaped into the REST rows, REST covering a silent or refused channel and resuming on silence, dedupe across the two sources, backoff and reconnection, the close on the first tick with no demand and outside the window, the socket under either audience and no joinable firehose over 400 fuzzed plans, a burst shed rather than queued, a message handler inside 0.05 ms, and the token redacted on every path`);
