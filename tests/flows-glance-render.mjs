@@ -180,12 +180,16 @@ const Q_FALLBACK = 0.042 * Math.sqrt(Math.PI / 2);
   const alt = await page.evaluate(({ card, x }) => {
     const G = window.FlowsUI.tickerGlance.model, y = JSON.parse(JSON.stringify(x));
     delete y.term.eventMove;
+    y.earnings.impliedNext = { ...y.earnings.impliedNext, d: "1999-01-04" };
+    const other = G(card, "1M", { cardX: y }).event.q;
+    y.earnings.impliedNext.d = y.earnings.next.d;
     const a = G(card, "1M", { cardX: y });
     y.earnings.events = y.earnings.events.slice(0, 3);
     const b = G(card, "1M", { cardX: y });
-    return { q: a.event.q, p: a.event.p, bq: b.event.q, bp: b.event.p, bwhy: b.why.eventP, bPair: b.p.filter((o) => o.h === b.event.h).length, bStep: Math.log(b.p.filter((o) => o.h === b.event.h)[1].up / b.S) ** 2 - Math.log(b.p.filter((o) => o.h === b.event.h)[0].up / b.S) ** 2 };
+    return { other, q: a.event.q, p: a.event.p, bq: b.event.q, bp: b.event.p, bwhy: b.why.eventP, bPair: b.p.filter((o) => o.h === b.event.h).length, bStep: Math.log(b.p.filter((o) => o.h === b.event.h)[1].up / b.S) ** 2 - Math.log(b.p.filter((o) => o.h === b.event.h)[0].up / b.S) ** 2 };
   }, { card, x: X });
-  near(alt.q, Q_FALLBACK, 1e-12, "without a term-structure event move the quoted expected move is read as a mean absolute move and scaled by the square root of pi over two to a standard deviation");
+  near(alt.q, Q_FALLBACK, 1e-12, "without a term-structure event move the quoted expected move of the same report is read as a mean absolute move and scaled by the square root of pi over two to a standard deviation");
+  ok(alt.other === null, "and a quoted move dated for another report steps nothing");
   eq(alt.bp, null, "fewer than four past reports give the real-world band no step");
   ok(/Fewer than 4 past reports/.test(alt.bwhy), "and say why");
   near(alt.bStep, 0, 1e-12, "so the P cone is continuous through the report");
