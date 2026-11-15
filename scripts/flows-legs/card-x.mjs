@@ -33,6 +33,7 @@ function fitSoft(payload) {
 export const CARD_X_SHED = Object.freeze([
   ["pm", (p) => { if (!p.pm) return false; delete p.pm; return true; }],
   ["va", (p) => { if (!p.va) return false; delete p.va; return true; }],
+  ["er.parts", (p) => { if (!hasLiveParts(p.er)) return false; p.er = stubSection(p.er, "er"); return true; }],
   ["dx.parts", (p) => { if (!hasLiveParts(p.dx)) return false; p.dx = stubSection(p.dx, "dx"); return true; }],
   ["vx.parts", (p) => { if (!hasLiveParts(p.vx)) return false; p.vx = stubSection(p.vx, "vx"); return true; }],
   ["ps.parts", (p) => { if (!hasLiveParts(p.ps)) return false; p.ps = stubSection(p.ps, "ps"); return true; }],

@@ -164,7 +164,7 @@ for (const [id, transforms, named] of MUTANTS) {
   const worker = scan("worker.js");
   ok(/flowsVoldeskRows\(\{ store: FLOWS_STORE,/.test(worker), "the Worker mounts the family on the Flows store");
   ok(/voldeskOn: \(env, username\)/.test(worker) && /env\.FLOWS_VOLDESK/.test(worker), "and passes the page predicate that reads FLOWS_VOLDESK");
-  ok(/"voldesk"\]\)/.test(worker) || /"hist", "voldesk"\]/.test(worker), "and keeps a last good copy of the read");
+  ok(/"voldesk"\]\)/.test(worker) || /"hist", "voldesk"[,\]]/.test(worker), "and keeps a last good copy of the read");
   const toml = scan("wrangler.toml");
   ok(/^FLOWS_VOLDESK = "on"$/m.test(toml), "wrangler.toml ships the switch open to every signed-in member");
   ok(/^FLOWS_VOLDESK = "on"$/m.test(scan("wrangler.staging.toml")), "and staging opens it");
