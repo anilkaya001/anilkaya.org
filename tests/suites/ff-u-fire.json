@@ -1,0 +1,1 @@
+{"name": "ff-u-fire", "class": "N", "group": "shard", "timing": false, "medianS": 45, "shard": 5, "command": "node --disable-warning=ExperimentalWarning ff-u-fire.mjs", "files": ["ff-u-fire.mjs"], "covers": ["assets/js/flows-ff-client.js","schema.sql"]}

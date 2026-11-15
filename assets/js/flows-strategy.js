@@ -476,6 +476,10 @@
           w.classList.toggle("is-l", strip.scrollLeft > 2);
           w.classList.toggle("is-r", strip.scrollLeft < max - 2);
         };
+        const step = (dir) => strip.scrollBy({ left: dir * Math.max(160, strip.clientWidth * 0.8), behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        w.append(
+          h("button", { type: "button", class: "tl-nav is-prev", "aria-label": "Scroll " + strip.getAttribute("aria-label").toLowerCase() + " list back", onclick: () => step(-1) }, "\u2039"),
+          h("button", { type: "button", class: "tl-nav is-next", "aria-label": "Scroll " + strip.getAttribute("aria-label").toLowerCase() + " list forward", onclick: () => step(1) }, "\u203a"));
         strip.addEventListener("scroll", edge, { passive: true });
         if (window.ResizeObserver) new ResizeObserver(edge).observe(strip);
         w._edge = edge;
@@ -746,7 +750,7 @@
     m.grade = h("span", { class: "tl-grade" });
     const odds = UI.moduleCard({ id: "sgOddsM", title: "Odds", index: 1, info: oddsInfo, body: [m.pop, UI.metrics([m.evQ, m.evP, m.edge], { min: 88 })] });
     odds.querySelector(".ui-mod-t").append(m.grade);
-    odds.querySelector(".ui-mod-sp").after(UI.calibTag() || "");
+    odds.querySelector(".ui-mod-sp").after(UI.calibTag(undefined, { deadlineMs: 45000 }) || "");
     m.dl = slot("Delta"); m.gm = slot("Gamma"); m.vg = slot("Vega"); m.th = slot("Theta"); m.cap = slot("Capital"); m.ror = slot("Return");
     const greeks = UI.moduleCard({ id: "sgGreeksM", title: "Greeks", index: 3, info: greeksInfo, body: [UI.metrics([m.dl, m.gm, m.vg, m.th, m.cap, m.ror], { min: 112 })] });
     m.scn = h("div", { class: "tl-scn" });

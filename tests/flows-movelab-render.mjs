@@ -481,7 +481,7 @@ function expectFull(world, got, w) {
     const hits = published !== null ? published : cardCounts[k].hits;
     note(r.bold === `${hits} per 252 sessions`, `size ${k} counts ${r.bold}, expected ${hits} per 252 sessions`);
     note(r.how === frequencyText({ route: "empirical", hits, sessions: SESSIONS }), `size ${k} says "${r.how}"`);
-    const basis = published !== null ? "nightly count, report days left out" : `counted on this card's closes${cardCounts[k].n === SESSIONS ? "" : ` (${cardCounts[k].n} returns, scaled)`}, report days kept in`;
+    const basis = published !== null ? "nightly count, report days kept in" : `counted on this card's closes${cardCounts[k].n === SESSIONS ? "" : ` (${cardCounts[k].n} returns, scaled)`}, report days kept in`;
     note(r.n === `${hits} per 252 sessions ${basis}`, `size ${k} names its basis: ${r.n}`);
   });
   const m = Math.round(s.movePerc * 1e5);

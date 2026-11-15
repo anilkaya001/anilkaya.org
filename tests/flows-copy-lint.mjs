@@ -171,9 +171,9 @@ const serverFiles = [...walk("shared", [".js"]), ...walk("server", [".js"]), ...
     .replace(/\s(?:src|href|data-src|data-css|id|class|data-[a-z-]+)="[^"]*"/gi, " ");
   const seen = [];
   let rendered = 0;
-  for (const [name, fn] of Object.entries(pages.FLOWS_PAGES)) {
+  for (const [name, fn] of Object.entries({ ...pages.FLOWS_PAGES, notFoundPage: pages.notFoundPage })) {
     if (typeof fn !== "function") continue;
-    for (const args of [{ username: "tester", ticker: "AAPL" }, { username: "tester", ticker: "AAPL", owner: true, scenes: true, xcheck: true, voldesk: true, live: true, net: true, funds: true }]) {
+    for (const args of [{ username: "tester", ticker: "AAPL" }, { username: "tester", ticker: "AAPL", owner: true, scenes: true, xcheck: true, voldesk: true, live: true, net: true, funds: true, eventrisk: true, halts: true, odds: true, privateLens: true, layers: true, positioning: true, shadow: true, feed: true, page: "fire" }]) {
       let html;
       try { html = fn(args); } catch { continue; }
       rendered++;
@@ -181,7 +181,8 @@ const serverFiles = [...walk("shared", [".js"]), ...walk("server", [".js"]), ...
       if (m) seen.push(`${name}: ${visible(html).slice(Math.max(0, m.index - 50), m.index + 50).replace(/\s+/g, " ")}`);
     }
   }
-  ok(rendered >= 30, `every page function renders, as a member and as an owner with every optional module on (${rendered} renders)`);
+  for (const need of ["positioningPage", "macroPage", "firePage", "inboxPage", "flowlabPage", "politicalPage", "statusPage", "eventsPage", "notFoundPage"]) ok(typeof (pages.FLOWS_PAGES[need] || pages[need]) === "function", `the lint renders ${need}`);
+  ok(rendered >= 40, `every page function renders, as a member and as an owner with every optional module on (${rendered} renders)`);
   eq(seen.join("\n"), "", "NO RENDERED PAGE NAMES THE DATA SOURCE BY ITS TRADE OR ITS COMPANY: text, titles, labels and placeholders say the feed");
   const venWord = ["ven", "dor"].join("");
   ok(SOURCE_TEXT.test(visible(`<div title="As the ${venWord} reports it">x</div>`)), "PLANTED WRONG BUILD FAILS: a title attribute naming the source is caught");

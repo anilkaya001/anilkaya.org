@@ -1,6 +1,7 @@
 import { isoDay, addDays, vnum } from "./flows-cross.js";
 import { isTradingDay } from "./flows-freshness.js";
 import { unwrap } from "./flows-vendor-core.js";
+import { fixedHalfUp } from "./flows-display-round.js";
 
 export const EXTRAS_VERSION = 1;
 
@@ -18,18 +19,30 @@ export const PARTS = Object.freeze({
   splits: Object.freeze({ group: "vx", op: "splits", rv: 1, refreshS: 14 * DAY_S, maxS: 28 * DAY_S }),
   etf: Object.freeze({ group: "vx", op: "etf-exposure", rv: 1, refreshS: 7 * DAY_S, maxS: 14 * DAY_S }),
   ivp: Object.freeze({ group: "vx", op: "interpolated-iv", rv: 1, refreshS: 20 * 3600, maxS: 3 * DAY_S }),
+  ftd: Object.freeze({ group: "ps", op: "ftds", rv: 1, refreshS: 7 * DAY_S, maxS: 21 * DAY_S }),
+  svx: Object.freeze({ group: "ps", op: "short-venues", rv: 1, refreshS: 20 * 3600, maxS: 3 * DAY_S }),
+  ibs: Object.freeze({ group: "ps", op: "insider-bs", rv: 1, refreshS: 3 * DAY_S, maxS: 7 * DAY_S }),
+  ins: Object.freeze({ group: "ps", op: "insiders", rv: 1, refreshS: 30 * DAY_S, maxS: 60 * DAY_S }),
+  eps: Object.freeze({ group: "er", op: "stock-earnings", rv: 1, refreshS: 5 * DAY_S, maxS: 30 * DAY_S }),
+  fin: Object.freeze({ group: "er", op: "income-statements", rv: 1, refreshS: 7 * DAY_S, maxS: 45 * DAY_S, calls: 3 }),
 });
 
-export const SLOW_IDS = Object.freeze(Object.keys(PARTS).filter((id) => id !== "ivp"));
+export const SLOW_IDS = Object.freeze(Object.keys(PARTS).filter((id) => id !== "ivp" && PARTS[id].group !== "ps" && PARTS[id].group !== "er"));
+
+export const PS_IDS = Object.freeze(Object.keys(PARTS).filter((id) => PARTS[id].group === "ps"));
+
+export const ER_IDS = Object.freeze(["eps", "fin"]);
 
 export const NIGHTLY_IDS = Object.freeze(["ivp"]);
 
 export const GROUPS = Object.freeze({
   dx: Object.freeze(Object.keys(PARTS).filter((id) => PARTS[id].group === "dx")),
   vx: Object.freeze(Object.keys(PARTS).filter((id) => PARTS[id].group === "vx")),
+  ps: Object.freeze(Object.keys(PARTS).filter((id) => PARTS[id].group === "ps")),
+  er: Object.freeze(Object.keys(PARTS).filter((id) => PARTS[id].group === "er")),
 });
 
-export const SECTION_BYTES = Object.freeze({ dx: 24 * 1024, vx: 8 * 1024 });
+export const SECTION_BYTES = Object.freeze({ dx: 24 * 1024, vx: 8 * 1024, ps: 8 * 1024, er: 8 * 1024 });
 
 export const SLOW_CAP = 2000;
 
@@ -52,7 +65,9 @@ export function extrasCap(env = {}, fallback = SLOW_CAP) {
   return Math.min(Math.floor(n), SLOW_CAP_MAX);
 }
 
-export const SHED_ORDER = Object.freeze(["financials", "breakdown", "ownership", "analysts", "estimates", "profile", "info", "etf", "splits", "dividends", "ivp"]);
+const EXTRAS_SHED = Object.freeze(["svx", "ins", "ibs", "ftd", "financials", "breakdown", "ownership", "analysts", "estimates", "profile", "info", "etf", "splits", "dividends", "ivp"]);
+
+export const SHED_ORDER = Object.freeze(["fin", "eps", ...EXTRAS_SHED]);
 
 export const FAIL_REASONS = Object.freeze(["unshaped", "missing", "type", "empty", "plan", "limited", "failed", "deadline", "cap", "size", "unread"]);
 
@@ -74,6 +89,14 @@ export const UNIT_STATUS = Object.freeze({
   "etf-exposure.full_name": Object.freeze({ state: "withheld", why: "third-party text" }),
   "etf-exposure.last_price": Object.freeze({ state: "withheld", why: "ambiguous" }),
   "etf-exposure.prev_price": Object.freeze({ state: "withheld", why: "ambiguous" }),
+  "insider-bs.purchases_notional": Object.freeze({ state: "withheld", why: "unit" }),
+  "insider-bs.sells_notional": Object.freeze({ state: "withheld", why: "unit" }),
+  "insider-sector.premium": Object.freeze({ state: "withheld", why: "unit" }),
+  "insider-sector.avg_price": Object.freeze({ state: "withheld", why: "unit" }),
+  "ftds.quantity": Object.freeze({ state: "stated", unit: "shares" }),
+  "ftds.price": Object.freeze({ state: "stated", unit: "usd" }),
+  "short-venues.short_volume": Object.freeze({ state: "stated", unit: "shares" }),
+  "short-venues.total_volume": Object.freeze({ state: "stated", unit: "shares" }),
 });
 
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -139,9 +162,16 @@ export function reduceDividends(raw, { today = null } = {}) {
   const events = [];
   const seen = new Set();
   let bad = 0;
+  let mistyped = 0;
+  let undated = 0;
   for (const r of rows) {
     const ex = dayWithin(r.ex_date, t);
-    if (!ex) { bad++; continue; }
+    if (!ex) {
+      bad++;
+      if (r.ex_date === null || r.ex_date === undefined) undated++;
+      else if (!(typeof r.ex_date === "string" && isoDay(r.ex_date))) mistyped++;
+      continue;
+    }
     if (seen.has(ex)) continue;
     seen.add(ex);
     const amount = vnum(r.amount);
@@ -153,7 +183,7 @@ export function reduceDividends(raw, { today = null } = {}) {
       raw: amount,
     });
   }
-  if (rows.length && !events.length) return fail("type:ex_date");
+  if (rows.length && !events.length && mistyped) return fail("type:ex_date");
   events.sort((a, b) => (a.ex < b.ex ? -1 : a.ex > b.ex ? 1 : 0));
   const past = t ? events.filter((e) => e.ex <= t) : events;
   const declared = t ? events.filter((e) => e.ex > t) : [];
@@ -168,7 +198,7 @@ export function reduceDividends(raw, { today = null } = {}) {
   const x = {
     ok: true,
     rv: PARTS.dividends.rv,
-    none: events.length === 0,
+    none: rows.length === 0,
     n: events.length,
     lastEx,
     nextEx: declared.length ? declared[0].ex : null,
@@ -181,6 +211,7 @@ export function reduceDividends(raw, { today = null } = {}) {
     rawAmounts: past.slice(-4).reverse().map((e) => e.raw),
   };
   if (bad) x.bad = bad;
+  if (undated) x.undated = undated;
   return x;
 }
 
@@ -279,6 +310,119 @@ export function reduceEtfExposure(raw) {
   return x;
 }
 
+export const FTD_ROWS = 20;
+
+export const VENUE_DAYS = 10;
+
+export const VENUE_ROWS = 16;
+
+export const IBS_ROWS = 12;
+
+const dollarsToCents = (v) => {
+  if (v === null || v === undefined || v === "") return null;
+  const n = typeof v === "number" ? v : /^\d+(\.\d+)?$/.test(String(v).trim()) ? Number(String(v).trim()) : NaN;
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const c = Number(fixedHalfUp(n, 0, 2));
+  return Number.isSafeInteger(c) ? c : null;
+};
+
+const wholeCount = (v) => {
+  const n = typeof v === "number" ? v : typeof v === "string" && /^\d+$/.test(v.trim()) ? Number(v.trim()) : NaN;
+  return Number.isSafeInteger(n) && n >= 0 ? n : null;
+};
+
+export function reduceFtd(raw) {
+  const rows = rowsOfList(raw);
+  if (rows === null) return fail("unshaped");
+  if (!rows.length) return fail("empty");
+  const out = [];
+  const seen = new Set();
+  let bad = 0;
+  for (const r of rows) {
+    const d = isoDay(typeof r.date === "string" ? r.date : "");
+    const q = wholeCount(r.quantity);
+    if (!d || q === null) { bad++; continue; }
+    if (seen.has(d)) continue;
+    seen.add(d);
+    out.push([d, q, dollarsToCents(r.price)]);
+  }
+  if (!out.length) return fail("type:quantity");
+  out.sort((a, b) => (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0));
+  const x = { ok: true, rv: PARTS.ftd.rv, rows: out.slice(0, FTD_ROWS) };
+  if (bad) x.bad = bad;
+  return x;
+}
+
+export function reduceShortVenues(raw) {
+  const rows = rowsOfList(raw);
+  if (rows === null) return fail("unshaped");
+  if (!rows.length) return fail("empty");
+  const byDay = new Map();
+  let bad = 0;
+  for (const r of rows) {
+    const d = isoDay(typeof r.date === "string" ? r.date : "");
+    const s = wholeCount(r.short_volume);
+    const t = wholeCount(r.total_volume);
+    const name = typeof r.exchange_name === "string" ? r.exchange_name.trim().slice(0, 40) : "";
+    if (!d || s === null || t === null || !name) { bad++; continue; }
+    if (!byDay.has(d)) byDay.set(d, []);
+    byDay.get(d).push([name, typeof r.market_center === "string" ? r.market_center.trim().slice(0, 8) : "", s, t]);
+  }
+  if (!byDay.size) return fail("type:short_volume");
+  const days = [...byDay.keys()].sort().reverse().slice(0, VENUE_DAYS);
+  const last = byDay.get(days[0]).slice().sort((a, b) => (b[3] - a[3]) || (a[0] < b[0] ? -1 : 1)).slice(0, VENUE_ROWS);
+  const x = {
+    ok: true, rv: PARTS.svx.rv,
+    days: days.map((d) => [d, byDay.get(d).reduce((a, v) => a + v[2], 0), byDay.get(d).reduce((a, v) => a + v[3], 0)]),
+    last: { date: days[0], venues: last },
+  };
+  if (bad) x.bad = bad;
+  return x;
+}
+
+export function reduceInsiderBs(raw) {
+  const rows = rowsOfList(raw);
+  if (rows === null) return fail("unshaped");
+  if (!rows.length) return fail("empty");
+  const out = [];
+  const seen = new Set();
+  let bad = 0;
+  for (const r of rows) {
+    const d = isoDay(typeof r.filing_date === "string" ? r.filing_date : "");
+    const p = wholeCount(r.purchases);
+    const s = wholeCount(r.sells);
+    if (!d || p === null || s === null) { bad++; continue; }
+    if (seen.has(d)) continue;
+    seen.add(d);
+    out.push([d, p, s]);
+  }
+  if (!out.length) return fail("type:purchases");
+  out.sort((a, b) => (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0));
+  const x = { ok: true, rv: PARTS.ibs.rv, rows: out.slice(0, IBS_ROWS), notional: { withheld: "unit" } };
+  if (bad) x.bad = bad;
+  return x;
+}
+
+export function reduceInsiders(raw) {
+  const rows = rowsOfList(raw);
+  if (rows === null) return fail("unshaped");
+  if (!rows.length) return fail("empty");
+  let persons = 0;
+  let entities = 0;
+  let bad = 0;
+  for (const r of rows) {
+    if (r.is_person === true) persons++;
+    else if (r.is_person === false) entities++;
+    else bad++;
+  }
+  if (!persons && !entities) return fail("type:is_person");
+  const x = { ok: true, rv: PARTS.ins.rv, persons, entities, total: persons + entities };
+  if (bad) x.bad = bad;
+  return x;
+}
+
+export const REDUCERS_PS = Object.freeze({ ftd: reduceFtd, svx: reduceShortVenues, ibs: reduceInsiderBs, ins: reduceInsiders });
+
 export const REDUCERS_X = Object.freeze({
   dividends: reduceDividends, splits: reduceSplits, ivp: reduceIvPercentile, etf: reduceEtfExposure,
 });
@@ -328,13 +472,13 @@ export function exSplit(x, today) {
   return { next: future[0] || null, last: past.length ? past[past.length - 1] : null, future, known: true };
 }
 
-export function partState(part, id, now) {
+export function partState(part, id, now, refreshS = null) {
   const spec = PARTS[id];
   if (!spec || !isObj(part) || !isNum(part.at)) return "missing";
   if (part.rv !== spec.rv) return "outdated";
   const age = (now - part.at) / 1000;
   if (!(age >= -DAY_S)) return "outdated";
-  if (age <= spec.refreshS) return "fresh";
+  if (age <= (refreshS === null ? spec.refreshS : refreshS)) return "fresh";
   if (age <= spec.maxS) return "stale";
   return "expired";
 }
@@ -353,31 +497,39 @@ export function fnv32(text) {
   return h >>> 0;
 }
 
-export function urgency(part, id, now) {
-  const s = partState(part, id, now);
+export function urgency(part, id, now, refreshS = null) {
+  const s = partState(part, id, now, refreshS);
   if (s === "fresh") return -1;
   if (s === "stale" && part.shed === 1) return -1;
   if (s !== "stale") return Infinity;
   return ((now - part.at) / 1000) / PARTS[id].maxS;
 }
 
-export function planSlow({ names, priors, now, cap = SLOW_CAP, ids = SLOW_IDS }) {
+export function planSlow({ names, priors, now, cap = SLOW_CAP, ids = SLOW_IDS, scopeOf = null, refreshOf = null }) {
   const due = [];
   let fresh = 0;
   for (const t of names) {
     const sections = priors && priors.get ? priors.get(t) : null;
     for (const id of ids) {
+      if (scopeOf && !scopeOf(id, t)) continue;
       const group = PARTS[id].group;
       const part = sections && isObj(sections[group]) && isObj(sections[group].parts) ? sections[group].parts[id] : null;
-      const u = urgency(part, id, now);
+      const u = urgency(part, id, now, refreshOf ? refreshOf(id, t) : null);
       if (u < 0) { fresh++; continue; }
       due.push({ t, id, u, h: fnv32(t + "|" + id) });
     }
   }
   const rank = (u) => (u === Infinity ? 1e9 : u);
   due.sort((a, b) => (rank(b.u) - rank(a.u)) || (a.h - b.h) || (a.t < b.t ? -1 : a.t > b.t ? 1 : a.id < b.id ? -1 : 1));
-  const picked = due.slice(0, Math.max(0, cap));
-  return { picked, deferred: due.length - picked.length, due: due.length, fresh };
+  const picked = [];
+  let spent = 0;
+  for (const d of due) {
+    const cost = PARTS[d.id].calls || 1;
+    if (spent + cost > Math.max(0, cap)) break;
+    spent += cost;
+    picked.push(d);
+  }
+  return { picked, deferred: due.length - picked.length, due: due.length, fresh, spent };
 }
 
 const stubOf = (part) => ({ at: part.at, rv: part.rv, shed: 1 });
@@ -421,6 +573,10 @@ export function fitSection(section, group, budget = SECTION_BYTES[group]) {
 }
 
 export function shedNextPart(payload) {
+  if (payload && isObj(payload.va)) {
+    delete payload.va;
+    return "va";
+  }
   for (const id of SHED_ORDER) {
     const group = PARTS[id].group;
     const section = payload && isObj(payload[group]) && isObj(payload[group].parts) ? payload[group] : null;
@@ -481,6 +637,29 @@ export function outcomeTally(rows) {
     else e.failed++;
   }
   return out;
+}
+
+export const REASON_KINDS = 6;
+
+export function reasonTally(rows, kinds = REASON_KINDS) {
+  const out = {};
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r || r.skipped) continue;
+    const why = String(r.why || "ok");
+    if (!(why === "unshaped" || why.startsWith("missing") || why.startsWith("type"))) continue;
+    const e = out[r.id] || (out[r.id] = {});
+    const key = /^[a-z]+(:[a-z_]{1,32})?$/.test(why) ? why : why.startsWith("type") ? "type" : why.startsWith("missing") ? "missing" : "unshaped";
+    if (!Object.hasOwn(e, key) && Object.keys(e).length >= kinds) continue;
+    e[key] = (e[key] || 0) + 1;
+  }
+  return out;
+}
+
+export function reasonsSaid(reasons, id) {
+  const e = isObj(reasons) && isObj(reasons[id]) ? reasons[id] : null;
+  if (!e) return "";
+  const parts = Object.entries(e).filter(([, n]) => Number.isInteger(n) && n > 0).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+  return parts.length ? parts.map(([k, n]) => `${k} ${n}`).join(", ") : "";
 }
 
 export const HEALTH_LINES = Object.freeze({ warn: 0.05, fail: 0.2, minAttempted: 50, matureNights: 7 });

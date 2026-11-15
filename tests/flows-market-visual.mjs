@@ -46,8 +46,14 @@ const FACTS = () => {
     const r = rect(c);
     const bar = c.querySelector(".mk-hc-b");
     const meter = c.querySelector(".mk-mt");
+    const tag = c.querySelector(".mk-hc-src");
+    const zero = meter && meter.querySelector(".mk-mt-b");
     return {
       k: c.querySelector(".mk-hc-k").textContent, v: c.querySelector(".mk-hc-v").textContent, s: c.querySelector(".mk-hc-s").textContent,
+      said: c.querySelector(".mk-hc-s").innerText.trim(), saidShown: rect(c.querySelector(".mk-hc-s")).height > 0, tag: tag && rect(tag).width > 0 ? tag.textContent.trim() : null, src: c.dataset.src || null,
+      button: c.tagName === "BUTTON", info: c.hasAttribute("data-info"), pop: c.getAttribute("aria-haspopup"), title: c.getAttribute("title") || "",
+      zero: zero ? { l: (rect(zero).left - rect(meter).left) / rect(meter).width, w: rect(zero).width / rect(meter).width, cls: zero.className } : null,
+      zlabel: meter ? meter.getAttribute("aria-label") : null, inside: [...c.children].every((e) => rect(e).right <= r.right + 0.5 && rect(e).bottom <= r.bottom + 0.5),
       tone: c.dataset.tone || null, shown: r.width > 0 && r.height > 0, href: c.getAttribute("href"),
       spark: Boolean(c.querySelector(".mk-hc-p svg path.ln")),
       bar: bar ? [...bar.children].map((i) => ({ cls: i.className, w: rect(i).width / rect(bar).width })) : null,
@@ -96,8 +102,11 @@ function audit(f, { phone, small = false }) {
   need(b && b.tone === (market.breadth.tilt < 0 ? "down" : "up"), "the hero breadth tone does not follow its sign");
   const pc = H["Put / call"];
   need(pc && pc.v === market.pcr.premium.toFixed(2), "the hero put to call is not the premium ratio");
-  need(pc && pc.fill !== null && Math.abs(pc.fill - Math.min(market.pcr.premium / 2, 1)) < 0.02, "the put to call meter is not on a 0 to 2 scale");
-  need(pc && pc.mark !== null && Math.abs(pc.mark - 0.5) < 0.02, "the put to call parity mark is not at 1.0");
+  need(phone ? pc && !pc.shown : pc && pc.shown, "the hero put to call cell is " + (phone ? "shown on a phone, where the first three cells are the hero" : "missing"));
+  need(phone || (pc && pc.fill !== null && Math.abs(pc.fill - Math.min(market.pcr.premium / 2, 1)) < 0.02), "the put to call meter is not on a 0 to 2 scale");
+  need(phone || (pc && pc.mark !== null && Math.abs(pc.mark - 0.5) < 0.02), "the put to call parity mark is not at 1.0");
+  need(f.hero.filter((c) => c.shown).length === (phone ? 3 : 8), "the hero does not show " + (phone ? "its first three cells on a phone" : "all eight cells"));
+  need(f.hero.filter((c) => c.shown).every((c) => c.inside), "something in a hero cell leaves its cell");
   for (const T of ["SPY", "QQQ", "IWM"]) {
     const c = H[T];
     need(c && near(c.v, EXPECT.etf[T]), "the hero " + T + " is not the last bucket of its options tide");
@@ -166,8 +175,132 @@ async function run(browser, { phone, patch = null, small = false }) {
   return { facts: { hero: first.hero, tm: second.tm, tiles: second.tiles, gts: third.gts, leak: third.leak }, errors };
 }
 
+const DASH = "\u2014";
+const CAP_SCALE = 0.25;
+const CAP_DEFINE = "Each stock's net premium over its total premium, averaged by market value.";
+const CAP_OUTSIDE = "Index options and funds have no market value and are outside it.";
+const signedPct = (v) => (v < 0 ? MINUS : v > 0 ? "+" : "") + (Math.round(Math.abs(v) * 1000) / 10).toFixed(1) + "%";
+const wholePct = (v) => Math.round(v * 100) + "%";
+const liveOf = (body) => (body && body.keys && body.keys.breadth && body.keys.breadth.payload ? body.keys.breadth : null);
+const fromNight = (n) => ({ src: "nightly", value: n.value, n: n.n, of: n.of, coverage: n.coverage });
+const fromLive = (l) => ({ src: "live", value: l.value, n: l.n, of: l.of, coverage: l.coverage });
+const CAP_WORLDS = [
+  ["the live read is live and of the newest session", null, (n, l) => fromLive(l), [[1920, 1080], [1440, 820], [1024, 768], [390, 844]]],
+  ["the live key has gone stale", (route, body) => {
+    const b = route === "lk" && liveOf(body);
+    if (b) Object.assign(b.fresh, { state: "stale", liveUntil: null, staleAt: null });
+    if (route === "market") Object.assign(body.capTide, { coverage: 0.6234, n: 211 });
+  }, (n) => ({ ...fromNight(n), coverage: 0.6234, n: 211 }), [[1920, 1080], [1440, 820], [1024, 768], [390, 844]]],
+  ["the live key is fresh but no longer live", (route, body) => { const b = route === "lk" && liveOf(body); if (b) Object.assign(b.fresh, { state: "fresh", liveUntil: body.serverNow - 1000 }); },
+    (n) => fromNight(n), [[1440, 820]]],
+  ["the live session is older than the nightly's", (route, body) => { const b = route === "lk" && liveOf(body); if (b) b.payload.session = "2026-08-21"; }, (n) => fromNight(n), [[1440, 820]]],
+  ["the live read was withheld and the nightly stands", (route, body) => { const b = route === "lk" && liveOf(body); if (b) Object.assign(b.payload.cap, { value: null, reason: "thin", equal: null }); },
+    (n) => ({ ...fromNight(n), note: "The live read was withheld, so the nightly figure stands." }), [[1440, 820]]],
+  ["a nightly figure beyond the meter's scale", (route, body) => { const b = route === "lk" && liveOf(body); if (b) delete b.payload.cap; if (route === "market") body.capTide.value = 0.3104; },
+    (n) => ({ ...fromNight(n), value: 0.3104 }), [[1440, 820], [390, 844]]],
+  ["both are withheld", (route, body) => {
+    const b = route === "lk" && liveOf(body);
+    if (b) Object.assign(b.payload.cap, { value: null, reason: "vendor-failed", n: 0, coverage: null, equal: null, effN: null, dollarNet: null });
+    if (route === "market") Object.assign(body.capTide, { value: null, reason: "coverage", coverage: 0.31, equal: null, top: [] });
+  }, () => ({ src: "live", value: null, short: "Live read failed", why: "The live read failed on this pass." }), [[1440, 820], [390, 844]]],
+  ["only the nightly exists and it is withheld", (route, body) => {
+    const b = route === "lk" && liveOf(body);
+    if (b) delete b.payload.cap;
+    if (route === "market") Object.assign(body.capTide, { value: null, reason: "coverage", coverage: 0.31, equal: null, top: [] });
+  }, () => ({ src: "nightly", value: null, short: "Under half the market value", why: "The names read cover under half the market value." }), [[1440, 820]]],
+  ["neither payload carries the figure", (route, body) => { const b = route === "lk" && liveOf(body); if (b) delete b.payload.cap; if (route === "market") delete body.capTide; },
+    () => ({ src: null, value: null, short: "Not published yet", why: "The nightly build has not published this figure yet." }), [[1440, 820], [390, 844]]],
+];
+
+function capAudit(f, pop, want, { w }) {
+  const bad = [];
+  const need = (cond, msg) => { if (!cond) bad.push(msg); };
+  const i = f.hero.findIndex((c) => c.k === "Cap-weighted tide");
+  need(i === 1 && f.hero[0].k === "Net tide", "the cap-weighted cell is not right after the net tide");
+  const c = f.hero[i];
+  if (!c) return bad;
+  need(c.shown && c.inside, "the cap-weighted cell is hidden or something leaves it");
+  need(c.button && c.info && c.pop === "dialog", "the cap-weighted cell does not open a disclosure");
+  need(c.src === want.src, "the cell is marked " + c.src + ", not " + want.src);
+  need(!/UTC|GMT|\bET\b|Eastern|\btape\b/i.test(c.title + " " + pop), "the cell names another zone or the banned word");
+  need(pop.includes(CAP_DEFINE) && pop.includes(CAP_OUTSIDE), "the disclosure does not define the measure and say what is outside it");
+  if (want.value === null) {
+    need(c.v === DASH, "a withheld figure prints " + c.v + ", not a dash");
+    need(c.tone === null, "a withheld figure is toned " + c.tone);
+    need(c.zero === null && c.zlabel === null, "a withheld figure draws a meter");
+    need(c.said === want.short, "a withheld figure does not give its reason in the cell: " + c.said);
+    need((c.title + " " + pop).includes(want.why), "a withheld figure does not give its reason in words");
+    return bad;
+  }
+  const word = want.src === "live" ? "Live" : "Nightly";
+  const cover = want.n + " of " + want.of + " names, " + wholePct(want.coverage) + " of market value";
+  need(c.v === signedPct(want.value), "the cell prints " + c.v + ", the fixture says " + signedPct(want.value));
+  need(c.tone === (want.value > 0 ? "up" : want.value < 0 ? "down" : null), "the cell's tone does not follow its sign: " + c.tone);
+  need(c.tag === word || (c.saidShown && c.said.startsWith(word + " \u00b7 ")), "the cell does not say on screen that it shows the " + word.toLowerCase() + " figure: " + c.tag + " / " + c.said);
+  need(!c.saidShown || c.said.includes(want.n + " of " + want.of), "the cell's second line does not count its names: " + c.said);
+  need(w < 1900 || (c.saidShown && c.said === cover), "at full width the cell does not print its coverage: " + c.said);
+  need(c.title.includes(cover + "."), "the title does not carry the coverage by market value: " + c.title);
+  need(pop.replace(/\s+/g, " ").includes("Names " + want.n + " of " + want.of) && pop.replace(/\s+/g, " ").includes("Market value covered " + wholePct(want.coverage)), "the disclosure does not carry the names and the coverage");
+  need(want.src !== "live" || (/Live read at \d\d:\d\d TRT/.test(c.title) && /Live read at \d\d:\d\d TRT/.test(pop)), "a live figure does not name its read time in TRT");
+  need(want.src !== "nightly" || /Nightly figure for /.test(c.title), "a nightly figure does not name its session");
+  need(!want.note || pop.includes(want.note), "the disclosure does not say why the nightly figure stands");
+  const frac = Math.min(Math.abs(want.value) / CAP_SCALE, 1);
+  const tol = w < 500 ? 0.02 : 0.012;
+  need(c.zero !== null && Math.abs(c.zero.w - frac * 0.5) < tol, "the meter bar is not the figure on a scale of 25% a side: " + JSON.stringify(c.zero));
+  need(c.zero !== null && Math.abs(c.zero.l - (want.value >= 0 ? 0.5 : 0.5 - frac * 0.5)) < tol, "the meter bar does not start at the centre on its own side: " + JSON.stringify(c.zero));
+  need(c.zero !== null && c.zero.cls.includes(want.value < 0 ? "is-neg" : "is-pos"), "the meter bar is on the wrong side's colour");
+  need(c.mark !== null && Math.abs(c.mark - 0.5) < 0.03, "the meter's zero mark is not at the centre: " + c.mark);
+  need(c.zlabel !== null && c.zlabel.includes(signedPct(want.value)) && c.zlabel.includes("zero at the centre"), "the meter does not say its figure and scale: " + c.zlabel);
+  return bad;
+}
+
+async function pooled(list, fn, width = 3) {
+  const out = new Array(list.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(width, list.length) }, async () => {
+    while (next < list.length) { const i = next++; out[i] = [list[i], await fn(list[i])]; }
+  }));
+  return out;
+}
+
+async function capRun(browser, world, [w, h], patch = null) {
+  const [, tweak, expect] = world;
+  const want = expect(market.capTide, breadth.cap);
+  const { context, page, errors } = await openMarket(browser, { rich: true, viewport: { width: w, height: h }, patch, tweak });
+  await page.waitForSelector("#mkHero .mk-hc");
+  await page.waitForTimeout(1300);
+  const f = await page.evaluate(FACTS);
+  let pop = "";
+  if (await page.locator("#mkHero button.mk-hc.is-cw").count()) {
+    await page.click("#mkHero button.mk-hc.is-cw");
+    await page.waitForTimeout(350);
+    pop = await page.evaluate(() => { const p = document.getElementById("fxPop"); return p ? p.innerText : ""; });
+  }
+  await context.close();
+  return { bad: capAudit(f, pop, want, { w }), errors };
+}
+
 const JS = "/assets/js/flows-market.js";
 const CSS = "/assets/css/flows-market.css";
+const CAP_MUTANTS = [
+  ["the nightly figure stands while the live read is live", [["if (on && isNum(live.value) !== null) return pick(live, \"live\");", ""]], 0],
+  ["a stale live key still counts as live", [["const on = Boolean(live && state === \"live\" && newer(lb.session, m));", "const on = Boolean(live && newer(lb.session, m));"]], 1],
+  ["a key that is fresh but not live counts as live", [["const on = Boolean(live && state === \"live\" && newer(lb.session, m));", "const on = Boolean(live && state !== \"stale\" && newer(lb.session, m));"]], 2],
+  ["an older live session outranks the nightly", [["const on = Boolean(live && state === \"live\" && newer(lb.session, m));", "const on = Boolean(live && state === \"live\");"]], 3],
+  ["a withheld live read is shown ahead of a nightly figure", [["if (night && isNum(night.value) !== null) return Object.assign(pick(night, \"nightly\"), { liveWhy: on ? live.reason : null, liveHeld: Boolean(live && !on) });\n    if (on) return pick(live, \"live\");", "if (on) return pick(live, \"live\");"]], 4],
+  ["a withheld figure is painted as zero", [["k: head, v: c.value === null ? DASH : F.pct(c.value, 1, true), tone: toneOf(c.value)", "k: head, v: F.pct(c.value === null ? 0 : c.value, 1, true), tone: toneOf(c.value)"]], 7],
+  ["a withheld figure draws a bar at zero", [["node: frac === null ? null : h(\"span\", { class: \"mk-mt mk-mt-z\"", "node: h(\"span\", { class: \"mk-mt mk-mt-z\""]], 7],
+  ["the sign is dropped", [["k: head, v: c.value === null ? DASH : F.pct(c.value, 1, true), tone: toneOf(c.value)", "k: head, v: c.value === null ? DASH : F.pct(Math.abs(c.value), 1), tone: toneOf(c.value)"]], 1],
+  ["the fraction is printed as if it were the percent", [["k: head, v: c.value === null ? DASH : F.pct(c.value, 1, true), tone: toneOf(c.value)", "k: head, v: c.value === null ? DASH : F.pct(c.value / 100, 1, true), tone: toneOf(c.value)"]], 0],
+  ["the meter is on another scale", [["const CAP_SCALE = 0.25;", "const CAP_SCALE = 1;"]], 0],
+  ["the meter starts at its left edge, not at zero", [["left: c.value >= 0 ? \"50%\" : (50 - frac * 50) + \"%\"", "left: \"0%\""]], 0],
+  ["the meter bar points the wrong way", [["left: c.value >= 0 ? \"50%\" : (50 - frac * 50) + \"%\"", "left: c.value < 0 ? \"50%\" : (50 - frac * 50) + \"%\""]], 1],
+  ["a figure past the scale runs out of the meter", [["Math.min(Math.abs(c.value) / CAP_SCALE, 1)", "Math.abs(c.value) / CAP_SCALE"]], 5],
+  ["coverage is counted by names, not by market value", [["\", \" + F.pct(c.coverage, 0) + \" of market value\"]", "\", \" + F.pct(c.n / c.of, 0) + \" of market value\"]"]], 1],
+  ["the cell sits after breadth", [["      capCell(cell),\n    ];", "    ];"], ["    const pp = isNum(pcr.premium), pv = isNum(pcr.volume);", "    cells.push(capCell(cell));\n    const pp = isNum(pcr.premium), pv = isNum(pcr.volume);"]], 0],
+  ["the cell does not say which figure it shows", [["tag: h(\"span\", { class: \"mk-hc-src\", \"data-src\": c.src }, word),", "tag: null,"], ["h(\"span\", { class: \"mk-cw-w\" }, word + \" \\u00b7 \")", "null"]], 0],
+  ["the disclosure leaves out what is outside the measure", [["CAP_COPY.net, CAP_COPY.outside, CAP_COPY.scope, CAP_COPY.withheld],", "CAP_COPY.net, CAP_COPY.scope, CAP_COPY.withheld],"]], 0],
+];
 const MUTANTS = [
   ["tile charts leak onto other tabs", CSS, [["{ .mk-small-p { visibility: inherit; } }", "{ .mk-small-p { visibility: visible; } }"]]],
   ["area ignores the floor", JS, [["Math.max(Math.abs(c.net === null ? 0 : c.net), top * TM_FLOOR)", "Math.abs(c.net === null ? 0 : c.net)"]]],
@@ -199,7 +332,16 @@ try {
       ok(found.length > 0 || m.errors.length > 0, `the planted wrong build "${name}" is caught`);
     }
   }
+  const visits = CAP_WORLDS.flatMap((world) => world[3].map((size) => ({ world, size })));
+  for (const [v, r] of await pooled(visits, ({ world, size }) => capRun(browser, world, size))) {
+    ok(r.errors.length === 0, `no page error at ${v.size.join("x")} when ${v.world[0]}: ${r.errors.join("; ")}`);
+    ok(r.bad.length === 0, `THE CAP-WEIGHTED CELL AT ${v.size.join("x")} WHEN ${v.world[0].toUpperCase()} is the fixture's figure, source, coverage and meter: ${r.bad.join("; ")}`);
+  }
+  for (const [[name], r] of await pooled(CAP_MUTANTS, ([, edits, world]) => capRun(browser, CAP_WORLDS[world], [1440, 820], { [JS]: edits }))) {
+    if (process.env.MARKET_WHY) console.log("WHY", name, JSON.stringify(r.bad), r.errors.join("; "));
+    ok(r.bad.length > 0, `the planted wrong build of the cap-weighted cell "${name}" is caught`);
+  }
 } finally {
   await browser.close();
 }
-console.log(`✓ flows-market-visual: ${checks} checks — the hero strip, the sector heat map and the tape meters against independent computations from the dry-run emit at 1440 and 390 px, and ${MUTANTS.length} planted wrong builds that each fail`);
+console.log(`✓ flows-market-visual: ${checks} checks — the hero strip, the sector heat map and the tape meters against independent computations from the dry-run emit at 1440 and 390 px, the cap-weighted cell in ${CAP_WORLDS.length} worlds at up to four sizes, and ${MUTANTS.length + CAP_MUTANTS.length} planted wrong builds that each fail`);

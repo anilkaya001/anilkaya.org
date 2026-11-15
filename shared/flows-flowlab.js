@@ -25,7 +25,7 @@ export const FLOWLAB_LIMITS = Object.freeze({
   bucketMinutes: 15,
   bucketCount: 26,
   structuresMax: 5,
-  litMarket: 40,
+  litMarket: 200,
   litTicker: 100,
   venuesUniverse: 500,
   codesTop: 6,
@@ -40,7 +40,9 @@ export const FLOWLAB_LIMITS = Object.freeze({
   screenPerPreset: 120,
 });
 
-export const REASONS = Object.freeze(["unshaped", "empty", "plan", "limited", "failed", "timeout", "cap"]);
+export const REASONS = Object.freeze(["unshaped", "empty", "plan", "limited", "failed", "timeout", "cap", "not-session"]);
+
+export const HARD_REASONS = Object.freeze(["timeout", "failed", "limited", "cap"]);
 
 export const PRESETS = Object.freeze({
   premium: Object.freeze({ order: "premium" }),
@@ -156,22 +158,23 @@ function volumeField(row, name) {
 }
 
 export function askBounds(r) {
-  const { vol, ask, bid, mid, none, premC } = r;
+  const { vol, ask, bid, premC } = r;
   if (!(vol > 0)) return { lo: null, hi: null, stated: null, show: false, why: "no-volume" };
-  if (ask === null || bid === null || mid === null || none === null) return { lo: null, hi: null, stated: null, show: false, why: "noSides" };
-  const sided = ask + bid + mid;
+  if (ask === null || bid === null) return { lo: null, hi: null, stated: null, show: false, why: "noSides" };
+  if (ask + bid > vol) return { lo: null, hi: null, stated: null, show: false, why: "sidesExceed" };
+  const sided = ask + bid;
   const stated = sided / vol;
-  const base = { lo: ask / vol, hi: (ask + none) / vol, stated };
+  const base = { lo: ask / vol, hi: (vol - bid) / vol, stated };
   if (!(premC > 0)) return { ...base, lo: null, hi: null, show: false, why: "noPremium" };
-  if (ask + bid === 0 && mid === 0) return { ...base, lo: null, hi: null, show: false, why: "noSides" };
+  if (sided === 0) return { ...base, lo: null, hi: null, show: false, why: "noSides" };
   if (FLOWLAB_LIMITS.coverageDen * sided < FLOWLAB_LIMITS.coverageNum * vol) return { ...base, lo: null, hi: null, show: false, why: "lowCoverage" };
   if (premC < FLOWLAB_LIMITS.leanFloorCents) return { ...base, lo: null, hi: null, show: false, why: "smallClassified" };
   return { ...base, show: true, why: null };
 }
 
-export function leanOf(bounds, cp, vol, ask, none) {
+export function leanOf(bounds, cp, vol, ask, bid) {
   if (!bounds.show) return null;
-  const buy = 2 * ask > vol ? 1 : 2 * (ask + none) < vol ? -1 : 0;
+  const buy = 2 * ask > vol ? 1 : 2 * bid > vol ? -1 : 0;
   if (buy === 0) return 0;
   return cp === "p" ? -buy : buy;
 }
@@ -195,7 +198,7 @@ export function ratiosOf(r) {
   out.askLo = b.show ? b.lo : null;
   out.askHi = b.show ? b.hi : null;
   out.askWhy = b.show ? null : b.why;
-  out.lean = leanOf(b, r.cp, r.vol, r.ask, r.none);
+  out.lean = leanOf(b, r.cp, r.vol, r.ask, r.bid);
   return out;
 }
 
@@ -503,7 +506,7 @@ export function reduceContract({ flow = null, intraday = null, profile = null } 
 }
 
 export function medianStrike(rows) {
-  const w = rows.map((r) => ({ k: r.k, v: r.callVol + r.putVol })).filter((r) => r.v > 0).sort((a, b) => a.k - b.k);
+  const w = rows.map((r) => ({ k: r.k, v: r.vol })).filter((r) => r.v > 0).sort((a, b) => a.k - b.k);
   const total = w.reduce((s, r) => s + r.v, 0);
   if (!total) return null;
   let acc = 0;
@@ -514,6 +517,83 @@ export function medianStrike(rows) {
   return null;
 }
 
+const SIDE_KEYS = Object.freeze([["ca", "call_volume_ask_side"], ["cb", "call_volume_bid_side"], ["pa", "put_volume_ask_side"], ["pb", "put_volume_bid_side"], ["cv", "call_volume"], ["pv", "put_volume"]]);
+
+function sideVolumes(row) {
+  const f = {};
+  for (const [n, key] of SIDE_KEYS) {
+    const g = volumeField(row, key);
+    if (!g.ok) return { ok: false, field: key };
+    f[n] = g.value;
+  }
+  return { ok: true, f };
+}
+
+export function leanOfSides(f) {
+  const vol = f.cv === null || f.pv === null ? null : sumSafe(f.cv, f.pv);
+  if (f.ca === null || f.cb === null || f.pa === null || f.pb === null) return { net: null, unknown: null, lo: null, hi: null, sided: null, vol, why: "noSides" };
+  if (vol === null) return { net: null, unknown: null, lo: null, hi: null, sided: null, vol, why: "noVolume" };
+  const uc = f.cv - f.ca - f.cb;
+  const up = f.pv - f.pa - f.pb;
+  if (uc < 0 || up < 0) return { net: null, unknown: null, lo: null, hi: null, sided: null, vol, why: "sidesExceed" };
+  const net = (f.ca - f.cb) - (f.pa - f.pb);
+  const unknown = uc + up;
+  return { net, unknown, lo: net - unknown, hi: net + unknown, sided: f.ca + f.cb + f.pa + f.pb, vol, why: null };
+}
+
+export const decided = (net, unknown) => net !== null && unknown !== null && Math.abs(net) > unknown;
+
+export function sessionRows(list, session) {
+  const dates = new Set();
+  for (const r of list) if (isObj(r) && typeof r.date === "string" && DAY_RE.test(r.date.slice(0, 10))) dates.add(r.date.slice(0, 10));
+  const latest = [...dates].sort().pop() || null;
+  if (typeof session !== "string" || !DAY_RE.test(session)) return { keep: list.filter(isObj), latest };
+  return { keep: list.filter((r) => isObj(r) && typeof r.date === "string" && r.date.slice(0, 10) === session), latest };
+}
+
+function nearest(ks, center) {
+  const list = center === null ? ks.slice().sort((a, b) => a - b) : ks.slice().sort((a, b) => Math.abs(a - center) - Math.abs(b - center) || a - b);
+  return list.slice(0, FLOWLAB_LIMITS.strikeRows).sort((a, b) => a - b);
+}
+
+const addNull = (a, b) => (a === null || b === null ? null : sumSafe(a, b));
+
+export function reduceStrikeDay(response, ctx = {}) {
+  const list = rowsIn(response);
+  if (list === null) return { ok: false, why: "unshaped" };
+  if (list.length === 0) return { ok: false, why: "empty" };
+  const { keep, latest } = sessionRows(list, ctx.session);
+  if (!keep.length) return { ok: false, why: "not-session", date: latest };
+  const by = new Map();
+  let dropped = 0;
+  let firstBad = null;
+  const bad = (f) => { dropped++; if (firstBad === null) firstBad = f; };
+  for (const row of keep) {
+    const k = typeof row.strike === "string" || typeof row.strike === "number" ? Number(row.strike) : NaN;
+    if (!Number.isFinite(k) || !(k > 0)) { bad("strike"); continue; }
+    const sv = sideVolumes(row);
+    if (!sv.ok) { bad(sv.field); continue; }
+    const cur = by.get(k);
+    if (!cur) by.set(k, { ...sv.f });
+    else for (const [n] of SIDE_KEYS) cur[n] = addNull(cur[n], sv.f[n]);
+  }
+  if (!by.size) return typeFail(firstBad || "strike");
+  const all = [...by.entries()].map(([k, f]) => ({ k, ...leanOfSides(f) }));
+  const center = medianStrike(all);
+  const shown = new Set(nearest(all.map((r) => r.k), center));
+  const strikes = all.filter((r) => shown.has(r.k)).sort((a, b) => a.k - b.k)
+    .map((r) => ({ k: r.k, net: r.net, unknown: r.unknown, lo: r.lo, hi: r.hi, sided: r.sided, vol: r.vol, decided: decided(r.net, r.unknown), why: r.why }));
+  let vol = 0;
+  let sided = 0;
+  let withheld = 0;
+  for (const r of all) {
+    if (r.why !== null) { withheld++; continue; }
+    vol = sumSafe(vol, r.vol);
+    sided = sumSafe(sided, r.sided);
+  }
+  return { ok: true, x: { strikes, center, centerSource: center === null ? "none" : "median", of: all.length, dropped, withheld, vol, sided, sidedShare: vol > 0 ? sided / vol : null, date: ctx.session || latest } };
+}
+
 export function reduceStrikes(response, ctx = {}) {
   const list = rowsIn(response);
   if (list === null) return { ok: false, why: "unshaped" };
@@ -521,49 +601,60 @@ export function reduceStrikes(response, ctx = {}) {
   const openMs = Number.isFinite(ctx.openMs) ? ctx.openMs : null;
   if (openMs === null) return { ok: false, why: "unshaped" };
   const width = FLOWLAB_LIMITS.bucketMinutes * 60000;
+  const { keep, latest } = sessionRows(list, ctx.session);
+  if (!keep.length) return { ok: false, why: "not-session", date: latest };
   const rows = [];
+  const offDate = list.length - keep.length;
   let dropped = 0;
   let outside = 0;
-  for (const row of list) {
-    if (!isObj(row)) { dropped++; continue; }
+  let withheld = 0;
+  let firstBad = null;
+  const bad = (f) => { dropped++; if (firstBad === null) firstBad = f; };
+  for (const row of keep) {
     const at = instantMs(row.timestamp);
-    const k = Number(row.strike);
-    const f = {};
-    let ok = at !== null && Number.isFinite(k);
-    if (ok) {
-      for (const [n, key] of [["ca", "call_volume_ask_side"], ["cb", "call_volume_bid_side"], ["pa", "put_volume_ask_side"], ["pb", "put_volume_bid_side"], ["callVol", "call_volume"], ["putVol", "put_volume"]]) {
-        const g = volumeField(row, key);
-        if (!g.ok || g.value === null) { ok = false; break; }
-        f[n] = g.value;
-      }
-    }
-    if (!ok) { dropped++; continue; }
+    if (at === null) { bad("timestamp"); continue; }
+    const k = typeof row.strike === "string" || typeof row.strike === "number" ? Number(row.strike) : NaN;
+    if (!Number.isFinite(k) || !(k > 0)) { bad("strike"); continue; }
+    const sv = sideVolumes(row);
+    if (!sv.ok) { bad(sv.field); continue; }
+    const lean = leanOfSides(sv.f);
+    if (lean.why !== null) { withheld++; continue; }
     const b = Math.floor((at - openMs) / width);
     if (b < 0 || b >= FLOWLAB_LIMITS.bucketCount) { outside++; continue; }
-    rows.push({ k, b, ...f });
+    rows.push({ k, b, net: lean.net, unknown: lean.unknown, vol: lean.vol, sided: lean.sided });
   }
-  if (!rows.length) return dropped ? typeFail("timestamp") : { ok: false, why: "empty" };
-  let spot = Number.isFinite(ctx.spot) && ctx.spot > 0 ? ctx.spot : null;
-  let spotSource = spot === null ? null : "card";
-  if (spot === null) {
-    spot = medianStrike(rows);
-    spotSource = spot === null ? "none" : "median";
-  }
-  const ks = [...new Set(rows.map((r) => r.k))];
-  const near = spot === null ? ks.slice().sort((a, b) => a - b) : ks.slice().sort((a, b) => Math.abs(a - spot) - Math.abs(b - spot) || a - b);
-  const strikes = near.slice(0, FLOWLAB_LIMITS.strikeRows).sort((a, b) => a - b);
+  if (!rows.length) return firstBad ? typeFail(firstBad) : { ok: false, why: "empty" };
+  const given = Number.isFinite(ctx.center) && ctx.center > 0 ? ctx.center : null;
+  const byK = new Map();
+  for (const r of rows) byK.set(r.k, sumSafe(byK.get(r.k) || 0, r.vol));
+  const center = given === null ? medianStrike([...byK.entries()].map(([k, vol]) => ({ k, vol }))) : given;
+  const strikes = nearest([...byK.keys()], center);
   const index = new Map(strikes.map((k, i) => [k, i]));
-  const cells = strikes.map(() => new Array(FLOWLAB_LIMITS.bucketCount).fill(null));
+  const blank = () => strikes.map(() => new Array(FLOWLAB_LIMITS.bucketCount).fill(null));
+  const cells = blank();
+  const unknown = blank();
+  let vol = 0;
+  let sided = 0;
   for (const r of rows) {
+    vol = sumSafe(vol, r.vol);
+    sided = sumSafe(sided, r.sided);
     const i = index.get(r.k);
     if (i === undefined) continue;
-    const s = (r.ca - r.cb) - (r.pa - r.pb);
-    cells[i][r.b] = (cells[i][r.b] === null ? 0 : cells[i][r.b]) + s;
+    cells[i][r.b] = cells[i][r.b] === null ? r.net : sumSafe(cells[i][r.b], r.net);
+    unknown[i][r.b] = unknown[i][r.b] === null ? r.unknown : sumSafe(unknown[i][r.b], r.unknown);
   }
-  const cum = cells.map((line) => line.reduce((s, v) => s + (v === null ? 0 : v), 0));
+  const call = cells.map((line, i) => line.map((v, b) => (v === null ? null : decided(v, unknown[i][b]))));
+  const cum = cells.map((line) => line.reduce((s, v) => (v === null ? s : sumSafe(s, v)), 0));
+  const cumUnknown = unknown.map((line) => line.reduce((s, v) => (v === null ? s : sumSafe(s, v)), 0));
   const buckets = [];
   for (let b = 0; b < FLOWLAB_LIMITS.bucketCount; b++) buckets.push(openMs + b * width);
-  return { ok: true, x: { strikes, buckets, cells, cum, spot, spotSource, rows: rows.length, dropped, outside, shown: strikes.length, of: ks.length } };
+  return {
+    ok: true,
+    x: {
+      strikes, buckets, cells, unknown, decided: call, cum, cumUnknown, center, centerSource: given === null ? (center === null ? "none" : "median") : "day",
+      rows: rows.length, dropped, withheld, outside, offDate, shown: strikes.length, of: byK.size, vol, sided, sidedShare: vol > 0 ? sided / vol : null,
+    },
+  };
 }
 
 export function reduceAlert(response) {
@@ -630,7 +721,7 @@ export function reduceStructures(response, ctx = {}) {
     });
   }
   out.sort((a, b) => ((b.premC === null ? -1 : b.premC) - (a.premC === null ? -1 : a.premC)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-  return { ok: true, x: { list: out.slice(0, FLOWLAB_LIMITS.structuresMax), found: out.length, dropped } };
+  return { ok: true, x: { list: out.slice(0, FLOWLAB_LIMITS.structuresMax), found: out.length, searched: list.length, dropped } };
 }
 
 export function reduceLegs(response, ctx = {}) {
@@ -665,20 +756,41 @@ export function reduceLegs(response, ctx = {}) {
   return { ok: true, x: { legs, confirmed: wanted !== null && legs.some((l) => l.c === wanted), dropped } };
 }
 
-export function reduceRecent(response) {
+const premCents = (v) => {
+  if (v === undefined || v === null) return null;
+  if (typeof v === "string" && !DECIMAL.test(v.trim())) return undefined;
+  const c = centsOf(v);
+  return c === null ? undefined : c.cents;
+};
+
+export function reduceExpiries(response, ctx = {}) {
   const list = rowsIn(response);
   if (list === null) return { ok: false, why: "unshaped" };
   if (list.length === 0) return { ok: false, why: "empty" };
+  const shaped = list.filter((r) => isObj(r) && typeof premCents(r.call_premium) === "number" && typeof premCents(r.put_premium) === "number");
+  if (!shaped.length) return { ok: false, why: "unshaped", missing: ["call_premium", "put_premium"] };
+  const session = typeof ctx.session === "string" && DAY_RE.test(ctx.session) ? ctx.session : null;
+  const prior = session ? previousSession(session) : null;
+  const { latest } = sessionRows(shaped, null);
+  const has = (d) => d !== null && shaped.some((r) => typeof r.date === "string" && r.date.slice(0, 10) === d);
+  const date = session === null ? latest : has(session) ? session : has(prior) ? prior : null;
+  if (date === null) return { ok: false, why: "not-session", date: latest };
   const rows = [];
+  const seen = new Set();
   let dropped = 0;
+  let offDate = 0;
   for (const row of list) {
-    if (!isObj(row) || typeof row.expiry !== "string" || !DAY_RE.test(row.expiry)) { dropped++; continue; }
-    const cents = {};
+    if (!isObj(row)) { dropped++; continue; }
+    if (typeof row.date !== "string" || row.date.slice(0, 10) !== date) { offDate++; continue; }
+    if (typeof row.expiry !== "string" || !DAY_RE.test(row.expiry)) { dropped++; continue; }
+    if (seen.has(row.expiry)) return { ok: false, why: "unshaped", repeated: row.expiry };
+    seen.add(row.expiry);
+    const c = {};
     let ok = true;
-    for (const [n, key] of [["callC", "call_premium"], ["putC", "put_premium"], ["callAskC", "call_premium_ask_side"], ["callBidC", "call_premium_bid_side"], ["putAskC", "put_premium_ask_side"], ["putBidC", "put_premium_bid_side"], ["callOtmC", "call_otm_premium"], ["putOtmC", "put_otm_premium"]]) {
-      const v = row[key] === undefined || row[key] === null ? null : centsOf(row[key], { signed: true });
-      if (row[key] !== undefined && row[key] !== null && v === null) { ok = false; break; }
-      cents[n] = v === null ? null : v.cents;
+    for (const [n, key] of [["callC", "call_premium"], ["putC", "put_premium"], ["callAskC", "call_premium_ask_side"], ["callBidC", "call_premium_bid_side"], ["putAskC", "put_premium_ask_side"], ["putBidC", "put_premium_bid_side"]]) {
+      const v = premCents(row[key]);
+      if (v === undefined) { ok = false; break; }
+      c[n] = v;
     }
     const counts = {};
     for (const [n, key] of [["callV", "call_volume"], ["putV", "put_volume"], ["callTr", "call_trades"], ["putTr", "put_trades"]]) {
@@ -686,12 +798,17 @@ export function reduceRecent(response) {
       if (!g.ok) { ok = false; break; }
       counts[n] = g.value;
     }
-    if (!ok) { dropped++; continue; }
-    rows.push({ e: row.expiry, ...cents, ...counts, netC: cents.callC !== null && cents.putC !== null ? cents.callC - cents.putC : null });
+    if (!ok || c.callC === null || c.putC === null) { dropped++; continue; }
+    const lean = leanOfSides({ ca: c.callAskC, cb: c.callBidC, pa: c.putAskC, pb: c.putBidC, cv: c.callC, pv: c.putC });
+    rows.push({
+      e: row.expiry, ...c, ...counts,
+      netC: lean.net, unknownC: lean.unknown, loC: lean.lo, hiC: lean.hi, sidedC: lean.sided,
+      sidedShare: lean.sided !== null && lean.vol > 0 ? lean.sided / lean.vol : null, decided: decided(lean.net, lean.unknown), why: lean.why,
+    });
   }
   if (!rows.length) return typeFail("expiry");
   rows.sort((a, b) => (a.e < b.e ? -1 : a.e > b.e ? 1 : 0));
-  return { ok: true, x: { rows, dropped } };
+  return { ok: true, x: { rows, date, prior: session !== null && date !== session, dropped, offDate } };
 }
 
 const GREEK_FIELDS = Object.freeze([["dirDelta", "dir_delta_flow"], ["dirVega", "dir_vega_flow"], ["totDelta", "total_delta_flow"], ["totVega", "total_vega_flow"], ["otmDirDelta", "otm_dir_delta_flow"], ["otmDirVega", "otm_dir_vega_flow"]]);
@@ -710,25 +827,31 @@ export function reduceGreek(response, ctx = {}) {
   if (list === null) return { ok: false, why: "unshaped" };
   if (list.length === 0) return { ok: false, why: "empty" };
   const group = ctx.group === true;
+  const openMs = Number.isFinite(ctx.openMs) ? ctx.openMs : null;
   const rows = [];
   let dropped = 0;
+  let early = 0;
+  let firstBad = null;
+  const bad = (f) => { dropped++; if (firstBad === null) firstBad = f; };
   for (const row of list) {
-    if (!isObj(row)) { dropped++; continue; }
+    if (!isObj(row)) { bad("row"); continue; }
     const at = instantMs(row.timestamp);
-    if (at === null) { dropped++; continue; }
+    if (at === null) { bad("timestamp"); continue; }
+    if (openMs !== null && at < openMs) { early++; continue; }
     const rec = { t: at };
-    let ok = true;
+    let failed = null;
     for (const [n, key] of GREEK_FIELDS) {
       const v = row[key];
       if (v === undefined || v === null) { rec[n] = null; continue; }
-      if (typeof v !== "string" || !DECIMAL.test(v.trim())) { ok = false; break; }
+      if (typeof v !== "string" || !DECIMAL.test(v.trim())) { failed = key; break; }
       rec[n] = Number(v);
     }
-    if (!ok) { dropped++; continue; }
+    if (failed) { bad(failed); continue; }
     if (group) {
       const c = typeof row.net_call_premium === "string" && DECIMAL.test(row.net_call_premium.trim()) ? centsOf(row.net_call_premium, { signed: true }) : null;
       const p = typeof row.net_put_premium === "string" && DECIMAL.test(row.net_put_premium.trim()) ? centsOf(row.net_put_premium, { signed: true }) : null;
-      if (c === null || p === null) { dropped++; continue; }
+      if (c === null) { bad("net_call_premium"); continue; }
+      if (p === null) { bad("net_put_premium"); continue; }
       rec.callC = c.cents;
       rec.putC = p.cents;
     }
@@ -736,7 +859,7 @@ export function reduceGreek(response, ctx = {}) {
     rec.vol = nonNegInt(row.volume) ? row.volume : null;
     rows.push(rec);
   }
-  if (!rows.length) return typeFail("timestamp");
+  if (!rows.length) return firstBad ? typeFail(firstBad) : { ok: false, why: "empty" };
   rows.sort((a, b) => a.t - b.t);
   const t = rows.map((r) => r.t);
   const series = {};
@@ -757,7 +880,7 @@ export function reduceGreek(response, ctx = {}) {
   }
   for (const s of [...sums.values()].sort((a, b) => a.t - b.t)) signs.push({ t: s.t, delta: Math.sign(s.delta), vega: Math.sign(s.vega) });
   const net = group ? { callC: rows.reduce((s, r) => s + r.callC, 0), putC: rows.reduce((s, r) => s + r.putC, 0) } : null;
-  return { ok: true, x: { t, series, rel, signs, unit: null, expiry: ctx.expiry || null, net, dropped } };
+  return { ok: true, x: { t, series, rel, signs, unit: null, expiry: ctx.expiry || null, net, dropped, early } };
 }
 
 const WIDTHS_C = Object.freeze([1, 2, 5, 10, 25, 50, 100, 250, 500]);
@@ -770,26 +893,73 @@ export function ladderWidth(loC, hiC) {
   return WIDTHS_C[WIDTHS_C.length - 1];
 }
 
+const SHARES = /^\d+(?:\.\d+)?$/;
+
+export function shareCount(v) {
+  if (typeof v === "number") return Number.isFinite(v) && v >= 0 ? v : null;
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  return SHARES.test(t) ? Number(t) : null;
+}
+
+export function stepOf(prices) {
+  const list = [...new Set(prices)].sort((a, b) => a - b);
+  let step = null;
+  for (let i = 1; i < list.length; i++) {
+    const gap = list[i] - list[i - 1];
+    if (gap > 0 && (step === null || gap < step)) step = gap;
+  }
+  return step;
+}
+
+export function widthFor(loC, hiC, stepC) {
+  const w = ladderWidth(loC, hiC);
+  if (stepC === null || stepC <= w) return { w, widened: false };
+  const wide = WIDTHS_C.find((x) => x >= stepC);
+  return { w: wide === undefined ? WIDTHS_C[WIDTHS_C.length - 1] : wide, widened: true };
+}
+
+export function reduceStockLevels(response, ctx = {}) {
+  const b = body(response);
+  const list = rowsIn(b);
+  if (list === null) return { ok: false, why: "unshaped" };
+  if (list.length === 0) return { ok: false, why: "empty" };
+  const date = isObj(b) && typeof b.date === "string" && DAY_RE.test(b.date.slice(0, 10)) ? b.date.slice(0, 10) : null;
+  if (ctx.session && date !== null && date !== ctx.session) return { ok: false, why: "not-session", date };
+  const rows = [];
+  let dropped = 0;
+  for (const row of list) {
+    const px = isObj(row) ? centsOf(row.price) : null;
+    const lit = isObj(row) ? shareCount(row.regular_volume) : null;
+    const off = isObj(row) ? shareCount(row.dark_pool_volume) : null;
+    if (px === null || px.cents <= 0 || lit === null || off === null) { dropped++; continue; }
+    rows.push({ px: px.cents, lit, off });
+  }
+  if (!rows.length) return typeFail("price");
+  return { ok: true, x: { rows, step: stepOf(rows.map((r) => r.px)), date, dropped } };
+}
+
 export function reduceLadders({ options = null, stock = null } = {}, ctx = {}) {
   const o = options === null ? null : rowsIn(options);
-  const s = stock === null ? null : rowsIn(stock);
-  if (o === null && s === null) return { ok: false, why: "unshaped" };
+  const st = stock === null ? null : reduceStockLevels(stock, ctx);
+  if (o === null && (st === null || !st.ok)) return st && !st.ok && st.why !== "unshaped" ? st : { ok: false, why: "unshaped" };
   const opt = [];
-  const stk = [];
   let dropped = 0;
   for (const row of o || []) {
     const px = isObj(row) ? centsOf(row.price) : null;
     if (px === null || !nonNegInt(row.call_volume) || !nonNegInt(row.put_volume)) { dropped++; continue; }
     opt.push({ px: px.cents, call: row.call_volume, put: row.put_volume });
   }
-  for (const row of s || []) {
-    const px = isObj(row) ? centsOf(row.price) : null;
-    if (px === null || !nonNegInt(row.lit_vol) || !nonNegInt(row.off_vol)) { dropped++; continue; }
-    stk.push({ px: px.cents, lit: row.lit_vol, off: row.off_vol });
+  const stk = st && st.ok ? st.x.rows : [];
+  const optionWhy = o === null ? null : !o.length ? { why: "empty" } : !opt.length ? { why: "type:price" } : null;
+  const stockWhy = st === null || st.ok ? null : { why: st.why, date: st.date || null };
+  if (!opt.length && !stk.length) {
+    const first = optionWhy || stockWhy;
+    return { ok: false, why: first ? first.why : "empty", ...(first && first.date ? { date: first.date } : {}) };
   }
-  if (!opt.length && !stk.length) return dropped ? typeFail("price") : { ok: false, why: "empty" };
   const all = [...opt, ...stk].map((r) => r.px);
-  const w = ladderWidth(Math.min(...all), Math.max(...all));
+  const step = st && st.ok ? st.x.step : null;
+  const { w, widened } = widthFor(Math.min(...all), Math.max(...all), step);
   const bins = new Map();
   const at = (px) => {
     const lo = Math.floor(px / w) * w;
@@ -797,13 +967,19 @@ export function reduceLadders({ options = null, stock = null } = {}, ctx = {}) {
     return bins.get(lo);
   };
   const add = (a, v) => (a === null ? v : a + v);
-  for (const r of opt) { const b = at(r.px); b.call = add(b.call, r.call); b.put = add(b.put, r.put); }
-  for (const r of stk) { const b = at(r.px); b.lit = add(b.lit, r.lit); b.off = add(b.off, r.off); }
-  const list = [...bins.values()].sort((a, b) => a.lo - b.lo).map((b) => ({ ...b, offShare: b.lit !== null && b.off !== null && b.lit + b.off > 0 ? b.off / (b.lit + b.off) : null }));
+  for (const r of opt) { const q = at(r.px); q.call = add(q.call, r.call); q.put = add(q.put, r.put); }
+  for (const r of stk) { const q = at(r.px); q.lit = add(q.lit, r.lit); q.off = add(q.off, r.off); }
+  const list = [...bins.values()].sort((a, b) => a.lo - b.lo).map((q) => ({ ...q, offShare: q.lit !== null && q.off !== null && q.lit + q.off > 0 ? q.off / (q.lit + q.off) : null }));
   let lit = 0;
   let off = 0;
-  for (const b of list) { lit += b.lit || 0; off += b.off || 0; }
-  return { ok: true, x: { w, bins: list, offShare: lit + off > 0 ? off / (lit + off) : null, spot: Number.isFinite(ctx.spot) ? ctx.spot : null, optionRead: o !== null, stockRead: s !== null, dropped } };
+  for (const q of list) { lit += q.lit || 0; off += q.off || 0; }
+  return {
+    ok: true,
+    x: {
+      w, widened, stockStep: step, bins: list, offShare: lit + off > 0 ? off / (lit + off) : null, spot: Number.isFinite(ctx.spot) ? ctx.spot : null,
+      optionRead: opt.length > 0, stockRead: stk.length > 0, stockDate: st && st.ok ? st.x.date : null, optionWhy, stockWhy, dropped: dropped + (st && st.ok ? st.x.dropped : 0),
+    },
+  };
 }
 
 export function reduceLit(response, ctx = {}) {
@@ -811,13 +987,16 @@ export function reduceLit(response, ctx = {}) {
   if (list === null) return { ok: false, why: "unshaped" };
   if (list.length === 0) return { ok: false, why: "empty" };
   const rows = [];
+  const floor = Number.isSafeInteger(ctx.minPremiumC) && ctx.minPremiumC > 0 ? ctx.minPremiumC : null;
   let dropped = 0;
+  let below = 0;
   for (const row of list) {
     if (!isObj(row)) { dropped++; continue; }
     const at = instantMs(row.executed_at);
     const px = centsOf(row.price);
     const prem = centsOf(row.premium);
     if (at === null || px === null || prem === null || !nonNegInt(row.size) || typeof row.ticker !== "string") { dropped++; continue; }
+    if (floor !== null && prem.cents < floor) { below++; continue; }
     rows.push({
       at, t: row.ticker, px: px.cents, size: row.size, premC: prem.cents,
       venue: typeof row.market_center === "string" ? row.market_center : null,
@@ -826,58 +1005,70 @@ export function reduceLit(response, ctx = {}) {
       cond: typeof row.sale_cond_codes === "string" ? row.sale_cond_codes : null,
     });
   }
-  if (!rows.length) return typeFail("executed_at");
+  if (!rows.length) return below ? { ok: false, why: "empty" } : typeFail("executed_at");
   const market = ctx.mode === "market";
   if (market) rows.sort((a, b) => (b.premC - a.premC) || (b.at - a.at) || (a.t < b.t ? -1 : 1));
   else rows.sort((a, b) => (b.at - a.at) || (b.premC - a.premC));
   const cap = market ? FLOWLAB_LIMITS.litMarket : FLOWLAB_LIMITS.litTicker;
   const live = rows.filter((r) => !r.canceled);
   const sums = { n: live.length, canceled: rows.length - live.length, size: live.reduce((s, r) => sumSafe(s, r.size), 0), premC: live.reduce((s, r) => sumSafe(s, r.premC), 0) };
-  return { ok: true, x: { list: rows.slice(0, cap), n: rows.length, dropped, sums, mode: market ? "market" : "ticker" } };
+  return { ok: true, x: { list: rows.slice(0, cap), n: rows.length, dropped, below, sums, mode: market ? "market" : "ticker" } };
+}
+
+function hhiOf(rows) {
+  const total = rows.reduce((s, r) => sumSafe(s, r.contracts), 0);
+  let hhiN = 0n;
+  for (const r of rows) hhiN += BigInt(r.contracts) * BigInt(r.contracts);
+  const hhiD = BigInt(total) * BigInt(total);
+  return { total, hhiN: hhiN.toString(), hhiD: hhiD.toString(), hhi: total > 0 ? Number(hhiN) / Number(hhiD) : null };
 }
 
 export function reduceVenues(response, ctx = {}) {
   const list = rowsIn(response);
   if (list === null) return { ok: false, why: "unshaped" };
   if (list.length === 0) return { ok: false, why: "empty" };
-  const codes = ctx.mode === "codes";
+  const codes = ctx.codes === true;
   const order = [];
   const by = new Map();
   let dropped = 0;
+  const bump = (m, key, row, premC) => {
+    const cur = m.get(key) || { x: key, trades: 0, contracts: 0, premC: 0, callTrades: 0, putTrades: 0 };
+    cur.trades = sumSafe(cur.trades, row.trade_count);
+    cur.contracts = sumSafe(cur.contracts, row.contracts);
+    cur.premC = sumSafe(cur.premC, premC);
+    cur.callTrades = sumSafe(cur.callTrades, nonNegInt(row.call_trades) ? row.call_trades : 0);
+    cur.putTrades = sumSafe(cur.putTrades, nonNegInt(row.put_trades) ? row.put_trades : 0);
+    m.set(key, cur);
+  };
   for (const row of list) {
     if (!isObj(row) || typeof row.underlying_symbol !== "string") { dropped++; continue; }
-    const key = codes ? row.trade_code : row.exchange;
     const prem = row.premium === undefined || row.premium === null ? null : centsOf(row.premium);
-    if (typeof key !== "string" || !nonNegInt(row.contracts) || !nonNegInt(row.trade_count) || prem === null) { dropped++; continue; }
+    if (typeof row.exchange !== "string" || !row.exchange || !nonNegInt(row.contracts) || !nonNegInt(row.trade_count) || prem === null) { dropped++; continue; }
     const t = row.underlying_symbol;
     if (ctx.ticker && t !== ctx.ticker) continue;
     if (!by.has(t)) {
       if (!ctx.ticker && by.size >= FLOWLAB_LIMITS.venuesUniverse) continue;
-      by.set(t, new Map());
+      by.set(t, { ex: new Map(), code: new Map() });
       order.push(t);
     }
     const m = by.get(t);
-    const cur = m.get(key) || { x: key, trades: 0, contracts: 0, premC: 0, callTrades: 0, putTrades: 0 };
-    cur.trades = sumSafe(cur.trades, row.trade_count);
-    cur.contracts = sumSafe(cur.contracts, row.contracts);
-    cur.premC = sumSafe(cur.premC, prem.cents);
-    cur.callTrades = sumSafe(cur.callTrades, nonNegInt(row.call_trades) ? row.call_trades : 0);
-    cur.putTrades = sumSafe(cur.putTrades, nonNegInt(row.put_trades) ? row.put_trades : 0);
-    m.set(key, cur);
+    bump(m.ex, row.exchange, row, prem.cents);
+    if (codes && typeof row.trade_code === "string" && row.trade_code) bump(m.code, row.trade_code, row, prem.cents);
   }
   if (!by.size) return dropped ? typeFail("contracts") : { ok: false, why: "empty" };
+  const rank = (m) => [...m.values()].sort((a, b) => (b.contracts - a.contracts) || (a.x < b.x ? -1 : 1));
   const tickers = order.map((t) => {
-    const rows = [...by.get(t).values()].sort((a, b) => (b.contracts - a.contracts) || (a.x < b.x ? -1 : 1));
-    const total = rows.reduce((s, r) => sumSafe(s, r.contracts), 0);
-    let hhiN = 0n;
-    for (const r of rows) hhiN += BigInt(r.contracts) * BigInt(r.contracts);
-    const hhiD = BigInt(total) * BigInt(total);
-    const out = { t, total, hhiN: hhiN.toString(), hhiD: hhiD.toString(), hhi: total > 0 ? Number(hhiN) / Number(hhiD) : null };
-    if (codes) out.top = rows.slice(0, FLOWLAB_LIMITS.codesTop).map((r) => ({ code: r.x, contracts: r.contracts, share: total > 0 ? r.contracts / total : null }));
-    else out.exchanges = rows;
+    const m = by.get(t);
+    const exchanges = rank(m.ex);
+    const out = { t, ...hhiOf(exchanges), exchanges };
+    if (codes) {
+      const list = rank(m.code);
+      out.top = list.slice(0, FLOWLAB_LIMITS.codesTop).map((r) => ({ code: r.x, contracts: r.contracts, share: out.total > 0 ? r.contracts / out.total : null }));
+      out.codes = list.length;
+    }
     return out;
   });
-  return { ok: true, x: { tickers, dropped } };
+  return { ok: true, x: { tickers, dropped, codes } };
 }
 
 export const ROOT_RE = /^[A-Z][A-Z0-9.]{0,9}$/;
@@ -940,4 +1131,37 @@ export function thirdFridayExpiry(session) {
   const gap = here ? sessionsBetween(session, here) : null;
   if (gap !== null && gap >= 5) return here;
   return m === 11 ? pick(y + 1, 0) : pick(y, m + 1);
+}
+
+export const GROUP_BAR_COUNT = 13;
+
+export const GROUP_BAR_MS = 30 * 60000;
+
+export const GROUP_STATUSES = Object.freeze(["ok", "unshaped", "empty", "plan", "limited", "failed", "timeout", "cap"]);
+
+export function groupBars(x, openMs) {
+  const bars = [];
+  for (let i = 0; i < GROUP_BAR_COUNT; i++) bars.push({ t: openMs + i * GROUP_BAR_MS, d: null, v: null });
+  x.t.forEach((t, i) => {
+    const b = Math.floor((t - openMs) / GROUP_BAR_MS);
+    if (b < 0 || b >= GROUP_BAR_COUNT) return;
+    const d = x.series.dirDelta[i];
+    const v = x.series.dirVega[i];
+    if (d !== null) bars[b].d = (bars[b].d === null ? 0 : bars[b].d) + d;
+    if (v !== null) bars[b].v = (bars[b].v === null ? 0 : bars[b].v) + v;
+  });
+  return bars;
+}
+
+export const groupStatus = (why) => (why === "deadline" ? "timeout" : GROUP_STATUSES.includes(why) ? why : "unshaped");
+
+export function groupEntry(result, openMs) {
+  if (!result || !result.ok) return { status: groupStatus(result ? result.why : "failed") };
+  return { status: "ok", n: result.x.t.length, bars: groupBars(result.x, openMs), callC: result.x.net.callC, putC: result.x.net.putC };
+}
+
+export function orderGroups(entries, missing = "cap") {
+  const ordered = {};
+  for (const g of GROUPS) ordered[g] = entries[g] || { status: missing };
+  return ordered;
 }

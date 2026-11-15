@@ -71,7 +71,9 @@ const BASE = {
   eq(opIdOf("/api/market/XLK/sector-tide"), "sector-tide", "a template in the middle");
   eq(opIdOf("/api/nothing"), OTHER_OP, "an unknown path is other");
   eq(opIdOf(null), OTHER_OP, "and so is no path");
-  for (const op of OPS) eq(opIdOf(op.path.replace(/\{[a-z_]+\}/g, "X1")), op.id === "darkpool" ? "darkpool" : op.id, `${op.id} maps to itself`);
+  const firstOfPath = (op) => OPS.find((e) => e.path === op.path).id;
+  for (const op of OPS) eq(opIdOf(op.path.replace(/\{[a-z_]+\}/g, "X1")), firstOfPath(op), `${op.id} maps to itself, or to the first entry of its path when two reads share one`);
+  eq(OPS.filter((op) => firstOfPath(op) !== op.id).map((op) => op.id), ["listings-delisted"], "the delisted listings read is the one entry metered under another's id: it differs from the active read by its query alone, which the meter does not keep");
   eq([classOf(200), classOf(204), classOf(301), classOf(404), classOf(429), classOf(503), classOf(0), classOf(undefined, "timeout"), classOf(500, "network")],
     ["2xx", "2xx", "3xx", "4xx", "429", "5xx", "network", "timeout", "network"], "classes");
 
@@ -152,7 +154,7 @@ const BASE = {
 
   let st = { delayMs: 150, floorMs: 150 };
   for (let i = 0; i < 5; i++) st = stepRateController(st, "error");
-  eq(st, { delayMs: 150 * RATE.errorBackoffX, floorMs: 150 },
+  eq(st, { delayMs: 150 * RATE.errorBackoffX, floorMs: 150, streak: 0 },
     "five failures in a row slow the pace to four times the floor, not to the 5 s ceiling: one failing call's retries no longer stall every other call");
   eq(stepRateController({ delayMs: 5000, floorMs: 150 }, "error").delayMs, 5000, "and a failure never shortens a backoff a 429 set");
   ok(RATE.errorBackoffX * RATE.floorCeilingMs <= RATE.maxDelayMs, "the error ceiling sits inside the 5 s per-call ceiling at every floor");

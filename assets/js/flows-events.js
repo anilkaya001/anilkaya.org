@@ -63,7 +63,36 @@
     return null;
   };
 
-  const S = { payload: null, cx: new Map(), asked: false, staleDays: null, divLane: null };
+  const S = { payload: null, cx: new Map(), asked: false, staleDays: null, divLane: null, odds: null, oddsAsked: false };
+  const ODDS_COPY = { none: "No prediction market matches this release.", thin: "Thin market: under $50K of liquidity or a spread above 5 points.", last: "Last traded price; no two-sided quote.", resolved: "Resolved; this is the final price." };
+  const oddsOn = () => { const el = document.getElementById("evMacroCard"); return !!el && el.dataset.odds === "on"; };
+
+  function oddsCell(m) {
+    const table = S.odds === null ? null : S.odds;
+    if (S.oddsFail) return h("span", { class: "fe-modd", title: S.oddsFail }, DASH, h("span", { class: "visually-hidden" }, " " + S.oddsFail));
+    if (table === null) return h("span", { class: "fe-modd", title: "Market price loading" }, DASH);
+    const hit = table.get(String(m.at) + "|" + String(m.event));
+    const mk = hit && hit.markets && hit.markets[0] ? hit.markets[0] : null;
+    if (!mk || n(mk.price) === null) return h("span", { class: "fe-modd", title: ODDS_COPY.none }, DASH, h("span", { class: "visually-hidden" }, " " + ODDS_COPY.none));
+    const label = (mk.resolved ? "Resolved " : "") + F.pct(mk.price, 0) + (mk.thin ? " \u25cb" : "");
+    return h("span", { class: "fe-modd", title: "Market price " + F.pct(mk.price, 0) + "." + (mk.thin ? " " + ODDS_COPY.thin : "") + (mk.basis === "last" ? " " + ODDS_COPY.last : "") + (mk.resolved ? " " + ODDS_COPY.resolved : "") }, label);
+  }
+
+  function loadOdds() {
+    if (S.oddsAsked || !oddsOn()) return;
+    S.oddsAsked = true;
+    S.oddsFail = null;
+    const fail = (why) => { S.odds = new Map(); S.oddsFail = "The market-price read failed (" + why + "); this is not an empty table."; if (S.payload) paintMacro(S.payload); };
+    fetch("/api/flows/macro?part=odds", { credentials: "same-origin", headers: { Accept: "application/json" } })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status))))
+      .then((body) => {
+        const list = body && body.odds && Array.isArray(body.odds.events) ? body.odds.events : null;
+        if (list === null) return fail("no odds block in the answer");
+        S.odds = new Map(list.map((e) => [String(e.at) + "|" + String(e.event), e]));
+        if (S.payload) paintMacro(S.payload);
+      })
+      .catch((e) => fail(e && e.message ? e.message : "the request failed"));
+  }
 
   const setModuleState = (hostEl, st, label) => {
     const card = hostEl && hostEl.closest(".fd-mod");
@@ -205,7 +234,7 @@
       h("div", { class: "fe-dh" }), laneHead("Macro", macroSt), laneHead("Earnings", earnSt), laneHead("FDA", fdaSt), divSt ? laneHead("Ex-div", divSt) : null));
     const mark = nextMark(list, nowDay, payload.gateOrigin);
     list.forEach((d, k) => {
-      const col = h("section", { class: "fe-col", "aria-label": weekday(d) + " " + F.day(d) });
+      const col = h("section", { class: "fe-col", "aria-label": weekday(d) + " " + F.day(d), "data-day": d });
       col.append(h("div", { class: "fe-dh" }, h("b", null, weekday(d)), h("span", null, F.day(d)), d === mark ? h("i", { class: "fe-next" }, d === nowDay ? "Today" : "Next") : null));
       const mac = macroSt.state === "ok" ? (payload.macro.rows || []).filter((m) => m && m.day === d).sort((a, b) => String(a.at).localeCompare(String(b.at))) : [];
       col.append(h("div", { class: "fe-cell fe-c-macro", "data-lane": "Macro" }, mac.length ? mac.map(macroPill) : macroSt.state === "ok" ? h("span", { class: "fe-none", title: "No scheduled economic print for this day in the feed calendar" }, "No print") : null));
@@ -433,10 +462,12 @@
         h("span", { class: "fe-mname" }, h("i", { class: "fe-dot", style: { "--c": UI.cssVar(tag ? tag[1] : "--label-4") } }),
           h("b", null, tag ? tag[0] : String(m.event || DASH).replace(/\s*\((MoM|YoY|QoQ)\)/, "")), tag ? h("small", null, String(m.event || "")) : null),
         cell(m.forecastRaw, "No consensus forecast in the feed calendar", { class: "fu-v fu-strong" }),
-        cell(m.prevRaw, "No prior reading in the feed calendar", V));
+        cell(m.prevRaw, "No prior reading in the feed calendar", V),
+        oddsOn() ? oddsCell(m) : null);
     });
     host.macro.replaceChildren(
-      h("div", { class: "fe-mrow fu-head", ...HIDE }, h("span", null, "When"), h("span", null, "Print"), h("span", V, "Forecast"), h("span", V, "Prior")),
+      h("div", { class: "fe-mrow fu-head", ...HIDE }, h("span", null, "When"), h("span", null, "Print"), h("span", V, "Forecast"), h("span", V, "Prior"), oddsOn() ? h("span", V, "Market price") : null),
+      ...(oddsOn() && S.oddsFail ? [h("button", { type: "button", class: "fe-modd-retry", onclick: () => { S.oddsAsked = false; S.odds = null; S.oddsFail = null; if (S.payload) paintMacro(S.payload); loadOdds(); } }, "Retry market prices")] : []),
       withList(UI.list(items, { visible: 7, label: "Economic prints after the close" })));
   }
 
@@ -668,7 +699,8 @@
     const stale = h("button", { class: "fd-pill", type: "button", id: "evStale", hidden: S.staleText ? null : true,
       "aria-haspopup": "dialog", "aria-controls": "fxPop",
       "data-info": UI.info(() => ({ title: "Stale calendar", state: "stale", lead: S.staleText })) }, UI.glyph("clock"), S.staleDays === null ? "Behind" : S.staleDays + "d old");
-    host.meta.replaceChildren(...bits.flatMap((b, i) => (i ? [h("span", { ...HIDE }, MID), b] : [b])), stale);
+    const chip = host.meta.querySelector(".er-chip");
+    host.meta.replaceChildren(...bits.flatMap((b, i) => (i ? [h("span", { ...HIDE }, MID), b] : [b])), stale, ...(chip ? [chip] : []));
   }
 
   function aboutInfo() {
@@ -722,6 +754,13 @@
 
   const trouble = (kind, message) => { const e = new Error(message); e.evKind = kind; return e; };
 
+  const erHost = document.getElementById("erDefer");
+  const erStart = () => {
+    if (!erHost || !UI.defer) return;
+    const er = () => window.FlowsUI.er;
+    UI.defer("er", { when: "idle" }).then(() => er() && er().mount()).then(() => { if (er()) er().weekMarks(host.week); });
+  };
+
   wireInfos();
   fetch("/api/flows/events", { credentials: "same-origin", headers: { Accept: "application/json" } }).then((response) => {
     if (response.status === 401) { location.replace("/flows/"); return null; }
@@ -742,6 +781,7 @@
     UI.freshness({ sessionDate: payload.sessionDate, generatedAt: payload.generatedAt, updatedAt: payload.__updatedAt, source: "events" });
     if (payload.status === "pending") {
       failEverywhere("pending", "The pipeline has not published this key yet. This calendar is built by the weekday after-close run out of screener rows it already holds — it costs no feed call — and it appears with the first run after this page shipped.");
+      erStart();
       return;
     }
     stale(payload, payload.__updatedAt);
@@ -751,9 +791,11 @@
     paintWeek(payload);
     paintEarnings(payload, true);
     paintMacro(payload);
+    loadOdds();
     paintFda(payload);
     paintReact(payload);
     wireInfos();
+    erStart();
   }).catch((error) => {
     const why = error && error.message ? error.message : "the request failed";
     if (error && error.evKind === "unreadable") {
@@ -761,5 +803,6 @@
     } else {
       failEverywhere("failed", "The calendar could not be fetched (" + why + "). Refresh to try again.");
     }
+    erStart();
   });
 })();

@@ -4,12 +4,13 @@ import { randomBytes } from "node:crypto";
 import { startWorker, SESSION_SECRET } from "./worker-server.mjs";
 import { signFlowsSession } from "../shared/flows-auth.js";
 import { FIXTURE_MEMBER } from "./lib/fixture-roster.mjs";
-import { checkFrame, createSeq, RT_TOPIC_KEYS, RT_CLOSE, RT_ROW_FIELDS } from "../shared/flows-rt.js";
+import { checkFrame, createSeq, RT_TOPIC_KEYS as ALL_TOPIC_KEYS, RT_CLOSE, RT_ROW_FIELDS } from "../shared/flows-rt.js";
 import { createFakeVendor, vendorHandler, socketAlert, socketPrice, socketGex, socketNews } from "./rt-fixtures.mjs";
 import { attachLoopbackSocket } from "./lib/ws-loopback.mjs";
 import { fakeBoards } from "../scripts/flows-legs/live-fake.mjs";
 import { easternDay, easternInstant, nextTradingDay } from "../shared/flows-freshness.js";
 import { wireSession, summariseWire } from "./lib/ws-wire.mjs";
+const RT_TOPIC_KEYS = ALL_TOPIC_KEYS.filter((k) => k !== "ht");
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };

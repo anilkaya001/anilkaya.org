@@ -8,10 +8,54 @@ const TICKER = { file: "assets/js/flows-ticker.js", page: "each name's Ticker pa
 const POLITICAL = { file: "assets/js/flows-political.js", page: "Political", href: "/flows/political/" };
 const MOVES = { file: "assets/js/flows-moves.js", page: "Moves", href: "/flows/moves/" };
 const UNUSUAL = { file: "assets/js/flows-unusual.js", page: "Unusual", href: "/flows/unusual/" };
+const VOLDESK = { file: "assets/js/flows-voldesk.js", page: "Market", href: "/flows/market/" };
+const XCHECK = { file: "assets/js/flows-ticker-xcheck.js", page: "each name's Ticker page", href: null };
 const FLOWLAB = { file: "shared/flows-flowlab-copy.js", page: "Flow Lab", href: "/flows/flowlab/" };
+const MACRO = { file: "shared/flows-macro-copy.js", page: "Macro", href: "/flows/macro/" };
 const BOARDS = { file: "assets/js/flows-board.js", page: "the Bullish and Bearish boards", href: "/flows/long/" };
 
 export const GLOSSARY = Object.freeze([
+  { key: "aggressor-side", term: "Aggressor side", ...MACRO, lines: [
+    "No aggressor side: the feed does not report one.",
+    "Crossed-quote prints are counted apart, never sided.",
+  ] },
+  { key: "contango-futures", term: "Contango (futures)", ...MACRO, lines: [
+    "Index futures usually sit above spot by carry.",
+  ] },
+  { key: "dollar-breadth", term: "Dollar breadth", ...MACRO, lines: [
+    "Dollar breadth counts the majors the dollar rose against over the last day.",
+    "The feed carries no dollar index; this count is not one.",
+  ] },
+  { key: "coin-flip", term: "Distinguishable from a coin", ...MACRO, lines: [
+    "Indistinguishable from a coin flip.",
+    "Names are ranked after a correction for how many were tested.",
+  ] },
+  { key: "disclosed-investor", term: "Disclosed investor", ...MACRO, lines: [
+    "A disclosed investor is a firm the feed lists as backing private companies.",
+    "Not listed as a disclosed private-markets investor.",
+  ] },
+  { key: "implied-mark", term: "Implied per-share mark", ...MACRO, lines: [
+    "An implied per-share price comes from the feed's funding data, not from a trade.",
+  ] },
+  { key: "inverted-curve", term: "Inverted curve", ...MACRO, lines: [
+    "Inverted: the 2-year yields more than the 10-year.",
+  ] },
+  { key: "most-active-contract", term: "Most active contract", ...MACRO, lines: [
+    "Most active contract, as the feed ranks them.",
+  ] },
+  { key: "prediction-price", term: "Prediction-market price", ...MACRO, lines: [
+    "A prediction-market price is the market's number, not a forecast.",
+  ] },
+  { key: "spread-2s10s", term: "2s10s spread", ...MACRO, lines: [
+    "Normal: the 10-year yields more than the 2-year.",
+    "Flat: within 5 bp.",
+  ] },
+  { key: "thin-market", term: "Thin market", ...MACRO, lines: [
+    "Thin market: under $50K of liquidity or a spread above 5 points.",
+  ] },
+  { key: "wilson-interval", term: "Wilson interval", ...MACRO, lines: [
+    "The share of years a month rose is shown with a 95% interval.",
+  ] },
   { key: "advancers", term: "Advancers", ...MARKET_BELOW, lines: [
     "The session's price change for every eligible name in the screened universe, in half-point bins.",
   ] },
@@ -22,11 +66,23 @@ export const GLOSSARY = Object.freeze([
     "Beyond 2 counts names more than 2 IV-days from flat, up or down.",
     "Share is that count over the sector's names.",
   ] },
+  { key: "engine-cross-check", term: "Engine cross-check", ...XCHECK, lines: [
+    "The feed's own figures, checked against the site's engine.",
+  ] },
   { key: "board-map", term: "Board map", ...BOARDS, lines: [
     "Every name on the board, grouped by sector. A tile's area is its net premium and its color is its score, deeper for stronger.",
   ] },
+  { key: "backwardation", term: "Backwardation", ...VOLDESK, lines: [
+    "Backwardation: 30-day implied above 90-day.",
+  ] },
   { key: "bounds-agree", term: "Bounds agree", ...POLITICAL, lines: [
     "The whole whisker is on the buying side of zero. Even the low bound is a net purchase.",
+  ] },
+  { key: "contango", term: "Contango", ...VOLDESK, lines: [
+    "Contango: 90-day implied above 30-day.",
+  ] },
+  { key: "correlation-window", term: "Correlation window", ...VOLDESK, lines: [
+    "Correlation window: the span of daily returns compared, three months or one year.",
   ] },
   { key: "disclosed-net", term: "Disclosed net", ...POLITICAL, lines: [
     "The bar is disclosed purchases minus disclosed sales from the midpoint of each dollar band.",
@@ -149,6 +205,12 @@ export const GLOSSARY = Object.freeze([
   { key: "q-and-p", term: "Risk-neutral and real-world chance", ...TICKER, lines: [
     "Priced by the options engine on this name's own smile: the chance of profit and the expected P&L are computed twice, under the risk-neutral density the smile implies (Q) and under the real-world GARCH law (P).",
   ] },
+  { key: "implied-against-realised", term: "Implied against realised", ...VOLDESK, lines: [
+    "Implied is option-market volatility today; realised is the last 21 sessions' moves.",
+  ] },
+  { key: "roll-per-30-days", term: "Roll per 30 days", ...VOLDESK, lines: [
+    "Roll: second-month futures against the front, per 30 days.",
+  ] },
   { key: "sector-tides", term: "Sector tides", ...MARKET, lines: [
     "Net option premium through the session for each of the eleven sectors, on one shared scale so heights compare.",
   ] },
@@ -157,6 +219,9 @@ export const GLOSSARY = Object.freeze([
   ] },
   { key: "tide", term: "Tide", ...MARKET, lines: [
     "Net call premium minus net put premium is the net; a put line below zero is puts sold.",
+  ] },
+  { key: "volatility-half-life", term: "Volatility half-life", ...VOLDESK, lines: [
+    "Half-life: sessions for a volatility shock to halve.",
   ] },
   { key: "volatility", term: "Volatility", ...MARKET_BELOW, lines: [
     "The index ETFs' fixed-tenor implied volatility stands in for the VIX curve, which the feed plan does not serve.",
@@ -168,4 +233,4 @@ export const GLOSSARY = Object.freeze([
   ] },
 ]);
 
-export const GLOSSARY_PAGES = Object.freeze([HOME.page, MARKET.page, MOVES.page, UNUSUAL.page, FLOWLAB.page, POLITICAL.page, EVENTS.page, BOARDS.page, TICKER.page]);
+export const GLOSSARY_PAGES = Object.freeze([HOME.page, MARKET.page, MOVES.page, UNUSUAL.page, FLOWLAB.page, POLITICAL.page, EVENTS.page, BOARDS.page, TICKER.page, MACRO.page]);

@@ -480,8 +480,20 @@
     colsEl.append(gCol, vCol, sCol);
     const dockEl = h("div", { class: "ftsf-tabs" });
     const rowEl = h("div", { class: "ftsf-row" }, keyEl);
-    root.append(chipsEl, rowEl, colsEl, dockEl);
+    const xcFlag = document.getElementById("ftSurface");
+    const xcHost = xcFlag && xcFlag.dataset.xcheck ? h("div", { class: "ftxc", id: "ftXcheck", hidden: true }) : null;
+    let xc = null;
+    let xcApi = null;
+    root.append(chipsEl, rowEl, colsEl, ...(xcHost ? [xcHost] : []), dockEl);
     host.append(root);
+    if (xcHost && UI.defer) {
+      UI.defer("xcheck", { when: "idle", el: root, label: "The engine cross-check" }).then(() => {
+        const api = window.FlowsUI && window.FlowsUI.xcheck;
+        if (dead || !api) return;
+        xcApi = api;
+        return api.ready.then(() => { if (!dead) xc = api.mount(xcHost, input.cardX || null, { buttonHost: document.getElementById("ftGReset") }); });
+      });
+    }
 
     const emit = (iso) => document.dispatchEvent(new CustomEvent("ft:expiry", { bubbles: true, detail: { expiry: iso, source: "surface" } }));
     const select = (iso, refocus) => {
@@ -594,7 +606,7 @@
     function terrainDraw(ctx, w, hh, s, out) {
       const phone = w < 380;
       const mx = phone ? 26 : 34, my = phone ? 30 : 34;
-      const lab = labeler(ctx, w, hh, (phone ? 10 : 11) + "px Inter, system-ui, sans-serif", out);
+      const lab = labeler(ctx, w, hh, (phone ? 10 : 11) + "px \"Google Sans\", system-ui, sans-serif", out);
       if (tm.hMax === undefined) { let mx1 = 0, mn1 = 0; for (const c of tm.cells) if (c.h !== null) { if (c.h > mx1) mx1 = c.h; if (c.h < mn1) mn1 = c.h; } tm.hMax = mx1; tm.hMin = mn1; }
       const hMax = tm.hMax, hMin = tm.hMin;
       const deep = (r) => clamp(r * 0.62, 2.4, 4.6);
@@ -736,7 +748,7 @@
         if (c.clip) {
           cam.put(cx, yh, cz, Q, 0);
           ctx.fillStyle = ink;
-          ctx.font = "700 9px Inter, system-ui, sans-serif";
+          ctx.font = "700 9px \"Google Sans\", system-ui, sans-serif";
           ctx.textAlign = "center";
           ctx.fillText(c.g > 0 ? "▲" : "▼", Q[0], Q[1] + 3);
         }
@@ -768,7 +780,7 @@
     function surfaceDraw(ctx, w, hh, s, out) {
       const phone = w < 380;
       const mx = phone ? 26 : 34, my = phone ? 30 : 34;
-      const lab = labeler(ctx, w, hh, (phone ? 10 : 11) + "px Inter, system-ui, sans-serif", out);
+      const lab = labeler(ctx, w, hh, (phone ? 10 : 11) + "px \"Google Sans\", system-ui, sans-serif", out);
       const eT = EASE.out(M.tw);
       const pv = M.prev && M.tw < 1 ? M.prev : null;
       const lo = pv && pv.ivLo !== null ? lerp(pv.ivLo, sm.ivLo, eT) : sm.ivLo, hi = pv && pv.ivHi !== null ? lerp(pv.ivHi, sm.ivHi, eT) : sm.ivHi;
@@ -1127,6 +1139,7 @@
     return {
       destroy() {
         dead = true;
+        if (xc) xc.destroy();
         cancelAnimationFrame(M.raf);
         document.removeEventListener("ft:expiry", onExpiry);
         document.removeEventListener("visibilitychange", onVis);
@@ -1136,6 +1149,10 @@
         host.replaceChildren();
       },
       reset: () => hooks.go("reset"),
+      setCardX(next) {
+        input.cardX = next || null;
+        if (xc && xcApi && !dead) xc = xcApi.mount(xcHost, input.cardX, { buttonHost: document.getElementById("ftGReset") });
+      },
       go: hooks.go,
       update(nextCard) {
         const next = surfaceModel(nextCard, FQ);

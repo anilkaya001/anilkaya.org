@@ -78,7 +78,7 @@ export function cronJob(cron, at) {
   return minute % 5 === 3 ? "focus" : minute % 5 === 2 ? "funds" : "rth";
 }
 
-export const NIGHTLY_READ_KEYS = Object.freeze(["board:long", "board:short", "board:watch", "meta", "focus"]);
+export const NIGHTLY_READ_KEYS = Object.freeze(["board:long", "board:short", "board:watch", "meta", "focus", "universe"]);
 
 export const NIGHTLY_MISSING_AFTER_MIN = FRESH_CLASSES.nightly.graceS / 60;
 

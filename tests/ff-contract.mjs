@@ -309,7 +309,9 @@ function contractProblems(w, repo) {
   for (const [name, p] of Object.entries(w.PAYLOADS)) {
     if (typeof p !== "object") continue;
     if (!/^ff-[a-z]+$/.test(p.key) || p.maxBytes > PAYLOAD_CAP_BYTES || p.maxBytes > 98304) bad("payload", name);
-    if (productOf(p.key)) bad("payload_registered", name);
+    const product = productOf(p.key);
+    if (Boolean(product) !== repo.tracked.includes(p.writer)) bad("payload_registered", name);
+    if (product && product.capBytes !== p.maxBytes) bad("payload_cap", name);
   }
 
   const lanes = Object.entries(w.LANES);
@@ -458,7 +460,7 @@ function docProblems(w, inventory, contractDoc) {
 }
 
 const repo = () => ({
-  knownKeys: ["ff-carry"],
+  knownKeys: [],
   inventory: text("docs/ff/inventory.md"),
   contractDoc: text("docs/ff/contract.md"),
   errors: ERRORS,
@@ -640,6 +642,9 @@ plant("an error status that differs", (w) => { w.ERROR_CODES.ff_wire_not_found =
 plant("an unlisted error code in the table", (w, r) => { r.errors = { ...r.errors, ff_extra: [400, "Extra"] }; }, "error_unlisted");
 plant("a payload key that is already registered", (w) => { w.PAYLOADS.metrics.key = "universe"; }, "payload");
 plant("a payload over the 96 KiB ceiling", (w) => { w.PAYLOADS.metrics.maxBytes = 120000; }, "payload");
+plant("a registered payload whose writer is gone", (w, r) => { r.tracked = r.tracked.filter((f) => f !== w.PAYLOADS.carry.writer); }, "payload_registered");
+plant("a payload with a writer that nobody registered", (w, r) => { r.tracked = [...r.tracked, w.PAYLOADS.calibration.writer]; }, "payload_registered");
+plant("a payload registered under another cap", (w) => { w.PAYLOADS.metrics.maxBytes = 65536; }, "payload_cap");
 plant("a file owned by two lanes", (w) => { w.LANES.B.files.push(w.LANES.A.files[0]); }, "lane_overlap");
 plant("a lane that owns a shared file", (w) => { w.LANES.D.files.push("worker.js"); }, "lane_owns_shared");
 plant("two lanes with one prefix", (w) => { w.LANES.E.prefix = w.LANES.D.prefix; }, "lane_prefix_overlap");

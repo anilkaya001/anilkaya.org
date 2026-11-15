@@ -101,7 +101,8 @@
     const ranked = [...byName.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1));
     const keepN = new Set((ranked.length <= cap + 1 ? ranked : ranked.slice(0, cap)).map((e) => e[0]));
     const secs = [...bySec.values()].sort((x, y) => y.v - x.v || (x.g.k < y.g.k ? -1 : 1));
-    const keepS = new Set((secs.length > 14 ? secs.slice(0, 13) : secs).map((s) => s.g.k));
+    const gcap = clamp(Math.round(num(o.groups) || 14), 3, 14);
+    const keepS = new Set((secs.length > gcap ? secs.slice(0, gcap - 1) : secs).map((s) => s.g.k));
 
     const nodes = new Map(), hops = [new Map(), new Map(), new Map()], paths = new Map();
     const node = (id, layer, o2) => {
@@ -582,7 +583,7 @@
       const vm = G.vMax, ghost = !M;
       const sizes = (k) => { G.k = k; for (const n of NL) n.r = ghost ? 7 * k : nodeR(n.d.v, vm, k); };
       const rMax = (L) => L.reduce((m, n) => Math.max(m, n.r), 0), cMax = (L) => L.reduce((m, n) => Math.max(m, n.chip ? n.chip.w : 0), 0);
-      const margin = W > 900 ? 36 : 22;
+      const margin = W > 900 ? 44 : 22;
       const gapPx = parseFloat(getComputedStyle(host).rowGap) || 0;
       const space = FIT && !VERT ? Math.round(stage.clientHeight + (scale.hidden ? 0 : scale.offsetHeight + gapPx)) : 0;
       const availFor = (k) => Math.max(120, space - (ghost ? 0 : lgH(k) + gapPx));
@@ -601,7 +602,7 @@
             if (!ghost) for (const n of NL) n.chip = nodeChip(n, t[0]);
             const rm = LN.map(rMax), cw = LN.map(cMax), s0 = (W - 2 * margin - (rm[0] + 8 + cw[0]) - (rm[3] + 8 + cw[3])) / 6;
             pick = t;
-            if (ghost || [1, 2].every((c) => cw[c] + rm[c] + 8 + rm[c === 1 ? 0 : 3] + 8 <= 2 * s0)) break;
+            if (ghost || [1, 2].every((c) => cw[c] + rm[c] + 8 + rm[c === 1 ? 0 : 3] + 8 <= s0 * (t[0] === "line" ? 1.72 : 2))) break;
           }
           return pick;
         };

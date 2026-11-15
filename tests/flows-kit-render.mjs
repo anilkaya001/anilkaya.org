@@ -160,7 +160,8 @@ const DOC = fs.readFileSync(path.join(ROOT, "docs/flows-design-system.md"), "utf
 
 {
   ok(!/\/\*/.test(CSS), "flows.css carries no comment");
-  const root = CSS.slice(CSS.indexOf(":root {"), CSS.indexOf("\n}\n", CSS.indexOf(":root {")));
+  const BASE = fs.readFileSync(path.join(ROOT, "assets/css/base.css"), "utf8");
+  const root = CSS.slice(CSS.indexOf(":root {"), CSS.indexOf("\n}\n", CSS.indexOf(":root {"))) + BASE.slice(BASE.indexOf(":root {"), BASE.indexOf("\n}\n", BASE.indexOf(":root {")));
   for (const t of TOKENS) ok(new RegExp("\\n\\s*" + t + ":").test(root), `${t} is declared on :root`);
   ok(/\[data-density="compact"\] \{ --row-h: 32px/.test(CSS), "compact density is a 32 px row");
   ok(/@media \(pointer: coarse\) \{ \[data-density="compact"\] \{ --row-h: 44px/.test(CSS), "compact density gives way to 44 px rows on a coarse pointer");

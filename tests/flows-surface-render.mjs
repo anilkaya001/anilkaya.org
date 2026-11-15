@@ -220,6 +220,7 @@ let runRail = async (page) => {
 };
 
 const VP = { width: 1440, height: 820 };
+const NARROW = { width: 1366, height: 820 };
 {
   const page = await boot(VP);
   const m = await page.evaluate(({ card }) => {
@@ -546,6 +547,13 @@ const settle = async (page) => { await page.waitForSelector('.ftsf[data-motion="
   const p3 = await boot(VP, { card: noEng });
   const railOnly = await p3.evaluate(() => ({ ticks: document.querySelectorAll(".ftg-xt").length, heads: [...document.querySelectorAll(".ftg-rh")].map((n) => n.textContent), sm: document.querySelectorAll("polyline.ftg-sm").length, text: [...document.querySelectorAll('.ftg-svg [data-layer="gamma"] text')].map((n) => n.textContent).join(" "), sig: document.querySelectorAll(".ftg-svg rect.ftg-sig").length }));
   await checkLabels(p3, "no engine, 1440");
+  {
+    const p4 = await boot(NARROW, { card: noEng });
+    const said = await p4.evaluate(() => ({ rail: !!document.querySelector(".ftg-svg .ftg-xt"), text: [...document.querySelectorAll('.ftg-svg [data-layer="gamma"] text.ftg-cap:not(.ftg-rh)')].map((n) => n.textContent) }));
+    ok(said.rail && said.text.length >= 2, `at ${NARROW.width} px the rail still stands and the no-smile sentence wraps to more than one line (${JSON.stringify(said.text)})`);
+    await checkLabels(p4, "no engine, " + NARROW.width);
+    await p4.context().close();
+  }
   ok(railOnly.ticks > 0 && railOnly.sm === 0 && railOnly.sig === 0, "with gamma but no engine the rail keeps the gamma bars and says the smile is missing instead of drawing one " + JSON.stringify(railOnly));
   ok(/no fitted smile/i.test(railOnly.text), `in words (${railOnly.text})`);
   await p3.locator("#ftTabSurface").click();
@@ -1161,7 +1169,7 @@ const MUTANT_ARB = clone(CARD);
   await clean.context().close();
 }
 for (const [name, file, fn, kind] of MUTANTS) {
-  const page = await boot(VP, { mutate: { [file]: fn }, card: kind === "calendar" ? MUTANT_ARB : LABEL_CARDS[name] || CARD });
+  const page = await boot(name === "the no-smile sentence is one unwrapped line" ? NARROW : VP, { mutate: { [file]: fn }, card: kind === "calendar" ? MUTANT_ARB : LABEL_CARDS[name] || CARD });
   const src = fs.readFileSync(path.join(ROOT, file.slice(1)), "utf8");
   ok(fn(src) !== src, `mutant "${name}" changes the module`);
   if (kind === "surface" || kind === "calendar") {

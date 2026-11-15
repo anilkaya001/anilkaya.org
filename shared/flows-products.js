@@ -29,7 +29,7 @@ export const DUE_BY_MIN = 300;
 const frozen = (o) => Object.freeze(o);
 
 const product = (id, family, over) => frozen({
-  id, family, key: null, pattern: null, level: "L2", exec: "actions", klass: "nightly", epoch: 1,
+  id, family, key: null, pattern: null, level: "L2", exec: "actions", klass: "nightly", cadence: "nightly", epoch: 1,
   capBytes: PAYLOAD_CAP_BYTES, volatile: VOLATILE, targetByMin: TARGET_BY_MIN, dueByMin: DUE_BY_MIN, required: frozen([]), ...over,
 });
 
@@ -50,9 +50,14 @@ const GLOBALS = [
   global("scoretrack"),
   global("calib"),
   global("dispersion"),
+  global("macro", { capBytes: 96 * 1024, required: ["v", "session"] }),
+  global("pm", { capBytes: 64 * 1024, required: ["v", "session"] }),
+  global("voldesk", { capBytes: 64 * 1024, dueByMin: 120, volatile: frozen(["generatedAt"]), required: ["v", "session", "term"] }),
+  global("voldesk-stance", { capBytes: 96 * 1024, dueByMin: 120, volatile: frozen(["generatedAt"]), required: ["v", "ring"] }),
   global("flowalerts"),
   global("pulse"),
-  global("political"),
+  global("political", { capBytes: 120 * 1024 }),
+  global("positioning", { capBytes: 96 * 1024, required: ["v", "sessionDate", "generatedAt"] }),
   global("unusual"),
   global("sector:trix"),
   global("sector:premium"),
@@ -65,10 +70,14 @@ const GLOBALS = [
   global("oracle-top", { capBytes: 16 * 1024, required: ["items", "sessionDate"] }),
   global("oracle-norm", { capBytes: 100 * 1024, required: ["t", "sessionDate"] }),
   global("flowlab-roots", { capBytes: 64 * 1024, required: ["v", "sessionDate", "n", "list"] }),
-  global("flowlab-venues", { capBytes: 96 * 1024, required: ["v", "sessionDate", "tickers", "codes"] }),
+  global("flowlab-venues", { capBytes: 96 * 1024, required: ["v", "sessionDate", "tickers"] }),
   global("flowlab-screen", { capBytes: 96 * 1024, required: ["v", "sessionDate", "presets"] }),
   global("flowlab-groups", { capBytes: 24 * 1024, required: ["v", "sessionDate", "expiry", "groups"] }),
   global("flowlab-corr", { capBytes: 32 * 1024, required: ["v", "sessionDate", "status"] }),
+  global("ff-metrics", { capBytes: 96 * 1024, required: ["v", "sessionDate", "generatedAt", "t", "cols"] }),
+  global("ff-carry", { capBytes: 96 * 1024, required: ["v", "sessionDate", "generatedAt", "windows"] }),
+  global("eventrisk", { capBytes: 96 * 1024, required: ["v", "sessionDate", "generatedAt"] }),
+  global("er-sectors", { cadence: "weekly", capBytes: 96 * 1024, required: ["v", "readAt"] }),
 ];
 
 const dated = (id, source, over = {}) => product(id, "dated", { pattern: source, archive: true, ...over });
@@ -117,6 +126,8 @@ export function productOf(key) {
 export const keysOf = (family) => PRODUCTS.filter((p) => p.family === family && p.key !== null).map((p) => p.key);
 
 export const GLOBAL_KEYS = frozen(keysOf("global"));
+
+export const NIGHTLY_GLOBAL_KEYS = frozen(PRODUCTS.filter((p) => p.family === "global" && p.key !== null && p.cadence === "nightly").map((p) => p.key));
 
 export const NAME_KINDS = frozen(NAMES.map((p) => p.id));
 

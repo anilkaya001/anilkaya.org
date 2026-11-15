@@ -1102,7 +1102,7 @@
   }
 
   function surfaceInput() {
-    return { card: STATE.card, ticker: STATE.card.ticker, expiry: GLANCE.mount && GLANCE.mount.expiry ? GLANCE.mount.expiry() : GLANCE.expiry };
+    return { card: STATE.card, cardX: STATE.cardX, ticker: STATE.card.ticker, expiry: GLANCE.mount && GLANCE.mount.expiry ? GLANCE.mount.expiry() : GLANCE.expiry };
   }
 
   function dropSurface() {
@@ -2904,6 +2904,16 @@
     UI.defer("movelab", { when: "visible", el: host, label: "The move lab" }).then(() => window.FlowsUI.moveLab && window.FlowsUI.moveLab.mount(host, raw));
   }
 
+  const PRIVATE = { host: null };
+
+  function buildPrivate(card) {
+    if (isIndex(card) || !UI.defer || !$("ftPrivate")) return;
+    const host = PRIVATE.host || (PRIVATE.host = h("div", { class: "is-slot" }, UI.silent(ST("quiet", "The private-markets lens loads when this module comes into view."), "Private markets", 140)));
+    const raw = { pm: STATE.cardX && STATE.cardX.pm ? STATE.cardX.pm : null, sector: typeof card.sector === "string" && card.sector ? card.sector : null };
+    mod({ id: "m-private", title: "Private markets", span: [12, 12], st: OK, body: [host], index: 5 });
+    UI.defer("private", { when: "visible", el: host, label: "The private-markets lens" }).then(() => { const f = window.FlowsUI.privateLens; if (f) f.mount(host, raw); });
+  }
+
   const NETWORK = { host: null };
 
   function buildNetwork(card) {
@@ -2944,7 +2954,7 @@
     showGrid();
     parkVerdict();
     for (const node of [...gridEl.children]) node.remove();
-    const builders = [buildIdeas, buildWorlds, buildSignal, buildGamma, buildHedging, buildVol, buildFlow, buildTape, buildEvents, buildPositioning, buildContext, buildMoveLab, buildNetwork];
+    const builders = [buildIdeas, buildWorlds, buildSignal, buildGamma, buildHedging, buildVol, buildFlow, buildTape, buildEvents, buildPositioning, buildContext, buildMoveLab, buildNetwork, buildPrivate];
     for (const b of builders) {
       try { b(card); } catch (e) { console.error("flows-ticker: " + b.name + " failed", e); }
     }
@@ -3291,7 +3301,7 @@
         Promise.all(["card", "summary", "card-x", "hist"].map((p) => soft(getJSON(api(p, t)))))
           .then(([card, neuron, cx, hist]) => {
             if (!card || !card.panels) return;
-            STATE.card = card; STATE.neuron = neuron || (STATE.neuron && STATE.neuron.loading ? { status: "unavailable" } : STATE.neuron); STATE.cardX = joined(cx, card); STATE.hist = joined(hist, card);
+            STATE.card = card; STATE.neuron = neuron || (STATE.neuron && STATE.neuron.loading ? { status: "unavailable" } : STATE.neuron); STATE.cardX = joined(cx, card); STATE.hist = joined(hist, card); if (SURF.api && SURF.api.setCardX) SURF.api.setCardX(STATE.cardX);
             paintAll();
             if (neuronPending(STATE.neuron)) awaitNeuron(t, card);
             else if (readPending(STATE.neuron)) awaitReading(t, card);
@@ -3370,7 +3380,7 @@
     if (!had("card-x") || !had("hist")) {
       Promise.all([cxP, histP]).then(([cx, hist]) => {
         if (STATE.card !== card) return;
-        if (STATE.cardX === waiting) STATE.cardX = joined(cx, card);
+        if (STATE.cardX === waiting) { STATE.cardX = joined(cx, card); if (SURF.api && SURF.api.setCardX) SURF.api.setCardX(STATE.cardX); }
         if (STATE.hist === waiting) STATE.hist = joined(hist, card);
         paintDossier(card);
       });

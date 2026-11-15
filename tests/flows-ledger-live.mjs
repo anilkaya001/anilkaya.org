@@ -31,7 +31,7 @@ const plain = (v) => JSON.parse(JSON.stringify(v));
   eq([ledgerLiveOn({ FLOWS_LEDGER_LIVE: "on" }, false), ledgerLiveOn({ FLOWS_LEDGER_LIVE: "owner" }, true), ledgerLiveOn({ FLOWS_LEDGER_LIVE: "owner" }, false), ledgerLiveOn({ FLOWS_LEDGER_LIVE: "owner" }, undefined), ledgerLiveOn({}, true)],
     [true, true, false, false, false], "on opens it to a member, owner to the owner alone, unset to nobody");
   const wrangler = fs.readFileSync(path.join(ROOT, "wrangler.toml"), "utf8");
-  ok(/^FLOWS_LEDGER_LIVE = "owner"$/m.test(wrangler), "wrangler.toml ships the live switch at owner");
+  ok(/^FLOWS_LEDGER_LIVE = "on"$/m.test(wrangler), "wrangler.toml ships the live switch on for every member");
 }
 
 {

@@ -40,31 +40,45 @@
   let ret = null;
   let state = null;
 
+  const partState = (p) => {
+    if (!p) return null;
+    const c = copy();
+    const classes = c.classes || {};
+    if (p.read && classes[p.read.class]) return classes[p.read.class];
+    if (!p.why) return null;
+    return (c.whys || {})[p.why] || "unshaped";
+  };
+  const varsOf = (p) => ({ TRT: DASH, status: p && p.read && num(p.read.status) !== null ? p.read.status : DASH, date: p && typeof p.date === "string" ? p.date : DASH });
+
   async function get(path) {
     let r;
-    try { r = await fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } }); } catch { return { error: "failed" }; }
+    try { r = await fetch(path, { credentials: "same-origin", headers: { Accept: "application/json" } }); } catch { return { error: "network" }; }
     let body = null;
     try { body = await r.json(); } catch { body = null; }
     if (r.ok && body) return { body };
+    const c = copy();
     const code = body && body.error && body.error.code;
-    if (r.status === 429 || code === "rate_limited") return { error: "rate_limited" };
+    const read = body && body.read && typeof body.read === "object" ? body.read : null;
+    if (read && (c.classes || {})[read.class]) return { error: c.classes[read.class], read };
+    if (code && (c.errors || {})[code]) return { error: c.errors[code], read };
+    if (r.status === 429) return { error: "rate_limited" };
     if (r.status === 504) return { error: "timeout" };
-    return { error: "failed" };
+    return { error: "failed", read };
   }
 
   const stateOf = (res) => {
     if (!res || res.error) return (res && res.error) || "failed";
-    const w = res.body && res.body.why;
-    if (!w) return null;
-    return w === "empty" ? "quiet" : w === "plan" ? "plan" : w === "limited" ? "rate_limited" : w === "timeout" ? "timeout" : w === "failed" ? "failed" : "unshaped";
+    return partState(res.body);
   };
-  const stateBlock = (code) => {
+  const varsOfRes = (res) => varsOf(res && (res.error ? res : res.body));
+  const stateBlock = (code, vars) => {
     const c = copy();
     const st = (c.stateMap || {})[code] || "quiet";
     return h("div", { class: "fl-state", "data-code": code, role: "status" },
       h("span", { class: "ds-st", "data-s": st }, h("i", { "aria-hidden": "true" }), (c.chips || {})[code] || code),
-      h("span", { class: "fl-state-t" }, fill((c.states || {})[code] || "", { TRT: DASH, date: DASH })));
+      h("span", { class: "fl-state-t" }, fill((c.states || {})[code] || "", vars || { TRT: DASH, date: DASH, status: DASH })));
   };
+  const resBlock = (res) => stateBlock(stateOf(res) || "failed", varsOfRes(res));
   const wait = () => h("p", { class: "fl-wait", role: "status" }, (copy().states || {}).loading || "");
 
   function table(cols, rows) {
@@ -91,17 +105,17 @@
 
   const part = (res, key) => {
     const st = stateOf(res);
-    if (st) return { st };
+    if (st) return { st, vars: varsOfRes(res) };
     const p = res.body.x && res.body.x[key];
     if (!p) return { st: "quiet" };
-    if (p.ok === false) return { st: p.why === "empty" ? "quiet" : p.why === "plan" ? "plan" : p.why === "unreachable" ? "failed" : "unshaped" };
+    if (p.ok === false) return { st: partState(p) || "failed", vars: varsOf(p) };
     return { x: p.x || p, asOf: res.body.asOf };
   };
 
   async function paintPrints() {
     const res = await core();
-    const { st, x } = part(res, "prints");
-    if (st) { body().replaceChildren(stateBlock(st)); return; }
+    const { st, x, vars } = part(res, "prints");
+    if (st) { body().replaceChildren(stateBlock(st, vars)); return; }
     const c = copy();
     const d = c.drill || {};
     const cols = [{ label: "Time" }, { label: "Price", cls: "num" }, { label: "Size", cls: "num" }, { label: (c.labels || {}).premium || "Premium", cls: "num" }, { label: "Side" }, { label: "Venue" }];
@@ -117,8 +131,8 @@
 
   async function paintMinutes() {
     const res = await core();
-    const { st, x } = part(res, "minutes");
-    if (st) { body().replaceChildren(stateBlock(st)); return; }
+    const { st, x, vars } = part(res, "minutes");
+    if (st) { body().replaceChildren(stateBlock(st, vars)); return; }
     const host = h("div", { class: "fl-plot" });
     body().replaceChildren(host);
     const draw = () => {
@@ -150,8 +164,8 @@
 
   async function paintProfile() {
     const res = await core();
-    const { st, x } = part(res, "profile");
-    if (st) { body().replaceChildren(stateBlock(st)); return; }
+    const { st, x, vars } = part(res, "profile");
+    if (st) { body().replaceChildren(stateBlock(st, vars)); return; }
     const host = h("div", { class: "fl-plot" });
     body().replaceChildren(host);
     const draw = () => {
@@ -178,8 +192,8 @@
 
   async function paintAlerts() {
     const res = await core();
-    const { st, x } = part(res, "prints");
-    if (st) { body().replaceChildren(stateBlock(st)); return; }
+    const { st, x, vars } = part(res, "prints");
+    if (st) { body().replaceChildren(stateBlock(st, vars)); return; }
     const d = copy().drill || {};
     const ids = (x.alertIds || []).filter((i) => UUID_RE.test(i));
     if (!ids.length) { body().replaceChildren(h("div", { class: "fl-state", role: "status" }, h("span", { class: "fl-state-t" }, d.noAlerts))); return; }
@@ -191,7 +205,7 @@
       list.append(slot);
       get("/api/flows/flowlab/contract?c=" + encodeURIComponent(state.c) + "&part=alert&id=" + encodeURIComponent(id)).then((r) => {
         const e = stateOf(r);
-        if (e) { slot.replaceChildren(stateBlock(e)); return; }
+        if (e) { slot.replaceChildren(resBlock(r)); return; }
         const a = r.body.x.alert;
         const cols = [{ label: "Time" }, { label: "Price", cls: "num" }, { label: "Size", cls: "num" }, { label: "Premium", cls: "num" }, { label: "Venue" }];
         const rows = r.body.x.trades.map((t) => h("tr", null, h("th", { scope: "row" }, F.time(t.at)), h("td", { class: "num" }, price(t.pxC)), h("td", { class: "num" }, F.num(t.size)), h("td", { class: "num" }, money(t.premC)), h("td", null, t.venue || DASH)));
@@ -206,9 +220,9 @@
     const day = state.d ? "&d=" + encodeURIComponent(state.d) : "";
     const res = await get("/api/flows/flowlab/contract?c=" + encodeURIComponent(state.c) + "&part=structure" + day);
     const e = stateOf(res);
-    if (e) { body().replaceChildren(stateBlock(e)); return; }
+    if (e) { body().replaceChildren(resBlock(res)); return; }
     const list = res.body.x.list;
-    if (!list.length) { body().replaceChildren(h("div", { class: "fl-state", role: "status" }, h("span", { class: "fl-state-t" }, d.noStructure))); return; }
+    if (!list.length) { body().replaceChildren(h("div", { class: "fl-state", "data-code": "no-structure", role: "status" }, h("span", { class: "fl-state-t" }, fill(d.noStructure, { n: F.num(res.body.x.searched) })))); return; }
     const cols = [{ label: "Time" }, { label: "Package" }, { label: "Legs", cls: "num" }, { label: "Premium", cls: "num" }, { label: "" }];
     const rows = list.map((q) => h("tr", null, h("th", { scope: "row" }, F.time(q.at)), h("td", null, q.strategy || q.code || DASH), h("td", { class: "num" }, q.legs === null ? DASH : String(q.legs)), h("td", { class: "num" }, money(q.premC)),
       h("td", null, UUID_RE.test(q.id) ? h("button", { type: "button", class: "fl-link", onclick: () => legs(q.id) }, "Legs") : "")));
@@ -224,7 +238,7 @@
     const day = state.d ? "&d=" + encodeURIComponent(state.d) : "";
     const res = await get("/api/flows/flowlab/contract?c=" + encodeURIComponent(state.c) + "&part=legs&id=" + encodeURIComponent(id) + day);
     const e = stateOf(res);
-    if (e) { body().replaceChildren(stateBlock(e)); return; }
+    if (e) { body().replaceChildren(resBlock(res)); return; }
     const x = res.body.x;
     const cols = [{ label: "Leg" }, { label: "Side" }, { label: "Size", cls: "num" }, { label: "Price", cls: "num" }, { label: "Delta", cls: "num" }];
     const rows = x.legs.map((l) => h("tr", { class: l.c === state.c ? "is-on" : null }, h("th", { scope: "row" }, labelOf(l.c) + (l.c === state.c ? " · " + d.confirmed : "")), h("td", null, l.side || DASH), h("td", { class: "num" }, F.num(l.size)), h("td", { class: "num" }, price(l.pxC)), h("td", { class: "num" }, l.delta === null ? DASH : F.px(l.delta, 2))));
@@ -244,12 +258,12 @@
       for (const q of pr.x.list) if (!q.canceled) by.set(q.venue || DASH, (by.get(q.venue || DASH) || 0) + q.size);
       const rows = [...by.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => h("tr", null, h("th", { scope: "row" }, k), h("td", { class: "num" }, F.num(v))));
       wrap.append(h("h3", null, "This contract"), table([{ label: "Venue" }, { label: "Contracts", cls: "num" }], rows));
-    } else wrap.append(stateBlock(pr.st || "quiet"));
+    } else wrap.append(stateBlock(pr.st || "quiet", pr.vars));
     body().replaceChildren(wrap);
     note(d.venueNote);
     const v = await get("/api/flows/flowlab/venues?t=" + encodeURIComponent(p.root));
     const e = stateOf(v);
-    if (e || !v.body.x || !v.body.x.tickers[0]) { wrap.append(h("h3", null, p.root), stateBlock(e || "quiet")); return; }
+    if (e || !v.body.x || !v.body.x.tickers[0]) { wrap.append(h("h3", null, p.root), e ? resBlock(v) : stateBlock("quiet")); return; }
     const t = v.body.x.tickers[0];
     const rows = t.exchanges.map((q) => h("tr", null, h("th", { scope: "row" }, q.x), h("td", { class: "num" }, F.num(q.contracts))));
     wrap.append(h("h3", null, p.root), table([{ label: "Exchange" }, { label: "Contracts", cls: "num" }], rows));

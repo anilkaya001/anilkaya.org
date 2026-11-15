@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { launch } from "./lib/browser.mjs";
 import { openMarket, TABS } from "./lib/market-fixtures.mjs";
+import { payloadFor as voldeskPayload } from "./lib/voldesk-world.mjs";
+
+const tabsOf = (page) => page.$$eval("#mkTabs [role=tab]", (l) => l.map((t) => t.dataset.tab));
 
 let checks = 0;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
@@ -33,7 +36,7 @@ const MEASURE = () => {
 
 async function sweep(page, label, { phone }) {
   const bad = [];
-  for (const t of TABS) {
+  for (const t of await tabsOf(page)) {
     await page.click(`#mkT-${t}`);
     await page.waitForTimeout(450);
     const mods = await page.evaluate((k) => [...document.querySelectorAll(`#mkP-${k} > .mk-mod`)].map((m) => m.id), t);
@@ -64,7 +67,7 @@ async function sweep(page, label, { phone }) {
 
 async function allDialogs(page, label) {
   const bad = [];
-  for (const t of TABS) {
+  for (const t of await tabsOf(page)) {
     await page.click(`#mkT-${t}`);
     await page.waitForTimeout(350);
     const n = await page.locator(`#mkP-${t} .mk-all:not([hidden])`).count();
@@ -106,8 +109,9 @@ async function keyboard(page, label) {
 const browser = await launch();
 
 for (const [w, h] of [[1440, 820], [1024, 768], [390, 844]]) {
-  const { context, page, errors } = await openMarket(browser, { viewport: { width: w, height: h }, coarse: w < 500 });
+  const { context, page, errors } = await openMarket(browser, { viewport: { width: w, height: h }, coarse: w < 500, voldesk: voldeskPayload("ok") });
   await page.waitForTimeout(2500);
+  ok((await tabsOf(page)).includes("voldesk"), `${w}x${h}: the sweep includes the Vol desk tab`);
   const phone = w < 900;
   eq(await sweep(page, `${w}`, { phone }), [], `${w}x${h}: EVERY TAB (AND EVERY MODULE ON A PHONE) FITS ONE SCREEN WITH NOTHING CLIPPED AND NO PAGE SCROLL`);
   eq(await allDialogs(page, `${w}`), [], `${w}x${h}: every Show all dialog fits the screen and closes on Escape`);

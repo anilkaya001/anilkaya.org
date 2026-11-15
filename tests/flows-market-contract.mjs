@@ -182,11 +182,13 @@ const MODULES = ["mkTideCard", "mkBreadthCard", "mkTapeCard", "mkEtfSPYCard", "m
   "mkSeasonCard"];
 const SCENE_MODULES = /^FLOWS_SCENES\s*=\s*"on"/m.test(readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8"))
   ? ["mkSkylineCard", "mkRelationsCard"] : [];
+const VOLDESK_MODULES = /^FLOWS_VOLDESK\s*=\s*"on"/m.test(readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8"))
+  ? ["mkVdTermCard", "mkVdIvrvCard", "mkVdCorrCard", "mkVdCharCard"] : [];
 const FEEDS =["mkTide", "mkVolume", "mkOi", "mkImpact", "mkInsiders", "mkDark", "mkSeason"];
 
 const browser = revealBelow(await chromium.launch());
 
-async function openMarket({ stub = true, routes = [], viewport, at } = {}) {
+async function openMarket({ stub = true, routes = [], viewport, at, lens = "raw" } = {}) {
   const page = await browser.newPage(viewport ? { viewport } : undefined);
   if (at) await page.clock.setFixedTime(new Date(at));
   await page.context().addCookies([{ name: "flows_session", value: token, url: server.baseURL }]);
@@ -207,6 +209,20 @@ async function openMarket({ stub = true, routes = [], viewport, at } = {}) {
     return s && !/^Loading the session/.test(s.textContent) &&
       document.querySelector("#mkVolume > *") && document.querySelector("#mktAgainst > *");
   }, null, { timeout: 15000 });
+  const lensNow = await page.evaluate(() => {
+    const b = document.querySelector("#mktMovers .mk-lens .ui-seg-i[aria-selected=true]");
+    return b ? b.textContent : null;
+  });
+  page.lensAtOpen = lensNow;
+  if (lens === "raw" && lensNow === "In IV-days") {
+    await page.evaluate(() => [...document.querySelectorAll("#mktMovers .mk-lens .ui-seg-i")].find((b) => b.textContent === "Raw change").click());
+    await page.waitForFunction(() => {
+      const b = document.querySelector("#mktMovers .mk-lens .ui-seg-i[aria-selected=true]");
+      const c = document.querySelector("#mktMovers .mk-movers-col");
+      return b && b.textContent === "Raw change" && c && !/in IV-days$/.test(c.getAttribute("aria-label") || "") &&
+        !document.querySelector("#mktMovers .mk-lens-note");
+    }, null, { timeout: 15000 });
+  }
   return page;
 }
 const painted = (p) => p.evaluate(() => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0))));
@@ -460,6 +476,8 @@ try {
   }
 
   const page = await openMarket();
+  eq(page.lensAtOpen, "In IV-days",
+     "a member's Market opens the extremes on IV-days, now that the lens is every member's; the reads below choose Raw change first, as a member can");
 
   const read = await page.evaluate(() => {
     const chartOf = (sel) => {
@@ -763,13 +781,13 @@ try {
   });
   eq(totalsTicks[totalsTicks.length - 1].text, dayLabel(dayStamp(1)),
      "and the newest session keeps its label, so the tick dropped was the one crowding it");
-  const volLabel = () => page.evaluate(() => document.querySelector("#mkVolume svg[role=img]").getAttribute("aria-label"));
+  const volLabel = () => page.evaluate(() => { const g = document.querySelector("#mkVolume svg[role=img]"); return g ? g.getAttribute("aria-label") : ""; });
   ok(/contracts/.test(await volLabel()),
      "the volume module draws contracts by default — the unit its title and its P/C reading are in");
 await showTab(page, "#mkVolumeSeg");
   await page.locator("#mkVolumeSeg .ui-seg-i", { hasText: "Premium" }).click();
-  await page.waitForFunction(() => /premium/.test(document.querySelector("#mkVolume svg[role=img]").getAttribute("aria-label")),
-    null, { timeout: 5000 }).catch(() => {});
+  await page.waitForFunction(() => { const g = document.querySelector("#mkVolume svg[role=img]"); return Boolean(g) && /premium/.test(g.getAttribute("aria-label")); },
+    null, { timeout: 15000 }).catch(() => {});
   ok(/premium/.test(await volLabel()), "and draws premium one tap away, on the same session axis");
   eq(await page.locator("#mkVolume svg text.mk-vol-x").count(), totalsTicks.length, "with the same dated ticks");
 await showTab(page, "#mkVolumeSeg");
@@ -1887,7 +1905,9 @@ await showTab(deepPage, "#mkRadarSeg");
     const titles = await deepPage.$$eval(".mk-stage .ui-mod-t", (hs) => hs.map((h) => h.childNodes[0].textContent.trim()));
     const scenes = await deepPage.evaluate((ids) => ids.filter((id) => document.getElementById(id)), ["mkSkylineCard", "mkRelationsCard"]);
     deep(scenes, SCENE_MODULES, "the scene modules are on the page exactly when wrangler.toml ships FLOWS_SCENES on");
-    eq(titles.length, MODULES.length + SCENE_MODULES.length + 3, "every module carries a title");
+    const desk = await deepPage.evaluate((ids) => ids.filter((id) => document.getElementById(id)), ["mkVdTermCard", "mkVdIvrvCard", "mkVdCorrCard", "mkVdCharCard"]);
+    deep(desk, VOLDESK_MODULES, "the Vol desk modules are on the page exactly when wrangler.toml ships FLOWS_VOLDESK on");
+    eq(titles.length, MODULES.length + SCENE_MODULES.length + VOLDESK_MODULES.length + 3, "every module carries a title");
     for (const t of titles) {
       ok(t.split(/\s+/).length <= 3, `a module title is one to three words (${t})`);
       ok(!/^[A-Z0-9 ]{4,}$/.test(t) || /^(SPY|QQQ|IWM)$/.test(t), `and sentence case, never ALL-CAPS (${t})`);

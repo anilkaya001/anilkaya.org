@@ -863,12 +863,16 @@ assert.deepEqual(missingReport, [],
   for (const t of ["SPY", "QQQ", "IWM"]) {
     const card = emitted("card:" + t);
     ok(card && card.depth === "index", `card:${t} is an index dossier`);
+    ok(card.engine && Array.isArray(card.engine.structures) && card.engine.structures.length && Array.isArray(card.engine.expiries) && card.engine.expiries.length,
+      `card:${t} carries the engine block: fitted expiries and priced structures, as a board card does`);
     ok(card.panels && card.panels.gamma && card.panels.context, `card:${t} carries the card panels`);
   }
   const { FOCUS_FUNDS, FOCUS_FIELDS, FOCUS_BUDGET_BYTES, FOCUS_METALS } = await import("../shared/flows-focus.js");
   for (const t of FOCUS_FUNDS) {
     const card = emitted("card:" + t);
     ok(card && card.depth === "fund", `card:${t} is a fund dossier`);
+    ok(card.engine && Array.isArray(card.engine.structures) && card.engine.structures.length && Array.isArray(card.engine.expiries) && card.engine.expiries.length,
+      `card:${t} carries the engine block: fitted expiries and priced structures, as a board card does`);
     ok(card.panels && card.panels.gamma && card.panels.context && card.panels.surface, `card:${t} carries the index dossier's panels`);
     const x = emitted("card-x:" + t);
     ok(x && x.scope === "fund" && x.cone && x.term && x.skew, `card-x:${t} carries cone, term and skew from the vol leg`);

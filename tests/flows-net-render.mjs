@@ -668,7 +668,7 @@ try {
   {
     const { ctx, page } = await mount(browser, { width: 700, height: 1400, delayFonts: 1500 });
     const widths = async () => (await net(page, "return net.labels();")).filter((l) => !l.id.startsWith("cap:")).reduce((a, l) => a + l.w, 0);
-    ok(await page.evaluate(() => [...document.fonts].some((f) => /Inter/.test(f.family) && f.status === "loaded")), "THE LAZY NETWORK IS FIRST DRAWN AFTER THE FONT: the load event waits for the face the page uses, so the network is measured in the loaded face");
+    ok(await page.evaluate(() => [...document.fonts].some((f) => /Google Sans/.test(f.family) && f.status === "loaded")), "THE LAZY NETWORK IS FIRST DRAWN AFTER THE FONT: the load event waits for the face the page uses, so the network is measured in the loaded face");
     for (let i = 0; i < 100 && !(await net(page, "return net.labels();")).some((l) => l.id === "s:tech"); i++) await page.waitForTimeout(100);
     const w0 = await widths();
     await page.waitForTimeout(900);
@@ -1099,7 +1099,7 @@ try {
     deep(await run(null), [], "THE SECTOR LAYER COMES FIRST, THE SIDES SECOND, NO SECTOR IS FOLDED, THE INDEX BUCKETS FOLLOW THE REAL SECTORS and every layer sums to the total");
     for (const [name, patch] of [
       ["the sides lead and the sectors follow", [['node(sid, 0, sid === "s:~"', 'node(sid, 1, sid === "s:~"'], ['node(ids[1], 1, {', 'node(ids[1], 0, {']]],
-      ["sectors fold into Other past six", [["const keepS = new Set((secs.length > 14 ? secs.slice(0, 13) : secs)", "const keepS = new Set((secs.length > 6 ? secs.slice(0, 5) : secs)"]]],
+      ["sectors fold into Other past six", [["const gcap = clamp(Math.round(num(o.groups) || 14), 3, 14);", "const gcap = 6;"]]],
       ["Index funds rank among the sectors", [['"s:fund": 1,', '"s:fund": 0,']]],
     ]) ok((await run(patch)).length > 0, `PLANTED WRONG BUILD FAILS: ${name}`);
   }

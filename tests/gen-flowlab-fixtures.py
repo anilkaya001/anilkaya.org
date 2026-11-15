@@ -22,6 +22,8 @@ def sha(path):
 with open(SPEC_PATH, "rb") as handle:
     SPEC = yaml.safe_load(handle.read())
 COMPONENTS = SPEC["components"]["schemas"]
+with open(SHAPES_PATH, "rb") as handle:
+    SHAPES = json.loads(handle.read())
 
 SESSION = "2026-10-23"
 EXPIRY = "2026-11-20"
@@ -38,11 +40,12 @@ OPS = {
     "exchange-breakdown": "/api/option-trades/exchange-breakdown/{date}",
     "optionable-roots": "/api/option-trades/optionable-tickers",
     "strike-flow-intraday": "/api/stock/{ticker}/flow-per-strike-intraday",
-    "flow-recent": "/api/stock/{ticker}/flow-recent",
+    "flow-per-strike": "/api/stock/{ticker}/flow-per-strike",
+    "flow-per-expiry": "/api/stock/{ticker}/flow-per-expiry",
     "greek-flow-expiry": "/api/stock/{ticker}/greek-flow/{expiry}",
     "group-greek-flow-expiry": "/api/group-flow/{flow_group}/greek-flow/{expiry}",
     "option-price-levels": "/api/stock/{ticker}/option/stock-price-levels",
-    "stock-price-levels": "/api/stock/{ticker}/stock-volume-price-levels",
+    "darkpool-levels": "/api/darkpool/{ticker}/price-levels",
     "lit-recent": "/api/lit-flow/recent",
     "lit-ticker": "/api/lit-flow/{ticker}",
     "analytics-window": "/api/analytics/window",
@@ -78,7 +81,59 @@ def properties(schema):
 TYPES = {"string": str, "boolean": bool, "array": list, "object": dict}
 
 
-def check_value(schema, value, path, problems):
+def observed_extra(op):
+    entry = SHAPES["ops"].get(op) or {}
+    return set(entry.get("undocumented") or [])
+
+
+def observed_types(op):
+    entry = SHAPES["ops"].get(op) or {}
+    out = {}
+    for fields in (entry.get("sets") or {}).values():
+        out.update(fields)
+    return out
+
+
+def wire_type(value):
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, (int, float)):
+        return "num"
+    if isinstance(value, str):
+        try:
+            float(value)
+            return "str#"
+        except ValueError:
+            return "str"
+    if isinstance(value, list):
+        return "arr"
+    return "obj"
+
+
+def check_wire(op, rows, problems):
+    types = observed_types(op)
+    if not types:
+        return
+    for i, row in enumerate(rows):
+        for key, value in row.items():
+            want = types.get(key)
+            if want is None:
+                problems.append("%s[%d].%s: not a key the wire carried" % (op, i, key))
+            elif wire_type(value) not in want.split("|"):
+                problems.append("%s[%d].%s: %s where the wire carried %s" % (op, i, key, wire_type(value), want))
+
+
+def numeric_text(value):
+    try:
+        float(value)
+        return True
+    except ValueError:
+        return False
+
+
+def check_value(schema, value, path, problems, extra=frozenset(), wired=frozenset()):
     schema = deref(schema)
     if not isinstance(schema, dict):
         return
@@ -86,6 +141,8 @@ def check_value(schema, value, path, problems):
     if value is None:
         if not schema.get("nullable") and declared is not None:
             problems.append("%s: null where the schema is not nullable" % path)
+        return
+    if declared in ("integer", "number") and isinstance(value, str) and path.rsplit(".", 1)[-1] in wired and numeric_text(value):
         return
     if declared == "integer":
         if not (isinstance(value, int) and not isinstance(value, bool)):
@@ -100,34 +157,45 @@ def check_value(schema, value, path, problems):
         return
     if declared == "array":
         for i, item in enumerate(value):
-            check_value(schema.get("items", {}), item, "%s[%d]" % (path, i), problems)
+            check_value(schema.get("items", {}), item, "%s[%d]" % (path, i), problems, extra, wired)
     elif declared == "object" or properties(schema):
         props = properties(schema)
         if props and isinstance(value, dict):
             for key, sub in value.items():
+                if key in extra:
+                    continue
                 if key not in props:
                     problems.append("%s.%s: not a documented property" % (path, key))
                 else:
-                    check_value(props[key], sub, "%s.%s" % (path, key), problems)
+                    check_value(props[key], sub, "%s.%s" % (path, key), problems, extra, wired)
 
 
 def validate(op, body):
     problems = []
     schema = root_schema(op)
     props = properties(schema)
-    if "data" in props:
-        check_value(schema, body, op, problems)
+    extra = observed_extra(op)
+    wired = frozenset(k for k, t in observed_types(op).items() if "str#" in t.split("|"))
+    if isinstance(body, list):
+        for i, row in enumerate(body):
+            check_value(schema, row, "%s[%d]" % (op, i), problems, extra, wired)
+        check_wire(op, [r for r in body if isinstance(r, dict)], problems)
+    elif "data" in props:
+        check_value(schema, body, op, problems, extra, wired)
+        rows = body.get("data") if isinstance(body, dict) else None
+        if isinstance(rows, list):
+            check_wire(op, [r for r in rows if isinstance(r, dict)], problems)
     elif deref(schema).get("type") == "array":
         rows = body["data"] if isinstance(body, dict) and "data" in body else body
-        check_value(schema, rows, op, problems)
+        check_value(schema, rows, op, problems, extra, wired)
     else:
         for key, value in body.items():
             if key == "data":
                 rows = value if isinstance(value, list) else [value]
                 for i, row in enumerate(rows):
-                    check_value(schema, row, "%s.data[%d]" % (op, i), problems)
+                    check_value(schema, row, "%s.data[%d]" % (op, i), problems, extra, wired)
             elif key in props:
-                check_value(props[key], value, "%s.%s" % (op, key), problems)
+                check_value(props[key], value, "%s.%s" % (op, key), problems, extra, wired)
             else:
                 problems.append("%s.%s: not a documented property" % (op, key))
     return problems
@@ -302,10 +370,12 @@ def build_exchange(rng, thin):
 
 def build_codes(rng, thin):
     rows = []
+    exchanges = [("XCBO", 5), ("XPHL", 3), ("XNAS", 2)]
     for t in TICKERS[:1] if thin else TICKERS:
         for code, trades, contracts, prem in [("auto", 4000, 7000, 500000.0), ("isoi", 1200, 2500, 210000.0), ("mlet", 600, 1300, 99000.0), ("late", 20, 40, 3000.0)]:
-            rows.append({"call_trades": trades // 2, "contracts": contracts, "exchange": "", "premium": prem, "put_trades": trades - trades // 2,
-                         "trade_code": code, "trade_count": trades, "underlying_symbol": t})
+            for ex, part in exchanges:
+                rows.append({"call_trades": trades * part // 20, "contracts": contracts * part // 10, "exchange": ex, "premium": prem * part / 10.0,
+                             "put_trades": trades * part // 10 - trades * part // 20, "trade_code": code, "trade_count": trades * part // 10, "underlying_symbol": t})
     return {"data": rows}
 
 
@@ -333,16 +403,50 @@ def build_strike_flow(rng, thin):
     return {"data": rows}
 
 
-def build_recent(rng, thin):
+def wire_money(v):
+    return "%.1f" % v
+
+
+def build_expiry(rng, thin):
     rows = []
-    for i, exp in enumerate(["2026-10-23", "2026-10-30", EXPIRY][: (1 if thin else 3)]):
+    expiries = ["2026-10-23", "2026-10-30", "2026-11-06", "2026-11-13", EXPIRY, "2026-12-18"][: (2 if thin else 6)]
+    for i, exp in enumerate(expiries):
+        cv = rng.randint(800, 9000)
+        pv = rng.randint(500, 7000)
+        cva, cvb = int(cv * rng.uniform(0.25, 0.55)), int(cv * rng.uniform(0.15, 0.35))
+        pva, pvb = int(pv * rng.uniform(0.2, 0.5), ), int(pv * rng.uniform(0.15, 0.4))
+        cpx, ppx = rng.uniform(0.6, 7.5), rng.uniform(0.5, 6.5)
         rows.append({
-            "call_otm_premium": money(41000 + i), "call_otm_trades": 12, "call_otm_volume": 900, "call_premium": money(180000 + i), "call_premium_ask_side": money(90000),
-            "call_premium_bid_side": money(40000), "call_trades": 31, "call_volume": 3100, "call_volume_ask_side": 1500, "call_volume_bid_side": 800, "date": SESSION,
-            "expiry": exp, "put_otm_premium": money(21000), "put_otm_trades": 8, "put_otm_volume": 500, "put_premium": money(95000), "put_premium_ask_side": money(30000),
-            "put_premium_bid_side": money(50000), "put_trades": 19, "put_volume": 1900, "put_volume_ask_side": 600, "put_volume_bid_side": 900, "ticker": "SYX101",
+            "call_otm_premium": wire_money(cv * cpx * 40), "call_otm_trades": cv // 25, "call_otm_volume": cv // 2, "call_premium": wire_money(cv * cpx * 100),
+            "call_premium_ask_side": wire_money(cva * cpx * 100), "call_premium_bid_side": wire_money(cvb * cpx * 100), "call_trades": cv // 9, "call_volume": cv,
+            "call_volume_ask_side": cva, "call_volume_bid_side": cvb, "date": SESSION, "expiry": exp, "put_otm_premium": wire_money(pv * ppx * 45),
+            "put_otm_trades": pv // 30, "put_otm_volume": pv // 2, "put_premium": wire_money(pv * ppx * 100), "put_premium_ask_side": wire_money(pva * ppx * 100),
+            "put_premium_bid_side": wire_money(pvb * ppx * 100), "put_trades": pv // 8, "put_volume": pv, "put_volume_ask_side": pva, "put_volume_bid_side": pvb,
+            "ticker": "SYX101",
         })
-    return {"data": rows}
+    return rows
+
+
+def build_strike_day(rng, thin):
+    rows = []
+    strikes = [95 + 5 * i for i in range(6 if thin else 30)]
+    for k in strikes:
+        near = max(0.05, 1 - abs(k - 120) / 60.0)
+        ca, cb = int(rng.randint(20, 900) * near), int(rng.randint(10, 600) * near)
+        pa, pb = int(rng.randint(15, 700) * near), int(rng.randint(10, 800) * near)
+        cx, px = int(rng.randint(0, 300) * near), int(rng.randint(0, 250) * near)
+        cv, pv = ca + cb + cx, pa + pb + px
+        cpx, ppx = max(0.05, (130 - k) / 6.0 + 1.2), max(0.05, (k - 110) / 6.0 + 1.1)
+        rows.append({
+            "call_otm_premium": wire_money(cv * cpx * 60 if k > 118 else 0), "call_otm_trades": cv // 30 if k > 118 else 0, "call_otm_volume": cv if k > 118 else 0,
+            "call_premium": wire_money(cv * cpx * 100), "call_premium_ask_side": wire_money(ca * cpx * 100), "call_premium_bid_side": wire_money(cb * cpx * 100),
+            "call_trades": max(1, cv // 7), "call_volume": cv, "call_volume_ask_side": ca, "call_volume_bid_side": cb, "date": SESSION,
+            "put_otm_premium": wire_money(pv * ppx * 60 if k < 118 else 0), "put_otm_trades": pv // 30 if k < 118 else 0, "put_otm_volume": pv if k < 118 else 0,
+            "put_premium": wire_money(pv * ppx * 100), "put_premium_ask_side": wire_money(pa * ppx * 100), "put_premium_bid_side": wire_money(pb * ppx * 100),
+            "put_trades": max(1, pv // 7), "put_volume": pv, "put_volume_ask_side": pa, "put_volume_bid_side": pb, "strike": "%.1f" % k, "ticker": "SYX101",
+            "timestamp": "2026-10-23T20:00:00Z",
+        })
+    return rows
 
 
 def build_greek(rng, thin, group=False):
@@ -369,9 +473,13 @@ def build_option_levels(rng, thin):
     return {"data": [{"call_volume": int(300 * max(0.0, 1 - abs(i - 12) / 13.0)) + 5, "price": money(110 + i * 0.75), "put_volume": int(260 * max(0.0, 1 - abs(i - 9) / 13.0)) + 4} for i in range(n)]}
 
 
-def build_stock_levels(rng, thin):
-    n = 4 if thin else 25
-    return {"data": [{"lit_vol": int(80000 * max(0.0, 1 - abs(i - 12) / 13.0)) + 500, "off_vol": int(30000 * max(0.0, 1 - abs(i - 11) / 13.0)) + 200, "price": 110 + i * 0.75} for i in range(n)]}
+def build_darkpool_levels(rng, thin):
+    n = 4 if thin else 20
+    rows = []
+    for i in range(n):
+        rows.append({"dark_pool_volume": str(int(30000 * max(0.0, 1 - abs(i - 9) / 12.0)) + 200), "price": "%.2f" % (113 + i * 0.5),
+                     "regular_volume": str(int(80000 * max(0.0, 1 - abs(i - 10) / 12.0)) + 500)})
+    return {"data": rows, "date": SESSION}
 
 
 def build_lit(rng, thin, ticker=None):
@@ -380,7 +488,7 @@ def build_lit(rng, thin, ticker=None):
     for i in range(n):
         t = ticker or TICKERS[i % 3]
         px = 100 + (i % 17) * 0.13
-        size = 100 + (i * 37) % 4000
+        size = (100 if ticker else 5000) + (i * 37) % 4000
         rows.append({
             "canceled": (not thin) and i == 7, "executed_at": ts(i * 2), "ext_hour_sold_codes": "", "market_center": ["N", "Q", "P", "Z"][i % 4], "nbbo_ask": money(px + 0.02),
             "nbbo_ask_quantity": 200, "nbbo_bid": money(px - 0.02), "nbbo_bid_quantity": 300, "premium": money(px * size), "price": money(px), "sale_cond_codes": "@ F",
@@ -414,11 +522,12 @@ def world(kind):
         "exchange-breakdown-codes": build_codes(rng, thin),
         "optionable-roots": build_roots(rng, thin),
         "strike-flow-intraday": build_strike_flow(rng, thin),
-        "flow-recent": build_recent(rng, thin),
+        "flow-per-strike": build_strike_day(rng, thin),
+        "flow-per-expiry": build_expiry(rng, thin),
         "greek-flow-expiry": build_greek(rng, thin),
         "group-greek-flow-expiry": build_greek(rng, thin, True),
         "option-price-levels": build_option_levels(rng, thin),
-        "stock-price-levels": build_stock_levels(rng, thin),
+        "darkpool-levels": build_darkpool_levels(rng, thin),
         "lit-recent": build_lit(rng, thin),
         "lit-ticker": build_lit(rng, thin, "SYX101"),
         "analytics-window": build_analytics(rng, thin),
@@ -427,8 +536,8 @@ def world(kind):
 
 
 LISTS = ["contract-screener", "contract-flow", "contract-intraday", "contract-profile", "multi-leg-legs", "multi-leg", "exchange-breakdown",
-         "exchange-breakdown-codes", "optionable-roots", "strike-flow-intraday", "flow-recent", "greek-flow-expiry", "group-greek-flow-expiry",
-         "option-price-levels", "stock-price-levels", "lit-recent", "lit-ticker"]
+         "exchange-breakdown-codes", "optionable-roots", "strike-flow-intraday", "flow-per-strike", "flow-per-expiry", "greek-flow-expiry", "group-greek-flow-expiry",
+         "option-price-levels", "darkpool-levels", "lit-recent", "lit-ticker"]
 
 
 def empty_world():
@@ -478,7 +587,7 @@ def main():
             "specSha256": sha(SPEC_PATH),
             "shapesSha256": sha(SHAPES_PATH),
             "pyyaml": yaml.__version__,
-            "source": "bodies built from the 200-response schemas of docs/uw-openapi.yaml; every key and JSON type is the spec's; not observed on the wire",
+            "source": "bodies built from the 200-response schemas of docs/uw-openapi.yaml, with the key names and numeric strings the shape manifest observed where it records the operation; the bodies were not observed on the wire",
             "nature": "synthetic: invented tickers, invented ids, invented figures; not vendor data",
         },
         "session": SESSION,

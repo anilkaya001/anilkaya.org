@@ -9,7 +9,9 @@ import { chromium } from "playwright";
 import * as PAGES from "../shared/flows-pages.js";
 import { liveEntry, phaseView } from "../shared/flows-live-worker.js";
 import { phaseAt, expectedNightlySession, freshHeaders } from "../shared/flows-freshness.js";
+import { fulfilFf } from "./lib/ff-u-world.mjs";
 import { realisticWorld, respondWith } from "./lib/sfc-render-world.mjs";
+import { payloadFor as voldeskPayload } from "./lib/voldesk-world.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, "..");
@@ -76,7 +78,7 @@ function answer(route, u) {
   switch (route) {
     case "board": return emitted("board-" + (q.get("side") || "long"));
     case "market": case "events": case "scoretrack": case "meta": case "flowalerts": case "pulse": case "news":
-    case "political": case "unusual": case "movers": case "universe": case "regime": case "ideas": case "focus": case "roster": case "record": case "brief":
+    case "political": case "positioning": case "unusual": case "movers": case "universe": case "regime": case "ideas": case "focus": case "roster": case "record": case "brief":
       return emitted(route) || { status: "pending" };
     case "sectors": return emitted("sector-trix") || { status: "pending", rows: [] };
     case "sector-premium": return emitted("sector-premium") || { status: "pending", sectors: [] };
@@ -108,6 +110,7 @@ function answer(route, u) {
       return { serverNow: NOW, tier1: { at: iso(NOW - 120000), okAt: iso(NOW - 120000), why: null }, clock: null,
         expected: expectedNightlySession(NOW, null), phase: phaseView(phaseAt(NOW, null)), keys };
     }
+    case "voldesk": return voldeskPayload("ok");
     default: return null;
   }
 }
@@ -120,7 +123,7 @@ const SPECS = [
   { id: "long", fn: "sidePage", args: { side: "long" }, url: "/flows/long/" },
   { id: "short", fn: "sidePage", args: { side: "short" }, url: "/flows/short/" },
   { id: "watch", fn: "watchPage", url: "/flows/watch/" },
-  { id: "market", fn: "marketPage", url: "/flows/market/" },
+  { id: "market", fn: "marketPage", args: { voldesk: true }, url: "/flows/market/" },
   { id: "network", fn: "networkPage", url: "/flows/network/" },
   { id: "now", fn: "nowPage", url: "/flows/now/" },
 
@@ -128,12 +131,18 @@ const SPECS = [
   { id: "events", fn: "eventsPage", url: "/flows/events/" },
   { id: "moves", fn: "movesPage", url: "/flows/moves/" },
   { id: "political", fn: "politicalPage", url: "/flows/political/" },
+  { id: "political-layers", fn: "politicalPage", args: { layers: true }, url: "/flows/political/" },
+  { id: "positioning", fn: "positioningPage", url: "/flows/positioning/" },
   { id: "strategy", fn: "strategyPage", url: "/flows/strategy/?t=NVDA" },
   { id: "desk", fn: "deskPage", url: "/flows/desk/" },
   { id: "ticker", fn: "tickerPage", url: "/flows/ticker/?t=NVDA" },
   { id: "ledger", fn: "ledgerPage", url: "/flows/ledger/" },
   { id: "flowlab", fn: "flowlabPage", url: "/flows/flowlab/" },
+  { id: "macro", fn: "macroPage", url: "/flows/macro/" },
   { id: "status", fn: "statusPage", url: "/flows/status/" },
+  { id: "fire", fn: "firePage", args: { shadow: true }, url: "/flows/fire/" },
+  { id: "inbox", fn: "inboxPage", args: { shadow: true }, url: "/flows/inbox/" },
+  { id: "digest", fn: "ffPendingPage", args: { page: "digest", shadow: true }, url: "/flows/digest/" },
 ];
 
 const pageFunctions = Object.keys(PAGES.FLOWS_PAGES).filter((k) => typeof PAGES.FLOWS_PAGES[k] === "function").sort();
@@ -157,6 +166,7 @@ async function mount(page, html, url, patch = null) {
       return route.fulfill({ path: f, contentType: MIME[path.extname(f)] || "application/octet-stream" });
     }
     if (u.pathname.startsWith("/api/rt/")) return route.fulfill({ status: 404, contentType: "application/json", body: '{"error":{"code":"rt_off"}}' });
+    if (u.pathname.startsWith("/api/ff/")) return fulfilFf(route, NOW);
     if (u.pathname.startsWith("/api/flows/")) {
       const r = u.pathname.slice("/api/flows/".length);
       asked.push(r);
@@ -193,7 +203,7 @@ async function mount(page, html, url, patch = null) {
 
 
 const SIZES = (process.env.SIZES || "1920x1080,1440x820,1024x768,390x844").split(",").map((s) => s.split("x").map(Number));
-const ONE_SCREEN = new Set(["overview", "market", "moves", "unusual", "events", "political", "status", "network", "now", "ledger", "flowlab"]);
+const ONE_SCREEN = new Set(["overview", "market", "moves", "unusual", "events", "political", "status", "network", "now", "ledger", "flowlab", "fire", "inbox"]);
 
 const SWEEP = () => {
   const vis = (e) => {
@@ -279,7 +289,7 @@ try {
   if (!ONLY && !process.env.NO_MUTANTS) {
     const byId = (id) => SPECS.find((x) => x.id === id);
     const MUTANTS = [
-      ["the sidebar scrolls inside itself at a short height", "status", 1440, 820, { "/assets/css/flows.css": [["  overflow: hidden;\n  visibility: hidden;", "  overflow-y: auto;\n  visibility: hidden;"], [".fx-side > .flows-rail { flex: 1 1 auto; min-height: 0; overflow-y: auto;", ".fx-side > .flows-rail { flex: 0 0 auto; min-height: 0;"]] }],
+      ["the sidebar scrolls inside itself at a short height", "status", 1440, 820, { "/assets/css/flows.css": [["  overflow: hidden;\n  visibility: hidden;", "  overflow-y: auto;\n  visibility: hidden;"], [".fx-side > .flows-rail { flex: 1 1 auto; min-height: 0; overflow-y: auto;", ".fx-side > .flows-rail { flex: 0 0 auto; min-height: 0;"], ["grid-auto-rows: minmax(26px, 34px);", "grid-auto-rows: 44px;"]] }],
       ["the network module scrolls inside and keeps a fixed stage", "unusual", 1440, 820, { "/assets/css/flows-feeds.css": [[".fd-stage > .fd-mod[data-free] { overflow: hidden; }", ".fd-stage > .fd-mod[data-free] { overflow-y: auto; }"], [".fd-stage > .fd-mod[data-free] > .fn-host > .fn-stage { flex: 1; min-height: 0; height: auto; margin: 0; }", ".fd-stage > .fd-mod[data-free] > .fn-host > .fn-stage { flex: none; height: 560px; margin: 0; }"]] }],
       ["the index volatility chart is taller than its card", "market", 1440, 820, { "/assets/js/flows-market-below.js": [["height: [150, 160, 180],\n      xTicks: [{ v: 7", "height: [180, 210, 230],\n      xTicks: [{ v: 7"]] }],
       ["the small sector tiles print a value wider than the tile", "market", 390, 844, { "/assets/css/flows-market.css": [["clamp(9px, min(11cqmin, 17cqw), 28px)", "clamp(14px, 11cqmin, 30px)"], [".mk-small-h b { grid-area: v; min-width: 0; overflow: visible;", ".mk-small-h b { grid-area: v; min-width: 0; overflow: hidden;"]] }],
