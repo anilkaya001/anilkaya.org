@@ -6,6 +6,7 @@ export const DIGEST_DESCRIPTION = "A session's hits by quadrant, each with its r
 export const DIGEST_STYLES = Object.freeze(["/assets/css/flows-ff-tokens.css", "/assets/css/flows-ff-inbox.css"]);
 export const DIGEST_SCRIPTS = Object.freeze(["/assets/js/flows-ff-kernel.js", "/assets/js/flows-ff-client.js", "/assets/js/flows-ff-digest.js"]);
 export const DIGEST_SHADOW_LINE = "Running in shadow: wires are evaluated, hits are not delivered yet. Every hit is held, so the lists stay empty; the receipts lines are real.";
+export const DIGEST_SHADOW_PAST_LINE = "Running in shadow: wires are evaluated, hits are not delivered now. The hits listed here were delivered before shadow began; the receipts lines are real.";
 export const DIGEST_CALIBRATION_LINE = ABSENT_MARK + " not released: the calibration leg that writes " + PAYLOADS.calibration.key + " is not built yet, so no wire has a calibration figure.";
 export const DIGEST_COLUMNS = Object.freeze([
   Object.freeze({ id: "house", title: "House", quadrants: Object.freeze(["house-nightly", "house-live"]) }),
@@ -39,7 +40,7 @@ export function digestBody(glyph, { shadow = false } = {}) {
       <button type="button" class="ffx-dig-btn" id="ffxDigRetry" hidden>Retry</button>
       <button type="button" class="ffx-ibtn" id="ffxDigInfoBtn" aria-haspopup="dialog" aria-label="How the Digest works">${g("info")}</button>
     </header>
-    <p class="ffx-banner" id="ffxDigBanner"${shadow ? ' data-ff-mode="shadow"' : " hidden"}>${shadow ? DIGEST_SHADOW_LINE : ""}</p>
+    <p class="ffx-banner" id="ffxDigBanner"${shadow ? ` data-ff-mode="shadow" data-past="${DIGEST_SHADOW_PAST_LINE}"` : " hidden"}>${shadow ? DIGEST_SHADOW_LINE : ""}</p>
     <div class="ffx-tabs" role="tablist" aria-label="Digest panels" id="ffxDigTabs">
       <button type="button" role="tab" id="ffxDigTabHouse" aria-selected="true" aria-controls="ffxDigHouse" data-v="house">House</button><button type="button" role="tab" id="ffxDigTabYours" aria-selected="false" aria-controls="ffxDigYours" data-v="yours" tabindex="-1">Yours</button><button type="button" role="tab" id="ffxDigTabRecord" aria-selected="false" aria-controls="ffxDigRecord" data-v="record" tabindex="-1">Record</button>
     </div>
@@ -48,10 +49,10 @@ export function digestBody(glyph, { shadow = false } = {}) {
         <h2 class="visually-hidden">${c.title}</h2>${c.quadrants.map(quadrant).join("")}
       </section>`).join("")}
       <section class="ffx-panel ffx-dig-col ffx-dig-rec" id="ffxDigRecord" data-col="record" role="tabpanel" aria-labelledby="ffxDigRecT">
-        <header class="ffx-ph"><h2 id="ffxDigRecT">Record so far</h2><span class="ffx-ph-n" id="ffxDigRecN"></span></header>
+        <header class="ffx-ph"><h2 id="ffxDigRecT">Record so far</h2><span class="ffx-ph-n" id="ffxDigRecN"></span><button type="button" class="ffx-dig-all" id="ffxDigRecAll" data-k="all" data-list="record" hidden>Show all</button></header>
         <p class="ffx-dig-cal" id="ffxDigCal" data-ff-absent="not_released">${DIGEST_CALIBRATION_LINE}</p>
         <ul class="ffx-dig-list ffx-dig-recs" id="ffxDigRecs" aria-busy="true"><li class="ffx-dig-wait" data-ff-absent="reading">${ABSENT_MARK} reading the house wires</li></ul>
-        <div class="ffx-dig-hy" id="ffxDigHy" hidden><h3>Silent wires of yours</h3><ul class="ffx-dig-list" id="ffxDigHyList"></ul></div>
+        <div class="ffx-dig-hy" id="ffxDigHy" hidden><div class="ffx-dig-hyh"><h3>Silent wires of yours</h3><button type="button" class="ffx-dig-all" id="ffxDigHyAll" data-k="all" data-list="silent" hidden>Show all</button></div><ul class="ffx-dig-list" id="ffxDigHyList"></ul></div>
         <p class="ffx-foot">Firings are counted on the wire's current version. No price outcome is scored.</p>
       </section>
     </div>

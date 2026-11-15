@@ -143,7 +143,10 @@
   var recN = document.getElementById("ffxDigRecN");
   var hy = document.getElementById("ffxDigHy");
   var hyList = document.getElementById("ffxDigHyList");
-  var state = { digest: null, record: null, error: null, loads: 0 };
+  var recAll = document.getElementById("ffxDigRecAll");
+  var hyAll = document.getElementById("ffxDigHyAll");
+  var banner = document.getElementById("ffxDigBanner");
+  var state = { digest: null, record: null, error: null, recordError: null, loads: 0 };
 
   function el(tag, attrs, text) {
     var n = document.createElement(tag);
@@ -194,22 +197,41 @@
   function part(q, k) { return q.querySelector('[data-k="' + k + '"]'); }
 
   function fitAll() {
-    if (!state.digest) return;
-    state.digest.quadrants.forEach(function (m) {
+    if (state.digest) state.digest.quadrants.forEach(function (m) {
       var q = quadrantNode(m.id);
       if (!q) return;
       var list = part(q, "list");
       var all = part(q, "all");
-      var got = K && K.fit ? K.fit.rows(list, { keep: 1 }) : { cut: 0 };
-      var cut = got.cut;
-      all.hidden = cut === 0;
-      var label = cut === 0 ? "Show all" : "Show all " + m.groups.length;
-      if (all.textContent !== label) all.textContent = label;
+      for (var pass = 0; pass < 2; pass++) {
+        var was = all.hidden;
+        var got = K && K.fit ? K.fit.rows(list, { keep: 1 }) : { cut: 0 };
+        var cut = got.cut;
+        all.hidden = cut === 0;
+        var label = cut === 0 ? "Show all" : "Show all " + m.groups.length;
+        if (all.textContent !== label) all.textContent = label;
+        if (all.hidden === was) break;
+      }
       [].forEach.call(q.querySelectorAll(".ffx-clip"), function (c) { if (K && K.fit) K.fit.clip(c); });
     });
     [].forEach.call(document.querySelectorAll("#ffxDigRecord .ffx-clip"), function (c) { if (K && K.fit) K.fit.clip(c); });
-    if (K && K.fit) K.fit.rows(recList, { keep: 1 });
-    if (K && K.fit) K.fit.rows(hyList, { keep: 1 });
+    listAll(recAll, recList, state.record ? state.record.lines.length : 0);
+    listAll(hyAll, hyList, state.digest ? state.digest.silent.length : 0);
+  }
+
+  function listAll(btn, list, n) {
+    for (var pass = 0; pass < 2; pass++) {
+      var was = btn.hidden;
+      var fitted = K && K.fit ? K.fit.rows(list, { keep: 1 }) : { cut: 0 };
+      btn.hidden = fitted.cut === 0 || n === 0;
+      var label = fitted.cut === 0 ? "Show all" : "Show all " + n;
+      if (btn.textContent !== label) btn.textContent = label;
+      if (btn.hidden === was) break;
+    }
+  }
+
+  function showRetry() {
+    var digestBad = state.error && state.error.code !== "ff_export_range" && state.error.code !== "ff_cursor_invalid";
+    retry.hidden = !(digestBad || state.recordError);
   }
 
   function paintQuadrant(m) {
@@ -231,29 +253,51 @@
 
   function paintDigest(m) {
     state.digest = m;
-    retry.hidden = true;
+    state.error = null;
+    showRetry();
+    if (banner && banner.hasAttribute("data-past")) {
+      if (!banner.hasAttribute("data-now")) banner.setAttribute("data-now", banner.textContent);
+      var held = m.quadrants.some(function (q) { return q.total > 0; });
+      var line = banner.getAttribute(held ? "data-past" : "data-now");
+      if (banner.textContent !== line) banner.textContent = line;
+    }
     put(cap, "Session " + m.session + (m.latest && m.latest !== m.session ? " · the latest is " + m.latest : "") + " · computed when read");
     latestLink.hidden = !(m.latest && m.latest !== m.session);
     m.quadrants.forEach(paintQuadrant);
     hy.hidden = m.silent.length === 0;
     hyList.textContent = "";
-    m.silent.forEach(function (s) {
-      var li = el("li", { class: "ffx-dig-g" });
-      var head = el("div", { class: "ffx-dig-gh" });
-      head.appendChild(span("ffx-dig-w ffx-clip", s.title));
-      li.appendChild(head);
-      li.appendChild(span("ffx-dig-s ffx-clip", s.text + " · last hit " + s.last));
-      hyList.appendChild(li);
-    });
+    m.silent.forEach(function (s) { hyList.appendChild(silentItem(s)); });
     fitAll();
     live.textContent = "Digest for session " + m.session + " loaded.";
+  }
+
+  function silentItem(s) {
+    var li = el("li", { class: "ffx-dig-g" });
+    var head = el("div", { class: "ffx-dig-gh" });
+    head.appendChild(span("ffx-dig-w ffx-clip", s.title));
+    li.appendChild(head);
+    li.appendChild(span("ffx-dig-s ffx-clip", s.text + " · last hit " + s.last));
+    return li;
+  }
+
+  function recordItem(l) {
+    var li = el("li", { class: "ffx-dig-g", "data-ff-wire": l.id || null });
+    var head = el("div", { class: "ffx-dig-gh" });
+    head.appendChild(span("ffx-dig-w ffx-clip", l.title));
+    head.appendChild(el("span", { class: "ffx-dig-gc" }, l.cadence + (l.following ? "" : " · not followed")));
+    li.appendChild(head);
+    var row = el("div", { class: "ffx-dig-h" });
+    row.appendChild(span("ffx-dig-f", l.figure, l.figureAbsent));
+    row.appendChild(span("ffx-dig-r ffx-clip", l.rarity, l.rarityAbsent));
+    li.appendChild(row);
+    return li;
   }
 
   function errorText(err, what) {
     var c = err && err.code;
     var d = err && err.details ? err.details : {};
     if (c === "ff_off") return what + " is unavailable: " + String(d.reason || "switched off").replace(/_/g, " ");
-    if (c === "ff_export_range") return "that session is outside the digest window";
+    if (c === "ff_export_range") return "that day is not one of the sessions the Digest keeps";
     if (c === "ff_cursor_invalid") return "the session in the address is not a date";
     if (c === "network" || c === "timeout") return "Flows did not answer";
     if (c === "rate_limited") return "too many reads just now";
@@ -261,10 +305,10 @@
   }
 
   function paintDigestError(err) {
-    state.error = err;
+    state.error = err || { code: "failed" };
     var text = errorText(err, "the Digest");
     put(cap, text, (err && err.code) || "failed");
-    retry.hidden = err && (err.code === "ff_export_range" || err.code === "ff_cursor_invalid");
+    showRetry();
     latestLink.hidden = !(err && (err.code === "ff_export_range" || err.code === "ff_cursor_invalid"));
     QUADRANTS.forEach(function (id) {
       var q = quadrantNode(id);
@@ -289,18 +333,9 @@
       put(none, "no house wire is armed", "no_record");
       recList.appendChild(none);
     }
-    m.lines.forEach(function (l) {
-      var li = el("li", { class: "ffx-dig-g", "data-ff-wire": l.id || null });
-      var head = el("div", { class: "ffx-dig-gh" });
-      head.appendChild(span("ffx-dig-w ffx-clip", l.title));
-      head.appendChild(el("span", { class: "ffx-dig-gc" }, l.cadence + (l.following ? "" : " · not followed")));
-      li.appendChild(head);
-      var row = el("div", { class: "ffx-dig-h" });
-      row.appendChild(span("ffx-dig-s ffx-clip", l.figure, l.figureAbsent));
-      row.appendChild(span("ffx-dig-r ffx-clip", l.rarity, l.rarityAbsent));
-      li.appendChild(row);
-      recList.appendChild(li);
-    });
+    m.lines.forEach(function (l) { recList.appendChild(recordItem(l)); });
+    state.recordError = null;
+    showRetry();
     fitAll();
   }
 
@@ -311,6 +346,10 @@
     put(li, "the record is unavailable: " + errorText(err, "the record"), (err && err.code) || "failed");
     recList.appendChild(li);
     put(recN, "unavailable", "unavailable");
+    recAll.hidden = true;
+    state.record = null;
+    state.recordError = err || { code: "failed" };
+    showRetry();
   }
 
   function client() {
@@ -384,11 +423,27 @@
 
   root.addEventListener("click", function (e) {
     var b = e.target.closest('[data-k="all"]');
-    if (!b || !state.digest) return;
+    if (!b) return;
+    var which = b.getAttribute("data-list");
+    if (which === "record" && state.record) {
+      allTitle.textContent = "Record so far: all " + plural(state.record.lines.length, "wire", "wires");
+      allList.textContent = "";
+      state.record.lines.forEach(function (l) { allList.appendChild(recordItem(l)); });
+      allDlg.showModal();
+      return;
+    }
+    if (which === "silent" && state.digest) {
+      allTitle.textContent = "Silent wires of yours: all " + state.digest.silent.length;
+      allList.textContent = "";
+      state.digest.silent.forEach(function (s) { allList.appendChild(silentItem(s)); });
+      allDlg.showModal();
+      return;
+    }
+    if (!state.digest || !b.closest("[data-q]")) return;
     var id = b.closest("[data-q]").getAttribute("data-q");
     var m = state.digest.quadrants.filter(function (q) { return q.id === id; })[0];
     if (!m) return;
-    allTitle.textContent = m.title + ": all hits";
+    allTitle.textContent = m.title + ": every wire";
     allList.textContent = "";
     m.groups.forEach(function (g) { allList.appendChild(groupItem(g)); });
     allDlg.showModal();

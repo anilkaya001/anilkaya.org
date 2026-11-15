@@ -4,8 +4,8 @@ import vm from "node:vm";
 import { launch } from "./lib/browser.mjs";
 import { COPY_BANNED, DIGEST_QUADRANTS } from "../shared/ff-contract.js";
 import { FLOWS_PAGES } from "../shared/flows-pages.js";
-import { DIGEST_CALIBRATION_LINE, DIGEST_SHADOW_LINE, DIGEST_COLUMNS } from "../shared/ff-pages-inbox.js";
-import { DASH, ROOT, SIZES, busy, digest, group, house, mount, quadrant, EMPTY_RECEIPTS } from "./lib/ff-e-digest-world.mjs";
+import { DIGEST_CALIBRATION_LINE, DIGEST_SHADOW_LINE, DIGEST_SHADOW_PAST_LINE, DIGEST_COLUMNS } from "../shared/ff-pages-inbox.js";
+import { DASH, ROOT, SIZES, busy, digest, group, house, houseMany, mount, quadrant, EMPTY_RECEIPTS } from "./lib/ff-e-digest-world.mjs";
 
 let checks = 0;
 const failures = [];
@@ -73,7 +73,7 @@ async function pageBattery(browser, o = {}) {
   const files = o.files || [];
   const sizes = o.sizes || SIZES;
   for (const [w, h] of sizes) {
-    for (const [name, opts] of [["shadow", {}], ["busy", { shadow: false, digest: busy() }]]) {
+    for (const [name, opts] of [["shadow", {}], ["busy", { shadow: false, digest: busy(), house: houseMany(9) }]]) {
       const views = w < 900 ? ["house", "yours", "record"] : ["all"];
       for (const v of views) {
         const { ctx, page, errors } = await mount(browser, w, h, { ...opts, files });
@@ -125,6 +125,23 @@ async function pageBattery(browser, o = {}) {
             all: q.querySelector('[data-k="all"]').hidden ? null : q.querySelector('[data-k="all"]').textContent,
             groups: q.querySelectorAll(".ffx-dig-g:not(.ffx-cut)").length, cut: q.querySelectorAll(".ffx-dig-g.ffx-cut").length,
           }));
+          for (const e of document.querySelectorAll('#ffxDigest [data-k="rc"], #ffxDigest .ffx-dig-f')) {
+            if (!vis(e)) continue;
+            if (e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1) out.push("a receipts line or record figure is cut: " + e.textContent.slice(0, 60));
+          }
+          for (const e of document.querySelectorAll("#ffxDigHyList > li:not(.ffx-cut) > .ffx-dig-s")) {
+            if (!vis(e.parentElement)) continue;
+            if (e.getBoundingClientRect().height < 8) out.push("a silent wire's line has no height: " + e.textContent.slice(0, 40));
+          }
+          for (const [list, btn] of [["ffxDigRecs", "ffxDigRecAll"], ["ffxDigHyList", "ffxDigHyAll"]]) {
+            const l = document.getElementById(list);
+            const b = document.getElementById(btn);
+            if (!l || !vis(l)) continue;
+            const cut = l.querySelectorAll(":scope > .ffx-cut").length;
+            const total = l.children.length;
+            if (cut > 0 && (!vis(b) || b.textContent !== "Show all " + total)) out.push(list + " drops " + cut + " of " + total + " rows with no Show all: " + (b ? b.textContent + " " + vis(b) : "no button"));
+            if (cut === 0 && b && vis(b)) out.push(list + " offers Show all with nothing cut");
+          }
           const banner = document.getElementById("ffxDigBanner");
           const cal = document.getElementById("ffxDigCal");
           return { out, text: text.filter(Boolean).join(" | "), qs, banner: vis(banner) ? banner.textContent : null, cal: cal && vis(cal) ? cal.textContent : null, calAbsent: cal ? cal.getAttribute("data-ff-absent") : null, recs: document.querySelectorAll("#ffxDigRecs .ffx-dig-g").length };
@@ -163,16 +180,26 @@ async function behaviourBattery(browser, files = [], count = false) {
   const bad = [];
   const t = (c, m) => { if (count) checks++; if (!c) bad.push(m); };
   {
-    const { ctx, page, calls } = await mount(browser, 1440, 820, { shadow: false, digest: busy(), files, search: "?d=2026-11-12" });
+    const { ctx, page, calls } = await mount(browser, 1440, 820, { shadow: false, digest: busy(), house: houseMany(9), files, search: "?d=2026-11-12" });
     t(calls.some((c) => c.path === "/api/ff/digest" && c.query === "?d=2026-11-12"), "the address session reaches the API: " + JSON.stringify(calls.map((c) => c.path + c.query)));
     const btn = page.locator('#ffxDig-house-nightly [data-k="all"]');
     if (await btn.isVisible()) {
       await btn.click();
       await page.waitForTimeout(150);
       const n = await page.evaluate(() => ({ open: document.getElementById("ffxDigAll").open, rows: document.querySelectorAll("#ffxDigAllList .ffx-dig-g").length, title: document.getElementById("ffxDigAllT").textContent }));
-      t(n.open && n.rows === 40 && n.title === "House · Nightly: all hits", "Show all lists every group: " + JSON.stringify(n));
+      t(n.open && n.rows === 40 && n.title === "House · Nightly: every wire", "Show all lists every group: " + JSON.stringify(n));
       await page.keyboard.press("Escape");
+      await page.waitForTimeout(80);
     } else t(false, "Show all hidden on a busy quadrant");
+    for (const [btn, rows, title] of [["#ffxDigRecAll", 9, "Record so far: all 9 wires"], ["#ffxDigHyAll", 20, "Silent wires of yours: all 20"]]) {
+      if (!(await page.locator(btn).isVisible())) { t(false, btn + " hidden while rows are cut"); continue; }
+      await page.click(btn);
+      await page.waitForTimeout(120);
+      const d = await page.evaluate(() => ({ open: document.getElementById("ffxDigAll").open, rows: document.querySelectorAll("#ffxDigAllList > li").length, title: document.getElementById("ffxDigAllT").textContent }));
+      t(d.open && d.rows === rows && d.title === title, btn + " opens every row: " + JSON.stringify(d));
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(80);
+    }
     const cap = await page.textContent("#ffxDigCap");
     t(cap === "Session 2026-11-13 · computed when read", "caption " + cap);
     await ctx.close();
@@ -193,7 +220,7 @@ async function behaviourBattery(browser, files = [], count = false) {
   {
     let n = 0;
     const d = () => (++n === 1 ? { status: 503, body: { error: { code: "store_unreadable", message: "the store could not be read" } } } : digest());
-    const { ctx, page, calls } = await mount(browser, 1440, 820, { files, digest: d, house: { status: 503, body: { error: { code: "store_unreadable", message: "the store could not be read" } } } });
+    const { ctx, page, calls } = await mount(browser, 1440, 820, { files, digest: d });
     const s = await page.evaluate(() => ({
       cap: document.getElementById("ffxDigCap").textContent, capAbsent: document.getElementById("ffxDigCap").getAttribute("data-ff-absent"),
       retry: !document.getElementById("ffxDigRetry").hidden, n: document.querySelector('#ffxDig-house-nightly [data-k="n"]').textContent,
@@ -202,8 +229,8 @@ async function behaviourBattery(browser, files = [], count = false) {
     t(s.cap === DASH + " the store could not be read" && s.capAbsent === "store_unreadable", "failed digest caption " + JSON.stringify(s));
     t(s.retry, "Retry offered");
     t(s.n.startsWith(DASH + " unavailable"), "quadrant says unavailable, never an empty list: " + s.n);
-    t(s.rec.startsWith(DASH + " the record is unavailable"), "record unavailable: " + s.rec);
-    await page.click("#ffxDigRetry");
+    t(!s.rec.startsWith(DASH), "the record still reads when only the digest fails: " + s.rec.slice(0, 60));
+    if (s.retry) await page.click("#ffxDigRetry");
     await page.waitForTimeout(300);
     const after = await page.evaluate(() => document.querySelector('#ffxDig-house-nightly [data-k="n"]').textContent);
     t(after === "0 delivered" && calls.filter((c) => c.path === "/api/ff/digest").length === 2, "Retry reads again: " + after);
@@ -212,7 +239,39 @@ async function behaviourBattery(browser, files = [], count = false) {
   {
     const { ctx, page } = await mount(browser, 1440, 820, { files, search: "?d=2025-01-02", digest: { status: 400, body: { error: { code: "ff_export_range", message: "That session is outside the digest window of 10 sessions" }, latest: "2026-11-13" } } });
     const s = await page.evaluate(() => ({ latest: !document.getElementById("ffxDigLatest").hidden, retry: !document.getElementById("ffxDigRetry").hidden, cap: document.getElementById("ffxDigCap").textContent }));
-    t(s.latest && !s.retry && s.cap === DASH + " that session is outside the digest window", "out of window offers the latest session: " + JSON.stringify(s));
+    t(s.latest && !s.retry && s.cap === DASH + " that day is not one of the sessions the Digest keeps", "out of window offers the latest session: " + JSON.stringify(s));
+    await ctx.close();
+  }
+  {
+    let n = 0;
+    const hs = () => (++n === 1 ? { status: 503, body: { error: { code: "store_quota", message: "The store is over its quota" } } } : house());
+    const { ctx, page, calls } = await mount(browser, 1440, 820, { files, house: hs });
+    const s = await page.evaluate(() => ({ retry: !document.getElementById("ffxDigRetry").hidden, rec: document.getElementById("ffxDigRecs").textContent }));
+    t(s.retry && s.rec.startsWith(DASH + " the record is unavailable"), "a failed record read alone offers Retry: " + JSON.stringify(s));
+    if (s.retry) {
+      await page.click("#ffxDigRetry");
+      await page.waitForTimeout(300);
+      const after = await page.evaluate(() => ({ retry: !document.getElementById("ffxDigRetry").hidden, recs: document.querySelectorAll("#ffxDigRecs .ffx-dig-g").length }));
+      t(!after.retry && after.recs === 4 && calls.filter((c) => c.path === "/api/ff/house").length === 2, "Retry reads the record again: " + JSON.stringify(after));
+    }
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await mount(browser, 1440, 820, { files, shadow: true, digest: busy() });
+    const s = await page.evaluate(() => document.getElementById("ffxDigBanner").textContent);
+    t(s === DIGEST_SHADOW_PAST_LINE, "shadow with delivered hits never says the lists stay empty: " + s);
+    await ctx.close();
+  }
+  {
+    const { ctx, page } = await mount(browser, 390, 844, { files, shadow: false, digest: busy(), house: houseMany(9), touch: true });
+    const s = await page.evaluate(() => [...document.querySelectorAll('[data-k="all"]')].filter((b) => b.getBoundingClientRect().height > 0).map((b) => Math.round(b.getBoundingClientRect().height)));
+    t(s.length > 0 && s.every((h) => h >= 44), "Show all is a 44 px target on a coarse pointer: " + JSON.stringify(s));
+    for (const v of ["house", "yours", "record"]) {
+      await page.click('#ffxDigTabs [data-v="' + v + '"]');
+      await page.waitForTimeout(120);
+      const over = await page.evaluate(() => [...document.querySelectorAll("#ffxDigest .ffx-dig-list")].filter((l) => l.getBoundingClientRect().height > 0 && l.scrollHeight > l.clientHeight + 1).map((l) => l.id || l.closest("[data-q]").id));
+      t(over.length === 0, "coarse " + v + ": no list overflows once Show all is 44 px: " + JSON.stringify(over));
+    }
     await ctx.close();
   }
   {
@@ -251,8 +310,15 @@ const PLANTS = [
   { id: "session-ignored", kind: "behaviour", files: [plant(JS, 'return "/api/ff/digest" + (d ? "?d=" + encodeURIComponent(d) : "");', 'return "/api/ff/digest";')] },
   { id: "no-phone-gutter", kind: "page", sizes: [[390, 844]], files: [plant(CSS, '  .flows-body[data-flows-page="digest"] .flows-main { padding-bottom: calc(var(--tab-h) + var(--safe-b) + var(--sp-3)); }\n', "")] },
   { id: "tabs-dead", kind: "page", sizes: [[390, 844]], files: [plant(JS, "    if (t) setView(t.getAttribute(\"data-v\"));", "    void t;")] },
-  { id: "retry-missing", kind: "behaviour", files: [plant(JS, "    retry.hidden = err && (err.code === \"ff_export_range\" || err.code === \"ff_cursor_invalid\");", "    retry.hidden = true;")] },
+  { id: "retry-missing", kind: "behaviour", files: [plant(JS, "    var digestBad = state.error && state.error.code !== \"ff_export_range\" && state.error.code !== \"ff_cursor_invalid\";", "    var digestBad = false;")] },
   { id: "group-total-from-shown", kind: "model", src: plant(JS, 'count: typeof g.count === "number" ? g.count : (g.hits || []).length,', "count: (g.hits || []).length,").body },
+  { id: "record-cut-silently", kind: "page", files: [plant(JS, "    listAll(recAll, recList, state.record ? state.record.lines.length : 0);", "    if (K && K.fit) K.fit.rows(recList, { keep: 1 });")] },
+  { id: "silent-cut-silently", kind: "page", files: [plant(JS, "    listAll(hyAll, hyList, state.digest ? state.digest.silent.length : 0);", "    if (K && K.fit) K.fit.rows(hyList, { keep: 1 });")] },
+  { id: "silent-line-flat", kind: "page", files: [plant(CSS, ".ffx-dig-g > .ffx-dig-s { flex: none; font: var(--t-caption); }\n", ".ffx-dig-g > .ffx-dig-s { font: var(--t-caption); }\n")] },
+  { id: "receipts-one-line", kind: "page", files: [plant(CSS, "flex: none; overflow-wrap: anywhere; min-width: 0; }", "flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }")] },
+  { id: "record-retry-missing", kind: "behaviour", files: [plant(JS, "    state.recordError = err || { code: \"failed\" };", "    state.recordError = null;")] },
+  { id: "shadow-banner-fixed", kind: "behaviour", files: [plant(JS, "      if (banner.textContent !== line) banner.textContent = line;", "      void line;")] },
+  { id: "coarse-show-all-small", kind: "behaviour", files: [plant(CSS, "@media (pointer: coarse) { .ffx-dig-all { min-height: 44px; } }\n", "")] },
   { id: "show-all-cut-only", kind: "behaviour", files: [plant(JS, "    m.groups.forEach(function (g) { allList.appendChild(groupItem(g)); });\n    allDlg.showModal();", "    m.groups.slice(0, 3).forEach(function (g) { allList.appendChild(groupItem(g)); });\n    allDlg.showModal();")] },
 ];
 

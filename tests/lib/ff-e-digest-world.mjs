@@ -85,7 +85,7 @@ export function busy() {
       "yours-nightly": quadrant("yours-nightly", many(120, 50).concat([group(199, 9, { title: "A wire title long enough that it cannot fit any column of this page at any width we test" })])),
       "yours-live": quadrant("yours-live", many(200, 30), { complete: false }),
     },
-    silent: Array.from({ length: 6 }, (_, i) => ({ wire: { id: "w-" + i, title: "Quiet wire " + i }, sessions: 40, lastHit: { v: null, text: DASH, reason: "no_hits" }, text: "No hit in 30 or more sessions" })),
+    silent: Array.from({ length: 20 }, (_, i) => ({ wire: { id: "w-" + i, title: "Quiet wire " + i }, sessions: 40, lastHit: { v: null, text: DASH, reason: "no_hits" }, text: "No hit in 30 or more sessions" })),
   });
 }
 
@@ -103,8 +103,17 @@ export function house(o = {}) {
   return { v: 1, serverNow: 1793000000000, wires };
 }
 
+export function houseMany(n = 9) {
+  const ids = ["h-t01", "h-t02", "h-t03", "h-t04", "h-t05", "h-t06", "h-t07a", "h-t07b", "h-t08", "h-t09", "h-t10"];
+  return house({ wires: Array.from({ length: n }, (_, i) => ({
+    id: ids[i] || "h-x" + i, title: "House wire " + (i + 1), cadence: i % 3 ? "nightly" : "live", following: i !== 2,
+    record: { period: "all", firings: { v: i, text: String(i) }, sessions: { v: 40, text: "40" }, calibration: {} },
+    rarity: i % 2 ? { v: 12, text: "1 in 12 sessions" } : { v: null, text: DASH, reason: "short_history", reasonText: "under 20 sessions of history" },
+  })) });
+}
+
 export async function mount(browser, w, h, o = {}) {
-  const ctx = await browser.newContext({ viewport: { width: w, height: h }, reducedMotion: "reduce", deviceScaleFactor: o.scale || 1 });
+  const ctx = await browser.newContext({ viewport: { width: w, height: h }, reducedMotion: "reduce", deviceScaleFactor: o.scale || 1, hasTouch: !!o.touch, isMobile: !!o.touch });
   ctx.setDefaultTimeout(o.timeout || 6000);
   const page = await ctx.newPage();
   const errors = [];
@@ -132,7 +141,7 @@ export async function mount(browser, w, h, o = {}) {
         return json(r, d || digest());
       }
       if (p === "/api/ff/house") {
-        const d = o.house;
+        const d = typeof o.house === "function" ? o.house(u) : o.house;
         if (d && d.status) return json(r, d.body, d.status);
         return json(r, d || house());
       }

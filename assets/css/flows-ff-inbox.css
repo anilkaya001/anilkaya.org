@@ -45,6 +45,7 @@
 .ffx-dig-n[data-ff-absent] { color: var(--ff-absent, var(--label-3)); }
 .ffx-dig-all { flex: none; min-height: 32px; padding: 0 8px; border-radius: var(--r-xs); color: var(--accent-ink); font-size: 13px; }
 .ffx-dig-all:hover { background: var(--fill-4); }
+@media (pointer: coarse) { .ffx-dig-all { min-height: 44px; } }
 
 .ffx-dig-list { list-style: none; margin: 0; padding: 2px 8px; flex: 0 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 4px; }
 .ffx-dig-q .ffx-dig-list { flex: 1 1 auto; }
@@ -61,14 +62,18 @@
 .ffx-dig-more { font: var(--t-caption); color: var(--label-3); }
 .ffx-dig-empty, .ffx-dig-inc, .ffx-dig-wait { margin: 0; padding: 2px 12px; font: var(--t-caption); color: var(--ff-absent, var(--label-3)); flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ffx-dig-empty[hidden], .ffx-dig-inc[hidden] { display: none; }
-.ffx-dig-rc { margin: 0; padding: 4px 12px 8px; font: var(--t-caption); color: var(--label-2); flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ffx-dig-rc { margin: 0; padding: 4px 12px 8px; font: var(--t-caption); color: var(--label-2); flex: none; overflow-wrap: anywhere; min-width: 0; }
 .ffx-dig-rc[data-ff-absent] { color: var(--ff-absent, var(--label-3)); }
 
 .ffx-dig-cal { margin: 0 12px 4px; padding: 4px 8px; border-radius: var(--r-sm); background: var(--fill-4); font: var(--t-caption); color: var(--ff-absent, var(--label-3)); flex: none; }
 .ffx-dig-recs { flex: 1 1 auto; }
 .ffx-dig-hy { flex: none; display: flex; flex-direction: column; padding: 4px 0 0; border-top: 1px solid var(--ff-rule, var(--sep)); max-height: 30%; overflow: hidden; }
 .ffx-dig-hy[hidden] { display: none; }
-.ffx-dig-hy h3 { margin: 0; padding: 0 12px 2px; font: 600 13px / 1.2 var(--font-text); }
+.ffx-dig-hyh { display: flex; align-items: center; gap: 8px; padding: 0 12px 2px; flex: none; min-width: 0; }
+.ffx-dig-hy h3 { margin: 0; flex: 1; min-width: 0; font: 600 13px / 1.2 var(--font-text); }
+.ffx-dig-g > .ffx-dig-s { flex: none; font: var(--t-caption); }
+.ffx-dig-f { color: var(--label-1); flex: none; white-space: nowrap; }
+.ffx-dig-f[data-ff-absent] { color: var(--ff-absent, var(--label-3)); }
 
 .ffx-dig-dlg { border: 0; border-radius: var(--r-lg); padding: 0; background: var(--glass-solid-thick); color: var(--label-1); box-shadow: var(--lift-3); }
 .ffx-dig-dlg::backdrop { background: var(--scrim); }
