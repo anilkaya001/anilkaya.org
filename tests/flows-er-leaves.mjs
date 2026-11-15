@@ -295,6 +295,7 @@ function battery(m) {
     assert.equal(by.F01.perDay, 50);
     assert.deepEqual(by.F05.fields, ["total_premium", "volume_oi_ratio", "dte"]);
     assert.ok(m.tpl.feedTemplateRows(null).every((r) => r.state === "unread"));
+    assert.ok(m.tpl.feedTemplateRows({ status: "unavailable", types: [], grammar: { targets: [] } }).every((r) => r.state === "unread"), "a feed that was never read is unread, not unlisted");
     const thin = m.tpl.feedTemplateRows({ types: [{ id: "earnings", can: true }], grammar: { targets: [] } });
     assert.equal(thin.find((r) => r.id === "F01").state, "unlisted");
     assert.equal(thin.find((r) => r.id === "F05").state, "unlisted");
@@ -452,7 +453,7 @@ const NEW = [
   "shared/flows-er-switch.js", "shared/flows-er-eps.js", "shared/flows-er-score.js", "shared/flows-er-calendar.js", "shared/flows-er-pulse.js",
   "shared/flows-er-policy.js", "shared/flows-er-feed.js", "shared/flows-er-payload.js", "shared/flows-er-copy.js", "shared/flows-er-feed-templates.js",
   "scripts/flows-legs/eventrisk.mjs", "scripts/flows-legs/eventrisk-fake.mjs", "scripts/flows-nightly/sections/eventrisk.mjs",
-  "server/routes/flows-eventrisk.js", "assets/js/flows-er.js", "assets/js/flows-ff-feed.js", "assets/css/flows-er.css",
+  "server/routes/flows-eventrisk.js", "assets/js/flows-er.js", "assets/js/flows-er-fire.js", "assets/css/flows-er.css",
   "tests/fixtures-eventrisk.json", "tests/fixtures-er.json",
 ];
 const BANNED = /\bta[p]e\b|ta[p]e_|vend[o]r/i;

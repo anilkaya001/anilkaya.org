@@ -63,7 +63,7 @@ const PAGES = Object.freeze([
   { slug: "political", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.politicalPage({ username, layers: positioningMode(env, owner) }) },
   { slug: "positioning", gate: "FLOWS_POSITIONING", render: (username) => FLOWS_PAGES.positioningPage({ username }) },
   { slug: "status", ownerOnly: true, render: (username) => FLOWS_PAGES.statusPage({ username }) },
-  { slug: "fire", ff: "fire", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.firePage({ username, shadow: ffMode(env) === "shadow" }) },
+  { slug: "fire", ff: "fire", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.firePage({ username, shadow: ffMode(env) === "shadow", feed: eventRiskOpen(env, owner) }) },
   { slug: "inbox", ff: "inbox", render: ffPending("inbox") },
   { slug: "digest", ff: "inbox", render: ffPending("digest") },
   { slug: "wires", ff: "wires", render: ffPending("wires") },
