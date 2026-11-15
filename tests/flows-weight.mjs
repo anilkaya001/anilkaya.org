@@ -197,6 +197,9 @@ const EVENTS_ER = { od: "WP6", gzip: 160, why: "the Events page asks for the eve
 GZIP_KIB.eventsPage += (EVENTS_RECENT.gzip + EVENTS_ER.gzip) / 1024;
 CSS_KIB.eventsPage += EVENTS_RECENT.cssBytes / 1024;
 CSS_GZIP_KIB.eventsPage += EVENTS_RECENT.cssGzip / 1024;
+const ER_HALTS_CSS = { od: "WP6-HALTS", cssBytes: 543, cssGzip: 129, why: "the Events page header carries the halts channel's state chip and hides the filter chips on the four event-risk views (flows-feeds.css 33,112 to 33,655 B raw and 6,441 to 6,570 B gzip)" };
+CSS_KIB.eventsPage += ER_HALTS_CSS.cssBytes / 1024;
+CSS_GZIP_KIB.eventsPage += ER_HALTS_CSS.cssGzip / 1024;
 GZIP_KIB.eventsPage += 190 / 1024;
 CEILING_KIB.tickerPage += (TICKER_DEALER_LABELS.bytes + TICKER_PRINTS_MOVE.bytes) / 1024;
 GZIP_KIB.tickerPage += (TICKER_DEALER_LABELS.gzip + TICKER_PRINTS_MOVE.gzip) / 1024;
@@ -495,7 +498,7 @@ for (const m of measured) {
 }
 
 {
-  const base = { name: "marketPage", raw: 240782, gzip: 72969, css: 137186, cssGzip: 28551 };
+  const base = { name: "marketPage", raw: 240782 + RT_HALTS.bytes, gzip: 72969 + RT_HALTS.gzip, css: 137186, cssGzip: 28551 };
   eq(judge(base).join("; "), "", "the ledger judge passes today's market route");
   ok(judge({ ...base, gzip: base.gzip + 8 * 1024 }).length > 0,
      "the judge fails a route inflated by 8 KiB of gzip");
@@ -507,7 +510,7 @@ for (const m of measured) {
   ok(judge({ ...base, raw: base.raw - 13 * 1024 }).length > 0,
      "the ratchet fails a route that saved 13 KiB raw and left its ceiling where it was");
   ok(judge({ ...base, name: "nowhere" }).length === 4, "a route with no ceilings fails on all four bases");
-  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 40627 + NN_KERNEL.gzip + EVENTS_ER.gzip, css: 119045 + NN_FLOWS_CSS.bytes + RAIL_FIT.bytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip + RAIL_FIT.gzip };
+  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 40627 + NN_KERNEL.gzip + EVENTS_ER.gzip, css: 119045 + NN_FLOWS_CSS.bytes + RAIL_FIT.bytes + ER_HALTS_CSS.cssBytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip + RAIL_FIT.gzip + ER_HALTS_CSS.cssGzip };
   eq(judge(events).join("; "), "", "events, whose ceiling is held for the earnings strip, passes with its wide raw headroom");
   eq(Object.keys(HELD_RAW_KIB).join(", "), "eventsPage", "events is the only route whose raw ceiling is held above the ratchet");
 }

@@ -23,6 +23,7 @@ const PREV = "2026-09-28";
 const T0 = easternInstant(DAY, 10 * 60 + 30);
 const T1 = T0 + 5000;
 const TOPICS = RT.RT_TOPIC_KEYS;
+const POLLED = TOPICS.filter((k) => k !== "ht");
 const FIELDS = STRIP_FIELDS.map(([n]) => n);
 const iso = (ms) => new Date(ms).toISOString();
 const RTH = { phase: "rth", session: DAY, trading: true, lastClosed: PREV, endsAt: iso(easternInstant(DAY, 16 * 60)) };
@@ -721,7 +722,7 @@ try {
     await R.until(() => R.snapHits.length >= 1);
     await R.pump();
     const drops = await page.evaluate(() => window.__drops.slice());
-    deep([...new Set(drops.filter((s) => /^rt:/.test(s)))].sort(), ["rt:fl", "rt:gx", "rt:mk", "rt:nw", "rt:px"], "WHEN THE SOCKET FALLS every rt:* freshness entry is dropped, so a dead socket cannot leave the pill stale");
+    deep([...new Set(drops.filter((s) => /^rt:/.test(s)))].sort(), ["rt:fl", "rt:gx", "rt:ht", "rt:mk", "rt:nw", "rt:px"], "WHEN THE SOCKET FALLS every rt:* freshness entry is dropped, so a dead socket cannot leave the pill stale");
     const f2 = await facts(page);
     ok(!f2["Price read"] && !f2.Payloads, `and the price-read claim and the payload count go with them (${JSON.stringify(f2)})`);
     await ctx.close();
@@ -1248,7 +1249,7 @@ try {
     await step(12);
     eq(await transport(page), "socket", "THE CLIENT AGAINST THE REAL HUB: hello over a bridged socket lands the page on the socket rung");
     const st = await status(page);
-    ok(TOPICS.every((k) => st.topics[k].synced && !st.topics[k].resync), `every topic synced (${JSON.stringify(Object.fromEntries(TOPICS.map((k) => [k, st.topics[k].sq])))})`);
+    ok(POLLED.every((k) => st.topics[k].synced && !st.topics[k].resync), `every topic synced (${JSON.stringify(Object.fromEntries(POLLED.map((k) => [k, st.topics[k].sq])))})`);
     ok(hub.topics.px.state.rows.size >= 3, `the hub holds ${hub.topics.px.state.rows.size} px rows`);
     let cmp = await same();
     deep([...cmp.mine.keys()].sort(), [...cmp.held.keys()].sort(), "the page holds exactly the hub's tickers");
@@ -1272,7 +1273,7 @@ try {
     hub.start(clock.t, { notify: "restart" });
     await step(10);
     const st3 = await status(page);
-    ok(TOPICS.every((k) => st3.topics[k].synced && !st3.topics[k].resync), "A HUB RESTART (new epoch, resync, fresh snapshots) is absorbed: every topic is synced in the new epoch");
+    ok(POLLED.every((k) => st3.topics[k].synced && !st3.topics[k].resync), "A HUB RESTART (new epoch, resync, fresh snapshots) is absorbed: every topic is synced in the new epoch");
     eq(st3.topics.px.ep, hub.ep, "on the hub's epoch");
     cmp = await same();
     ok(cmp.held.size > 0 && [...cmp.held].every(([t, v]) => JSON.stringify(cmp.mine.get(t)) === JSON.stringify(v)), "with equal state");
@@ -1284,7 +1285,7 @@ try {
     await step(25);
     const st4 = await status(page);
     eq(st4.degraded, null, "and recovery clears it");
-    ok(TOPICS.every((k) => st4.topics[k].synced && !st4.topics[k].resync), "with every topic resynced from the recovery snapshots");
+    ok(POLLED.every((k) => st4.topics[k].synced && !st4.topics[k].resync), "with every topic resynced from the recovery snapshots");
 
     const gxT = [...hub.topics.gx.state.rows.keys()][0];
     const gxRow = await page.evaluate((t) => window.FlowsUI.rt.gex(t), gxT);
@@ -1337,7 +1338,7 @@ try {
     const px = diff("px");
     const snap = async (ks) => JSON.stringify((await rig.hub.snap(ks)).frames).length;
     const one = await snap(["px"]);
-    const all = await snap(TOPICS);
+    const all = await snap(POLLED);
     const strips = (await import("../shared/flows-live.js")).shapeStrips;
     const live = await import("../scripts/flows-legs/live-fake.mjs");
     const rest = JSON.stringify(strips(live.fakeScreenerRows(NAMES, { session: DAY, dated: true, now: R.now }), { at: R.now, session: DAY, names: NAMES, writer: "w" })).length;
@@ -1353,7 +1354,7 @@ try {
 
     let rig2 = null;
     const all5 = await mount(browser, { html: coreHtml(), fake: false, setup: async (R2, page2) => { rig2 = rigHub(page2, R2, { roster }); } });
-    await connect(all5.page, { topics: TOPICS });
+    await connect(all5.page, { topics: POLLED });
     await all5.R.nextConn();
     await rig2.step(14);
     const j0 = JSON.parse(JSON.stringify((await measure(all5.page)).kinds));

@@ -135,7 +135,7 @@ for (const [name, type] of engines) {
 
 const builds = [
   ["a notice inserted above the tabs when the data lands", { "/assets/js/flows-er.js": [["  function chip() {\n", "  function chip() {\n    const tabs = document.getElementById(\"fdTabs\");\n    if (tabs && !document.getElementById(\"erLate\")) tabs.before(Object.assign(document.createElement(\"p\"), { id: \"erLate\", textContent: \"Event risk loaded.\" }));\n"]] }],
-  ["a module that grows with its rows", { "/assets/css/flows-er.css": [[".er-days {", "#erRiskCard { height: auto !important; min-height: 0 !important; }\n.er-days {"]] }],
+  ["a module that grows with its rows", { "/assets/css/flows-er.css": [[".er-days {", "#erRiskCard { inset: 0 0 auto 0 !important; height: auto !important; min-height: 0 !important; }\n.er-days {"]] }],
 ];
 for (const [name, patch] of builds) {
   let worst = 0;
