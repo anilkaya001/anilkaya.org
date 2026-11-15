@@ -14,7 +14,11 @@ export const RT_VERSION = 1;
 
 export const RT_OBJECT_NAME = "pulse:1";
 
-export const RT_TOPIC_KEYS = Object.freeze(["px", "fl", "gx", "mk", "nw"]);
+export const RT_TOPIC_KEYS = Object.freeze(["px", "fl", "gx", "mk", "nw", "ht"]);
+
+export const RT_DEFAULT_TOPICS = Object.freeze(["px", "fl", "gx", "mk", "nw"]);
+
+export const RT_SOCKET_ONLY = Object.freeze(["ht"]);
 
 export const RT_KINDS = Object.freeze([...RT_TOPIC_KEYS, "ctl"]);
 
@@ -75,6 +79,7 @@ export const RT_TOPICS = Object.freeze({
   gx: Object.freeze({ k: "gx", klass: "rtSlow", cadenceMs: 15000, merge: "latest", key: null, stamp: "rows", barS: 60, rowMax: 64 }),
   mk: Object.freeze({ k: "mk", klass: "rtSlow", cadenceMs: 20000, merge: "latest", key: "live:market", stamp: "rows", barS: 300, rowMax: 16 }),
   nw: Object.freeze({ k: "nw", klass: "rtNews", cadenceMs: 30000, extendedMs: 60000, merge: "append", key: "live:news", stamp: "event", barS: 0, rowMax: 60 }),
+  ht: Object.freeze({ k: "ht", klass: "rtNews", cadenceMs: null, extendedMs: null, merge: "append", key: null, stamp: "event", barS: 0, rowMax: 200 }),
 });
 
 export const rtCadenceMs = (k, phaseName) => {
@@ -107,6 +112,10 @@ export const RT_UPSTREAM = Object.freeze({
   nw: Object.freeze({
     scope: "global", channels: Object.freeze(["news"]),
     rest: () => [{ feed: "nw", path: pathFor("news"), params: { limit: RT_LIMITS.newsLimit } }],
+  }),
+  ht: Object.freeze({
+    scope: "global", channels: Object.freeze(["trading_halts"]),
+    rest: () => [],
   }),
 });
 
@@ -231,6 +240,14 @@ export function checkFrame(f) {
 
 export function pendingStream(k) {
   return { state: "pending", reason: "unpublished", klass: RT_TOPICS[k].klass };
+}
+
+export function socketOnlyStream(k, session = null, state = "unavailable", reason = "socket-only") {
+  const spec = RT_TOPICS[k];
+  return {
+    state, reason, klass: spec.klass, cadenceS: FRESH_CLASSES[spec.klass].cadenceS, source: "hub",
+    session: typeof session === "string" ? session : null, updatedAt: null, readAt: null, liveUntil: null, staleAt: null,
+  };
 }
 
 export function streamEntry({ k, readAt, vendorAt = null, session, now, clock = null, updatedAt = null }) {
@@ -408,12 +425,12 @@ export function createBudget({ perMinute = RT_LIMITS.callsPerMinute } = {}) {
     },
     minute(now) {
       const out = {};
-      for (const k of RT_TOPIC_KEYS) out[k] = secs.has(k) ? secs.get(k).sum(now) : 0;
+      for (const k of RT_DEFAULT_TOPICS) out[k] = secs.has(k) ? secs.get(k).sum(now) : 0;
       return out;
     },
     hour(now) {
       const out = {};
-      for (const k of RT_TOPIC_KEYS) out[k] = mins.has(k) ? mins.get(k).sum(now) : 0;
+      for (const k of RT_DEFAULT_TOPICS) out[k] = mins.has(k) ? mins.get(k).sum(now) : 0;
       return out;
     },
   };
@@ -629,11 +646,16 @@ export function createNewsState() {
   return { ring: [], seen: new Map() };
 }
 
+export function createHaltState() {
+  return { ring: [], seen: new Map(), dropped: 0 };
+}
+
 export function createTopicState(k) {
   if (k === "px") return createPxState();
   if (k === "fl") return createFlowState();
   if (k === "gx") return createGexState();
   if (k === "mk") return createMarketState();
+  if (k === "ht") return createHaltState();
   return createNewsState();
 }
 
@@ -668,6 +690,13 @@ export function mergeTopic(k, state, frame) {
     delete meta.page;
     meta.dropped = state.dropped;
     meta.truncated = truncated;
+  } else if (k === "ht") {
+    const merged = mergeAppend(state.ring, state.seen, items.map((it) => ({ id: it.id, ts: it.ts, row: it })), {
+      ringMax: RT_TOPICS.ht.rowMax, seenMax: RT_LIMITS.seenMax, frameMax: RT_TOPICS.ht.rowMax,
+    });
+    state.dropped += (Number.isSafeInteger(meta.dropped) ? meta.dropped : 0) + merged.dropped;
+    rows = merged.rows;
+    meta.dropped = state.dropped;
   } else {
     rows = mergeAppend(state.ring, state.seen, items.map((it) => ({ id: it.id, ts: it.ts, row: it })), {
       ringMax: RT_TOPICS.nw.rowMax, seenMax: RT_LIMITS.seenMax, frameMax: RT_TOPICS.nw.rowMax,

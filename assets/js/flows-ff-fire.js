@@ -211,6 +211,52 @@
     return { close: function () { if (dlg.open) dlg.close(); }, workbench: wb };
   }
 
+  function feedSegment(rows, say) {
+    var seg = document.getElementById("ffxSeg");
+    var feedList = document.getElementById("ffxFeedTpls");
+    if (!seg || !feedList) return;
+    var flowsList = document.getElementById("ffxTpls");
+    var flowsFoot = document.getElementById("ffxTplFoot");
+    var feedFoot = document.getElementById("ffxFeedFoot");
+    var btns = [].slice.call(seg.querySelectorAll("[role=radio]"));
+    var asked = false;
+    function closest(id) {
+      var row = rows.filter(function (r) { return r.getAttribute("data-template") === id; })[0] ||
+        rows.filter(function (r) { var k = r.getAttribute("data-template"); return k.indexOf(id) === 0 && /^[a-z]$/.test(k.slice(id.length)); })[0];
+      if (!row) return;
+      choose("flows", true);
+      row.click();
+    }
+    function choose(k, focus) {
+      var feed = k === "feed";
+      btns.forEach(function (b) {
+        var on = b.getAttribute("data-seg") === k;
+        b.setAttribute("aria-checked", on ? "true" : "false");
+        b.tabIndex = on ? 0 : -1;
+        if (on && focus) b.focus();
+      });
+      flowsList.hidden = feed;
+      if (flowsFoot) flowsFoot.hidden = feed;
+      feedList.hidden = !feed;
+      if (feedFoot) feedFoot.hidden = !feed || !feedFoot.textContent;
+      if (!feed || asked) return;
+      asked = true;
+      window.FlowsUI.defer("er-fire", { el: feedList, label: "The feed's alert types" }).then(function () {
+        var f = window.FlowsUI.ffFeed;
+        if (f) f.mount({ list: feedList, foot: feedFoot, onClosest: closest, say: say, shown: function () { return !feedList.hidden; } });
+      });
+    }
+    btns.forEach(function (b, i) {
+      b.addEventListener("click", function () { choose(b.getAttribute("data-seg"), false); });
+      b.addEventListener("keydown", function (e) {
+        var j = e.key === "ArrowRight" || e.key === "ArrowDown" ? i + 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? i - 1 : e.key === "Home" ? 0 : e.key === "End" ? btns.length - 1 : null;
+        if (j === null) return;
+        e.preventDefault();
+        choose(btns[(j + btns.length) % btns.length].getAttribute("data-seg"), true);
+      });
+    });
+  }
+
   function initPage() {
     var root = document.getElementById("ffxFire");
     var reg = readRegistry();
@@ -273,6 +319,7 @@
       });
     });
     markTemplate();
+    feedSegment(rows, say);
     if (symbol && /^[A-Z][A-Z0-9.-]{0,9}$/.test(symbol)) wb.setSymbol(symbol);
 
     function loadCap() {

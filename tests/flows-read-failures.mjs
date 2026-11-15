@@ -71,7 +71,9 @@ const BASE = {
   eq(opIdOf("/api/market/XLK/sector-tide"), "sector-tide", "a template in the middle");
   eq(opIdOf("/api/nothing"), OTHER_OP, "an unknown path is other");
   eq(opIdOf(null), OTHER_OP, "and so is no path");
-  for (const op of OPS) eq(opIdOf(op.path.replace(/\{[a-z_]+\}/g, "X1")), op.id === "darkpool" ? "darkpool" : op.id, `${op.id} maps to itself`);
+  const firstOfPath = (op) => OPS.find((e) => e.path === op.path).id;
+  for (const op of OPS) eq(opIdOf(op.path.replace(/\{[a-z_]+\}/g, "X1")), firstOfPath(op), `${op.id} maps to itself, or to the first entry of its path when two reads share one`);
+  eq(OPS.filter((op) => firstOfPath(op) !== op.id).map((op) => op.id), ["listings-delisted"], "the delisted listings read is the one entry metered under another's id: it differs from the active read by its query alone, which the meter does not keep");
   eq([classOf(200), classOf(204), classOf(301), classOf(404), classOf(429), classOf(503), classOf(0), classOf(undefined, "timeout"), classOf(500, "network")],
     ["2xx", "2xx", "3xx", "4xx", "429", "5xx", "network", "timeout", "network"], "classes");
 

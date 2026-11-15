@@ -9,19 +9,20 @@ export const SOCKET_LIMITS = Object.freeze({
   ackMs: 10000,
   messageBytesMax: 32768,
   backoffMs: Object.freeze([1000, 2000, 4000, 8000, 16000, 30000]),
-  silentMs: Object.freeze({ fl: 8000, gx: 20000, nw: 60000 }),
-  pendingMax: Object.freeze({ px: 64, fl: 150, gx: 8, nw: 100 }),
+  silentMs: Object.freeze({ fl: 8000, gx: 20000, nw: 60000, ht: 120000 }),
+  pendingMax: Object.freeze({ px: 64, fl: 150, gx: 8, nw: 100, ht: 200 }),
   handlerBudgetMs: 0.05,
   closeNormal: 1000,
 });
 
-export const SOCKET_TOPICS = Object.freeze(["px", "fl", "gx", "nw"]);
+export const SOCKET_TOPICS = Object.freeze(["px", "fl", "gx", "nw", "ht"]);
 
 export const SOCKET_CHANNELS = Object.freeze({
   px: Object.freeze({ scope: "ticker", channel: (t) => `price:${t}`, template: "price:<T>", max: SOCKET_LIMITS.pxMax }),
   gx: Object.freeze({ scope: "ticker", channel: (t) => `gex:${t}`, template: "gex:<T>", max: SOCKET_LIMITS.gxMax }),
   fl: Object.freeze({ scope: "global", channel: () => "flow-alerts", template: "flow-alerts", max: 1 }),
   nw: Object.freeze({ scope: "global", channel: () => "news", template: "news", max: 1 }),
+  ht: Object.freeze({ scope: "global", channel: () => "trading_halts", template: "trading_halts", max: 1 }),
 });
 
 export const SOCKET_HOURS = Object.freeze({
@@ -59,6 +60,7 @@ export function wantChannels({ topics, focus = [], gex = [] }) {
   };
   if (has("fl")) add("fl", null, SOCKET_CHANNELS.fl.channel());
   if (has("nw")) add("nw", null, SOCKET_CHANNELS.nw.channel());
+  if (has("ht")) add("ht", null, SOCKET_CHANNELS.ht.channel());
   if (has("px")) for (const t of focus.slice(0, SOCKET_CHANNELS.px.max)) if (TICKER_RE.test(t)) add("px", t, SOCKET_CHANNELS.px.channel(t));
   if (has("gx")) for (const t of gex.slice(0, SOCKET_CHANNELS.gx.max)) if (TICKER_RE.test(t)) add("gx", t, SOCKET_CHANNELS.gx.channel(t));
   return out;
@@ -68,6 +70,7 @@ export function channelTopic(channel) {
   if (typeof channel !== "string") return null;
   if (channel === "flow-alerts") return { k: "fl", name: null };
   if (channel === "news") return { k: "nw", name: null };
+  if (channel === "trading_halts") return { k: "ht", name: null };
   const i = channel.indexOf(":");
   if (i <= 0) return null;
   const head = channel.slice(0, i);
@@ -161,7 +164,38 @@ export function newsBody(payloads) {
   };
 }
 
+const HALT_STATE_RE = /^[a-z_]{1,20}$/;
+
+const HALT_REASON_RE = /^[A-Z0-9]{0,6}$/;
+
+export function haltRow(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const t = upper(payload.ticker);
+  if (!TICKER_RE.test(t)) return null;
+  const ts = timeMs(payload.time);
+  if (!Number.isFinite(ts)) return null;
+  const word = typeof payload.state === "string" ? payload.state.trim().toLowerCase() : "";
+  const state = HALT_STATE_RE.test(word) ? word : null;
+  const code = typeof payload.reason === "string" ? payload.reason.trim() : null;
+  const reason = code !== null && code !== "" && HALT_REASON_RE.test(code) ? code : null;
+  return { id: t + "|" + ts + "|" + (state || ""), ts, t, state, reason };
+}
+
+export function shapeHalts(batch, { at }) {
+  const items = [];
+  let dropped = 0;
+  let newest = null;
+  for (const p of Array.isArray(batch) ? batch : []) {
+    const row = haltRow(p);
+    if (!row) { dropped++; continue; }
+    items.push(row);
+    if (newest === null || row.ts > newest) newest = row.ts;
+  }
+  return { k: "ht", readAt: at, items, vendorAt: newest, meta: { read: Array.isArray(batch) ? batch.length : 0, dropped, via: "socket" }, full: {}, answered: true };
+}
+
 export function shapeSocketFrame(k, batch, { at, session, stageOf = null }) {
+  if (k === "ht") return shapeHalts(batch, { at });
   if (k === "fl") {
     const out = RT_REST_SHAPE.fl({ data: batch }, { stageOf, cursor: null });
     return { k, readAt: at, ...out, meta: { ...out.meta, via: "socket" } };
