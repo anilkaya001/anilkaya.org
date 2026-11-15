@@ -1761,7 +1761,7 @@ The event-risk console: switch leaf, report-risk, issue, policy and halt leaves,
 | File | Exports | Suites |
 |---|---|---|
 | `assets/css/flows-er.css` |  | flows-er-leaves, flows-glass-render, flows-layout-sweep, flows-motion |
-| `assets/js/flows-er-fire.js` |  | flows-er-fire-render, flows-er-leaves, flows-layout-sweep |
+| `assets/js/flows-er-fire.js` |  | flows-er-fire-render, flows-er-leaves, flows-horizon-lint, flows-layout-sweep |
 | `assets/js/flows-er.js` |  | flows-er-leaves, flows-layout-sweep |
 | `scripts/flows-legs/eventrisk-fake.mjs` | `scripts/flows-legs/eventrisk-fake.mjs#eventRiskHandlers` | flows, flows-engine-budget, flows-er-leaves, flows-events, flows-garch, flows-legs and 6 more |
 | `scripts/flows-legs/eventrisk.mjs` | `scripts/flows-legs/eventrisk.mjs#ALERT_TYPES`, `scripts/flows-legs/eventrisk.mjs#DELISTED_MAX`, `scripts/flows-legs/eventrisk.mjs#NATR_NAMES`, `scripts/flows-legs/eventrisk.mjs#PULSE_NAMES`, `scripts/flows-legs/eventrisk.mjs#REFUSED_RETRY_S`, `scripts/flows-legs/eventrisk.mjs#ROUTES`, `scripts/flows-legs/eventrisk.mjs#SCHEDULE_AHEAD_DAYS`, `scripts/flows-legs/eventrisk.mjs#SECTOR_ENUM`, `scripts/flows-legs/eventrisk.mjs#WEEKLY_S`, `scripts/flows-legs/eventrisk.mjs#deliveryPlan`, `scripts/flows-legs/eventrisk.mjs#failureOf`, `scripts/flows-legs/eventrisk.mjs#refusedNow`, `scripts/flows-legs/eventrisk.mjs#runEventRiskReads`, `scripts/flows-legs/eventrisk.mjs#sectorList`, `scripts/flows-legs/eventrisk.mjs#sectorsPayload` | flows, flows-engine-budget, flows-er-leaves, flows-events, flows-garch, flows-live and 5 more |
