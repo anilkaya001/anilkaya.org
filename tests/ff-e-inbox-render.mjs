@@ -475,7 +475,8 @@ const PLANTS = [
 
 const browser = await launch();
 const production = process.env.FF_E_SKIPPROD ? [] : Object.keys(S);
-const only = process.env.FF_E_ONLY ? process.env.FF_E_ONLY.split(",") : null;
+const PARTS = { b: ["health", "copy", "keys", "race", "loadFail", "groupCount", "reasons"], c: ["focus", "narrowFocus", "pressed", "phone"] };
+const only = process.env.FF_E_ONLY ? process.env.FF_E_ONLY.split(",") : PARTS[process.env.FF_E_PART] || Object.keys(S).filter((k) => !PARTS.b.includes(k) && !PARTS.c.includes(k));
 for (const name of production) {
   if (only && !only.includes(name)) continue;
   const before = failures.length;

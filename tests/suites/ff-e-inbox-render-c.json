@@ -1,0 +1,1 @@
+{"name": "ff-e-inbox-render-c", "class": "N", "group": "shard", "timing": false, "medianS": 90, "shard": 9, "command": "node ff-e-inbox-render-c.mjs", "files": ["ff-e-inbox-render-c.mjs"], "covers": ["assets/css/flows-ff-inbox.css","assets/js/flows-ff-evidence.js","assets/js/flows-ff-inbox.js"]}
