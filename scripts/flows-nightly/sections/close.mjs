@@ -166,8 +166,21 @@ export async function runClose(ctx) {
   const extrasSummary = extrasRun ? {
     calls: extrasRun.calls, due: extrasRun.plan.due, deferred: extrasRun.plan.deferred, picked: extrasRun.plan.picked,
     priorFailed: extrasRun.priorFailed, health: extrasRun.health, ...extrasStanding(extrasRun.health, priorExtras),
+    ...(extrasRun.reasons && Object.keys(extrasRun.reasons).length ? { reasons: extrasRun.reasons } : {}),
   } : null;
 
+  let macroNight = null;
+  if (ctx.macroMeta) {
+    let priorClean = 0;
+    try {
+      const held = await readStored("meta");
+      const prior = held && held.payload && typeof held.payload === "object" ? held.payload.macro : null;
+      priorClean = prior && Number.isInteger(prior.clean) ? prior.clean : 0;
+    } catch {
+      priorClean = 0;
+    }
+    macroNight = { ...ctx.macroMeta, priorClean, clean: ctx.macroMeta.written && !ctx.macroMeta.address ? Math.min(priorClean + 1, 99) : 0 };
+  }
   const volAuditRun = volAudit || null;
   let volauditSummary = null;
   if (volAuditRun) {
@@ -192,6 +205,7 @@ export async function runClose(ctx) {
       cardsBuilt, cardsFailed, cardsSkipped,
       ...(neuronLedger ? { neuron: neuronLedger } : {}),
       ...(extrasSummary ? { extras: extrasSummary } : {}),
+      ...(macroNight ? { macro: macroNight } : {}),
       ...(volauditSummary ? { volaudit: volauditSummary } : {}),
       ...(deepen && deepen.plan ? { deepen: {
         mode: deepen.mode, chosen: deepen.plan.n, built: rotationCards ? rotationCards.built : 0,
@@ -371,6 +385,7 @@ export async function runClose(ctx) {
       rosterWritten: rosterSummary ? rosterSummary.written : (rosterThrew ? false : undefined), enriched: enriched.length,
       neuron: neuronLedger,
       extras: extrasSummary,
+      macro: macroNight,
       volaudit: volauditSummary,
     } });
   stages.finish();

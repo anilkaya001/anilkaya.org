@@ -32,10 +32,11 @@ import { runClose } from "./flows-nightly/sections/close.mjs";
 import { runContext } from "./flows-nightly/sections/context.mjs";
 import { runFocus } from "./flows-nightly/sections/focus.mjs";
 import { runPositioning } from "./flows-nightly/sections/positioning.mjs";
-import { runDeepenLedger, runDeepenPlan } from "./flows-nightly/sections/deepen.mjs";
+import { openTransport, runDeepenLedger, runDeepenPlan } from "./flows-nightly/sections/deepen.mjs";
 import { pathFor } from "../shared/flows-vendor-ops.js";
 import { processCpuMs, runCompute } from "./flows-nightly/sections/compute.mjs";
 import { runOraclePrep, runOraclePublish } from "./flows-nightly/sections/oracle.mjs";
+import { runMacroStage, runPmNames, runPmSectors } from "./flows-nightly/sections/macro.mjs";
 import { runVolAuditSection, runVoldeskStage, volAuditFailed } from "./flows-nightly/sections/voldesk.mjs";
 import { voldeskBuildOn } from "../shared/flows-voldesk.js";
 import { runFlowlab } from "./flows-nightly/sections/flowlab.mjs";
@@ -230,6 +231,7 @@ async function main() {
     console.log(`publishing to ${ingestURL()}`);
   }
 
+  const transport = await openTransport();
   const sessionDate = DRY_RUN ? DRY_SESSION_DATE : await resolveSessionDate();
   console.log(`session date: ${sessionDate || "unresolved — falling back to undated calls"}`);
 
@@ -275,7 +277,7 @@ async function main() {
     return;
   }
 
-  const ctx = { stages, sessionDate, intraday, gateOrigin, gate };
+  const ctx = { stages, sessionDate, intraday, gateOrigin, gate, transport };
   ctx.auditHooks = { on: voldeskBuildOn(process.env), run: () => runVolAuditSection(ctx), failed: (error) => volAuditFailed(ctx, error) };
   await runUniverse(ctx);
   await runBoards(ctx);
@@ -283,17 +285,22 @@ async function main() {
     console.warn(`  deepen: ${error.message} — no rotation tonight`);
   });
   await runMarket(ctx);
+  await runMacroStage(ctx);
   await runRecord(ctx);
   await runChains(ctx);
   await runAlerts(ctx);
   await runContext(ctx);
   await runCards(ctx);
+  ctx.beforeFocus = async () => {
+    await runPmNames(ctx);
+  };
   await runFocus(ctx);
   await runPositioning(ctx);
   await runOraclePrep(ctx);
   await runCompute(ctx);
   await runEventRisk(ctx);
   await runOraclePublish(ctx);
+  await runPmSectors(ctx);
   await runVoldeskStage(ctx);
   await stages.run("deepen-ledger", () => runDeepenLedger(ctx), (error) => {
     console.warn(`  deepen ledger: ${error.message} — the next run re-reads what the store holds`);

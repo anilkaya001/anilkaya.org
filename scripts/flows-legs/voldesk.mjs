@@ -90,7 +90,7 @@ export async function runVolAudit({
     if (!chain) { skipped.chain++; return; }
     const day = { date: session };
     const greeks = await feed("greeks", pathFor("greeks", { ticker: t }), { expiry: chosen.expiry, ...day });
-    const chains = await feed("option-chains", pathFor("option-chains", { ticker: t }), { ...day });
+    const chains = await feed("option-chains", pathFor("option-chains", { ticker: t }), { greeks: true, ...day });
     const atm = await feed("atm-chains", pathFor("atm-chains", { ticker: t }), { "expirations[]": [chosen.expiry] });
     const oiExpiry = await feed("oi-per-expiry", pathFor("oi-per-expiry", { ticker: t }), {});
     const volOi = await feed("volume-oi-expiry", pathFor("volume-oi-expiry", { ticker: t }), { ...day });

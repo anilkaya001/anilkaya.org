@@ -329,8 +329,15 @@
       for (const b of viewSeg.children) b.setAttribute("aria-pressed", String(b.dataset.view === view));
       if (!M) { layerSeg.hidden = true; return; }
       if (!sel) sel = defaultSel();
+      const af = document.activeElement;
+      const heldChip = af && af.closest && stage.contains(af) ? af.closest(".nm-chip") : null;
+      const heldLayer = af && af.parentNode === layerSeg ? [...layerSeg.children].indexOf(af) : -1;
       layerSegFill();
       if (view === "map") drawMap(); else drawTable();
+      if (heldChip) {
+        const again = stage.querySelector('.nm-chip[data-id="' + CSS.escape(heldChip.dataset.id) + '"]') || stage.querySelector('.nm-chip[tabindex="0"]');
+        if (again) again.focus({ preventScroll: true });
+      } else if (heldLayer >= 0 && layerSeg.children[heldLayer]) layerSeg.children[heldLayer].focus({ preventScroll: true });
       const n = (() => { for (const l of M.layers) for (const x of l) if (x.id === sel) return x; return null; })();
       if (n) {
         const r = readout(M, n);

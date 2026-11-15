@@ -242,6 +242,7 @@ export async function runFocus(ctx) {
     if (ctx.auditHooks.on) await stages.run("vol-audit", () => ctx.auditHooks.run(), (error) => ctx.auditHooks.failed(error));
     else stages.skip("vol-audit", "FLOWS_VOLDESK_BUILD is off");
   }
+  if (typeof ctx.beforeFocus === "function") await ctx.beforeFocus();
   {
     const featuresFor = new Map(enriched.map((e) => [e.features.ticker, e.features]));
     for (const [t, f] of dossierFeatures) featuresFor.set(t, f);

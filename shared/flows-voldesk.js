@@ -140,6 +140,16 @@ export function rangedOf(value, field, lo, hi, loOpen = false) {
 const deltaOf = (value) => rangedOf(value, "delta", -1, 1);
 const volOf = (value, field = "iv") => rangedOf(value, field, 0, 5, true);
 
+const SYMBOL_RE = /^[A-Z0-9.]+?(\d{2})(\d{2})(\d{2})[PC]\d{8}$/;
+
+export function symbolExpiry(symbol) {
+  const m = typeof symbol === "string" ? SYMBOL_RE.exec(symbol.trim().toUpperCase()) : null;
+  if (!m) return null;
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  return month >= 1 && month <= 12 && day >= 1 && day <= 31 ? `20${m[1]}-${m[2]}-${m[3]}` : null;
+}
+
 export function rowsOfBody(raw) {
   const body = unwrap(raw);
   return Array.isArray(body) ? body : null;
@@ -529,7 +539,7 @@ export function auditName({ card, chain, greeks, chains, atm, oiExpiry, volOi, e
   let spotRow;
   if (!atmFeed.rows) spotRow = nc("spot", atmFeed.why, XCHECK_TOL.spotRel);
   else {
-    const hit = atmFeed.rows.find((r) => isObj(r) && r.expiry === chosen.expiry) || null;
+    const hit = atmFeed.rows.find((r) => isObj(r) && symbolExpiry(r.option_symbol) === chosen.expiry) || null;
     const px = hit ? rangedOf(hit.stock_price, "stock_price", 0, Infinity, true) : { v: null, why: "absent" };
     spotRow = px.v === null || !fin(S) ? nc("spot", px.why || "engine", XCHECK_TOL.spotRel) : judge("spot", S, px.v, relGap(S, px.v), XCHECK_TOL.spotRel);
   }

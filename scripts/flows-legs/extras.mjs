@@ -5,6 +5,7 @@ import { REDUCERS } from "../../shared/flows-dossier-vendor.js";
 import { sanitizeText } from "../../shared/flows-dossier.js";
 import {
   PARTS, NIGHTLY_IDS, PS_IDS, SLOW_CAP, REDUCERS_X, REDUCERS_PS, ER_IDS, planSlow, partState, mergeParts, sectionOf, fitSection, outcomeTally, shapeHealth, usableX,
+  reasonTally, reasonsSaid,
 } from "../../shared/flows-vendor-extras.js";
 import { reduceStockEarnings, reduceFin } from "../../shared/flows-er-eps.js";
 import { sessionsBetween } from "../../shared/flows-calendar.js";
@@ -202,10 +203,13 @@ export async function runExtras({
   }
   const health = shapeHealth(tally);
   const failing = Object.entries(health).filter(([, h]) => h.state === "fail").map(([id]) => id);
+  const reasons = reasonTally(rows);
+  const named = Object.keys(reasons).sort().map((id) => `${id} ${reasonsSaid(reasons, id)}`);
   log(`  extras: ${calls} call(s) for ${list.length} name(s): ${plan.picked.length} of ${plan.due} due slow part(s) read` +
     (plan.deferred ? `, ${plan.deferred} deferred by the ${cap}-call cap` : "") + `, ${nightly.length} implied-volatility read(s)` +
     (priorFailed.size ? `, ${priorFailed.size} prior card-x unread` : "") +
-    (failing.length ? `; SHAPE FAILING ${failing.join(", ")}` : ""));
-  return { sections, tally, health, calls, ...(erPlan ? { er: { due: erPlan.due, picked: erPlan.picked.length, deferred: erPlan.deferred, spent: erPlan.spent } } : {}), plan: { due: plan.due, picked: plan.picked.length, deferred: plan.deferred, fresh: plan.fresh }, psPlan: positioning ? { due: psPlan.due, picked: psPlan.picked.length, deferred: psPlan.deferred, fresh: psPlan.fresh } : null, priorFailed: priorFailed.size, failing };
+    (failing.length ? `; SHAPE FAILING ${failing.join(", ")}` : "") +
+    (named.length ? `; not read, by reducer reason: ${named.join("; ")}` : ""));
+  return { sections, tally, health, reasons, calls, ...(erPlan ? { er: { due: erPlan.due, picked: erPlan.picked.length, deferred: erPlan.deferred, spent: erPlan.spent } } : {}), plan: { due: plan.due, picked: plan.picked.length, deferred: plan.deferred, fresh: plan.fresh }, psPlan: positioning ? { due: psPlan.due, picked: psPlan.picked.length, deferred: psPlan.deferred, fresh: psPlan.fresh } : null, priorFailed: priorFailed.size, failing };
 }
 

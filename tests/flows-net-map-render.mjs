@@ -145,6 +145,30 @@ async function legendOf(page) {
   return page.evaluate(() => document.querySelector("#mkNet .nm-legend").textContent);
 }
 
+async function focusFaults(page, id, viewport) {
+  const bad = [];
+  const sel = `#mkNet .nm-chip[data-id="${id}"]`;
+  const held = () => page.evaluate((q) => {
+    const a = document.activeElement, was = window.__nmHeld, now = document.querySelector(q);
+    return { id: a && a.dataset ? a.dataset.id || null : null, tag: a ? a.tagName : null, fresh: Boolean(now) && now !== was, same: a === now };
+  }, sel);
+  const hold = () => page.evaluate((q) => { const el = document.querySelector(q); el.focus(); window.__nmHeld = el; return document.activeElement === el; }, sel);
+  if (!(await hold())) return ["the chip " + id + " does not take focus"];
+  await page.evaluate(() => { const api = window.FlowsUI.netMap.of(document.getElementById("mkNet")); api.view("map"); });
+  let h = await held();
+  if (!h.fresh) bad.push("a repaint did not redraw the chips, so the check proves nothing");
+  if (h.id !== id || !h.same) bad.push("a repaint dropped focus from " + id + " to " + (h.id || h.tag));
+  for (const dw of [-24, 0]) {
+    await hold();
+    await page.setViewportSize({ width: viewport.width + dw, height: viewport.height });
+    const redrawn = await page.waitForFunction((q) => { const now = document.querySelector(q); return Boolean(now) && now !== window.__nmHeld; }, sel, { timeout: 8000 }).then(() => true, () => false);
+    if (!redrawn) { bad.push("a resize of " + dw + " px did not rebuild the network"); continue; }
+    h = await held();
+    if (h.id !== id || !h.same) bad.push("a rebuild after a resize dropped focus from " + id + " to " + (h.id || h.tag));
+  }
+  return bad;
+}
+
 const browser = await launch();
 const ALERTS = alertsFixture({ n: 170, seed: 23 });
 const EXP = expectedOf(ALERTS);
@@ -182,9 +206,7 @@ for (const [w, h] of [[1440, 820], [1024, 768]]) {
   ok(read1.includes(" of $") && new RegExp("\\b" + Math.round((want / EXP.total) * 100) + "%").test(read1), `${w}: with its share of the total, ${Math.round((want / EXP.total) * 100)}%`);
   const lit = await page.evaluate(() => ({ on: document.querySelectorAll("#mkNet .nm-band.is-on").length, off: document.querySelectorAll("#mkNet .nm-band.is-off").length }));
   ok(lit.on > 0 && lit.off > 0, `${w}: the selected node's paths are lit and the rest stepped back`);
-  await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(600);
-  await page.focus(`#mkNet .nm-chip[data-id="${pick}"]`);
+  eq(await focusFaults(page, pick, { width: w, height: h }), [], `${w}: A REBUILD OF THE NETWORK KEEPS KEYBOARD FOCUS ON THE CHIP THAT HAD IT`);
   await page.keyboard.press("ArrowDown");
   const moved = await page.evaluate(() => document.activeElement && document.activeElement.dataset.id);
   ok(moved && moved !== pick, `${w}: ArrowDown moves to the next name chip (${moved})`);
@@ -206,6 +228,16 @@ for (const [w, h] of [[1440, 820], [1024, 768]]) {
     ok(dh <= 820, `${w}: the dialog fits the viewport`);
     await page.keyboard.press("Escape");
     await page.click('#mkNet .nm-chip[data-id="s:~"]').catch(() => null);
+    const gone = await page.evaluate(() => {
+      const host = document.getElementById("mkNet"), api = window.FlowsUI.netMap.of(host);
+      const chip = host.querySelector(".nm-chip.l3");
+      chip.focus();
+      const id = chip.dataset.id;
+      api.mode("dte");
+      const a = document.activeElement;
+      return { id, still: Boolean(host.querySelector('.nm-chip[data-id="' + CSS.escape(id) + '"]')), chip: Boolean(a && a.classList && a.classList.contains("nm-chip")), rove: a ? a.getAttribute("tabindex") : null };
+    });
+    ok(!gone.still && gone.chip && gone.rove === "0", `${w}: when a rebuild removes the focused chip (${gone.id}), focus moves to the selected chip and never to the body`);
     await page.click("#mkNet .nm-seg button[data-mode='dte']");
     const bad2 = await audit(page, { ...EXP, byLean: null, kinds: EXP.kinds }, `${w} expiry`).catch((e) => ["expiry audit threw " + e.message]);
     const caps = await page.evaluate(() => [...document.querySelectorAll("#mkNet .nm-cap")].map((t) => t.textContent.split(" ")[0]));
@@ -239,6 +271,7 @@ for (const [w, h] of [[1440, 820], [1024, 768]]) {
   eq(segs, ["Sector", "Side", "Name", "Lean"], "390: the four layers are a switch, not a squeeze");
   for (const [i, name] of segs.entries()) {
     await page.click(`#mkNet .nm-layers button:nth-child(${i + 1})`);
+    eq(await page.evaluate(() => { const a = document.activeElement; return a && a.parentNode && a.parentNode.classList.contains("nm-layers") ? [a.textContent, a.getAttribute("aria-pressed")] : [a ? a.tagName : null]; }), [name, "true"], `390: the layer switch keeps focus on ${name} when it redraws itself`);
     const n = await page.evaluate(() => [...document.querySelectorAll("#mkNet .nm-chip")].map((g) => [g.querySelector(".nm-lb").textContent, g.querySelector(".nm-fg").textContent, g.getBoundingClientRect().left >= 0 && g.getBoundingClientRect().right <= innerWidth]));
     ok(n.length > 0 && n.every((c) => c[0] && c[1] && c[2]), `390: layer ${name} shows every chip with its label and figure inside the screen (${n.length})`);
   }
@@ -286,8 +319,11 @@ const MUTANTS = [
   ["the legend loses the band width key", [["h(\"span\", { class: \"nm-lg\" }, h(\"i\", { class: \"nm-sw s-band\"", "h(\"span\", { class: \"nm-lg\", hidden: true }, h(\"i\", { class: \"nm-sw s-band\""]]],
   ["chips overlap", [["const gap = GAP;", "const gap = -9;"]]],
   ["the largest name is not selected at rest", [["const defaultSel = () => (M.layers[2][0] ? M.layers[2][0].id : M.layers[0][0] ? M.layers[0][0].id : null);", "const defaultSel = () => (M.layers[2][1] ? M.layers[2][1].id : null);"]]],
+  ["a rebuild drops keyboard focus to the body", [["if (again) again.focus({ preventScroll: true });", ""]]],
   ["the table twin drops the sector", [["[\"Sector\", \"Side\", \"Name\", LAYER[mode][3], \"Premium\", \"Share\"].map((c, i) => h(\"th\"", "[\"Sector\", \"Side\", \"Name\", LAYER[mode][3], \"Premium\", \"Share\"].filter((c) => c !== \"Sector\").map((c, i) => h(\"th\""]]],
 ];
+
+const FOCUS_MUTANT = "a rebuild drops keyboard focus to the body";
 
 async function mutantFails(name, edits) {
   const { context, page } = await openMarket(browser, { alerts: ALERTS, patch: { [MAP]: edits } });
@@ -309,6 +345,13 @@ async function mutantFails(name, edits) {
     if (heads.length !== 6) bad.push("table lost a column");
     void lg;
     if (!read.startsWith([...EXP.byName.entries()].sort((a, b) => b[1] - a[1])[0][0])) bad.push("the largest name is not selected at rest");
+    if (name === FOCUS_MUTANT) {
+      const others = bad.length;
+      await page.click("#mkNet .nm-seg button[data-view='map']");
+      const id = await page.evaluate(() => document.querySelector("#mkNet .nm-chip.l2").dataset.id);
+      const lost = await focusFaults(page, id, { width: 1440, height: 820 });
+      return others === 0 && lost.length === 3 && lost.every((m) => /dropped focus/.test(m));
+    }
     return bad.length > 0;
   } finally {
     await context.close();

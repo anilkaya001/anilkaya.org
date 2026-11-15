@@ -33,7 +33,7 @@ export function makeVoldeskFake({ sessionDate, cardOf, chainOf }) {
     return engine && chosen && slice ? { engine, chosen, slice } : null;
   };
 
-  const audit = (ticker, tail) => {
+  const audit = (ticker, tail, params) => {
     const e = engineFor(ticker);
     if (!e) throw new Error(`${tail} -> HTTP 404`);
     const { engine, chosen, slice } = e;
@@ -59,11 +59,12 @@ export function makeVoldeskFake({ sessionDate, cardOf, chainOf }) {
       }) };
     }
     if (tail === "option-chains") {
+      if (!(params && (params.greeks === true || params.greeks === "true"))) return { data: rows.slice(0, 400).map((r) => r.symbol) };
       return { data: rows.slice(0, 400).map((r) => ({ option_symbol: r.symbol, strike: f(r.K, 2), expires: r.expiry, option_type: r.type === "C" ? "call" : "put", open_interest: r.oi })) };
     }
     if (tail === "atm-chains") {
       return { data: rows.filter((r) => Math.abs(r.K - F) <= (strikes[1] ? strikes[1] - strikes[0] : 1) * 1.5).map((r) => ({
-        option_symbol: r.symbol, expiry: r.expiry, strike: f(r.K, 2), option_type: r.type === "C" ? "call" : "put", open_interest: r.oi, stock_price: f(spot, 4), volume: 100,
+        option_symbol: r.symbol, open_interest: r.oi, stock_price: f(spot, 4), volume: 100,
       })) };
     }
     if (tail === "oi-per-expiry") {
@@ -112,7 +113,7 @@ export function makeVoldeskFake({ sessionDate, cardOf, chainOf }) {
     throw new Error(`${tail} -> HTTP 404`);
   };
 
-  const vendor = async (path, _params = {}, { envelope = false } = {}) => {
+  const vendor = async (path, params = {}, { envelope = false } = {}) => {
     calls.push(path);
     const body = (() => {
       let m = /^\/api\/stock\/([^/]+)\/volatility\/term-structure$/.exec(path);
@@ -147,7 +148,7 @@ export function makeVoldeskFake({ sessionDate, cardOf, chainOf }) {
         return { data: out };
       }
       m = /^\/api\/stock\/([^/]+)\/(greeks|option-chains|atm-chains|oi-per-expiry|option\/volume-oi-expiry|greek-exposure\/strike-expiry|greek-exposure\/strike|option-stance)$/.exec(path);
-      if (m) return audit(m[1], m[2]);
+      if (m) return audit(m[1], m[2], params);
       throw new Error(`${path} -> HTTP 404`);
     })();
     if (envelope) return body;

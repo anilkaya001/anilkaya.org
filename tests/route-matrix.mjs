@@ -61,9 +61,9 @@ const FRESH_PRESENT = ["Read-At", "Live-Until", "Stale-At", "Phase-Ends", "Last-
 
 const FLOWS_API = ["board", "market", "events", "scoretrack", "calib", "dispersion", "meta", "flowalerts", "pulse", "news", "lk", "now", "tape", "political",
   "unusual", "movers", "sectors", "sector-premium", "universe", "regime", "ideas", "focus", "roster", "ai-usage", "summary", "dossier",
-  "live", "brief", "ask", "record", "card", "card-x", "hist", "chain", "strategy", "ingest", "ready", "dispatch-check", "coverage", "ops", "ledger", "positioning"];
-const FLOWS_PAGES_SLASH = ["", "long", "short", "watch", "market", "network", "now", "history", "desk", "strategy", "ask", "ticker", "unusual", "moves", "flowlab", "ledger", "events", "track", "political", "positioning", "status", "about", "glossary", "fire", "inbox", "digest", "wires"];
-const FLOWS_PAGES_BARE = ["long", "short", "desk", "watch", "history", "market", "network", "now", "ticker", "unusual", "moves", "flowlab", "ledger", "events", "track", "political", "positioning", "status", "strategy", "ask", "about", "glossary", "fire", "inbox", "digest", "wires"];
+  "live", "brief", "ask", "record", "card", "card-x", "hist", "chain", "strategy", "ingest", "ready", "dispatch-check", "coverage", "ops", "ledger", "macro", "positioning"];
+const FLOWS_PAGES_SLASH = ["", "long", "short", "watch", "market", "network", "now", "history", "desk", "strategy", "ask", "ticker", "unusual", "moves", "flowlab", "ledger", "macro", "events", "track", "political", "positioning", "status", "about", "glossary", "fire", "inbox", "digest", "wires"];
+const FLOWS_PAGES_BARE = ["long", "short", "desk", "watch", "history", "market", "network", "now", "ticker", "unusual", "moves", "flowlab", "ledger", "macro", "events", "track", "political", "positioning", "status", "strategy", "ask", "about", "glossary", "fire", "inbox", "digest", "wires"];
 const FF_API = ["health", "wires", "house", "hits", "read", "preview", "receipts", "records", "symbol", "digest", "export", "mute", "note", "run"];
 const FF_PAGES = ["fire", "inbox", "digest", "wires"];
 
@@ -97,7 +97,7 @@ for (const name of FLOWS_API) {
   else row("/api/flows/" + name);
 }
 for (const q of ["board?side=short", "summary?t=NVDA", "dossier?t=NVDA", "card?t=NVDA", "hist?t=NVDA", "chain?t=NVDA", "strategy?t=NVDA",
-  "lk?k=market,strips", "now?n=board:long,meta", "tape?t=NVDA", "ledger?scope=sector%3AEnergy&period=session", "ledger?scope=zz"]) light("/api/flows/" + q, { principals: ["anon", "member"] });
+  "lk?k=market,strips", "now?n=board:long,meta", "tape?t=NVDA", "ledger?scope=sector%3AEnergy&period=session", "ledger?scope=zz", "macro?part=odds", "macro/now?part=fx"]) light("/api/flows/" + q, { principals: ["anon", "member"] });
 row("/api/health");
 for (const p of ["/api/flows/ready", "/api/health", "/api/flows/ops", "/api/flows/ops?part=ai"]) row(p, { env: "ready-on" });
 row("/api/flows/coverage", { env: "coverage-on" });

@@ -129,6 +129,7 @@ const SPECS = [
   { id: "unusual", fn: "unusualPage", url: "/flows/unusual/" },
   { id: "ledger", fn: "ledgerPage", url: "/flows/ledger/" },
   { id: "flowlab", fn: "flowlabPage", url: "/flows/flowlab/" },
+  { id: "macro", fn: "macroPage", url: "/flows/macro/" },
   { id: "events", fn: "eventsPage", url: "/flows/events/" },
   { id: "moves", fn: "movesPage", url: "/flows/moves/" },
   { id: "political", fn: "politicalPage", url: "/flows/political/" },

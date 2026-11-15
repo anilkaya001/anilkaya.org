@@ -4,7 +4,7 @@ import { priorLedger } from "../../../shared/flows-universe.js";
 import {
   DEEPEN, capFromEnv, coverageNights, deepenMode, holdSet, ledgerPayload, planNight, settleNight,
 } from "../../../shared/flows-deepen.js";
-import { lineOf, lineSaid, readLine, shareOf, stepLine } from "../../../shared/flows-transport.js";
+import { lineOf, lineSaid, paceOf, readLine, shareOf, stepLine } from "../../../shared/flows-transport.js";
 import { DRY_RUN } from "../flags.mjs";
 import { DEADLINE_MS, EARNINGS_GATE_DAYS } from "../vendor-params.mjs";
 import { poolWidth, raiseReadPace, runPooled, stats } from "../vendor.mjs";
@@ -19,13 +19,28 @@ export const NONE = Object.freeze({
   transport: null,
 });
 
+export async function openTransport({ read = readStored, raise = raiseReadPace, env = process.env, log = (line) => console.log(line) } = {}) {
+  const stored = await read(DEEPEN.key);
+  const readable = !(stored && stored.failed);
+  const working = planLines(env)["uw.min"].cap;
+  const state = readable && stored ? readLine(stored.payload) : null;
+  const line = lineOf(state, working);
+  const share = shareOf(line, "nightly");
+  const pace = paceOf(share);
+  raise(pace.spacingMs);
+  log(`  transport: every feed call of this run is paced from the first, ${pace.spacingMs}ms apart (${pace.perMinute}/min of a ${line}/min line` +
+    (state ? ", learned" : readable ? ", the working line" : ", the working line: the stored line could not be read") + ")");
+  return { stored, readable, state, working, line, share, pace, paced: true };
+}
+
 export async function runDeepenPlan(ctx) {
   const {
     stages, universe, byCard, deepTickers, sessionDate, dating, gateOrigin, earlyRoster,
   } = ctx;
   ctx.deepen = NONE;
   const mode = deepenMode(process.env);
-  const read = mode === "off" ? { payload: null } : await readStored(DEEPEN.key);
+  const opened = ctx.transport && ctx.transport.paced === true ? ctx.transport : null;
+  const read = mode === "off" ? { payload: null } : opened ? opened.stored : await readStored(DEEPEN.key);
   const readable = !(read && read.failed);
   let rosterKnown = null;
   if (readable && !DRY_RUN) {
@@ -35,10 +50,10 @@ export async function runDeepenPlan(ctx) {
   const rows = (universe || []).filter((r) => r && typeof r.ticker === "string");
   const lines = planLines(process.env);
   const working = lines["uw.min"].cap;
-  const lineState = readable && read ? readLine(read.payload) : null;
-  const line = lineOf(lineState, working);
-  const share = shareOf(line, "nightly");
-  const transport = { state: lineState, working, line, share, paced: false };
+  const lineState = opened ? opened.state : readable && read ? readLine(read.payload) : null;
+  const line = opened ? opened.line : lineOf(lineState, working);
+  const share = opened ? opened.share : shareOf(line, "nightly");
+  const transport = { state: lineState, working, line, share, paced: opened !== null };
   const night = planNight({
     mode, cap: capFromEnv(process.env, DRY_RUN ? DEEPEN.dryRunCap : DEEPEN.perNightCap), payload: read ? read.payload : null, readable, sessionDate,
     rows: rows.map((r) => ({ t: r.ticker, w: screenerDollarVolume(r) ?? num(r.marketcap, 0) })),

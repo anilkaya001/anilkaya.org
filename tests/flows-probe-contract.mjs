@@ -46,9 +46,9 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
     if (opTier.has(p.op)) eq(opTier.get(p.op), p.tier, `${p.op} carries one tier across its probes`);
     opTier.set(p.op, p.tier);
   }
-  eq(byTier.used.size, 127, "every one of the 127 operations a production call site reads over REST is probed and labelled used: the sixteen the event-risk package reads (the quote moved up from Tier 2), the sixteen the Flow Lab reads of the eighteen it registered (the recent flows read and the exact stock levels were retired when the Flow Lab moved to the per-expiry totals and the off-exchange levels), the 38 labelled before, the 37 the nightly legs read that were still filed under Tiers 1 and 2, the unusual-activity leg's one, the four the extras leg reads (dividends, splits, interpolated implied volatility, ETF exposure) and the thirteen the volatility desk reads, the VIX term structure among them");
+  eq(byTier.used.size, 163, "every one of the 163 operations a production call site reads over REST is probed and labelled used: the sixteen the event-risk package reads (the quote moved up from Tier 2), the 36 macro and private-markets operations, the futures stats among them, the sixteen the Flow Lab reads of the eighteen it registered (the recent flows read and the exact stock levels were retired when the Flow Lab moved to the per-expiry totals and the off-exchange levels), the 38 labelled before, the 37 the nightly legs read that were still filed under Tiers 1 and 2, the unusual-activity leg's one, the four the extras leg reads (dividends, splits, interpolated implied volatility, ETF exposure) and the thirteen the volatility desk reads, the VIX term structure among them");
   eq(byTier["1"].size, 0, "no Tier 1 operation is left unread: the volatility desk reads the last one, and the VIX term structure is read again");
-  eq(byTier["2"].size, 3, "Tier 2 holds only the three entitlement probes (order flow, volatility context and futures), the quote having become a used read with the event-risk package: the greeks and the trade-stance ranking moved to used with the volatility desk, the unusual congressional trades became a planned read with the positioning package, and Tier 3 is left out");
+  eq(byTier["2"].size, 2, "Tier 2 holds only the two entitlement probes (order flow and volatility context), the quote having become a used read with the event-risk package and the futures stats with the macro package: the greeks and the trade-stance ranking moved to used with the volatility desk, the unusual congressional trades became a planned read with the positioning package, and Tier 3 is left out");
   eq(byTier.planned.size, 26, "the 26 operations the positioning package reads are probed as planned: their shapes are recorded, their fields are not yet held strict");
   for (const [op, names] of Object.entries(list.expect)) {
     eq(new Set(names).size, names.length, `${op}: the documented names are listed once each`);
@@ -140,8 +140,8 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
   deep([...restRegistered].filter((op) => !["used", "planned"].includes(tierOf.get(op))), [], "USED IS TRUE: every registered operation has a probe labelled used, or planned for the positioning package's 26");
   deep(listOps.filter((op) => tierOf.get(op) === "used" && !restRegistered.has(op)), [],
     "and no operation is labelled used that the registry does not carry");
-  eq(registered.size, 154, "154 operations are registered: the 127 read over REST in production, the 26 the positioning package plans and the halt channel's socket path");
-  eq(OPS.length, 155, "one entry for each, the listings path carrying two for its active and delisted reads");
+  eq(registered.size, 190, "190 operations are registered: the 163 read over REST in production, the 26 the positioning package plans and the halt channel's socket path");
+  eq(OPS.length, 192, "one entry for each, the economy entry sharing the treasury yield's operation and the listings path carrying two for its active and delisted reads");
   const dossierIds = new Set([...Object.values(DOSSIER_OPS), ...SOURCES.map((s) => s.op)]);
   const read = new Set([...refs.keys(), ...dossierIds]);
   deep(OPS.filter((e) => !read.has(e.id)).map((e) => e.id), [], "READ IS TRUE: every registered id is named by a production call site or a dossier source");
@@ -177,6 +177,15 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
       `${e.id}: the call path only fixes template segments of its operation`);
     ok(tokens.every((t) => opTokens.includes(t)), `${e.id}: its path parameters are the operation's`);
   }
+  const sharedOp = (entries) => {
+    const by = new Map();
+    for (const e of entries) by.set(e.op, [...(by.get(e.op) || []), e]);
+    return [...by].filter(([, group]) => group.length > 1 && group.filter((e) => e.path === e.op).length > 1).map(([op]) => op);
+  };
+  deep(sharedOp(OPS), ["/api/companies/listings"], "TWO ENTRIES MAY SHARE ONE SPEC OPERATION only when all but one carry an op of their own (the treasury yield and the general economy entry), the listings path aside, whose active and delisted reads are two queries of one operation");
+  deep(sharedOp([...OPS, { ...opById("economy"), id: "economy-again" }]), ["/api/companies/listings", "/api/economy/{indicator}"], "and a planted duplicate of the general entry with no op of its own is refused");
+  ok(PLANS.includes("addon:private") && !PLANS.includes("addon:made-up"), "the private-markets add-on is a declared plan and an unknown plan is not");
+  ok(OPS.filter((e) => e.plan === "addon:private").length === 9, "nine private-markets operations carry it");
   deep(list.liveOnly.filter((op) => registered.has(op)).sort(), OPS.filter((e) => e.liveOnly && e.envelope !== null).map((e) => e.op).sort(),
     "the probe list's liveOnly and the registry's agree on every registered operation; the volatility context is probed and not yet read");
 
@@ -241,7 +250,7 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
   const liveOps = new Set(list.probes.filter((p) => p.tier !== "planned").map((p) => p.op));
   for (const e of OPS) if (e.reads && e.reads.length && liveOps.has(e.op)) derived[e.op] = [...e.reads];
   deep(list.reads, derived, "THE PROBE DERIVES ITS STRICT READ LIST FROM THE REGISTRY: loadList returns exactly the registry's reads");
-  eq(Object.keys(list.reads).length, 79, "for the 79 operations whose fields the code reads: the sixteen event-risk reads, the Flow Lab's reads (the per-strike and per-expiry flow and the off-exchange levels among them, the recent flows read and the exact stock levels retired), the five fund reads and the eleven volatility desk reads among them, the two unschemed volatility reads aside");
+  eq(Object.keys(list.reads).length, 116, "for the 116 operations whose fields the code reads: the sixteen event-risk reads, the 37 macro and private-markets reads, the Flow Lab's reads (the per-strike and per-expiry flow and the off-exchange levels among them, the recent flows read and the exact stock levels retired), the five fund reads and the eleven volatility desk reads among them, the two unschemed volatility reads aside");
   deep(probe.SESSION_PROBE.path, pathFor("ohlc-1d", { ticker: "SPY" }), "and the session probe is the registry's daily candle for SPY");
   eq(probe.SESSION_PROBE.op, opById("ohlc-1d").op, "under the spec's operation");
 
@@ -279,20 +288,19 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
   eq(PLAN.startup.perDay, 80000, "and its day line");
 
   const entitled = list.entitlement;
-  deep(entitled.slice().sort(), ["/api/futures/{contract}/stats",
-    "/api/option-trades", "/api/stock/{ticker}/volatility/context"],
-    "ENTITLEMENT: the order-flow, volatility-context and futures routes are asked, not assumed; the quote became a used read with the event-risk package, the unusual congressional trades became a planned read, the lit-flow, strike-flow and stock price-level routes moved to used when the Flow Lab began to read them, and the trade-stance ranking when the volatility desk did");
+  deep(entitled.slice().sort(), ["/api/option-trades", "/api/stock/{ticker}/volatility/context"],
+    "ENTITLEMENT: the order-flow and volatility-context routes are asked, not assumed; the quote became a used read with the event-risk package and the futures stats with the macro package, the unusual congressional trades became a planned read, the lit-flow, strike-flow and stock price-level routes moved to used when the Flow Lab began to read them, and the trade-stance ranking when the volatility desk did");
   deep(list.probes.filter((p) => p.op === "/api/stock/{ticker}/flow-recent" || p.op === "/api/stock/{ticker}/stock-volume-price-levels").map((p) => p.id), [],
     "RETIRED: the per-name recent flow and the stock volume levels the Flow Lab stopped reading are not probed, since no code reads them");
   ok(!OPS.some((e) => e.op === "/api/stock/{ticker}/flow-recent" || e.op === "/api/stock/{ticker}/stock-volume-price-levels"), "and not registered; docs/vendor-coverage.md says why");
   const tickers = ["AAPL", "NVDA"];
   const expanded = probe.expandProbes(list, tickers);
   const asked = expanded.filter((p) => entitled.includes(p.op)).map((p) => p.id);
-  deep(asked, ["option-trades:AAPL", "option-trades:NVDA", "volatility-context:AAPL", "volatility-context:NVDA", "futures-stats"],
-    "each per-name route is asked for AAPL and NVDA, the gold future once");
+  deep(asked, ["option-trades:AAPL", "option-trades:NVDA", "volatility-context:AAPL", "volatility-context:NVDA"],
+    "each per-name route is asked for AAPL and NVDA");
   ok(expanded.filter((p) => entitled.includes(p.op)).every((p) => p.entitlement && !p.gated),
     "and each carries the entitlement mark into its run");
-  eq(expanded.length + 1, 269, "a weekly strict run is 268 list calls plus the session call: the 22 the event-risk reads added, the volatility desk's and the Flow Lab's probes beside the positioning package's planned ones, five of them per name for AAPL and NVDA");
+  eq(expanded.length + 1, 300, "a weekly strict run is 299 list calls plus the session call: the 22 the event-risk reads added, the volatility desk's and the Flow Lab's probes beside the positioning package's planned ones, five of them per name for AAPL and NVDA, and the 36 macro and private-markets operations, each once");
   ok(list.enums["/api/option-trades"].report_flags.includes("intermarket_sweep") &&
      list.enums["/api/option-trades"].upstream_condition_detail.includes("isoi"),
     "the sweep question is asked of both encodings the spec documents: report_flags and the OPRA code isoi");
@@ -1315,18 +1323,32 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
   ok(!/\d{4}/.test(JSON.stringify({ ...committed, observed: null, run: null })), "VALUE-FREE: no run of four digits anywhere but the day and the run it records");
   const registryOps = new Set(OPS.filter((e) => list.probes.some((p) => p.op === e.op && p.tier !== "planned")).map((e) => e.op));
   const unrecorded = [...registryOps].filter((o) => !committed.ops[o]).sort();
-  deep(unrecorded, ["/api/alerts", "/api/alerts/configuration", "/api/alerts/filters", "/api/alerts/query/grammar", "/api/analytics/sliding", "/api/analytics/window", "/api/calendar/ipo",
-    "/api/companies/listings", "/api/companies/{ticker}/dividends", "/api/companies/{ticker}/splits", "/api/earnings/afterhours", "/api/earnings/premarket", "/api/etfs/{ticker}/exposure",
-    "/api/etfs/{ticker}/info", "/api/etfs/{ticker}/weights", "/api/group-flow/{flow_group}/greek-flow/{expiry}", "/api/lit-flow/recent", "/api/lit-flow/{ticker}", "/api/market/correlations",
-    "/api/net-flow/expiry", "/api/option-contract/{id}/flow", "/api/option-contract/{id}/intraday", "/api/option-contract/{id}/volume-profile",
-    "/api/option-trades/exchange-breakdown/{date}", "/api/option-trades/flow-alerts/{id}", "/api/option-trades/multi-leg/{id}/legs", "/api/option-trades/optionable-tickers",
-    "/api/politician-portfolios/holders/{ticker}", "/api/potus/posts", "/api/potus/schedule", "/api/stock-directory/ticker-exchanges", "/api/stock/{sector}/tickers",
-    "/api/stock/{ticker}/atm-chains", "/api/stock/{ticker}/balance-sheets", "/api/stock/{ticker}/cash-flows", "/api/stock/{ticker}/earnings", "/api/stock/{ticker}/flow-per-strike-intraday",
-    "/api/stock/{ticker}/greek-exposure/strike", "/api/stock/{ticker}/greek-exposure/strike-expiry", "/api/stock/{ticker}/greek-flow/{expiry}", "/api/stock/{ticker}/income-statements",
-    "/api/stock/{ticker}/interpolated-iv", "/api/stock/{ticker}/oi-per-expiry", "/api/stock/{ticker}/option-stance", "/api/stock/{ticker}/option/stock-price-levels",
-    "/api/stock/{ticker}/option/volume-oi-expiry", "/api/stock/{ticker}/options-pulse", "/api/stock/{ticker}/quote", "/api/stock/{ticker}/technical-indicator/{function}",
-    "/api/stock/{ticker}/volatility/realized", "/api/stock/{ticker}/volatility/stats", "/api/volatility/character/top", "/api/volatility/vix-term-structure"],
-    "every operation the code reads has a recorded shape, bar the two earnings calendars and the net flow, which answered without rows on 2026-10-04, the one the plan refuses (422), the four the extras leg reads and the three fund reads that no weekly run has answered yet, the fifteen the Flow Lab reads, the eleven the volatility desk reads and the sixteen the event-risk package reads: their reducers fail by name until the first Sunday probe records them");
+  deep(unrecorded, [
+    "/api/alerts", "/api/alerts/configuration", "/api/alerts/filters", "/api/alerts/query/grammar",
+    "/api/analytics/sliding", "/api/analytics/window", "/api/calendar/ipo", "/api/commodities/{name}",
+    "/api/companies/listings", "/api/companies/{ticker}/dividends", "/api/companies/{ticker}/splits", "/api/crypto/whale-transactions",
+    "/api/crypto/whales/recent", "/api/crypto/{pair}/ohlc/{candle_size}", "/api/crypto/{pair}/state", "/api/digital-currencies/history",
+    "/api/digital-currencies/intraday", "/api/earnings/afterhours", "/api/earnings/premarket", "/api/etfs/{ticker}/exposure",
+    "/api/etfs/{ticker}/info", "/api/etfs/{ticker}/weights", "/api/forex/history", "/api/forex/intraday",
+    "/api/forex/rate", "/api/futures/contracts", "/api/futures/flow", "/api/futures/{contract}/candles",
+    "/api/futures/{contract}/stats", "/api/futures/{contract}/trades", "/api/group-flow/{flow_group}/greek-flow/{expiry}", "/api/lit-flow/recent",
+    "/api/lit-flow/{ticker}", "/api/market/correlations", "/api/market/movers", "/api/net-flow/expiry",
+    "/api/option-contract/{id}/flow", "/api/option-contract/{id}/intraday", "/api/option-contract/{id}/volume-profile", "/api/option-trades/exchange-breakdown/{date}",
+    "/api/option-trades/flow-alerts/{id}", "/api/option-trades/multi-leg/{id}/legs", "/api/option-trades/optionable-tickers", "/api/politician-portfolios/holders/{ticker}",
+    "/api/potus/posts", "/api/potus/schedule", "/api/predictions/insiders", "/api/predictions/market/{asset_id}",
+    "/api/predictions/market/{asset_id}/liquidity", "/api/predictions/market/{asset_id}/positions", "/api/predictions/smart-money", "/api/predictions/unusual",
+    "/api/predictions/user/{user_id}", "/api/predictions/whales", "/api/private-markets/companies", "/api/private-markets/companies/{npm_ticker}",
+    "/api/private-markets/companies/{npm_ticker}/funding", "/api/private-markets/companies/{npm_ticker}/investors", "/api/private-markets/companies/{npm_ticker}/management", "/api/private-markets/companies/{npm_ticker}/pricing",
+    "/api/private-markets/investors", "/api/private-markets/investors/{name}", "/api/private-markets/search", "/api/seasonality/{month}/performers",
+    "/api/seasonality/{ticker}/monthly", "/api/seasonality/{ticker}/year-month", "/api/stock-directory/ticker-exchanges", "/api/stock/{sector}/tickers",
+    "/api/stock/{ticker}/atm-chains", "/api/stock/{ticker}/balance-sheets", "/api/stock/{ticker}/cash-flows", "/api/stock/{ticker}/earnings",
+    "/api/stock/{ticker}/flow-per-strike-intraday", "/api/stock/{ticker}/greek-exposure/strike", "/api/stock/{ticker}/greek-exposure/strike-expiry", "/api/stock/{ticker}/greek-flow/{expiry}",
+    "/api/stock/{ticker}/income-statements", "/api/stock/{ticker}/interpolated-iv", "/api/stock/{ticker}/oi-per-expiry", "/api/stock/{ticker}/option-stance",
+    "/api/stock/{ticker}/option/stock-price-levels", "/api/stock/{ticker}/option/volume-oi-expiry", "/api/stock/{ticker}/options-pulse", "/api/stock/{ticker}/quote",
+    "/api/stock/{ticker}/technical-indicator/{function}", "/api/stock/{ticker}/volatility/realized", "/api/stock/{ticker}/volatility/stats", "/api/volatility/character/top",
+    "/api/volatility/vix-term-structure",
+  ],
+    "every operation the code reads has a recorded shape, bar the two earnings calendars and the net flow, which answered without rows on 2026-10-04, the one the plan refuses (422), the four the extras leg reads and the three fund reads that no weekly run has answered yet, the fifteen the Flow Lab reads, the eleven the volatility desk reads, the sixteen the event-risk package reads and the macro and private-markets operations: their reducers fail by name until the first Sunday probe records them");
   const own = committed.ops["/api/institution/{ticker}/ownership"];
   deep([own.unseen, own.undocumented], [["units_change"], ["cik", "units_changed"]], "the ownership route's wire name: units_changed arrives, the documented units_change does not (weekly run 37223455933)");
   deep(own.renames, { units_change: "units_changed" }, "declared as a rename of the spec's name");
@@ -1381,6 +1403,57 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
   const holders = dossier.bodies.ownership.data;
   ok(holders.length > 0 && holders.every((h) => Object.hasOwn(h, "units_changed") && !Object.hasOwn(h, "units_change")), "the ownership fixture carries the wire's units_changed and not the spec's units_change");
   deep(dossier.renames, { "/api/institution/{ticker}/ownership": { units_change: "units_changed" } }, "and records the rename it applied");
+}
+
+{
+  const { loadMutated } = await import("./truth/mutants.mjs");
+  const here = JSON.stringify(new URL("../scripts/flows-probe.mjs", import.meta.url).href);
+  const planted = (transforms, salt) => loadMutated("scripts/flows-probe.mjs", [
+    ...transforms,
+    ["new URL(\"./flows-probe-list.json\", import.meta.url)", `new URL("./flows-probe-list.json", ${here})`],
+    ["new URL(\"./flows-probe-shapes.json\", import.meta.url)", `new URL("./flows-probe-shapes.json", ${here})`],
+    ["fileURLToPath(import.meta.url) === process.argv[1]", "false"],
+  ], { salt });
+  const script = (statuses) => {
+    const sleeps = [];
+    let n = 0;
+    const deps = {
+      fetchImpl: async () => { const status = statuses[Math.min(n, statuses.length - 1)]; n++; return new Response(status === 200 ? "{\"data\":[{\"a\":1}]}" : "upstream connect error", { status }); },
+      key: "k", pace: async () => {}, now: () => 0, sleep: async (ms) => { sleeps.push(ms); },
+    };
+    return { deps, sleeps, count: () => n };
+  };
+  const once = script([503, 200]);
+  const healed = await probe.callVendor("https://vendor.test/x", once.deps);
+  deep([healed.status, healed.again, once.count(), once.sleeps], [200, 1, 2, [probe.SERVER_RETRY_MS]],
+    "THE WEEKLY PROBE OF 2026-11-08: a single 503 from the feed's edge is asked again once, after two seconds, and the answer is read");
+  const down = script([503]);
+  const dead = await probe.callVendor("https://vendor.test/x", down.deps);
+  deep([dead.status, dead.again, down.count()], [503, 1, 2], "an operation that answers 5xx twice is still a 5xx, asked exactly twice");
+  deep(probe.strictVerdict([{ id: "x", op: "/x", cls: "5xx", status: 503, again: 1 }], {}).failures, ["FAIL x 503"], "and the strict run still fails on it");
+  const refused = script([422]);
+  deep([(await probe.callVendor("https://vendor.test/x", refused.deps)).status, refused.count()], [422, 1], "a 4xx is an answer and is never asked again");
+  const stubborn = await planted([["if (response.status >= 500 && again < MAX_SERVER_RETRIES) {", "if (false) {"]], checks);
+  const one = script([503, 200]);
+  eq((await stubborn.callVendor("https://vendor.test/x", one.deps)).status, 503, "PLANTED WRONG BUILD, a probe that never asks a 5xx again: one upstream reset fails the week, which the real probe reads past");
+  const endless = await planted([["export const MAX_SERVER_RETRIES = 1;", "export const MAX_SERVER_RETRIES = 4;"]], checks + 1);
+  const five = script([503]);
+  await endless.callVendor("https://vendor.test/x", five.deps);
+  ok(five.count() > 2, "PLANTED WRONG BUILD, a probe that keeps asking a failing operation: it spends more than two calls, which the real probe does not");
+
+  const weekly = JSON.parse(fs.readFileSync(new URL("../scripts/flows-probe-list.json", import.meta.url), "utf8"));
+  const used = weekly.probes.filter((p) => p.tier === "used");
+  const of = (op) => used.filter((p) => p.op === op);
+  ok(of("/api/etfs/{ticker}/info").length === 1 && of("/api/etfs/{ticker}/info")[0].path === "/api/etfs/SPY/info" &&
+     of("/api/etfs/{ticker}/weights").length === 1 && of("/api/etfs/{ticker}/weights")[0].path === "/api/etfs/SPY/weights",
+    "the fund routes are probed with a fund: a stock answers data null and empty lists, which proves no field the code reads");
+  ok(of("/api/stock/{ticker}/option-chains").length === 1 && of("/api/stock/{ticker}/option-chains")[0].query.greeks === "true",
+    "the option chain is probed only as the nightly reads it, with greeks=true: without it the feed sends bare symbol strings and no field can arrive");
+  const eb = of("/api/option-trades/exchange-breakdown/{date}");
+  ok(eb.length === 1 && eb[0].query.by_trade_code === "true" && Array.isArray(eb[0].query["ticker[]"]),
+    "the exchange breakdown is probed as the Worker's venue read asks it, by trade code for one name, which is the only form that carries trade_code");
+  ok(/pathFor\("option-chains", \{ ticker: t \}\), \{ greeks: true, \.\.\.day \}/.test(fs.readFileSync(new URL("../scripts/flows-legs/voldesk.mjs", import.meta.url), "utf8")),
+    "and the nightly's audit asks for the chain with greeks=true");
 }
 
 console.log(`✓ flows-probe: ${checks} assertions — a registry that declares each vendor operation once, with no vendor path spelled ` +

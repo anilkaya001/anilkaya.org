@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "430";
+export const ASSET_VERSION = "432";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -7,6 +7,7 @@ import { etDayOf, isSession, shiftDay } from "./flows-quant-time.js";
 import { ledgerBody, LEDGER_DESCRIPTION, LEDGER_STYLES, LEDGER_SCRIPTS } from "./flows-page-ledger.js";
 import { positioningBody, POSITIONING_DESCRIPTION, POSITIONING_STYLES, POSITIONING_SCRIPTS } from "./flows-page-positioning.js";
 import { HORIZON_SESSIONS } from "./flows-horizon.js";
+import { macroBody, MACRO_DESCRIPTION, MACRO_STYLES, MACRO_SCRIPTS, MACRO_DEFER } from "./flows-page-macro.js";
 import { COPY as VD_COPY } from "./flows-voldesk-copy.js";
 import { flowlabBody, FLOWLAB_DESCRIPTION, FLOWLAB_STYLES, FLOWLAB_SCRIPTS } from "./flows-page-flowlab.js";
 import { FIRE_DESCRIPTION, FIRE_SCRIPTS, FIRE_STYLES, fireBody } from "./ff-pages-fire.js";
@@ -88,6 +89,7 @@ const GLYPHS = {
   sidebar: '<rect x="3.5" y="5" width="17" height="14" rx="3"/><path d="M9.5 5v14"/>',
   boards: '<rect x="4" y="4" width="7" height="7" rx="2"/><rect x="13" y="4" width="7" height="7" rx="2"/><rect x="4" y="13" width="7" height="7" rx="2"/><rect x="13" y="13" width="7" height="7" rx="2"/>',
   bars: '<path d="M6 18v-3M12 18v-7M18 18V7"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="3.8" ry="9"/><path d="M3 12h18"/>',
   fire: '<path d="M12 4.5c.75 3.6 4.8 5.55 4.8 9.75a4.8 4.8 0 0 1-9.6 0c0-2.25 1.2-3.3 2.1-4.8.75 1.05 1.5 1.35 1.95 1.35C11.55 9.6 11.85 7.8 12 4.5z"/>',
 };
 
@@ -144,8 +146,10 @@ export const FLOWS_NAV = [
     { key: "unusual", href: "/flows/unusual/", label: "Unusual", glyph: "unusual" },
     { key: "flowlab", href: "/flows/flowlab/", label: "Flow Lab", glyph: "flask", ownerOnly: true },
     { key: "ledger", href: "/flows/ledger/", label: "Ledger", glyph: "levels" },
+    { key: "macro", href: "/flows/macro/", label: "Macro", glyph: "globe", gate: "macro" },
     { key: "events", href: "/flows/events/", label: "Events", glyph: "cal", count: true },
     { key: "political", href: "/flows/political/", label: "Political", glyph: "hall" },
+    { key: "positioning", href: "/flows/positioning/", label: "Positioning", glyph: "stack", switched: true },
   ] },
   { group: "Tools", id: "railTools", items: [
     { key: "fire", href: "/flows/fire/", label: "Fire", glyph: "fire", switched: true },
@@ -158,15 +162,19 @@ const RAIL_END = `
   </nav>
   <div class="fx-side-f">`;
 
-const TABS = [
+const groupKeys = (id) => FLOWS_NAV.find((g) => g.id === id).items.map((it) => it.key);
+
+export const FLOWS_TABS = Object.freeze([
   { href: "/flows/", label: "Home", glyph: "home", keys: ["overview"] },
-  { href: "/flows/long/", label: "Boards", glyph: "boards", keys: ["long", "short"] },
+  { href: "/flows/long/", label: "Boards", glyph: "boards", group: "railBoards", keys: groupKeys("railBoards") },
   { href: "/flows/ticker/", label: "Search", glyph: "search", keys: ["ticker"], search: true },
-  { href: "/flows/market/", label: "Market", glyph: "market", keys: ["market", "moves", "unusual", "flowlab", "ledger", "events", "political"] },
-];
+  { href: "/flows/market/", label: "Market", glyph: "market", group: "railMarket", keys: groupKeys("railMarket") },
+].map((tab) => Object.freeze({ ...tab, keys: Object.freeze(tab.keys) })));
+
+const TABS = FLOWS_TABS;
 
 const railItem = (active) => (it) => {
-  if ((it.ownerOnly || it.switched) && it.key !== active) return "";
+  if ((it.ownerOnly || it.switched || it.gate) && it.key !== active) return "";
   const on = it.key === active;
   const badge = it.count ? `<span class="rail-count" data-rail-count="${it.key}" hidden></span>` : "";
   return `<a href="${it.href}"${on ? ' class="is-on" aria-current="page"' : ""}>` +
@@ -192,6 +200,18 @@ export function brandMark(href) {
 }
 
 const BRAND_LINK = brandMark(BRAND_MEMBER);
+
+const MACRO_ITEM = FLOWS_NAV.flatMap((g) => g.items).find((it) => it.key === "macro");
+
+export function macroNav(html) {
+  const text = String(html);
+  if (text.includes('href="/flows/macro/"')) return text;
+  const at = text.indexOf('<a href="/flows/ledger/"');
+  if (at < 0) return text;
+  const end = text.indexOf("</a>", at);
+  if (end < 0) return text;
+  return text.slice(0, end + 4) + "\n      " + railItem("")({ ...MACRO_ITEM, gate: undefined }) + text.slice(end + 4);
+}
 
 export function ownerNav(html) {
   let text = String(html);
@@ -424,7 +444,7 @@ ${body}
 </body>
 </html>`;
 
-export function aboutPage() {
+export function aboutPage({ positioning = false } = {}) {
   return doc("Flows — About", "What Flows is: options-flow research for US equities, what it promises about its figures, and what it is not.", `
   <header class="fx-doc-h">
     <span class="fx-mark" aria-hidden="true">&#949;</span>
@@ -452,8 +472,10 @@ export function aboutPage() {
       <li><strong>Unusual.</strong> The option windows the vendor flagged, drawn as a flow network from sector through the side of the quote and name to lean, and the contracts trading far above their open interest.</li>
       <li><strong>Flow Lab.</strong> The contracts behind a name's flow: a screener ranked by the site's own ratios, strike and Greek flow, price ladders, routing, lit prints and group flow, each with its unit or a dash and the reason.</li>
       <li><strong>Ledger.</strong> The flagged option premium booked as a closed ledger: takers on one side, liquidity providers on the other, so every row and column sums to zero. It sets each sector's share against its market-cap share, with the bounds it can prove.</li>
+      <li><strong>Macro.</strong> Rates, currencies, commodities, crypto and futures on one screen, with prediction-market odds beside each scheduled release and seasonality shown with its intervals. A figure the feed does not carry is a dash with its reason.</li>
       <li><strong>Events.</strong> Earnings, economic prints and FDA dates for the coming sessions, with the move each report is priced for.</li>
-      <li><strong>Political.</strong> Stocks that members of Congress disclosed buying or selling, in the dollar ranges the filings give, with how late each filing arrives.</li>
+      <li><strong>Political.</strong> Stocks that members of Congress disclosed buying or selling, in the dollar ranges the filings give, with how late each filing arrives.</li>${positioning ? `
+      <li><strong>Positioning.</strong> How a fixed set of 13F filers moved their book between sectors, what insiders did by sector, and where failures to deliver and short-sale volume sit.</li>` : ""}
       <li><strong>Ticker.</strong> One name's dossier: price against the priced move, the dealer book, volatility, flow and positioning, and a written reading of how they fit together.</li>
       <li><strong>Fire.</strong> A wire is a standing condition a member writes once. Flows reads it on the nightly run or in the live session, records a hit when it first holds, and keeps a receipt for every session it was read or not read.</li>
       <li><strong>Strategy, Premium desk and Ask.</strong> Option structures priced on the name's own smile, and questions answered from what has been published.</li>
@@ -1075,7 +1097,7 @@ const ER_TABS = Object.freeze([["week", "Week", "evWeekCard"], ["earn", "Earning
 
 const erSkeleton = (n, what) => `<p class="er-load" data-er-load>${what}</p>${Array.from({ length: n }, () => `<div class="er-sk" aria-hidden="true"><i></i><i></i><i></i></div>`).join("")}`;
 
-export function eventsPage({ username = "", eventrisk = false, halts = false } = {}) {
+export function eventsPage({ username = "", eventrisk = false, halts = false, odds = false } = {}) {
   return `${head("Flows — Events", "What reports next, what is priced into it, and what else is on the calendar.", FEEDS_CSS)}
 ${shell("Events", "events", username, `${feedHead("ev", "Events")}
   <p class="visually-hidden" id="evStatus" role="status">Loading the calendar…</p>
@@ -1092,7 +1114,7 @@ ${feedTabs(eventrisk ? ER_TABS : [["week", "Week", "evWeekCard"], ["earn", "Earn
   <div class="fd-stage" id="fdStage" data-view="week">
 ${feedModule("evWeekCard", "Week ahead", `<div class="fd-body" id="evWeek"></div>`, { tab: "week" })}
 ${feedModule("evEarnCard", "Earnings", `<div class="fd-body" id="evEarn"></div>`, { tab: "earn" })}${eventrisk ? feedModule("erRiskCard", "Report risk", `<div class="fd-body er-body" id="erRisk">${erSkeleton(1, "Loading the event-risk read.")}</div>`, { tab: "risk" }) : ""}
-${feedModule("evMacroCard", "Macro", `<div class="fd-body" id="evMacro"></div>`, { tab: "macro" })}
+${feedModule("evMacroCard", "Macro", `<div class="fd-body" id="evMacro"></div>`, { tab: "macro" }).replace('id="evMacroCard"', odds ? 'id="evMacroCard" data-odds="on"' : 'id="evMacroCard"')}
 ${feedModule("evFdaCard", "FDA", `<div class="fd-body" id="evFda"></div>`, { tab: "fda" })}${eventrisk ? `
 ${feedModule("erIssuesCard", "New issues", `<div class="fd-body er-body" id="erIssues">${erSkeleton(1, "Loading the event-risk read.")}</div>`, { tab: "issues" })}
 ${feedModule("erPolicyCard", "Policy calendar", `<div class="fd-body er-body" id="erPolicy">${erSkeleton(1, "Loading the event-risk read.")}</div>`, { tab: "policy" })}
@@ -1199,6 +1221,21 @@ export function ledgerPage({ username = "", live = false } = {}) {
   });
 }
 
+export function macroPage({ username = "", live = false } = {}) {
+  return flowsDocument({
+    title: "Macro",
+    description: MACRO_DESCRIPTION,
+    active: "macro",
+    username,
+    chrome: false,
+    chart: true,
+    styles: MACRO_STYLES,
+    scripts: MACRO_SCRIPTS,
+    body: macroBody(glyph, { live }) + `
+  <i hidden data-defer="macro-charts" data-src="${v(MACRO_DEFER)}"></i>`,
+  });
+}
+
 export function positioningPage({ username = "", now = Date.now() } = {}) {
   return flowsDocument({
     title: "Positioning",
@@ -1256,7 +1293,7 @@ ${UI_CHART_SCRIPTS}
 </html>`;
 }
 
-export function tickerPage({ username = "", scenes = false, xcheck = false, now = Date.now() } = {}) {
+export function tickerPage({ username = "", scenes = false, xcheck = false, privateLens = false, now = Date.now() } = {}) {
   return flowsDocument({
     title: "Ticker",
     description: "One name's options dossier: price against the priced move, the Neuron verdict with priced structures, and the dealer book, volatility, flow and positioning behind it.",
@@ -1327,7 +1364,8 @@ export function tickerPage({ username = "", scenes = false, xcheck = false, now 
   </div>
   <i hidden data-defer="movelab" data-src="${v("/assets/js/flows-ticker-movelab.js")}" id="ftMoveLab"></i>
   <i hidden data-defer="network" data-src="${v("/assets/js/flows-ticker-network.js")}" data-css="${v("/assets/css/flows-ticker-network.css")}" id="ftNetwork"></i>
-  <i hidden data-defer="live" data-src="${v("/assets/js/flows-ticker-live.js")}" id="ftLive"></i>${scenes ? `
+  <i hidden data-defer="live" data-src="${v("/assets/js/flows-ticker-live.js")}" id="ftLive"></i>${privateLens ? `
+  <i hidden data-defer="private" data-src="${v("/assets/js/flows-ticker-private.js")}" data-css="${v("/assets/css/flows-ticker-private.css")}" id="ftPrivate"></i>` : ""}${scenes ? `
   <i hidden data-defer="surface" data-src="${v("/assets/js/flows-ticker-surface.js")}" id="ftSurface"${xcheck ? ' data-xcheck="1"' : ""}></i>${xcheck ? `
   <i hidden data-defer="xcheck" data-src="${v("/assets/js/flows-ticker-xcheck.js")}" data-css="${v("/assets/css/flows-voldesk.css")}" id="ftXcheckLoad"></i>` : ""}` : ""}
 `,
@@ -1665,9 +1703,18 @@ export function fireNav(html, on, slug) {
   return html.replace(FIRE_NAV_ANCHOR, () => FIRE_NAV_ITEM + "\n      " + FIRE_NAV_ANCHOR);
 }
 
+const POSITIONING_NAV_ANCHOR = '\n    </div>\n    <p class="rail-group" id="railTools">';
+const POSITIONING_NAV_ITEM = `<a href="/flows/positioning/" data-pos-nav>${glyph("stack")}<span class="rail-label">Positioning</span></a>`;
+
+export function positioningNav(html, on, slug) {
+  if (typeof html !== "string" || on !== true || slug === "positioning") return html;
+  if (html.includes("data-pos-nav") || !html.includes(POSITIONING_NAV_ANCHOR)) return html;
+  return html.replace(POSITIONING_NAV_ANCHOR, () => "\n      " + POSITIONING_NAV_ITEM + POSITIONING_NAV_ANCHOR);
+}
+
 export const FLOWS_PAGES = {
   loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, networkPage, nowPage, deskPage,
   politicalPage, positioningPage,
-  tickerPage, unusualPage, movesPage, flowlabPage, ledgerPage, statusPage, eventsPage, strategyPage, firePage, ffPendingPage, ASSET_VERSION,
+  tickerPage, unusualPage, movesPage, flowlabPage, ledgerPage, macroPage, statusPage, eventsPage, strategyPage, firePage, ffPendingPage, ASSET_VERSION,
 };
 
