@@ -116,7 +116,8 @@ function home(p = {}) {
   FOCUS.asOf = "2026-09-03"; FOCUS.ahead = CAL.ahead("2026-09-03"); FOCUS.origin = "2026-09-04"; MK.today = "2026-09-08";
   if (ov.reportAhead(2, "2026-09-04", "2026-09-08") !== 1) say("over Labor Day a report on Sep 9 read on Sep 8 is not the next session");
   MK.today = "2026-09-15";
-  if (ov.reportAhead(5, "2026-09-04", "2026-09-15") !== null) say("a reader's day past the session list is placed by a guess instead of a dash");
+  if (ov.reportAhead(5, "2026-09-04", "2026-09-15", "2026-09-17") !== null) say("a reader's day past the session list is placed by a guess instead of a dash");
+  if (ov.reportAhead(5, "2026-09-04", "2026-09-15", "2026-09-11") !== -1) say("a report dated before the reader's day is not past when the list cannot place the day");
   return bad;
 }
 
@@ -364,7 +365,7 @@ const PLANTS = [
   ["the priced move rounds the binary product", home, { below: [['"±" + F.pct(Math.abs(im), 1)', '"±" + (Math.abs(im) * 100).toFixed(1) + "%"']] }],
   ["the chip share rounds the binary product", home, { overview: [["F.pct(a / (a + b), 0)", 'Math.round((a / (a + b)) * 100) + "%"']] }],
   ["the session count is a weekday count", home, { overview: [["return list.filter((x) => x > from && x <= to).length;", 'let n = 0; for (let t = Date.parse(from + "T12:00:00Z") + 864e5; t <= Date.parse(to + "T12:00:00Z"); t += 864e5) if (![0, 6].includes(new Date(t).getUTCDay())) n++; return n;']] }],
-  ["the board tag prints the nightly's count unaged", home, { overview: [["const s = reportAhead(ev && ev.sdte, origin, today);", "const s = isNum(ev && ev.sdte);"]] }],
+  ["the board tag prints the nightly's count unaged", home, { overview: [["const s = reportAhead(ev && ev.sdte, origin, today, ev && (ev.di || ev.d));", "const s = isNum(ev && ev.sdte);"]] }],
   ["the report count ignores the report time", events, { events: [["const n = calendarBetween(origin, imp.early);", "const n = calendarBetween(origin, earningsDate);"]] }],
   ["the spanning test reads the earlier session", events, { events: [["return !imp || !end ? null : imp.late <= end;", "return !imp || !end ? null : imp.early <= end;"]] }],
   ["the event premium ignores the span", events, { events: [["evp: spans !== true || vendorMove === null", "evp: vendorMove === null"]] }],

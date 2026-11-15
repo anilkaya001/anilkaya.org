@@ -847,7 +847,7 @@
     const pv = (k) => (pr && isNum(pr[k]) !== null ? usd(Math.abs(pr[k]) * LOT) : DASH);
     const word = (k) => (pr && isNum(pr[k]) !== null ? (pr[k] < 0 ? "credit" : pr[k] > 0 ? "debit" : "") : "");
     m.px4.replaceChildren(...[["Mid", "mid"], ["Fill", "fill"], ["Natural", "natural"], ["Model", "model"]].map(([l, k]) =>
-      h("div", { "data-on": st.basis === k ? "" : null, title: word(k) ? l + ": " + word(k) + " " + pv(k) + " per lot" : null }, h("span", null, l + (word(k) ? " " + word(k) : "")), h("b", null, pv(k)))));
+      h("div", { "data-on": st.basis === k ? "" : null, title: word(k) ? l + ": " + word(k) + " " + pv(k) + " per lot" : null }, h("span", null, l, word(k) ? h("small", null, " " + word(k)) : null), h("b", null, pv(k)))));
     m.px4.setAttribute("aria-label", "Position price per lot at mid, fill, natural and on the smile, each named credit or debit");
   }
 

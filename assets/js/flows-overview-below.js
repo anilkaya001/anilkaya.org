@@ -392,7 +392,7 @@
     return im === null ? DASH : "±" + F.pct(Math.abs(im), 1);
   };
 
-  const aheadOf = (sd, origin, today) => (sd === null ? null : reportAhead(sd, origin, today));
+  const aheadOf = (sd, origin, today, day) => (sd === null ? null : reportAhead(sd, origin, today, day));
   const UNPLACED = "The reader's day could not be placed on the session list, so no session count is shown.";
   const aheadSaid = (n, known) => (n === null ? (known ? " · " + DASH : "") : n < 0 ? " · past" : n === 0 ? " · today" : n === 1 ? " · next session" : " · in " + n + " sessions");
 
@@ -418,7 +418,7 @@
           "opinion on " + (opinionless === 1 ? "it" : "them") + " going into the print."
         : ", so every name here can be read against the ranking above.");
     const today = UI.freshness.market().today;
-    const ahead = (row) => aheadOf(isNum(row.sdte), payload.gateOrigin, today);
+    const ahead = (row) => aheadOf(isNum(row.sdte), payload.gateOrigin, today, row.di || row.d);
     const soon = rows.filter((row) => { const a = ahead(row); return a !== null && a >= 0 && a <= 5; }).length;
     const lastAhead = ahead(rows[rows.length - 1]);
     const placed = rows.some((row) => ahead(row) !== null);

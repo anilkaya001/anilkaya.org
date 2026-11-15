@@ -474,9 +474,11 @@ try {
     await page.waitForFunction(() => /320/.test(document.querySelector('[data-slot="Cost"] .ui-metric-n').dataset.value || ""));
     eq((await slot("Cost")).value, "$320.00",
        "priced natural the same spread costs the ask on the buy and pays the bid on the sell — twenty dollars more than the mid, a real cost the mid hides");
-    const px4 = await page.$$eval("#sgLegsM .tl-px4 > div", (ds) => Object.fromEntries(ds.map((d) => [d.firstChild.textContent, d.lastChild.textContent])));
+    const px4 = await page.$$eval("#sgLegsM .tl-px4 > div", (ds) => Object.fromEntries(ds.map((d) => [d.firstChild.firstChild.textContent, d.lastChild.textContent])));
     ok(px4.Mid === "$300.00" && px4.Natural === "$320.00" && px4.Fill === "$305.00" && /^\$\d/.test(px4.Model),
        `and the crossing cost is published beside it rather than left to be inferred: mid ${px4.Mid}, fill ${px4.Fill}, natural ${px4.Natural}, on the smile ${px4.Model}`);
+    const words = await page.$$eval("#sgLegsM .tl-px4 > div", (ds) => ds.map((d) => (d.querySelector("span small") || { textContent: "" }).textContent.trim()));
+    ok(words.slice(0, 3).every((w) => w === "debit"), `each basis names its own side of the trade (${words.join(", ")})`);
     eq((await slot("Max loss")).value, MINUS + "$320.00", "the whole payoff moves with the basis");
     eq(new URL(page.url()).searchParams.get("basis"), "natural", "and the basis is held in the link");
   }

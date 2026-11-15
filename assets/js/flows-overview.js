@@ -198,14 +198,15 @@
     return list.filter((x) => x > from && x <= to).length;
   }
   const calendarPassed = (from, to) => (dayOk(from) && dayOk(to) ? Math.round((Date.parse(to + "T12:00:00Z") - Date.parse(from + "T12:00:00Z")) / 864e5) : null);
-  const reportAhead = (sdte, origin, today) => {
+  const reportAhead = (sdte, origin, today, day) => {
     const s = isNum(sdte), p = passed(origin, today);
-    return s === null || p === null ? null : s - p;
+    if (s !== null && p !== null) return s - p;
+    return s !== null && dayOk(day) && dayOk(today) && day < today ? -1 : null;
   };
 
   function earningsMark(row, ev) {
     const today = UI.freshness.market().today, origin = FOCUS.origin;
-    const s = reportAhead(ev && ev.sdte, origin, today);
+    const s = reportAhead(ev && ev.sdte, origin, today, ev && (ev.di || ev.d));
     const d0 = isNum(row && row.edte), dp = calendarPassed(origin, today);
     const d = d0 === null || dp === null ? null : d0 - dp;
     const date = (ev && ev.d) || (row && row.ed) || null;

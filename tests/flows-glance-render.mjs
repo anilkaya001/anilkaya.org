@@ -37,7 +37,7 @@ function makeX() {
   x.earnings.next = { d: "2026-08-31", when: "postmarket", source: "company", confirmed: true, sessions: SIM_SESSIONS };
   x.earnings.impliedNext = { em: 0.042 };
   x.earnings.medianAbsMove = 0.01;
-  x.cone = { status: "ok", iv30: 0.4003, slope30_90: 0.02 };
+  x.cone = { status: "ok", iv30: 0.4003, slope30_90: 0.02, tenors: [{ days: 30, min: 0.3, max: 0.5, rangePos: 0.5015 }] };
   x.term = { status: "ok", expiries: [7, 14, 30, 60, 90, 180].map((d, i) => ({ dte: d, iv: [0.36, 0.38, 0.4003, 0.41, 0.42, 0.43][i] })), eventMove: { sd: 0.042 } };
   x.skew = { status: "ok", rr25: 0.005, z: 0.4 };
   x.vrp = { status: "ok", exAnte: { vrp: 0.096 }, hitRate: 0.6 };
@@ -311,7 +311,7 @@ const CARD_IDS = ["signal", "volatility", "flow", "positioning", "earnings", "ra
   ok(by.signal.sub === "conviction " + card.conviction + " of 100", `and the card's conviction (${by.signal.sub})`);
   eq(by.signal.rows, 5, "five components");
   eq(by.volatility.f, fmt.iv, "Volatility prints the 30-day implied volatility");
-  ok(by.volatility.sub === "IV rank " + Math.round(pm.ivRank * 100), `and the card's IV rank (${by.volatility.sub})`);
+  ok(by.volatility.sub === "IV rank 50", `and the rank of the IV it prints, from the same cone: 0.5015 of its year is 50 (${by.volatility.sub})`);
   ok(by.volatility.foot.includes("+9.6 pts") && by.volatility.foot.includes("skew +0.5") && by.volatility.foot.includes("upward term"), `with premium over realised, skew and the term direction (${by.volatility.foot})`);
   eq(by.flow.f, fmt.net, "Flow prints the session's net premium");
   ok(by.flow.foot.includes("Net delta " + fmt.nd) && by.flow.foot.includes("NOPE " + fmt.nope), `with net delta and NOPE (${by.flow.foot})`);
