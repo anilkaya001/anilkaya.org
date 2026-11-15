@@ -93,6 +93,7 @@ new_sqlite_classes = ["Pulse"]
 
 [vars]
 FLOWS_MACRO = "on"
+FLOWS_IPO = "owner"
 FLOWS_MACRO_LIVE = "off"
 FLOWS_SESSION_EPOCH = "1"
 FLOWS_READ_MODE = "off"

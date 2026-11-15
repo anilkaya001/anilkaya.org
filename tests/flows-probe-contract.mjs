@@ -46,10 +46,10 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
     if (opTier.has(p.op)) eq(opTier.get(p.op), p.tier, `${p.op} carries one tier across its probes`);
     opTier.set(p.op, p.tier);
   }
-  eq(byTier.used.size, 147, "every one of the 147 operations a production call site reads is probed and labelled used: the 36 macro and private-markets operations, the futures stats among them, the sixteen the Flow Lab reads of the eighteen it registered (the recent flows read and the exact stock levels were retired when the Flow Lab moved to the per-expiry totals and the off-exchange levels), the 38 labelled before, the 37 the nightly legs read that were still filed under Tiers 1 and 2, the unusual-activity leg's one, the four the extras leg reads (dividends, splits, interpolated implied volatility, ETF exposure) and the thirteen the volatility desk reads, the VIX term structure among them");
+  eq(byTier.used.size, 148, "every one of the 148 operations a production call site reads is probed and labelled used: the IPO calendar the events leg reads, the 36 macro and private-markets operations, the futures stats among them, the sixteen the Flow Lab reads of the eighteen it registered (the recent flows read and the exact stock levels were retired when the Flow Lab moved to the per-expiry totals and the off-exchange levels), the 38 labelled before, the 37 the nightly legs read that were still filed under Tiers 1 and 2, the unusual-activity leg's one, the four the extras leg reads (dividends, splits, interpolated implied volatility, ETF exposure) and the thirteen the volatility desk reads, the VIX term structure among them");
   eq(byTier["1"].size, 0, "no Tier 1 operation is left unread: the volatility desk reads the last one, and the VIX term structure is read again");
   eq(byTier["2"].size, 3, "Tier 2 holds only the three entitlement probes (order flow, quote and volatility context), the futures stats having become a used read with the macro package: the greeks and the trade-stance ranking moved to used with the volatility desk, the unusual congressional trades became a planned read with the positioning package, and Tier 3 is left out");
-  eq(byTier.planned.size, 26, "the 26 operations the positioning package reads are probed as planned: their shapes are recorded, their fields are not yet held strict");
+  eq(byTier.planned.size, 28, "the 26 operations the positioning package reads and the 2 the endpoint census plans (listings, the President's schedule) are probed as planned: their shapes are recorded, their fields are not yet held strict");
   for (const [op, names] of Object.entries(list.expect)) {
     eq(new Set(names).size, names.length, `${op}: the documented names are listed once each`);
   }
@@ -139,11 +139,19 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
   deep([...registered].filter((op) => !["used", "planned"].includes(tierOf.get(op))), [], "USED IS TRUE: every registered operation has a probe labelled used, or planned for the positioning package's 26");
   deep(listOps.filter((op) => tierOf.get(op) === "used" && !registered.has(op)), [],
     "and no operation is labelled used that the registry does not carry");
-  eq(registered.size, 173, "173 operations are registered: the 147 read in production and the 26 the positioning package plans");
-  eq(OPS.length, 174, "one entry for each, the economy entry sharing the treasury yield's operation");
+  eq(registered.size, 176, "176 operations are registered: the 148 read in production, the 26 the positioning package plans, and the 2 the endpoint census plans");
+  eq(OPS.length, 177, "one entry for each, the economy entry sharing the treasury yield's operation");
   const dossierIds = new Set([...Object.values(DOSSIER_OPS), ...SOURCES.map((s) => s.op)]);
   const read = new Set([...refs.keys(), ...dossierIds]);
-  deep(OPS.filter((e) => !read.has(e.id)).map((e) => e.id), [], "READ IS TRUE: every registered id is named by a production call site or a dossier source");
+  const unreadUnplanned = (ops) => ops.filter((e) => !e.planned && !read.has(e.id)).map((e) => e.id);
+  const readPlanned = (ops) => ops.filter((e) => e.planned && read.has(e.id)).map((e) => e.id);
+  deep(unreadUnplanned(OPS), [], "READ IS TRUE: every registered id that is not marked planned is named by a production call site or a dossier source");
+  deep(OPS.filter((e) => e.planned).map((e) => e.id).sort(), ["listings", "potus-schedule"], "PLANNED: exactly the two operations the endpoint census registered ahead of a reader carry planned");
+  deep(readPlanned(OPS), [], "PLANNED IS UNREAD: no production call site names a planned operation, so a planned entry costs no call");
+  deep(OPS.filter((e) => e.planned && tierOf.get(e.op) !== "planned").map((e) => e.id), [], "and each is probed weekly under the planned tier, outside the strict read list");
+  deep(OPS.filter((e) => e.planned && !(Array.isArray(e.reads) && e.reads.length)).map((e) => e.id), [], "and each carries the read list its reader will be held to");
+  deep(unreadUnplanned([...OPS, { ...opById("listings"), planned: false }]), ["listings"], "PLANTED: a planned operation with its mark removed is refused as registered and unread");
+  deep(readPlanned([...OPS, { ...opById("ipo-calendar"), planned: true }]), ["ipo-calendar"], "PLANTED: and a read operation marked planned is refused as planned and read");
   ok(refs.has("earnings-premarket") && refs.has("earnings-afterhours"),
     "including the two earnings calendars the events leg names");
 
@@ -248,7 +256,7 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
   const liveOps = new Set(list.probes.filter((p) => p.tier !== "planned").map((p) => p.op));
   for (const e of OPS) if (e.reads && e.reads.length && liveOps.has(e.op)) derived[e.op] = [...e.reads];
   deep(list.reads, derived, "THE PROBE DERIVES ITS STRICT READ LIST FROM THE REGISTRY: loadList returns exactly the registry's reads");
-  eq(Object.keys(list.reads).length, 100, "for the 100 operations whose fields the code reads: the 37 macro and private-markets reads, the Flow Lab's reads (the per-strike and per-expiry flow and the off-exchange levels among them, the recent flows read and the exact stock levels retired), the five fund reads and the eleven volatility desk reads among them, the two unschemed volatility reads aside");
+  eq(Object.keys(list.reads).length, 101, "for the 101 operations whose fields the code reads: the IPO calendar, the 37 macro and private-markets reads, the Flow Lab's reads (the per-strike and per-expiry flow and the off-exchange levels among them, the recent flows read and the exact stock levels retired), the five fund reads and the eleven volatility desk reads among them, the two unschemed volatility reads aside");
   deep(probe.SESSION_PROBE.path, pathFor("ohlc-1d", { ticker: "SPY" }), "and the session probe is the registry's daily candle for SPY");
   eq(probe.SESSION_PROBE.op, opById("ohlc-1d").op, "under the spec's operation");
 
@@ -298,7 +306,7 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
     "each per-name route is asked for AAPL and NVDA");
   ok(expanded.filter((p) => entitled.includes(p.op)).every((p) => p.entitlement && !p.gated),
     "and each carries the entitlement mark into its run");
-  eq(expanded.length + 1, 280, "a weekly strict run is 279 list calls plus the session call: the volatility desk's and the Flow Lab's probes beside the positioning package's planned ones, five of them per name for AAPL and NVDA, and the 36 macro and private-markets operations, each once");
+  eq(expanded.length + 1, 283, "a weekly strict run is 282 list calls plus the session call: the IPO calendar and the two planned census reads, the volatility desk's and the Flow Lab's probes beside the positioning package's planned ones, five of them per name for AAPL and NVDA, and the 36 macro and private-markets operations, each once");
   ok(list.enums["/api/option-trades"].report_flags.includes("intermarket_sweep") &&
      list.enums["/api/option-trades"].upstream_condition_detail.includes("isoi"),
     "the sweep question is asked of both encodings the spec documents: report_flags and the OPRA code isoi");
@@ -1317,7 +1325,7 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
   const registryOps = new Set(OPS.filter((e) => list.probes.some((p) => p.op === e.op && p.tier !== "planned")).map((e) => e.op));
   const unrecorded = [...registryOps].filter((o) => !committed.ops[o]).sort();
   deep(unrecorded, [
-    "/api/analytics/sliding", "/api/analytics/window", "/api/commodities/{name}", "/api/companies/{ticker}/dividends",
+    "/api/analytics/sliding", "/api/analytics/window", "/api/calendar/ipo", "/api/commodities/{name}", "/api/companies/{ticker}/dividends",
     "/api/companies/{ticker}/splits", "/api/crypto/whale-transactions", "/api/crypto/whales/recent", "/api/crypto/{pair}/ohlc/{candle_size}",
     "/api/crypto/{pair}/state", "/api/digital-currencies/history", "/api/digital-currencies/intraday", "/api/earnings/afterhours",
     "/api/earnings/premarket", "/api/etfs/{ticker}/exposure", "/api/etfs/{ticker}/info", "/api/etfs/{ticker}/weights",

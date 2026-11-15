@@ -185,6 +185,74 @@ How to read the columns. **Status**: `read` is in the registry before this branc
 | `/api/private-markets/investors/{name}` | added | pm-investor | private-markets add-on | not observed | nightly (private markets, WP5) |
 | `/api/private-markets/search` | added | pm-search | private-markets add-on | not observed | nightly (private markets, WP5) |
 
+## Endpoint census
+
+Counted from the committed spec (217 paths) against `shared/flows-vendor-ops.js` on 2026-11-15. **Used** is an operation a production call site or a dossier source reads (the registry entry carries no `planned` mark); **planned** is registered with its read list and a spec-derived fixture (`tests/fixtures-intel.json`, written by `tests/gen-intel-fixtures.py`) and read by no production code yet, which `tests/flows-probe-contract.mjs` holds (a planned entry named by a call site, or an unread entry without the mark, fails); **unused** is not registered. Five more operations are read from the live documentation and are not in the committed copy (the term-structure and interpolated-IV distributions, the option sentiment and its top list, the daily report).
+
+| Family | Paths | Used | Planned | Unused |
+| --- | --- | --- | --- | --- |
+| alerts | 4 | 0 | 0 | 4 |
+| analytics | 2 | 2 | 0 | 0 |
+| calendar | 1 | 1 | 0 | 0 |
+| commodities | 1 | 1 | 0 | 0 |
+| companies | 6 | 4 | 1 | 1 |
+| congress | 8 | 8 | 0 | 0 |
+| crypto | 4 | 4 | 0 | 0 |
+| darkpool | 3 | 3 | 0 | 0 |
+| digital-currencies | 2 | 2 | 0 | 0 |
+| earnings | 3 | 3 | 0 | 0 |
+| economy | 1 | 1 | 0 | 0 |
+| etfs | 5 | 5 | 0 | 0 |
+| forex | 3 | 3 | 0 | 0 |
+| futures | 5 | 5 | 0 | 0 |
+| group-flow | 2 | 2 | 0 | 0 |
+| insider | 4 | 4 | 0 | 0 |
+| institution | 5 | 5 | 0 | 0 |
+| institutions | 2 | 2 | 0 | 0 |
+| lit-flow | 2 | 2 | 0 | 0 |
+| market | 12 | 12 | 0 | 0 |
+| net-flow | 1 | 1 | 0 | 0 |
+| news | 1 | 1 | 0 | 0 |
+| option-activity | 1 | 1 | 0 | 0 |
+| option-contract | 4 | 4 | 0 | 0 |
+| option-trades | 8 | 6 | 0 | 2 |
+| options-pulse | 3 | 1 | 0 | 2 |
+| politician-portfolios | 5 | 5 | 0 | 0 |
+| politics | 6 | 4 | 0 | 2 |
+| potus | 2 | 0 | 1 | 1 |
+| predictions | 9 | 8 | 0 | 1 |
+| private-markets | 9 | 9 | 0 | 0 |
+| screener | 3 | 3 | 0 | 0 |
+| seasonality | 4 | 4 | 0 | 0 |
+| short_screener | 1 | 1 | 0 | 0 |
+| shorts | 6 | 5 | 0 | 1 |
+| socket | 19 | 0 | 0 | 19 |
+| stock | 56 | 43 | 0 | 13 |
+| stock-directory | 1 | 1 | 0 | 0 |
+| volatility | 3 | 3 | 0 | 0 |
+| **Total** | **217** | **169** | **2** | **46** |
+
+### Registered by the census
+
+| Operation | Status | Registry id | Plan | Wire | Reader value | Decision |
+| --- | --- | --- | --- | --- | --- | --- |
+| `/api/calendar/ipo` | added | ipo-calendar | Advanced | not observed | listings dated in the next three months with ticker, venue and price range; nothing on the site lists new issues | built: one nightly call in the events leg (`FLOWS_IPO_NIGHTLY`, on), shaped by `shared/flows-ipo.js` into `events.ipo` (92 calendar days, 40 rows, a range kept only with both ends positive and ordered and a stated currency), shown on the Events page's IPOs tab behind `FLOWS_IPO` (shipped `owner` until it has been read on real data) |
+| `/api/companies/listings` | planned | listings | Advanced | not observed | securities delisted as of a date | planned: tells a name that left the universe because it was delisted from one that fell out of the screen, for the record and the roster; needs a nightly diff against the prior universe |
+| `/api/potus/schedule` | planned | potus-schedule | Advanced | not observed | the President's public schedule for a date | planned: scheduled appearances beside the macro calendar as event context; third-party text, so it needs the dossier sanitiser and a sentence that claims no market effect |
+
+### Unused families, with the reason
+
+- `alerts` (4): the account's own alert configuration and grammar on the feed; the site keeps its own rules, so none carries reader value.
+- `socket` (19): the WebSocket channels. The rail already joins `price`, `gex`, `flow_alerts` and `news` over the socket upstream (`RT_UPSTREAM`), which the REST registry does not list; `trading_halts` is WP6's; the rest duplicate REST reads the rail polls.
+- `option-trades` (2): `/api/option-trades` is an entitlement probe only, and the dated whole-session download is one file per session, far past the ingest cap and the nightly deadline.
+- `options-pulse` (2): `sectors` and `top` document no response fields (`additionalProperties` only), so no read list can be written from the spec; the total is read.
+- `politics` (2): lobbying and people by company are Enterprise only.
+- `potus` (1): the posts are a real person's social media text; no figure, a large sanitiser surface and a market-effect claim the site will not make.
+- `predictions` (1): `search-users` looks up individual traders by name; never called.
+- `companies` (1): call transcripts, per the per-name table.
+- `shorts` (1): interest-float version 1 is deprecated; version 2 is read.
+- `stock` (13): duplicates of read operations (statements, earnings, flow alerts, spot exposures by expiry), Enterprise ownership, an empty schema (options pulse), the quote entitlement probe, two retired reads, technical indicators computed from held candles, and `{sector}/tickers`, which the universe's sector column already answers.
+
 ## The screener is the cheapest lever
 
 `/api/screener/stocks` is harvested for the whole screened universe every night. The wire (the 2026-10-04 shape manifest) carries about 200 keys a row; the committed spec documents 45 and the probe list's `expect` has 204 from the live documentation. `UNIVERSE_COLUMNS` reads about 35. The rest cost no call and are not stored: dividend dates and amounts (`next_dividend_date`, `latest_dividend`, `latest_dividend_date`, `latest_dividend_payment_date`, `ttm_dividend`, `dividend_yield`), the other tenors of `volatility_N` and `implied_move_perc_N`, `iv_percentile_1m`, `eps_growth_N`, `insider_*_volume_N`, `etf_share_flow`, `earnings_perc`, the moving averages and oscillators, the daily gamma components and the premium sides. The mentor's rule for storing them is a nightly unit check against the screener's own other fields (a family is unlocked for seven days after its last pass, otherwise its fields print an em dash with the reason unit unverified); it is not built on this branch and is listed under what remains in the pull request.

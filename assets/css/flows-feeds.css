@@ -342,6 +342,9 @@ a.fe-erow:hover, a.fe-frow:hover { background: var(--fill-4); }
   .fe-mrow > .fe-modd::before { content: "Market price "; color: var(--label-3); }
   .fe-mrow.fu-head > :nth-child(5) { display: none; }
 }
+.fe-irow { grid-template-columns: 44px minmax(0, 1fr) 62px 104px; }
+.fe-iex { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--label-2); font: var(--t-caption); white-space: nowrap; }
+@media (max-width: 640px) { .fe-irow { grid-template-columns: 44px minmax(0, 1fr) 104px; gap: 8px; } .fe-irow > .fe-iex, .fe-irow.fu-head > :nth-child(3) { display: none; } }
 .fe-modd { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .fe-mname { display: flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap; }
 .fe-mname b { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }

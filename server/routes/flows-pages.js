@@ -58,7 +58,7 @@ const PAGES = Object.freeze([
   { slug: "unusual", render: (username, summary, owner) => FLOWS_PAGES.unusualPage({ username, owner }) },
   { slug: "ledger", gate: "FLOWS_LEDGER", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.ledgerPage({ username, live: ledgerLiveOn(env, owner) }) },
   { slug: "macro", open: "macro", render: (username, summary, owner, scenes, env, voldesk, gates) => FLOWS_PAGES.macroPage({ username, live: gates.macroLiveOn(env, owner) }) },
-  { slug: "events", render: (username, summary, owner, scenes, env, voldesk, gates) => FLOWS_PAGES.eventsPage({ username, odds: gates.macroOn(env, owner) }) },
+  { slug: "events", render: (username, summary, owner, scenes, env, voldesk, gates) => FLOWS_PAGES.eventsPage({ username, odds: gates.macroOn(env, owner), ipo: ipoOn(env, owner) }) },
   { slug: "political", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.politicalPage({ username, layers: positioningMode(env, owner) }) },
   { slug: "positioning", gate: "FLOWS_POSITIONING", render: (username) => FLOWS_PAGES.positioningPage({ username }) },
   { slug: "status", ownerOnly: true, render: (username) => FLOWS_PAGES.statusPage({ username }) },
@@ -85,6 +85,13 @@ const GET_HEAD = ["GET", "HEAD"];
 const html = (body) => new Response(body, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
 
 const slashed = (slug) => "/flows/" + (slug === "" ? "" : slug + "/");
+
+export const IPO_SWITCH = "FLOWS_IPO";
+
+export function ipoOn(env, owner) {
+  const mode = String((env && env[IPO_SWITCH]) || "").trim().toLowerCase();
+  return mode === "on" || (mode === "owner" && owner === true);
+}
 
 export function flowsPageRows(deps) {
   const { currentFlowsUser, readFlowsSummary, isOwner, scenesOn = () => false, voldeskOn = () => false, macroOn = () => false, macroLiveOn = () => false } = deps;
