@@ -134,3 +134,17 @@ Found, not fixed yet:
 - Macro: Copper is dated Sep 1 and WTI Nov 17 (shown honestly, but old).
 - Ticker page on the phone scrolls (about 1,100 px).
 - Lab sign-in gate turns the nightly red from 27 November (owner action: sign in to the Lab once).
+
+## Finishing pass (asked 21 November): ready for outside readers
+
+Rule for every page: each figure says what it covers, is recomputed from the stored payload, and no label needs explaining.
+
+Order of work (one pull request each, after the open chain #327 to #331 and the live-check fixes):
+1. Coverage first. Home and Unusual lead with whole-session option premium (calls plus puts over the 822 screened names, the index options and the funds; tens of billions), then show the flagged set as a stated share of it. Today the headline $895M to $916M is only the 179 largest alert windows the nightly keeps from one page of 239. Raise what is read (more pages of the alert list) and say "N windows of M".
+2. Rename "Flagged". On first use: "Unusual-activity alerts" with one line on what an alert is; the short label stays consistent across Home, Unusual, Market, Ledger, Fire.
+3. Network motion. Retire Ambient (white dashes, breathing, sway) on Home and Unusual. Keep only the arrival flare for new data. Still frame at rest.
+4. Home tiles that say too little: Headlines becomes a readable list (source, time in TRT, tickers); Volatility, What changed, Nearly in get a plain label under each numeral.
+5. Moves, rebuilt around one question, "what moved more than it should have": ranked list first, the field second, each row with the reason in words. Bad inputs held out (done in the live-check branch).
+6. Per-page audit, in sidebar order: recompute every number from the API payload, check every empty state has a reason, every time is TRT, nothing is cut, nothing overlaps (orb included), and write the result here page by page.
+7. Stored wording: after Monday night's run, re-check that no stored note says "vendor".
+8. Known data gaps to close or state on the page: positioning rotation (fix waits for Monday night's run), sector breakdown reducer (18% refused), old macro quotes (Copper Sep 1).
