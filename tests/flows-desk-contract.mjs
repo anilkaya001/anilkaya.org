@@ -769,11 +769,11 @@ try {
         const marks = svg.querySelectorAll("g circle, g rect, g path").length;
         return { label: svg.getAttribute("aria-label"), front: svg.querySelectorAll(".dk-front").length, marks };
       });
-      ok(/Annualised yield, square-root scale, against net delta for 3 lines/.test(chart.label), `the frontier is a chart of every priced line, with a text alternative that names its scale and its axis (${chart.label})`);
+      ok(/Return on cash, time value over collateral, not annualised, against net delta for 3 lines/.test(chart.label), `the frontier is a chart of every priced line, with a text alternative that names its scale and its axis (${chart.label})`);
       ok(chart.marks >= 3, "one mark per line");
       await probe.locator("#dkFrontierM .ui-seg-i", { hasText: "Win % (implied)" }).click();
       await probe.waitForFunction(() => /implied chance of profit/.test(document.querySelector("#dkScatter svg")?.getAttribute("aria-label") || ""), null, { timeout: 5000 }).catch(() => {});
-      ok(/Annualised yield, square-root scale, against the implied chance of profit/.test(await probe.locator("#dkScatter svg").getAttribute("aria-label")),
+      ok(/Return on cash, time value over collateral, not annualised, against the implied chance of profit/.test(await probe.locator("#dkScatter svg").getAttribute("aria-label")),
          "and the risk axis switches from net delta to the implied chance of profit");
       await probe.locator("#dkScatter .tl-scrub").focus();
       await probe.keyboard.press("ArrowRight");

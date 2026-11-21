@@ -107,8 +107,26 @@
     return chance ? out.reverse() : out;
   }
 
+  function frontiersOf(pts, chance) {
+    const by = new Map();
+    for (const p of pts) { const k = (p.r && p.r.expiry) || ""; if (!by.has(k)) by.set(k, []); by.get(k).push(p); }
+    return [...by.keys()].sort().map((k) => frontierOf(by.get(k), chance));
+  }
+
+  function returnAxis(sorted) {
+    const p95 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))];
+    const cap = Math.max(0.002, Math.min(sorted[sorted.length - 1], p95 * 4) * 1.04);
+    const lo = Math.min(0, Math.max(sorted[0], -cap) * 1.04);
+    const raw = (cap - lo) / 5, mag = 10 ** Math.floor(Math.log10(raw)), e = raw / mag;
+    const step = (e >= 7.5 ? 10 : e >= 3.5 ? 5 : e >= 1.5 ? 2 : 1) * mag;
+    const d = step >= 0.01 - 1e-12 ? 0 : step >= 0.001 - 1e-12 ? 1 : 2;
+    const ticks = [];
+    for (let i = Math.ceil(lo / step - 1e-9); i * step <= cap + 1e-12; i++) ticks.push({ v: +(i * step).toFixed(10), text: (i < 0 ? "\u2212" : "") + Math.abs(i * step * 100).toFixed(d) + "%" });
+    return { lo, cap, step, ticks };
+  }
+
   if (typeof document === "undefined") {
-    globalThis.__FlowsDeskTest = Object.freeze({ TENORS, parseBuyingPower, sizeRow, betterDeployment, netDelta, frontierOf, roundCents, premiumLine, ratioText, centsText, ratioFraction });
+    globalThis.__FlowsDeskTest = Object.freeze({ TENORS, parseBuyingPower, sizeRow, betterDeployment, netDelta, frontierOf, frontiersOf, returnAxis, roundCents, premiumLine, ratioText, centsText, ratioFraction });
     return;
   }
 
@@ -1016,39 +1034,39 @@
     const rows = (view.shown || []).filter((r) => r.__eng);
     if (!rows.length) { emptyFrontier(host, H, phone); return; }
     const xOf = axis === 0 ? netOf : popQ;
-    const pts = rows.map((r) => ({ r, x: xOf(r), y: isNum(r.annualized) })).filter((p) => p.x !== null && p.y !== null);
+    const pts = rows.map((r) => ({ r, x: xOf(r), y: isNum(r.yieldOnCollateral) })).filter((p) => p.x !== null && p.y !== null);
     if (!pts.length) { host.append(UI.silent({ state: "withheld", reason: T("fr-none") }, "Frontier", H)); return; }
     const ys = pts.map((p) => p.y).sort((a, b) => a - b);
-    const p95 = ys[Math.min(ys.length - 1, Math.floor(ys.length * 0.95))];
-    const cap = Math.max(0.05, Math.min(ys[ys.length - 1], p95 * 8) * 1.04);
+    const ax = returnAxis(ys), cap = ax.cap;
     const left = 44, right = 16, top = 24, bottom = 26;
     const x0 = axis === 0 ? 0 : Math.max(0, Math.min(...pts.map((p) => p.x)) - 0.03), x1 = axis === 0 ? Math.max(0.1, Math.max(...pts.map((p) => p.x)) * 1.08) : 1;
-    const x = C.lin(x0, x1, left, w - right), yl = C.lin(0, Math.sqrt(cap), H - bottom, top);
-    const y = (v) => yl(Math.sqrt(Math.max(0, v)));
+    const x = C.lin(x0, x1, left, w - right), yl = C.lin(ax.lo, cap, H - bottom, top);
+    const y = (v) => yl(Math.max(ax.lo, v));
     const box = h("div", { class: "tl-scrub" });
     host.append(box);
     const svg = C.svgRoot(box, w, H, animate && !mods.quick, T("fr-aria", { x: axis === 0 ? "net delta" : "the implied chance of profit", n: pts.length }));
-    s("line", { x1: left, x2: w - right, y1: H - bottom, y2: H - bottom, class: "base" }, svg);
+    s("line", { x1: left, x2: w - right, y1: y(0), y2: y(0), class: "base" }, svg);
     let lastY = Infinity;
-    for (const t of [0, 0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32]) {
-      if (t > cap || lastY - y(t) < 40) continue;
-      lastY = y(t);
-      s("text", { x: left - 8, y: y(t) + 4, text: Math.round(t * 100) + "%", "text-anchor": "end" }, svg);
+    for (const t of ax.ticks) {
+      if (lastY - y(t.v) < 24) continue;
+      lastY = y(t.v);
+      s("text", { x: left - 8, y: y(t.v) + 4, text: t.text, "text-anchor": "end", "data-v": String(t.v) }, svg);
     }
-    s("text", { x: 2, y: 11, text: "Ann. yield, square-root scale", class: "tx-3" }, svg);
+    s("text", { x: 2, y: 11, text: phone ? "Return on cash, not annualised" : "Return on cash: time value ÷ collateral, not annualised", class: "tx-3" }, svg);
     for (const t of C.niceTicks(x0, x1, phone ? 4 : 6)) {
       if (x(t) < left + 8 || x(t) > w - right - 8) continue;
       s("text", { x: x(t), y: H - 7, text: axis === 0 ? t.toFixed(2).replace(/^0/, "") : Math.round(t * 100) + "%", "text-anchor": "middle" }, svg);
     }
     s("text", { x: w - right, y: H - bottom - 6, text: axis === 0 ? "Net delta" : WIN_Q, "text-anchor": "end", class: "tx-3" }, svg);
-    const fr = frontierOf(pts, axis === 1);
-    const frSet = new Set(fr);
-    if (fr.length > 1) {
+    const frs = frontiersOf(pts, axis === 1);
+    const frSet = new Set(frs.flat());
+    for (const fr of frs) {
+      if (fr.length < 2) continue;
       const P = fr.map((p) => [x(p.x), y(Math.min(p.y, cap))]);
       const inScale = fr.findIndex((p) => p.y > cap);
       const cut = inScale < 0 ? P.length : Math.max(1, inScale);
-      s("path", { d: C.pathOf(P.slice(0, cut)), class: "ln dk-front" + (animate && !mods.quick ? " draw" : ""), pathLength: 1 }, svg);
-      if (cut < P.length) s("path", { d: C.pathOf(P.slice(cut - 1)), class: "ln dk-front is-off" }, svg);
+      s("path", { d: C.pathOf(P.slice(0, cut)), class: "ln dk-front" + (animate && !mods.quick ? " draw" : ""), pathLength: 1, "data-expiry": fr[0].r.expiry }, svg);
+      if (cut < P.length) s("path", { d: C.pathOf(P.slice(cut - 1)), class: "ln dk-front is-off", "data-expiry": fr[0].r.expiry }, svg);
     }
     const syms = [...new Set(pts.map((p) => p.r.__sym))];
     const g = s("g", { class: animate && !mods.quick ? "fade" : null }, svg);
@@ -1071,14 +1089,14 @@
         const p = order[i], r = p.r;
         const pc = r.__pc || premiumLine(r), pcText = pc.ok ? ratioText(pc.premiumC, pc.collateralC) : DASH;
         return {
-          noLine: true, top: Math.max(0, y(Math.min(p.y, cap)) - 40), say: r.ticker + " " + kf(r.strike) + ", " + fmtPct(r.annualized, 0) + " annualised, premium over collateral " + pcText,
+          noLine: true, top: Math.max(0, y(Math.min(p.y, cap)) - 40), say: r.ticker + " " + kf(r.strike) + ", " + fmtPct(p.y, 2) + " return on cash over " + r.days + " days, not annualised, premium over collateral " + pcText,
           parts: [C.part(r.ticker + " " + kf(r.strike) + (r.strategy === "cc" ? " call" : " put"), null), C.part(F.day(r.expiry), "k"),
-            h("b", null, fmtPct(r.annualized, 0)), C.part(pcText + " of collateral", "k"), C.part(axis === 0 ? "Net Δ " + fmt2(p.x) : fmtPct(p.x, 0), "k")],
+            h("b", null, fmtPct(p.y, 2)), C.part("over " + r.days + "d", "k"), C.part(pcText + " of collateral", "k"), C.part(axis === 0 ? "Net Δ " + fmt2(p.x) : fmtPct(p.x, 0), "k")],
         };
       },
     });
     box.setAttribute("aria-label", T("fr-key"));
-    mods.legend.replaceChildren(UI.legend([...syms.map((sym) => [colorOf(sym), "dot", sym]), ["--label-2", "dot", "Put"], ["--label-2", "dia", "Call"], ["--label-1", "ln", "Frontier"]]), ...(view.shown.length > pts.length ? [h("p", { class: "dk-hint" }, T("unplotted", { n: view.shown.length - pts.length }))] : []));
+    mods.legend.replaceChildren(UI.legend([...syms.map((sym) => [colorOf(sym), "dot", sym]), ["--label-2", "dot", "Put"], ["--label-2", "dia", "Call"], ["--label-1", "ln", "Frontier, one per expiry"]]), ...(view.shown.length > pts.length ? [h("p", { class: "dk-hint" }, T("unplotted", { n: view.shown.length - pts.length }))] : []));
     mods.quick = false;
   }
 
@@ -1492,7 +1510,7 @@
 
   const initial = readURL();
   window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { deskKit: Object.freeze({
-    UI, h, s, F, glyph, DASH, MINUS, C, T, Q, isNum, fmt2, fmtPct, fmtInt, fmtSd, fmtMoney, usd, kf, colorOf, roundCents, centsText, ratioText, ratioFraction, frontierOf, netDelta, mods, WIN_Q, WIN_P, isItm, labHref, whyText, rateHow,
+    UI, h, s, F, glyph, DASH, MINUS, C, T, Q, isNum, fmt2, fmtPct, fmtInt, fmtSd, fmtMoney, usd, kf, colorOf, roundCents, centsText, ratioText, ratioFraction, frontierOf, frontiersOf, returnAxis, netDelta, mods, WIN_Q, WIN_P, isItm, labHref, whyText, rateHow,
     filters, st: () => ({ side, rank, tenor, axis, buyingPower, bpBad, view, focused, quick: mods.quick }),
     render, focusPoint, chartHeight, forwardText, betterDeployment, recutTerms, winHalf, winHalfOf, priceStruct, bandNote, winText, dashed, EV_P, addFilter: (n) => { mods.terms = n; placeFilters(); }, emptyFrontier, attached: () => { syncRanks(); render(); recutTerms(); },
   }) }));
