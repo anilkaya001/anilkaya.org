@@ -238,11 +238,15 @@
     const seen = n(a.seen);
     const share = (x, w) => (w ? x / w : null);
     const ask = F.askShare(rows);
+    const day = typeof a.sessionDate === "string" ? a.sessionDate : null;
+    const whole = S.session && day && S.session.day === day ? S.session : null;
     host.chips.replaceChildren(UI.chips([
-      UI.gaugeChip({ icon: "unusual", color: "--accent-ink", value: prem ? F.money(prem) : DASH, label: "Premium",
-        info: { title: "Flagged premium", lead: "The feed's total premium across every flagged window in the record.", facts: [["Windows", count(rows.length)]] } }),
-      UI.gaugeChip({ icon: "list", color: "--label-2", value: (floor ? "≥" : "") + count(seen ?? rows.length), label: "Windows",
-        info: { title: "Windows", lead: floor ? "The read hit a ceiling, so this count is a floor." : "Flagged windows held.", facts: [["Drawn", count(rows.length)], ["Seen", seen === null ? null : (floor ? "at least " : "") + count(seen)]] } }),
+      ...(whole ? [UI.gaugeChip({ icon: "market", color: "--label-1", value: F.money(whole.total), label: whole.all ? "All options" : "Index and funds",
+        info: { title: "Whole-session option premium", lead: whole.all ? "Call and put premium traded in the session across every screened name, the index options and the funds." : "Call and put premium traded in the session in the index options and the funds. Single stocks join after the next nightly run.", facts: [["Names and funds", count(whole.names)], ["Session", F.day(whole.day)]] } })] : []),
+      UI.gaugeChip({ icon: "unusual", color: "--accent-ink", value: prem ? F.money(prem) : DASH, label: whole && prem ? "Alerts · " + F.pct(prem / whole.total, prem / whole.total < 0.1 ? 1 : 0) : "Alerts",
+        info: { title: "Alert premium", lead: "An alert is a window of activity in one contract that the feed's unusual-activity rules picked out. This is the premium in the alerts held here, not the market's.", facts: [["Alerts held", count(rows.length)], ...(whole && prem ? [["Share of the session", F.pct(prem / whole.total, 2)]] : [])] } }),
+      UI.gaugeChip({ icon: "list", color: "--label-2", value: (floor ? "≥" : "") + count(seen ?? rows.length), label: "Alert windows",
+        info: { title: "Alert windows", lead: floor ? "The read hit a ceiling, so this count is a floor." : "Flagged windows held.", facts: [["Drawn", count(rows.length)], ["Seen", seen === null ? null : (floor ? "at least " : "") + count(seen)]] } }),
       UI.gaugeChip({ ring: share(call, cpW), color: "--up-mark", value: pct0(share(call, cpW)), label: "Calls",
         info: { title: "Call share", lead: "Call premium as a share of the premium on windows whose contract side could be read." } }),
       UI.gaugeChip({ ring: ask.share, color: "--label-1", value: pct0(ask.share), label: "Ask side",
@@ -444,6 +448,28 @@
     else if (body && typeof body === "object") UI.freshness({ sessionDate: body.sessionDate, generatedAt: body.generatedAt, updatedAt: upd, source });
   }
 
+  function sessionOf(m) {
+    if (!m || typeof m !== "object") return null;
+    const t = m.session ? n(m.session.total) : null;
+    if (t !== null && t > 0) return { total: t, all: true, day: m.sessionDate || null, names: (m.session.stocks ? m.session.stocks.n : 0) + (m.session.funds ? m.session.funds.n : 0) };
+    const rows = m.funds && m.funds.status === "ok" && m.funds.rows && typeof m.funds.rows === "object" ? m.funds.rows : null;
+    if (!rows) return null;
+    let sum = 0, k = 0;
+    for (const key of Object.keys(rows)) {
+      const c = rows[key] ? n(rows[key].cp) : null, q = rows[key] ? n(rows[key].pp) : null;
+      if (c === null || q === null || c < 0 || q < 0) continue;
+      sum += c + q; k++;
+    }
+    return sum > 0 ? { total: sum, all: false, day: m.funds.session || m.sessionDate || null, names: k } : null;
+  }
+
+  function loadSession() {
+    return get("/api/flows/market").then((res) => (res.ok ? res.json() : null)).then((m) => {
+      S.session = sessionOf(m);
+      if (S.session) paintChips();
+    }).catch(() => {});
+  }
+
   function loadAlerts() {
     return get("/api/flows/flowalerts").then((res) => {
       if (res.status === 401) { location.replace("/flows/"); return; }
@@ -554,6 +580,7 @@
   buildFilters();
   wireInfos();
   syncNote();
+  loadSession();
   Promise.all([loadAlerts(), loadFeed()]).then(() => {
     wireInfos();
     streamFlow();
