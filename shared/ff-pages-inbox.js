@@ -1,4 +1,4 @@
-import { ABSENT_MARK, DIGEST_QUADRANTS, LIMITS, PAYLOADS } from "./ff-contract.js";
+import { ABSENT_MARK, DIGEST_QUADRANTS, LIMITS } from "./ff-contract.js";
 
 export const INBOX_PAGE = "inbox";
 export const INBOX_PATH = "/flows/inbox/";
@@ -81,7 +81,7 @@ export const DIGEST_STYLES = Object.freeze(["/assets/css/flows-ff-tokens.css", "
 export const DIGEST_SCRIPTS = Object.freeze(["/assets/js/flows-ff-kernel.js", "/assets/js/flows-ff-client.js", "/assets/js/flows-ff-digest.js"]);
 export const DIGEST_SHADOW_LINE = "Running in shadow: wires are evaluated, hits are not delivered yet. Every hit is held, so the lists stay empty; the receipts lines are real.";
 export const DIGEST_SHADOW_PAST_LINE = "Running in shadow: wires are evaluated, hits are not delivered now. The hits listed here were delivered before shadow began; the receipts lines are real.";
-export const DIGEST_CALIBRATION_LINE = ABSENT_MARK + " not released: the calibration leg that writes " + PAYLOADS.calibration.key + " is not built yet, so no wire has a calibration figure.";
+export const DIGEST_CALIBRATION_LINE = ABSENT_MARK + " not released: no wire has a calibration figure yet.";
 export const DIGEST_COLUMNS = Object.freeze([
   Object.freeze({ id: "house", title: "House", quadrants: Object.freeze(["house-nightly", "house-live"]) }),
   Object.freeze({ id: "yours", title: "Yours", quadrants: Object.freeze(["yours-nightly", "yours-live"]) }),
@@ -109,7 +109,7 @@ export function digestBody(glyph, { shadow = false } = {}) {
   <div class="ffx ffx-dig" id="ffxDigest" data-ff-page="digest" data-view="house" data-shadow="${shadow ? "1" : "0"}">
     <header class="ffx-title" data-fx-hero>
       <h1 id="fxTitle">Digest</h1>
-      <p class="ffx-cap" id="ffxDigCap" data-ff-absent="reading">${ABSENT_MARK} reading the digest</p>
+      <p class="ffx-cap" id="ffxDigCap" tabindex="-1" data-ff-absent="reading">${ABSENT_MARK} reading the digest</p>
       <a class="ffx-dig-latest" id="ffxDigLatest" href="${DIGEST_PATH}" hidden>Latest session</a>
       <button type="button" class="ffx-dig-btn" id="ffxDigRetry" hidden>Retry</button>
       <button type="button" class="ffx-ibtn" id="ffxDigInfoBtn" aria-haspopup="dialog" aria-label="How the Digest works">${g("info")}</button>
@@ -142,7 +142,7 @@ export function digestBody(glyph, { shadow = false } = {}) {
       <p>The Digest is one session's delivered hits in four quadrants: house wires and yours, each read nightly or live.</p>
       <p>Each quadrant ends with its receipts line: how many armed wires were evaluated for the session, and why any were not.</p>
       <p>It is computed when you open it, with no model. A wire with more than three hits in the session is grouped.</p>
-      <p>The record counts firings over sessions for each house wire you follow. A figure Flows has not measured is a dash with its reason, never zero.</p>
+      <p>The record counts firings over sessions for every house wire, whether or not you follow it. A figure Flows has not measured is a dash with its reason, never zero.</p>
       <p>No price outcome is scored anywhere. Times are in TRT.</p>
       <div class="ffx-dig-dx"><button type="button" class="ffx-dig-btn" data-close>Close</button></div>
     </div>

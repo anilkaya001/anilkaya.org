@@ -226,6 +226,7 @@
 
 .ffx-dig-dlg { border: 0; border-radius: var(--r-lg); padding: 0; background: var(--glass-solid-thick); color: var(--label-1); box-shadow: var(--lift-3); }
 .ffx-dig-dlg::backdrop { background: var(--scrim); }
+.ffx-dig-dlg .ffx-dig-s, .ffx-dig-dlg .ffx-dig-inc, .ffx-dig-dlg .ffx-clip { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 .ffx-dig-dg { padding: var(--sp-5); display: flex; flex-direction: column; gap: 10px; font: var(--t-footnote); }
 .ffx-dig-dg h2 { margin: 0; font: 600 18px / 1.2 var(--font-text); }
 .ffx-dig-dg p { margin: 0; }
