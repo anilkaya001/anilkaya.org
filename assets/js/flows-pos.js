@@ -21,6 +21,7 @@
   const STATE = {
     loading: "Loading the positioning read.",
     pending: "The first positioning read lands after tonight's run.",
+    held: "No tracked filer has two quarters on record yet.",
     quietRotation: "No filer had both quarters on file to compare.",
     quietFilings: "No filing is on record in the window.",
     quietInsiders: "No insider rows came back for any sector.",
@@ -172,7 +173,7 @@
   function stateBox(section, quiet) {
     const box = el("div", "pos-state");
     const st = section ? section.status : "pending";
-    if (st === "pending") box.append(el("b", null, STATE.pending), el("span", null, WHY.unread));
+    if (st === "pending") box.append(el("b", null, section && section.filers && section.filers.tracked > 0 ? STATE.held : STATE.pending), el("span", null, WHY.unread));
     else if (st === "unavailable") box.append(el("b", null, WHY[section.why] || WHY.failed));
     else box.append(el("b", null, quiet));
     return box;

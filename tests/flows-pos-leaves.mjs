@@ -285,4 +285,41 @@ const failures = (b) => Object.values(b).flat();
   for (const n of names) eq(browser(n), PL.initialsOf(n), `THE BROWSER'S INITIALS EQUAL THE LEAF'S: ${JSON.stringify(n)}`);
 }
 
+{
+  const row = (sector, q, value, n = 5) => ({ sector, report_date: q, value, positions: n, positions_increased: 2, positions_decreased: 1, positions_closed: 1 });
+  const strings = P13.sectorEntry([row("Technology", "2026-09-30", "1948023952"), row("Energy", "2026-09-30", "43952.0", "7"), row("Technology", "2026-06-30", 1500)], "2026-11-20");
+  assert.deepEqual(strings.qs, ["2026-09-30", "2026-06-30"], "A SECTOR BOOK WHOSE NUMBERS ARRIVE AS TEXT keeps both quarters"); checks++;
+  assert.deepEqual(strings.rows, [[9, 0, 1948023952, 5, 2, 1, 1], [4, 0, 43952, 7, 2, 1, 1], [9, 1, 1500, 5, 2, 1, 1]], "and every row, as whole numbers"); checks++;
+  assert.equal(strings.bad, 0, "with none refused"); checks++;
+  for (const v of ["-5", "1.5", "1e9", "", " 12", null, undefined, -1, 1.5, NaN]) { assert.equal(P13.countOf(v), null, "countOf refuses " + String(v)); checks++; }
+  assert.equal(P13.sectorEntry([row("Technology", "2026-09-30", "12.5")], "2026-11-20").bad, 1, "a value that is not a whole number is still refused"); checks++;
+
+  const { readPositioning } = await import("../scripts/flows-legs/positioning.mjs");
+  const CIK = "0000102909";
+  const asked = [];
+  const uw = async (pathname, params) => {
+    asked.push([pathname, { ...params }]);
+    if (pathname === "/api/institutions") return { data: [{ cik: CIK, name: "SYX FUNDS INC /MD/", is_hedge_fund: false, total_value: "900", filing_date: "2026-11-16", date: "2026-09-30" }] };
+    if (pathname === "/api/institutions/latest_filings") return { data: [] };
+    if (pathname === "/api/institution/" + CIK + "/sectors") return { data: [row("Technology", params.date ? "2026-06-30" : "2026-09-30", "100")] };
+    if (pathname.startsWith("/api/institution/")) return { data: [] };
+    return { data: [] };
+  };
+  const got = await readPositioning({ uw, sessionDate: "2026-11-20" });
+  const sectorCalls = asked.filter(([p]) => p.endsWith("/sectors"));
+  assert.ok(asked.filter(([p]) => p.startsWith("/api/institution/")).every(([p]) => p.startsWith("/api/institution/" + CIK + "/")), "THE LEG ASKS FOR A FILER BY ITS ID, never by a name with spaces and slashes: " + asked.map(([p]) => p).join(" ")); checks++;
+  assert.deepEqual(sectorCalls.map(([, q]) => q.date || null), [null, "2026-06-30"], "a book that answers with one quarter is asked once more for the quarter before"); checks++;
+  assert.deepEqual(P13.sectorEntry(got.sectorsByCik[CIK], "2026-11-20").qs, ["2026-09-30", "2026-06-30"], "and the two quarters are joined"); checks++;
+  assert.deepEqual(got.sectorReads, { asked: 1, failed: 0, empty: 0, one: 0, two: 1, second: 1 }, "and the read is counted for the stage record"); checks++;
+
+  const plants = [
+    ["a filer asked for by name", [['ask("inst-sectors", { limit: 40 }, { name: f.cik })', 'ask("inst-sectors", { limit: 40 }, { name: f.name })']], async (m) => { const a = []; await m.readPositioning({ uw: async (p, q) => { a.push(p); return uw(p, q); }, sessionDate: "2026-11-20" }); return a.filter((p) => p.startsWith("/api/institution/")).every((p) => p.startsWith("/api/institution/" + CIK + "/")); }],
+    ["no second read for the earlier quarter", [["if (qs.length === 1 && quarterBefore(qs[0])) {", "if (false) {"]], async (m) => (await m.readPositioning({ uw, sessionDate: "2026-11-20" })).sectorReads.two === 1],
+  ];
+  for (const [name, transforms, holds] of plants) {
+    const m = await loadMutated("scripts/flows-legs/positioning.mjs", transforms);
+    assert.ok(!(await holds(m)), "A PLANTED WRONG BUILD (" + name + ") is caught"); checks++;
+  }
+}
+
 console.log(`✓ flows-pos-leaves: ${checks} assertions — every pure positioning leaf held to an exact rational oracle over 300 rotation worlds, 50 insider worlds, 100 short worlds, the exchange calendar's session lags, returns against the index and initials, plus the hand cases of the tracked set and the read plan, and ${25}+ planted wrong builds that each fail`);

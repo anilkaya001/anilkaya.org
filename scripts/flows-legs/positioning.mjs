@@ -1,6 +1,6 @@
 import { read, rowsOf, pastDeadline } from "./common.mjs";
 import { pathFor } from "../../shared/flows-vendor-ops.js";
-import { SECTOR_ORDER, TRACK, daysBetween, planFilers, trackFilers } from "../../shared/flows-pos-13f.js";
+import { SECTOR_ORDER, TRACK, daysBetween, planFilers, quarterBefore, sectorQuarters, trackFilers } from "../../shared/flows-pos-13f.js";
 
 export const REFUSAL_DAYS = 7;
 
@@ -75,9 +75,20 @@ export async function readPositioning({
 
   const sectorsByCik = {};
   const toRead = planFilers(tracked, ledger, sessionDate);
+  const sectorReads = { asked: 0, failed: 0, empty: 0, one: 0, two: 0, second: 0 };
   await each(toRead, async (f) => {
-    const res = await ask("inst-sectors", { limit: 40 }, { name: f.name });
-    sectorsByCik[f.cik] = res.ok ? res.rows : { __failed: res.kind };
+    sectorReads.asked++;
+    const res = await ask("inst-sectors", { limit: 40 }, { name: f.cik });
+    if (!res.ok) { sectorReads.failed++; sectorsByCik[f.cik] = { __failed: res.kind }; return; }
+    let rows = res.rows;
+    let qs = sectorQuarters(rows);
+    if (qs.length === 1 && quarterBefore(qs[0])) {
+      sectorReads.second++;
+      const earlier = await ask("inst-sectors", { limit: 40, date: quarterBefore(qs[0]) }, { name: f.cik });
+      if (earlier.ok) { rows = rows.concat(earlier.rows.filter((r) => r && r.report_date !== qs[0])); qs = sectorQuarters(rows); }
+    }
+    sectorReads[qs.length === 0 ? "empty" : qs.length === 1 ? "one" : "two"]++;
+    sectorsByCik[f.cik] = rows;
   });
 
   const activityByCik = {};
@@ -90,13 +101,13 @@ export async function readPositioning({
   await each(fresh, async (f) => {
     const stored = ledger[f.cik];
     const params = { limit: 200, ...(stored && stored.r ? { start_date: stored.r } : {}) };
-    let res = await ask("inst-activity", params, { name: f.name });
+    let res = await ask("inst-activity", params, { name: f.cik });
     if (!res.ok && gone(res) && v1Used < ACTIVITY_V1_MAX) {
       v1Used++;
-      res = await ask("inst-activity-v1", params, { name: f.name });
+      res = await ask("inst-activity-v1", params, { name: f.cik });
     }
     if (res.ok && res.rows.length) { activityByCik[f.cik] = res.rows; return; }
-    const hold = await ask("inst-holdings", { limit: 100, order: "value", order_direction: "desc" }, { name: f.name });
+    const hold = await ask("inst-holdings", { limit: 100, order: "value", order_direction: "desc" }, { name: f.cik });
     if (hold.ok) holdingsByCik[f.cik] = hold.rows;
     else if (!res.ok) activityByCik[f.cik] = { __failed: res.kind };
   });
@@ -110,5 +121,5 @@ export async function readPositioning({
   log(`  positioning: ${state.calls} call(s): ${tracked.length} filer(s) tracked, ${toRead.length} sector read(s), ${fresh.length} activity read(s)` +
     (Object.keys(refused).length ? `, refused ${Object.keys(refused).join(" ")}` : "") +
     (Object.keys(failed).length ? `, failed ${Object.keys(failed).join(" ")}` : ""));
-  return { list, latest, sectorsByCik, activityByCik, holdingsByCik, insiderBySector, calls: state.calls, refused, failed, tracked: tracked.length, limits: TRACK };
+  return { list, latest, sectorsByCik, activityByCik, holdingsByCik, insiderBySector, sectorReads, calls: state.calls, refused, failed, tracked: tracked.length, limits: TRACK };
 }

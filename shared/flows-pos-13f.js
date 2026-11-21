@@ -98,6 +98,13 @@ export function planFilers(tracked, ledger, now) {
   return picked.slice(0, TRACK.readMax).map((r) => r.f);
 }
 
+const WHOLE = /^\d{1,15}(\.0+)?$/;
+export const countOf = (v) => (isInt(v) && v >= 0 ? v : typeof v === "string" && WHOLE.test(v) ? Number(v.split(".")[0]) : null);
+
+export function sectorQuarters(rows) {
+  return [...new Set((Array.isArray(rows) ? rows : []).map((r) => r && r.report_date).filter(isDay))].sort().reverse();
+}
+
 export function sectorEntry(rows, now) {
   const list = Array.isArray(rows) ? rows : [];
   const dates = [...new Set(list.map((r) => r && r.report_date).filter(isDay))].sort().reverse().slice(0, 2);
@@ -108,8 +115,8 @@ export function sectorEntry(rows, now) {
     const qi = r ? dates.indexOf(r.report_date) : -1;
     const si = r ? SECTOR_ORDER.indexOf(r.sector) : -1;
     if (qi < 0) continue;
-    const ints = [r.value, r.positions, r.positions_increased, r.positions_decreased, r.positions_closed];
-    if (si < 0 || !ints.every((x) => isInt(x) && x >= 0)) { bad++; continue; }
+    const ints = [r.value, r.positions, r.positions_increased, r.positions_decreased, r.positions_closed].map(countOf);
+    if (si < 0 || !ints.every((x) => x !== null)) { bad++; continue; }
     out.push([si, qi, ...ints]);
   }
   return { qs: dates, rows: out, bad, rd: now };

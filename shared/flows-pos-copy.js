@@ -34,6 +34,7 @@ export const WHY = Object.freeze({
 export const STATE_SENTENCES = Object.freeze({
   loading: "Loading the positioning read.",
   pending: "The first positioning read lands after tonight's run.",
+  held: "No tracked filer has two quarters on record yet.",
   quietRotation: "No filer had both quarters on file to compare.",
   quietFilings: "No filing is on record in the window.",
   quietInsiders: "No insider rows came back for any sector.",

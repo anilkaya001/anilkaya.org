@@ -44,7 +44,7 @@ export function buildPositioning(input) {
   const {
     sessionDate, generatedAt, now = Date.parse(generatedAt), universe = {}, list = [], latest = [],
     sectorsByCik = {}, activityByCik = {}, holdingsByCik = {}, insiderBySector = {}, psByTicker = {}, advByTicker = {},
-    prior = null, refused = {}, failed = {}, calls = 0, fixture = false,
+    prior = null, refused = {}, failed = {}, calls = 0, fixture = false, sectorReads = null,
   } = input;
   const tracked = trackFilers(list, prior, sessionDate);
   const reads = {};
@@ -77,7 +77,7 @@ export function buildPositioning(input) {
   const { unread: insiderUnread, bad: insiderBad, ...insidersOut } = insiders;
   const payload = {
     v: POSITIONING_VERSION, sessionDate, generatedAt,
-    basis: { calls, refused: { ...refused }, failed: { ...failed }, insiderUnread, insiderBad, tracked: tracked.length },
+    basis: { calls, refused: { ...refused }, failed: { ...failed }, insiderUnread, insiderBad, tracked: tracked.length, ...(sectorReads ? { sectorReads: { ...sectorReads } } : {}) },
     rotation: rot,
     filings,
     insiders: insidersOut,

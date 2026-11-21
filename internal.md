@@ -10,8 +10,10 @@ If the session stops (usage limit, restart), nothing here is lost: every item be
 
 | Item | Pull request | State | What is left |
 |---|---|---|---|
-| Premium desk frontier: Return on cash | #337 | In CI (third round) | Merge when the checks pass |
-| Fire & Forget: Wires page | #326 | All 16 review findings fixed and tested locally | Push after #337 merges, CI, merge |
+| Fire & Forget: Wires page | #326 | All 16 review findings fixed; in CI | Merge when the checks pass |
+| Market Floor fund pillars | #327 | 4 review findings fixed and tested locally | Push after #326 merges, CI, merge |
+| Pulse | #328 | 4 review findings fixed and tested locally | Push after #327 merges, CI, merge |
+| Neuron orb docked in the top bar | #329 | 5 review findings fixed and tested locally | Push after #328 merges, CI, merge |
 
 - **Premium desk frontier: Return on cash** (asked 21 Nov). Y axis is now time value ÷ collateral for the contract's life, not annualised, linear from zero, one frontier per expiry. Both charts (puts/covered calls and short calls). Branch `claude/desk-return-on-cash`, worktree roc. PR #337.
 
@@ -40,12 +42,12 @@ Before the usage limit hit on 15 November, two reviewers read each pull request 
 |---|---|---|
 | #324 Digest | 17 over two rounds | Fixed (the second round on 21 November) |
 | #325 Inbox (already live) | 6 from the second round | Not fixed; needs a follow-up pull request |
-| #326 Wires, mark, name panel | 16 | Not fixed |
-| #327 Floor funds | 5 | Not fixed |
-| #328 Pulse | 5 | Not fixed |
-| #329 Orb | 6 | Not fixed |
-| #330 Always-fresh | 6 | Not fixed |
-| #331 Reliable reading | 7 | Not fixed |
+| #326 Wires, mark, name panel | 16 | Fixed and merged 21 November |
+| #327 Floor funds | 5 (4 distinct) | Fixed and merged 21 November |
+| #328 Pulse | 5 (4 distinct) | Fixed and merged 21 November |
+| #329 Orb | 6 (5 distinct) | Fixed and merged 21 November |
+| #330 Always-fresh | 6 | Fixed and merged 21 November |
+| #331 Reliable reading | 7 | Fixed and merged 21 November |
 | #332 Endpoint coverage | 5 | Not fixed |
 | #333 Real time stage 1 | 4 | Not fixed |
 | #334 Safari Home | 5 | Not fixed |
@@ -57,6 +59,8 @@ Before the usage limit hit on 15 November, two reviewers read each pull request 
 |---|---|
 | Landing page: market board centred, redundant title removed, depth-rendered 3D field | #306 and follow-ups |
 | Market Tide on the full universe with market-cap weights | #316 |
+| Premium desk frontier: Return on cash (time value over collateral, not annualised, linear, one frontier per expiry) | #337 (21 Nov) |
+| Fire & Forget: Digest page | #324 (21 Nov) |
 | Fire & Forget transport: budget allocator and pacer; the line no longer eases on two refusals | #317 and earlier |
 | Same background on all pages; sidebar stays open between pages | #318, #319 |
 | Google Sans on every page | #320, #321 |
@@ -109,3 +113,56 @@ To do these I need to be signed in to the site. The saved sign-in is from 14 Nov
 - Merge as soon as the checks are green; no waiting on review.
 - Times in TRT; missing values are a dash with a reason, never a zero; one screen with no scroll at the four standard sizes.
 - The data source is called "the feed" in everything a reader or a model sees.
+
+
+## Live check, 21 November (signed in, every page at four sizes, read-only)
+
+100 page loads: every one answered 200, no script error, no failed request, Google Sans everywhere, TRT only, no "tape", no null or NaN on screen.
+
+Found and fixed (worktree w332, goes out after #331):
+- Positioning: the rotation never filled. All 36 tracked filers were "unread" every night while the page said the first read lands tonight. The nightly now asks for a filer by its id, accepts numbers that arrive as text, asks once more for the earlier quarter when a book answers with one, and records how many books it read. Cannot be proven until Monday night's run; the stage record will say (books, oneQ).
+- Moves: APD and BRO ranked at the top only because the feed's previous-close implied volatility was implausibly low (APD 7.9% against 23% today and 21% realised). Such a value is now held out and the page names the names left out.
+
+Found, clears by itself:
+- "vendor" in the Market caption and the nightly health warning: fixed in code on 21 November (#295), after Friday night's run wrote the stored text. Monday night's run replaces it.
+
+Found, not fixed yet:
+- The nightly's sector breakdown reducer refuses 18% of names (rev_group outside the documented list). Needs the real values; plan: record the refused value's shape in the stage record.
+- The orb covers Ask Neuron on the phone Home and the last switch value on Status: #329 fixes it.
+- Bullish and Bearish boards show five rows with room for one or two more at 1440x820.
+- Market floor on the phone: a few labels touch.
+- Macro: Copper is dated Sep 1 and WTI Nov 17 (shown honestly, but old).
+- Ticker page on the phone scrolls (about 1,100 px).
+- Lab sign-in gate turns the nightly red from 27 November (owner action: sign in to the Lab once).
+
+## Finishing pass (asked 21 November): ready for outside readers
+
+Rule for every page: each figure says what it covers, is recomputed from the stored payload, and no label needs explaining.
+
+Order of work (one pull request each, after the open chain #327 to #331 and the live-check fixes):
+1. Coverage first. Home and Unusual lead with whole-session option premium (calls plus puts over the 822 screened names, the index options and the funds; tens of billions), then show the flagged set as a stated share of it. Today the headline $895M to $916M is only the 179 largest alert windows the nightly keeps from one page of 239. Raise what is read (more pages of the alert list) and say "N windows of M".
+2. Rename "Flagged". On first use: "Unusual-activity alerts" with one line on what an alert is; the short label stays consistent across Home, Unusual, Market, Ledger, Fire.
+3. Network motion. Retire Ambient (white dashes, breathing, sway) on Home and Unusual. Keep only the arrival flare for new data. Still frame at rest.
+4. Home tiles that say too little: Headlines becomes a readable list (source, time in TRT, tickers); Volatility, What changed, Nearly in get a plain label under each numeral.
+5. Moves, rebuilt around one question, "what moved more than it should have": ranked list first, the field second, each row with the reason in words. Bad inputs held out (done in the live-check branch).
+6. Per-page audit, in sidebar order: recompute every number from the API payload, check every empty state has a reason, every time is TRT, nothing is cut, nothing overlaps (orb included), and write the result here page by page.
+7. Stored wording: after Monday night's run, re-check that no stored note says "vendor".
+8. Known data gaps to close or state on the page: positioning rotation (fix waits for Monday night's run), sector breakdown reducer (18% refused), old macro quotes (Copper Sep 1).
+
+## Competitor review, 21 November (signed in with the owner's account, 12 pages, screenshots in scratchpad/rival)
+
+What they have that we lack:
+- Breadth: 12,276 tickers against our 822 screened names.
+- Whole-session figures per name on the first screen (NVDA: 8.99M contracts, $4.26B premium, net premium, calls against puts by 5 minutes). We lead with alerts.
+- A live print-by-print flow list with deep filters (side, ask share, type, expiry, size) and saved filters.
+- A workspace of movable windows with templates and saved layouts.
+- Dealer exposure as a strike by expiry heat map with walls, flip and implied-move marks, per-minute.
+- Charting, a trading journal, predictions, a stock screener, dark-pool prints, earnings, an AI assistant on every page.
+Where we are already ahead or different:
+- One screen per page, no scroll; they are dense tables that scroll and three of twelve pages returned an error.
+- Stated coverage, reasons for every absent figure, TRT, a closed premium ledger, calibrated wires, the Neuron's cited reading.
+- Their figures and ours agree where both show them (NVDA 125.53, -14.01%, after-hours 130.01).
+What this changes in the finishing pass:
+- Step 1 grows: per-name whole-session volume and premium on the ticker page and Home, not only alerts.
+- New step: universe breadth (how far past 822 the nightly can go inside its call budget).
+- New step: a filterable live flow list as a first-class page.

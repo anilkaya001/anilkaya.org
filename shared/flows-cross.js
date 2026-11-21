@@ -353,6 +353,21 @@ function sigmaCell(r, ctx, field) {
   return Number.isFinite(v) && v >= 0 && (field !== "s" || v > 0) ? v : null;
 }
 
+export const IV_PREV_FLOOR = 0.5;
+
+export function prevIvOf(r, ctx) {
+  const v = firstPositive(r.iv30d_1d);
+  if (v === null) return null;
+  const now = iv30Of(r);
+  const s = sigmaCell(r, ctx, "s");
+  if (now === null || s === null) return v;
+  return v < IV_PREV_FLOOR * now && v < IV_PREV_FLOOR * s * Math.sqrt(252) ? null : v;
+}
+
+export const prevIvHeld = (list, ctx) => (Array.isArray(list) ? list : [])
+  .filter((r) => r && typeof r.ticker === "string" && firstPositive(r.iv30d_1d) !== null && prevIvOf(r, ctx) === null)
+  .map((r) => r.ticker).sort();
+
 export const UNIVERSE_COLUMNS = Object.freeze([
   { key: "px", unit: "usd", scale: 100, prio: 1,
     get: (r) => { const v = vnum(r.close); return v !== null && v > 0 ? v : null; } },
@@ -363,7 +378,7 @@ export const UNIVERSE_COLUMNS = Object.freeze([
   { key: "iv30", unit: "vol", scale: 1e3, prio: 1,
     get: (r) => iv30Of(r) },
   { key: "iv30p", unit: "vol", scale: 1e3, prio: 1,
-    get: (r) => firstPositive(r.iv30d_1d) },
+    get: (r, ctx) => prevIvOf(r, ctx) },
   { key: "ivp", unit: "pct100", scale: 1, prio: 1,
     get: (r) => { const v = vnum(r.iv_percentile_1y); return v !== null && v >= 0 && v <= 100 ? v : null; } },
   { key: "ts", unit: "fraction", scale: 1e3, prio: 1,
@@ -544,6 +559,7 @@ export function buildUniverse(rows, {
     edUnstated: edUnstated.map,
     edUnstatedN: edUnstated.n,
     edUnstatedThrough: edUnstated.through,
+    iv30pHeld: prevIvHeld(list, ctx),
     ...(reports ? { rdBasis: basisOf(new Map(list.map((r) => [r.ticker, cellOf(reports, r.ticker)])), { asOf: sessionDate, from: reports.from || null, cutDays: reports.cut || [] }) } : {}),
     shed: [],
     budgetBytes,
@@ -648,5 +664,6 @@ export function projectUniverse(universe, wanted) {
     out.edUnstatedThrough = u.edUnstatedThrough ?? null;
   }
   if (want.includes("rd")) out.rdBasis = u.rdBasis ?? null;
+  if (want.includes("iv30p") && Array.isArray(u.iv30pHeld) && u.iv30pHeld.length) out.iv30pHeld = u.iv30pHeld;
   return out;
 }
