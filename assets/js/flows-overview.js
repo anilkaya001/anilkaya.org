@@ -2100,9 +2100,7 @@
     const rows = ans(alerts) && Array.isArray(alerts.rows) ? alerts.rows : null;
     const m = ans(market) ? market : null;
     if (!rows || !rows.length || !m || m.sessionDate !== alerts.sessionDate) return;
-    let whole = m.session && isNum(m.session.total) !== null && m.session.total > 0 ? m.session.total : 0;
-    const table = !whole && m.funds && m.funds.status === "ok" && m.funds.rows ? m.funds.rows : null;
-    if (table) for (const k of Object.keys(table)) { const c = table[k] ? isNum(table[k].cp) : null, q = table[k] ? isNum(table[k].pp) : null; if (c !== null && q !== null && c >= 0 && q >= 0) whole += c + q; }
+    const whole = m.session && isNum(m.session.total) !== null ? m.session.total : 0;
     const prem = rows.reduce((a, r) => a + (isNum(r && r.prem) ?? 0), 0);
     if (!(whole > 0) || !(prem > 0)) return;
     const floor = alerts.vendorTruncated === true || alerts.readTruncated === true;
