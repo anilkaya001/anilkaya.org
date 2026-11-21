@@ -183,7 +183,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
         "dark pool feed, whose rows really are reported executions");
     }
   }
-  ok(/vendor/.test(PULSE_NOTES.oiChange) && /vendor/.test(PULSE_NOTES.netImpact),
+  ok(/feed/.test(PULSE_NOTES.oiChange) && /feed/.test(PULSE_NOTES.netImpact),
     "the two ranked feeds both name the feed as the selector — the headline caveat");
   ok(/no forecast|never a forecast|carries no claim/i.test(PULSE_NOTES.tide + " " + PULSE_NOTES.seasonality),
     "and the two series feeds refuse the forecast reading in words");

@@ -143,7 +143,7 @@ function checkDossier(d, label, ticker = T) {
 {
   const sha = createHash("sha256").update(readFileSync(root("docs/uw-openapi.yaml"))).digest("hex");
   eq(VENDOR.provenance.specSha256, sha, "THE FIXTURES WERE BUILT FROM THIS SPEC: docs/uw-openapi.yaml still hashes to the value the generator recorded; if the spec moved, run python3 tests/gen-dossier-fixtures.py and read the diff");
-  ok(/synthetic/.test(VENDOR.provenance.nature) && /not feed data/.test(VENDOR.provenance.nature), "and say what they are: synthetic bodies for a fictional ticker, not feed data");
+  ok(/synthetic/.test(VENDOR.provenance.nature) && /not vendor data/.test(VENDOR.provenance.nature), "and say what they are: synthetic bodies for a fictional ticker, not feed data");
   eq(VENDOR.ticker, "EXMP", "the fictional ticker the spec's own examples use");
   const routes = Object.values(D.VENDOR_ROUTES);
   eq(new Set(routes).size, routes.length, "thirteen distinct feed routes");

@@ -127,7 +127,7 @@ const CARD = {
   ok(stale.features.find((f) => f.key === "gamma").why.includes("capped"), "with the cap named in the reason");
 
   const fp = contextFingerprint(ctx);
-  ok(/^n6\./.test(fp), "the fingerprint carries the protocol version, now 6: the vet accepts only the engine's ranked ideas and the state's thresholds are one table, so a row stored under 3, 4 or 5 is read again once, the dealer exposures being a new feature");
+  ok(/^n7\./.test(fp), "the fingerprint carries the protocol version, now 7 (the prompt names the feed, so a row stored under 6 is read again once): the vet accepts only the engine's ranked ideas and the state's thresholds are one table, so a row stored under 3, 4 or 5 is read again once, the dealer exposures being a new feature");
   ok(fp === contextFingerprint(stale),
      "N-F6: and does NOT move when the next session closes and the cap lands on every grade: the same card gave n3.37jodr.25.e5 while fresh and n3.1bg51xk.25.e5 " +
      "once the close had passed, so each viewed name was regenerated at 16:00 and again when the nightly landed");
@@ -1682,7 +1682,7 @@ const CARD = {
   ok(guardAnswer(f.say, guardFacts(ctx), guardOptions(ctx)).ok, "and the sentence passes the guard it would be quoted through");
   ok(contextFacts(ctx).some((x) => x.id === "neuron:SYN1/exposure"), "the assistant can quote it for the page's own name");
   same(publicContext(ctx).exposure.facts.map((x) => x.key), ["gamma", "dex", "vanna", "charm"], "and the public context carries the structured facts");
-  ok(!/e\d+$/.test(contextFingerprint(ctx)) && /^n6\./.test(contextFingerprint(ctx)), "the fingerprint moved with the protocol version");
+  ok(!/e\d+$/.test(contextFingerprint(ctx)) && /^n7\./.test(contextFingerprint(ctx)), "the fingerprint moved with the protocol version");
 
   const bare = ctxOf(JSON.parse(JSON.stringify(CARD)));
   const fb = feat(bare);

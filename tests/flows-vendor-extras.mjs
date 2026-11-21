@@ -89,7 +89,7 @@ const TODAY = "2026-10-20";
 const FIX = JSON.parse(fs.readFileSync(path.join(ROOT, "tests/fixtures-vendor-extras.json"), "utf8"));
 
 {
-  ok(/synthetic/.test(FIX.provenance.nature) && /not feed data/.test(FIX.provenance.nature) && /not observed on the wire/.test(FIX.provenance.nature), "the fixtures say they are synthetic, spec-derived and not observed on the wire");
+  ok(/synthetic/.test(FIX.provenance.nature) && /not vendor data/.test(FIX.provenance.nature) && /not observed on the wire/.test(FIX.provenance.nature), "the fixtures say they are synthetic, spec-derived and not observed on the wire");
   eq(FIX.provenance.generator, "tests/gen-extras-fixtures.py", "and name their generator");
   eq(FIX.provenance.specSha256, createHash("sha256").update(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.yaml"))).digest("hex"), "THE FIXTURES WERE BUILT TO THIS SPEC: docs/uw-openapi.yaml still hashes to the value the generator recorded; if it moved, run python3 tests/gen-extras-fixtures.py and read the diff");
   const names = (value, into) => {

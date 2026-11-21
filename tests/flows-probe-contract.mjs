@@ -1377,13 +1377,13 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
   for (const f of REGENERATED) {
     const doc = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", f), "utf8"));
     ok(FIXTURES.includes(f) && doc.provenance && doc.provenance.generator === "tests/gen-probe-fixtures.py", `${f} names its generator`);
-    ok(/synthetic/.test(doc.provenance.nature) && /not feed data/.test(doc.provenance.nature) && /not feed data/.test(doc.source), `${f} says it is synthetic and not feed data`);
+    ok(/synthetic/.test(doc.provenance.nature) && /not vendor data/.test(doc.provenance.nature) && /not vendor data/.test(doc.source), `${f} says it is synthetic and not feed data`);
     eq(doc.provenance.shapesSha256, probeShapes, `${f} was built to this shape manifest: if scripts/flows-probe-shapes.json moved, run python3 tests/gen-probe-fixtures.py and read the diff`);
   }
   ok(PHRASES.test("Rows are the probe's printed first row, verbatim") && PHRASES.test("Unusual Whales live probe") && PHRASES.test("nl/probe-report.json") && !PHRASES.test("synthetic bodies built to the schema"),
     "the phrases catch the three spellings and spare a synthetic source");
   const dossier = JSON.parse(fs.readFileSync(path.join(ROOT, "tests/fixtures-dossier-vendor.json"), "utf8"));
-  ok(/synthetic/.test(dossier.provenance.nature) && /not feed data/.test(dossier.provenance.nature), "the dossier fixtures say they are synthetic");
+  ok(/synthetic/.test(dossier.provenance.nature) && /not vendor data/.test(dossier.provenance.nature), "the dossier fixtures say they are synthetic");
   eq(dossier.provenance.generator, "tests/gen-dossier-fixtures.py", "and name the generator that wrote them");
   eq(dossier.provenance.shapesSha256, createHash("sha256").update(fs.readFileSync(path.join(ROOT, "scripts/flows-probe-shapes.json"))).digest("hex"),
     "THE FIXTURES WERE BUILT TO THIS SHAPE MANIFEST: scripts/flows-probe-shapes.json still hashes to the value the generator recorded; if it moved, run python3 tests/gen-dossier-fixtures.py and read the diff");

@@ -551,7 +551,7 @@ for (const [id, transforms, expect] of PLANTS) {
   eq(prov.specSha256, await sha("docs/uw-openapi.yaml"), "and from the committed spec");
   eq(prov.shapesSha256, await sha("scripts/flows-probe-shapes.json"), "and the committed shape manifest");
   ok(/not observed on the wire/.test(prov.source), "the source says the bodies are not observed");
-  ok(/not feed data/.test(prov.nature), "and that they are not feed data");
+  ok(/not vendor data/.test(prov.nature), "and that they are not feed data");
   const wrangler = fs.readFileSync(path.join(ROOT, "wrangler.toml"), "utf8");
   const assumed = Object.entries(FX.entries).filter(([, e]) => e.shape === "assumed").map(([k]) => k).sort();
   eq(assumed, ["analytics-sliding", "analytics-window"], "the two analytics bodies are assumed shapes");

@@ -499,9 +499,9 @@ try {
     await showView(page, "smile");
     const note = await openInfo(page, page.locator('#deskSurface [aria-label="About smile"]'));
     await closeInfo(page);
-    ok(/vendor.s implied volatility for that contract.s last transaction/.test(note), "the smile says each cell is the feed's last-transaction volatility");
+    ok(/feed.s implied volatility for that contract.s last transaction/.test(note), "the smile says each cell is the feed's last-transaction volatility");
     ok(/not the volatility the lines above use for delta, win % and EV, which is inverted from each contract.s mid/.test(note), "and that the lines above use another one, so the two are not mixed");
-    ok(/At the money, on the vendor.s last-transaction volatility:/.test(note), "the at-the-money levels are labelled with the basis they use");
+    ok(/At the money, on the feed.s last-transaction volatility:/.test(note), "the at-the-money levels are labelled with the basis they use");
     const title = await page.$eval("#deskSurface .ivs-cellgroup title", (n) => n.textContent);
     ok(/% feed volatility/.test(title), `a cell's tooltip names the basis of its number (${title.slice(0, 80)})`);
     const level = await page.$eval("#deskSurface .ivs-levelgroup title", (n) => n.textContent);

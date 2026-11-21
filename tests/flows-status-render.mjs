@@ -368,7 +368,7 @@ try {
     map["/api/flows/ops"] = { body: old };
     const { page } = await open(browser, { view: "capacity", map });
     const tiles = await text(page, "#stTiles");
-    ok(/VENDOR CALLS TODAY[\s\S]*the last feed counter was read 21:40 TRT, before today/.test(tiles), "A READING FROM AN EARLIER VENDOR WINDOW IS NOT TODAY'S, even on the same UTC day: " + tiles.replace(/\n/g, "|"));
+    ok(/FEED CALLS TODAY[\s\S]*the last feed counter was read 21:40 TRT, before today/.test(tiles), "A READING FROM AN EARLIER VENDOR WINDOW IS NOT TODAY'S, even on the same UTC day: " + tiles.replace(/\n/g, "|"));
     const cv = await text(page, "#cVendor");
     ok(/Whole key today\s+\u2014 of 60,000/.test(cv), "and it is never set against the day line: " + cv.slice(0, 300));
     await page.close();
@@ -409,7 +409,7 @@ try {
     const { page, errors } = await open(browser, { map });
     const tiles = await text(page, "#stTiles");
     ok(/PRICES[\s\S]*\u2014[\s\S]*rail idle: no one is watching/.test(tiles), "an idle rail is a dash with its reason, not a zero: " + tiles.replace(/\n/g, "|"));
-    ok(/VENDOR CALLS TODAY[\s\S]*\u2014[\s\S]*no Tier 1 or focus tick has recorded the feed's counter header yet/.test(tiles), "no feed counter is a dash and says why");
+    ok(/FEED CALLS TODAY[\s\S]*\u2014[\s\S]*no Tier 1 or focus tick has recorded the feed's counter header yet/.test(tiles), "no feed counter is a dash and says why");
     const rail = await text(page, "#hRail");
     ok(/Idle, no viewer/.test(rail) && /feed calls \u2014 of \u2014 this minute/.test(rail), "absent counters are dashes, not 0 of 0: " + rail.slice(0, 200));
     ok(/An idle rail polls nothing/.test(rail), "and the idle rail says why there are no figures");

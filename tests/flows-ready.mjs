@@ -77,7 +77,7 @@ for (const side of ["board:long", "board:short"]) {
   eq(codes(live({ tier1At: null, tier1OkAt: null })), ["tier1"], "a Tier 1 that never ticked blocks");
   eq(codes(live({ tier1At: RTH - READY_LIMITS.tier1TickMs - 1000 })), ["tier1"], "a tick just past the limit blocks");
   eq(live({ tier1At: RTH - READY_LIMITS.tier1TickMs + 1000 }).ok, true, "just inside it does not");
-  const bad = live({ tier1OkAt: RTH - READY_LIMITS.tier1OkMs - 1000, tier1Why: "error:vendor 500" });
+  const bad = live({ tier1OkAt: RTH - READY_LIMITS.tier1OkMs - 1000, tier1Why: "error:feed 500" });
   eq(codes(bad), ["tier1"], "ticking with no good read blocks");
   ok(bad.blockers[0].sentence.includes("feed 500"), "and carries the reason: " + bad.blockers[0].sentence);
   eq(live({ tier1Why: "off" }).blockers[0].sentence.includes("switched off"), true, "a Tier 1 switched off says so");
