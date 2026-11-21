@@ -236,12 +236,16 @@ export function symbolView(found, symbol, now, today) {
       quietUntil: state === "quiet" ? w.cool_until : null,
     });
   });
-  const armed = wires.filter((w) => w.status === "armed").length;
+  const counted = found.counts && Number.isFinite(Number(found.counts.total));
+  const armed = counted ? Number(found.counts.armed) || 0 : wires.filter((w) => w.status === "armed").length;
+  const total = counted ? Number(found.counts.total) : wires.length;
   const last = found.lastHit;
   return Object.freeze({
     symbol,
     wires,
     armed,
+    paused: total - armed,
+    total,
     lastHit: last
       ? Object.freeze({ session: last.session, at: Object.freeze({ ms: last.fired_at, text: when(last.fired_at, now) }) })
       : absent("no_hits"),

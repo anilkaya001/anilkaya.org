@@ -197,7 +197,10 @@ export const SQL = Object.freeze({
   symbolWires: def("member", ["member", "symbol", "subject", "limit"], (p) =>
     "SELECT w.id, w.title, w.status, w.current_version, v.cadence, v.scope_kind, v.sentence, st.phase, st.cool_until, st.last_session " +
     "FROM ff_wire_symbol s JOIN ff_wire w ON w.id = s.wire_id AND w.member_id = s.member_id JOIN ff_wire_version v ON v.wire_id = w.id AND v.version = w.current_version " +
-    `LEFT JOIN ff_state st ON st.wire_id = w.id AND st.subject = ${p.subject} WHERE s.member_id = ${p.member} AND s.symbol = ${p.symbol} AND w.member_id = ${p.member} AND w.status IN ('armed', 'paused') ORDER BY w.created_at DESC, w.id LIMIT ${p.limit}`),
+    `LEFT JOIN ff_state st ON st.wire_id = w.id AND st.subject = ${p.subject} WHERE s.member_id = ${p.member} AND s.symbol = ${p.symbol} AND w.member_id = ${p.member} AND w.status IN ('armed', 'paused') ORDER BY (w.status = 'armed') DESC, w.created_at DESC, w.id LIMIT ${p.limit}`),
+  symbolCount: def("member", ["member", "symbol"], (p) =>
+    "SELECT COALESCE(SUM(w.status = 'armed'), 0) AS armed, COUNT(*) AS total FROM ff_wire_symbol s JOIN ff_wire w ON w.id = s.wire_id AND w.member_id = s.member_id " +
+    `WHERE s.member_id = ${p.member} AND s.symbol = ${p.symbol} AND w.status IN ('armed', 'paused')`),
   symbolLastHit: def("member", ["member", "symbol"], (p) =>
     `SELECT session, session_label, fired_at FROM ff_hit WHERE stream = ${p.member} AND symbol = ${p.symbol} AND state = 'delivered' ORDER BY seq DESC LIMIT 1`),
 
@@ -561,7 +564,7 @@ export function createFfStore({ ensureFf, statements = SQL }) {
       return (await bound(D1, S.runGet, { id: runId }).first()) || null;
     },
 
-    async listWires(env, id, { status, limit }) {
+    async listWires(env, id, { status, limit, runId = null }) {
       assertMember(id);
       const D1 = await db(env);
       if (!D1) return null;
@@ -569,8 +572,9 @@ export function createFfStore({ ensureFf, statements = SQL }) {
       const results = await D1.batch([
         bound(D1, S.wireList, { member: id, statusA: pair[0], statusB: pair[1], limit: Math.min(limit || FF_STORE_LIMITS.listMax, FF_STORE_LIMITS.listMax) }),
         bound(D1, S.memberGet, { member: id }),
+        ...(runId === null ? [] : [bound(D1, S.capacity, capacityBinds(id, runId))]),
       ]);
-      return { rows: rowsOf(results[0]), member: rowsOf(results[1])[0] || null };
+      return { rows: rowsOf(results[0]), member: rowsOf(results[1])[0] || null, cap: runId === null ? null : rowsOf(results[2])[0] || null };
     },
 
     async getWire(env, id, wireId) {
@@ -813,8 +817,9 @@ export function createFfStore({ ensureFf, statements = SQL }) {
         bound(D1, S.symbolWires, { member: id, symbol, subject: "n:" + symbol, limit }),
         bound(D1, S.symbolLastHit, { member: id, symbol }),
         bound(D1, S.muteGet, { member: id, symbol }),
+        bound(D1, S.symbolCount, { member: id, symbol }),
       ]);
-      return { wires: rowsOf(results[0]), lastHit: rowsOf(results[1])[0] || null, muted: rowsOf(results[2]).length > 0 };
+      return { wires: rowsOf(results[0]), lastHit: rowsOf(results[1])[0] || null, muted: rowsOf(results[2]).length > 0, counts: rowsOf(results[3])[0] || null };
     },
 
     async receipts(env, id, { wireId, session, limit }) {

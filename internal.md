@@ -10,9 +10,10 @@ If the session stops (usage limit, restart), nothing here is lost: every item be
 
 | Item | Pull request | State | What is left |
 |---|---|---|---|
-| Fire & Forget: Digest page | #324 | In CI | Merge when the checks pass |
+| Premium desk frontier: Return on cash | #337 | In CI (third round) | Merge when the checks pass |
+| Fire & Forget: Wires page | #326 | All 16 review findings fixed and tested locally | Push after #337 merges, CI, merge |
 
-- **Premium desk frontier: Return on cash** (asked 21 Nov). Y axis is now time value ÷ collateral for the contract's life, not annualised, linear from zero, one frontier per expiry. Both charts (puts/covered calls and short calls). Branch `claude/desk-return-on-cash`, worktree roc. Built, local suites running; next: PR, CI, merge.
+- **Premium desk frontier: Return on cash** (asked 21 Nov). Y axis is now time value ÷ collateral for the contract's life, not annualised, linear from zero, one frontier per expiry. Both charts (puts/covered calls and short calls). Branch `claude/desk-return-on-cash`, worktree roc. PR #337.
 
 ## 2. Built, waiting their turn to merge (one at a time, in this order)
 

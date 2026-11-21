@@ -203,7 +203,7 @@ export async function ringLimiter(c, build) {
   const { id } = await seedOne(api);
   const codes = [];
   for (const path of ["/api/ff/receipts?wire=" + id, "/api/ff/records?wire=" + id, "/api/ff/symbol?t=SYA101", "/api/ff/digest", "/api/ff/export?from=2026-10-20&to=2026-10-27"]) codes.push((await api.call("GET", path, { user: alice })).status);
-  c.eq(codes, [200, 200, 429, 429, 429], "limiter: the heavy reads share one budget per member");
+  c.eq(codes, [200, 200, 200, 429, 429], "limiter: the heavy reads share one budget per member, and the name panel's read on every ticker page does not spend it");
   const refused = await api.call("GET", "/api/ff/digest", { user: alice });
   c.eq([refused.error.code, refused.headers["retry-after"], refused.trips], ["rate_limited", "60", 0], "limiter: a refusal carries Retry-After and reads nothing");
   c.ok(seen.every((k) => k === "alice.one"), "limiter: keyed by the session member", [...new Set(seen)]);
