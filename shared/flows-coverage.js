@@ -219,6 +219,8 @@ export function verifyCoverage({ universe, roster = null, listing = null, global
   const n = names.length;
   const keys = listing && isObject(listing.keys) ? listing.keys : {};
   const truncated = !!(listing && listing.truncated);
+  const through = listing && Number.isInteger(listing.through) && listing.through >= 0 ? listing.through : null;
+  const cutAt = (i) => truncated && (through === null || i >= through);
   const listed = listing !== null;
   const columns = Object.fromEntries(KEY_PRODUCTS.map((p) => [p, new Array(n).fill(STATE.unfetched)]));
   const counts = Object.fromEntries(KEY_PRODUCTS.map((p) => [p, zeroCounts()]));
@@ -252,7 +254,7 @@ export function verifyCoverage({ universe, roster = null, listing = null, global
       }
       const entry = listed ? keys[`${kind}:${t}`] : null;
       sessions[kind] = entry && typeof entry.sessionDate === "string" ? entry.sessionDate : null;
-      put(product, listed ? entryState(entry, expected, truncated) : [STATE.pending, "the store listing could not be read"]);
+      put(product, listed ? entryState(entry, expected, cutAt(i)) : [STATE.pending, "the store listing could not be read"]);
     }
     if (wanted.includes("card")) {
       predicates.P1.of++;
@@ -270,7 +272,8 @@ export function verifyCoverage({ universe, roster = null, listing = null, global
     }
   }
   failing.sort((a, b) => SEVERITY[a.code] - SEVERITY[b.code] || (a.t < b.t ? -1 : a.t > b.t ? 1 : 0) || (a.p < b.p ? -1 : 1));
-  const fresh = names.map((t) => nameFreshness({ t, keys, listed, truncated, roster, expected }));
+  const fresh = names.map((t, i) => nameFreshness({ t, keys, listed, truncated: cutAt(i), roster, expected }));
+  const unfresh = fresh.filter((f) => FRESH_BROKEN.has(f.why)).length;
   const conservation = { ok: true, expected: n, counted: {} };
   for (const p of KEY_PRODUCTS) {
     const sum = Object.values(counts[p]).reduce((a, b) => a + b, 0);
@@ -287,7 +290,7 @@ export function verifyCoverage({ universe, roster = null, listing = null, global
     }
   }
   const held = roster && isObject(roster.held) ? Object.keys(roster.held).length : 0;
-  const complete = conservation.ok && globalsOk && failing.length === 0 && predicates.P1.failing === 0 && predicates.P2.failing === 0 && predicates.P4.failing === 0 && listed && !truncated;
+  const complete = conservation.ok && globalsOk && failing.length === 0 && predicates.P1.failing === 0 && predicates.P2.failing === 0 && predicates.P4.failing === 0 && listed && !truncated && unfresh === 0;
   return {
     v: COVERAGE_VERSION,
     expected,
@@ -309,6 +312,7 @@ export function verifyCoverage({ universe, roster = null, listing = null, global
 
 export const FRESH_WHY = Object.freeze(["unknown", "absent", "new", "stale", "held", "undated", "split", "fresh"]);
 
+const FRESH_BROKEN = new Set(["absent", "stale", "undated", "split"]);
 const FRESH_RANK = Object.freeze(Object.fromEntries(FRESH_WHY.map((w, i) => [w, i])));
 
 const dayOf = (entry) => (entry && entry.present !== false && typeof entry.sessionDate === "string" && DAY.test(entry.sessionDate) ? entry.sessionDate : null);

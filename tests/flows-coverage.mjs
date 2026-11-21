@@ -237,6 +237,16 @@ function freshBattery(mod) {
   check(mod.FRESH_WHY[undated.columns.fresh[undated.columns.t.indexOf(u)]] === "undated", "a card with no session date is undated");
   const cut = run({}, { listing: { ...listingOf({ ["card:" + u]: null }), truncated: true } });
   check(mod.FRESH_WHY[cut.columns.fresh[cut.columns.t.indexOf(u)]] === "unknown", "a name missing from a cut listing is unknown, never new or absent");
+  const lostRoster = clone(roster);
+  delete lostRoster.depth[u];
+  const lost = run({ ["card:" + u]: { sessionDate: "2026-08-21" } }, { roster: lostRoster });
+  check(mod.FRESH_WHY[lost.columns.fresh[lost.columns.t.indexOf(u)]] === "stale" && lost.complete === false, "A STALE CARD THE ROSTER NO LONGER NAMES (a read that failed tonight) IS NOT A COMPLETE REPORT: complete and the freshness contract never disagree about a broken name");
+  check(run({}, { universe: { ...universe, t: carded, n: carded.length } }).complete === true && whole.complete === true, "while a name with no card yet, which the rotation has not reached, does not break completeness");
+  const ui = small.t.indexOf(u);
+  const within = run({}, { listing: { ...listingOf({ ["card:" + u]: null }), truncated: true, through: ui + 1 } });
+  check(mod.FRESH_WHY[within.columns.fresh[ui]] === "absent", "A NAME THE CUT LISTING DID LOOK UP IS JUDGED: a missing card inside the names read is absent, not unknown");
+  const beyond = run({}, { listing: { ...listingOf({ ["card:" + u]: null }), truncated: true, through: ui } });
+  check(mod.FRESH_WHY[beyond.columns.fresh[ui]] === "unknown", "and one past the names read is unknown");
   const unread = run({}, { listing: null });
   check(unread.freshness.counts.unknown === small.n && unread.freshness.ok === false, "an unread listing leaves every name unknown");
   const blind = run({}, { expected: null });
@@ -257,6 +267,8 @@ function freshBattery(mod) {
     ["age-in-calendar-days", [["const n = sessionsBetween(from, to);", "const n = Math.round((Date.parse(to) - Date.parse(from)) / 864e5);"]]],
     ["split-unchecked", [['const gaps = ["card-x", "hist"].filter(', "const gaps = [].filter("]]],
     ["cut-listing-reads-as-new", [['    if (truncated) return { t, why: "unknown", age: null, session: null, note: "the listing stopped before this name" };\n', ""]]],
+    ["complete-ignores-freshness", [[" && listed && !truncated && unfresh === 0;", " && listed && !truncated;"]]],
+    ["cut-flag-covers-every-name", [["const cutAt = (i) => truncated && (through === null || i >= through);", "const cutAt = () => truncated;"]]],
     ["contract-ignores-names", [["ok: names.length > 0 && counts.fresh === names.length,", "ok: counts.stale === 0,"]]],
     ["roster-never-knows", [["  if (!isObject(roster)) return false;\n", "  return false;\n"]]],
     ["held-never-distinguished", [["const kept = isObject(roster) && isObject(roster.held) && Object.hasOwn(roster.held, `card:${t}`);", "const kept = false;"]]],
@@ -299,7 +311,8 @@ function freshBattery(mod) {
   eq(statements, Math.ceil(2700 / NAME_LIST_CHUNK), "in chunks of " + NAME_LIST_CHUNK);
   ok(Object.values(listing.keys).every((k) => k.sessionDate === SESSION), "every key carries its session");
   const over = await store.listing({ DB }, ["card"], Array.from({ length: NAME_LIST_MAX_NAMES + 5 }, (_, i) => "SYZ" + String(i % 1000).padStart(3, "0")));
-  eq(over.truncated, true, "more names than the ceiling is said to be cut");
+  eq([over.truncated, over.through], [true, NAME_LIST_MAX_NAMES], "more names than the ceiling is said to be cut, and how many names were looked up");
+  eq(listing.through, 900, "an uncut listing looked every name up");
   const failing = await store.listing({ DB: { prepare: DB.prepare, batch: async () => { throw new Error("down"); } } }, ["card"], many);
   eq(failing, null, "a refused batch is an unread listing, never an empty one");
   const prefix = await store.listing({ DB }, ["card"]);

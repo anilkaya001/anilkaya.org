@@ -364,7 +364,8 @@
     const d = card.sessionDate, gap = sessionsBehind(d, expected);
     const span = gap === null ? "behind" : (gap.more ? "at least " : "") + gap.n + (gap.n === 1 ? " session" : " sessions") + " behind";
     const known = !!meta && isoOk(meta.sessionDate), landed = known && meta.sessionDate >= expected;
-    const why = !known ? "" : !landed ? " The run for " + expected + " has not published yet, so this is the newest full read of the name."
+    const why = !known ? "" : !landed && meta.sessionDate > d ? " The run for " + meta.sessionDate + " did not rebuild this card, and the run for " + expected + " has not published yet."
+      : !landed ? " The run for " + expected + " has not published yet, so this is the newest full read of the name."
       : card.depth === "deepened" ? " The run for " + expected + " did not land a new read of this name, so the read of " + d + " is kept until one does."
       : " The run for " + expected + " did not rebuild this card, so the card of " + d + " is kept.";
     return "Stale: every figure on this page is from the session of " + d + ", " + span + " the last completed session, " + expected + "." + why;

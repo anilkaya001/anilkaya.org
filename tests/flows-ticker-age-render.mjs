@@ -91,6 +91,8 @@ const CASES = [
   { id: "kept-deep", session: "2026-11-06", depth: "deepened", meta: EXPECTED, why: /The run for 2026-11-13 did not land a new read of this name, so the read of 2026-11-06 is kept until one does\./ },
   { id: "not-yet", session: "2026-11-12", depth: "deepened", meta: "2026-11-12", why: /The run for 2026-11-13 has not published yet, so this is the newest full read of the name\./ },
   { id: "board-kept", session: "2026-11-10", depth: "board", meta: EXPECTED, why: /The run for 2026-11-13 did not rebuild this card, so the card of 2026-11-10 is kept\./ },
+  { id: "later-run", session: "2026-11-10", depth: "deepened", meta: "2026-11-12", why: /The run for 2026-11-12 did not rebuild this card, and the run for 2026-11-13 has not published yet\./ },
+  { id: "across-a-holiday", session: "2026-09-04", depth: "deepened", meta: EXPECTED, why: /did not land a new read/ },
   { id: "very-old", session: "2026-07-31", depth: "deepened", meta: EXPECTED, why: /did not land a new read/ },
 ];
 
@@ -145,9 +147,11 @@ try {
   }
   const PLANTS = [
     ["age-in-calendar-days", [["return i < 0 || i > j ? null : { n: j - i, more: false };", "return i < 0 || i > j ? null : { n: Math.round((Date.parse(to) - Date.parse(from)) / 864e5), more: false };"]]],
-    ["no-reason-given", [['    const why = !known ? "" : !landed ?', '    const why = ""; const unused = !known ? "" : !landed ?']]],
+    ["no-reason-given", [['    const why = !known ? "" : !landed && meta.sessionDate > d ?', '    const why = ""; const unused = !known ? "" : !landed && meta.sessionDate > d ?']]],
     ["reasons-swapped", [["const known = !!meta && isoOk(meta.sessionDate), landed = known && meta.sessionDate >= expected;", "const known = !!meta && isoOk(meta.sessionDate), landed = known && meta.sessionDate < expected;"]]],
     ["weekdays-only-calendar", [['calDays = [...new Set(read("past").concat(read("sessions")))].sort();', 'calDays = []; for (let t = Date.parse("2026-01-01T00:00:00Z"); t < Date.parse("2027-01-01T00:00:00Z"); t += 864e5) { const w = new Date(t); if (w.getUTCDay() % 6) calDays.push(w.toISOString().slice(0, 10)); }']]],
+    ["weekdays-only-same-window", [['calDays = [...new Set(read("past").concat(read("sessions")))].sort();', 'const real = [...new Set(read("past").concat(read("sessions")))].sort(); calDays = []; for (let t = Date.parse(real[0] + "T00:00:00Z"); t <= Date.parse(real[real.length - 1] + "T00:00:00Z"); t += 864e5) { const w = new Date(t); if (w.getUTCDay() % 6) calDays.push(w.toISOString().slice(0, 10)); }']]],
+    ["later-run-unsaid", [['!landed && meta.sessionDate > d ?', 'false ?']]],
     ["old-card-floor-not-said", [["if (from < days[0]) return { n: j + 1, more: true };", "if (from < days[0]) return null;"]]],
     ["chip-label-without-age", [['b.setAttribute("aria-label", "Stale: session " + day(card.sessionDate) + (gap ?', 'b.setAttribute("aria-label", "Stale: session " + day(card.sessionDate) + (false ?']]],
   ];

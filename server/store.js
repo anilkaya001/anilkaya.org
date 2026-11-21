@@ -105,7 +105,7 @@ export function nameListIds(names, kinds) {
     seen.add(t);
     for (const kind of kinds) ids.push(`${kind}:${t}`);
   }
-  return { ids, cut: Array.isArray(names) && names.length > NAME_LIST_MAX_NAMES };
+  return { ids, cut: Array.isArray(names) && names.length > NAME_LIST_MAX_NAMES, through: Array.isArray(names) ? Math.min(names.length, NAME_LIST_MAX_NAMES) : 0 };
 }
 
 export function ingestListing(rows, max = INGEST_LIST_MAX) {
@@ -165,13 +165,13 @@ export function createFlowsStore({ ensureFlowsTables }) {
 
     async listing(env, kinds, names = null) {
       if (Array.isArray(names)) {
-        const { ids, cut } = nameListIds(names, kinds);
-        if (!ids.length) return { keys: {}, listed: 0, truncated: cut };
+        const { ids, cut, through } = nameListIds(names, kinds);
+        if (!ids.length) return { keys: {}, listed: 0, truncated: cut, through };
         const statements = chunks(ids, NAME_LIST_CHUNK).map((g) => env.DB.prepare(nameListSql(g.length)).bind(...g));
         const results = await env.DB.batch(statements).catch(() => null);
         if (!results) return null;
         const listed = ingestListing(results.flatMap((r) => (r && r.results) || []), ids.length);
-        return { ...listed, truncated: cut };
+        return { ...listed, truncated: cut, through };
       }
       const rows = await env.DB.prepare(ingestListSql(kinds)).all().catch(() => null);
       return rows ? ingestListing(rows.results || []) : null;
