@@ -474,19 +474,19 @@ export function callDeltaLeg(row) { return row ? (row.call_delta ?? row.call_dex
 export function putDeltaLeg(row)  { return row ? (row.put_delta  ?? row.put_dex)  : undefined; }
 
 export const GREEK_UNITS = Object.freeze({
-  gamma: "share-gamma: gamma × open interest × 100 shares (vendor definition); put gamma arrives dealer-signed, so the dealer book is call + put",
-  delta: "share-delta: delta × open interest × 100 shares (vendor definition), holder-signed (calls +, puts −); dealer view = call − put",
-  charm: "charm × open interest × 100 shares (vendor definition), put leg holder-signed; no time unit is claimed here, because the per-day scale is measured across the run and applied on the hedging panel",
-  vanna: "vanna × open interest × 100 shares (vendor definition), put leg holder-signed; per 1.00 of volatility, checked against the option chain on the hedging panel before any dollar figure is drawn",
+  gamma: "share-gamma: gamma × open interest × 100 shares (feed definition); put gamma arrives dealer-signed, so the dealer book is call + put",
+  delta: "share-delta: delta × open interest × 100 shares (feed definition), holder-signed (calls +, puts −); dealer view = call − put",
+  charm: "charm × open interest × 100 shares (feed definition), put leg holder-signed; no time unit is claimed here, because the per-day scale is measured across the run and applied on the hedging panel",
+  vanna: "vanna × open interest × 100 shares (feed definition), put leg holder-signed; per 1.00 of volatility, checked against the option chain on the hedging panel before any dollar figure is drawn",
 });
 
 export const GREEK_DEALER_SIGN = Object.freeze({ gamma: 1, delta: -1, vanna: -1, charm: -1 });
 
 export const SIGN_CONVENTION =
   "Put gamma arrives dealer-signed (negated); put delta, vanna and charm arrive with the " +
-  "holder's sign. Under the vendor's convention that dealers are long every call and short " +
+  "holder's sign. Under the feed's convention that dealers are long every call and short " +
   "every put, dealer net = call + put for gamma and call − put for delta, vanna and charm. " +
-  "The two legs are drawn here as the vendor signed them, and each expiry's dealer net is " +
+  "The two legs are drawn here as the feed signed them, and each expiry's dealer net is " +
   "published beside them.";
 
 export function expiryDays(expiry, asOf) {
@@ -516,7 +516,7 @@ export function greekTermStructure(expiryRows, { name, callLeg, putLeg, asOf = n
   if (!hasCall && !hasPut) {
     return {
       status: "absent",
-      reason: `the vendor published no ${name} leg on this response`,
+      reason: `the feed published no ${name} leg on this response`,
       unit: GREEK_UNITS[name] || null,
       rows: [], legs: { call: false, put: false },
     };

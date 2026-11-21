@@ -396,7 +396,7 @@ const flat = (from, to, c) => { const out = []; for (let d = from; d <= to; d = 
 
 {
   const src = fs.readFileSync(path.join(ROOT, "scripts/flows-legs/calibration.mjs"), "utf8");
-  ok(!/\bfetch\(|process\.env|Date\.now|new Date\(\)/.test(src), "the leg has no network, environment or clock of its own: its vendor, store and bars come in through its arguments");
+  ok(!/\bfetch\(|process\.env|Date\.now|new Date\(\)/.test(src), "the leg has no network, environment or clock of its own: its feed, store and bars come in through its arguments");
   ok(/ideas:\$\{d\}/.test(src) && !/ideas:\$\{sessionDate\}/.test(src), "and no read key is built from the run's own session date");
 }
 

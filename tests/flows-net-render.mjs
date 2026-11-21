@@ -413,7 +413,7 @@ try {
     const tipOf = (id) => page.evaluate((id) => { const el = document.querySelector(`#uaNet .fn-hit[data-id="${id}"]`); el.focus({ preventScroll: true }); const t = document.querySelector("#uaNet .fn-tip").textContent; el.blur(); return t; }, id);
     const techNames = new Set(NAMES.filter((x) => x[1] === "Technology").map((x) => x[0]));
     ok((await tipOf("s:tech")).includes(sizeOf((r) => techNames.has(r.t)) + " contracts"), "a sector's tooltip shows its contracts");
-    for (const id of ["i:ca", "i:pb", "o:bull", "o:bear"]) ok(!/contract/.test(await tipOf(id)), `a side or lean node shows no contracts, which the vendor never splits by side (${id})`);
+    for (const id of ["i:ca", "i:pb", "o:bull", "o:bear"]) ok(!/contract/.test(await tipOf(id)), `a side or lean node shows no contracts, which the feed never splits by side (${id})`);
     await page.mouse.move(5, 5);
     await litVector(page, ["n:MSFT", "n:NVDA", "s:energy"], [1, 1, 1], "leaving NVDA");
     eq((await net(page, `return net.node("n:MSFT").lit;`)), 1, "leaving the node restores the whole network");
@@ -937,7 +937,7 @@ try {
     eq(u.ct.c, null, "and a count that sums to zero is omitted, never shown as zero");
     eq(u.ct.tech, null, "a sector holding a window of unknown size shows none either");
     eq(u.ct.energy, null, "nor a sector whose only window states zero");
-    eq(u.ct.ca, null, "a side node never carries contracts: the vendor attributes premium, not contracts, to the quote sides");
+    eq(u.ct.ca, null, "a side node never carries contracts: the feed attributes premium, not contracts, to the quote sides");
     eq(u.ct.bull, null, "nor does a lean node");
     eq(u.ct.far, null, "an expiry with only a zero-size window shows none");
     eq(u.ct.w1, null, "an expiry holding the unknown-size window shows none");

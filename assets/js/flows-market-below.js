@@ -494,7 +494,7 @@
     const p = n === null ? null : n * 100;
     const plain = n === null ? DASH : (() => { const v = Math.abs(p) >= 100 ? Math.round(p) : Math.round(p * 10) / 10; return signGlyph(v) + Math.abs(v).toLocaleString("en-US") + "%"; })();
     const small = prev !== null && prev < 100;
-    if (n !== null && (n > 0 ? small : n === 0 && d > 0)) return ["new", small ? "From " + grouped(prev) + " contracts, a base too small for a percentage to mean anything" : "Up " + grouped(d) + " contracts on a ratio the vendor sent as 0"];
+    if (n !== null && (n > 0 ? small : n === 0 && d > 0)) return ["new", small ? "From " + grouped(prev) + " contracts, a base too small for a percentage to mean anything" : "Up " + grouped(d) + " contracts on a ratio the feed sent as 0"];
     if (n === null || n <= 0) return [plain, null];
     if (n >= 1) {
       const x = 1 + n;
@@ -522,7 +522,7 @@
         h("span", { class: "ui-row-v", "data-tone": toneOf(d) }, signedGrouped(r.diff)),
         h("span", { class: "ui-row-v mk-growth", title: why }, growth));
     }), { visible: 6, label: "Contracts by open-interest change" }));
-    const detail = table("Contracts the vendor ranked by open-interest change", [["Contract"], ["Change", true], ["Growth", true], ["Curr OI", true], ["Volume", true]],
+    const detail = table("Contracts the feed ranked by open-interest change", [["Contract"], ["Change", true], ["Growth", true], ["Curr OI", true], ["Volume", true]],
       rows.map((r) => { const [g, why] = growthSaid(r); return [contractLabel(r), signedGrouped(r.diff), [g, "c-num", why], grouped(r.currOi), grouped(r.vol)]; }));
     const notes = pulse.notes || {};
     infoInto("mkOiCard", "open interest", () => ({
@@ -544,7 +544,7 @@
     neg.sort(byNet);
     host.append(h("div", { class: "mk-movers-grid mk-two" }, moverList("Positive", pos, "netPrem", { max: 6, said: "positive net premium impact" }), moverList("Negative", neg, "netPrem", { max: 6, said: "negative net premium impact" })));
     const notes = pulse.notes || {};
-    infoInto("mkImpactCard", "net impact", () => ({ title: "Net impact", lead: "The names the vendor ranks by net premium impact, split by sign.", notes: [notes.netImpact, capLine(feed, Math.min(pos.length, 6) + Math.min(neg.length, 6), "names")] }));
+    infoInto("mkImpactCard", "net impact", () => ({ title: "Net impact", lead: "The names the feed ranks by net premium impact, split by sign.", notes: [notes.netImpact, capLine(feed, Math.min(pos.length, 6) + Math.min(neg.length, 6), "names")] }));
   }
 
   function paintInsiders(pulse) {
@@ -597,7 +597,7 @@
       h("span", { class: "ui-row-m" }, h("b", null, r.t || DASH), h("span", null, price(r.px) + " · " + grouped(r.size))),
       h("span", { class: "ui-meter" }, h("i", { style: { "--w": ((isNum(r.prem) || 0) / top * 100).toFixed(1) + "%", "--i": String(i), "--c": UI.cssVar("--s-purple") } })),
       h("span", { class: "ui-row-v" }, usd(r.prem)))), { visible: 6, label: "Largest off-exchange prints" }));
-    const detail = table("Off-exchange equity trades reported to the print feed, as the vendor surfaces them", [["Name"], ["Time (TRT)", true], ["Price", true], ["Size", true], ["Premium", true]],
+    const detail = table("Off-exchange equity trades reported to the print feed, as the feed surfaces them", [["Name"], ["Time (TRT)", true], ["Price", true], ["Size", true], ["Premium", true]],
       rows.map((r) => [r.t || DASH, F.time(r.at, false), price(r.px), grouped(r.size), usd(r.prem)]));
     const notes = pulse.notes || {};
     const voided = isNum(feed.canceled) ? feed.canceled : 0;
@@ -622,7 +622,7 @@
     if (cells.size < rows.length) {
       host.append(emptyLine("unavailable", syms.some((t) => t) ?
         "The seasonality feed carried " + rows.length + " rows for " + cells.size + " ticker months, so at least one ticker repeats a month. Nothing is drawn rather than a calendar that averages two readings it cannot tell apart." :
-        "The seasonality feed carried " + rows.length + " rows for " + new Set(rows.map((r) => isNum(r.month))).size + " distinct months. The vendor sends one row per ticker per month, and this " +
+        "The seasonality feed carried " + rows.length + " rows for " + new Set(rows.map((r) => isNum(r.month))).size + " distinct months. The feed sends one row per ticker per month, and this " +
         "payload does not say which ticker a row is, so the rows cannot be told apart. Nothing is drawn rather than a " +
         "calendar that repeats a month.", "seasonality", 120));
       return;
@@ -663,8 +663,8 @@
     const notes = pulse.notes || {};
     const funds = syms.filter(Boolean);
     infoInto("mkSeasonCard", "seasonality", () => ({ title: "Seasonality", lead: funds.length ?
-      "Average change in each calendar month for " + funds.join(", ") + ", over the years the vendor holds. Up months is the share of those years the month closed higher; the outlined column is this month." :
-      "Average change in each calendar month over the years the vendor holds, with the share of those months that closed higher beneath it.",
+      "Average change in each calendar month for " + funds.join(", ") + ", over the years the feed holds. Up months is the share of those years the month closed higher; the outlined column is this month." :
+      "Average change in each calendar month over the years the feed holds, with the share of those months that closed higher beneath it.",
       notes: [notes.seasonality, capLine(feed, rows.length, funds.length ? "fund months" : "months")] }));
   }
 
@@ -782,7 +782,7 @@
     });
     staleMark("mkVolCard", useLive ? lv.session : reg && reg.sessionDate, "volatility");
     infoInto("mkVolCard", "volatility", () => ({
-      title: "Volatility", lead: "The index ETFs' fixed-tenor implied volatility stands in for the VIX curve, which the vendor plan does not serve.",
+      title: "Volatility", lead: "The index ETFs' fixed-tenor implied volatility stands in for the VIX curve, which the feed plan does not serve.",
       facts: [["Source", useLive ? "live:vol" : "regime"], ["Implied correlation QQQ", ic.QQQ && ic.QQQ.status === "ok" ? isNum(ic.QQQ.rho).toFixed(3) : DASH],
         ["SPY coverage", rho ? F.pct(rho.coverage, 0) : null], ["Holdings as of", rho ? rho.weightsAsOf : null]],
       notes: ["Contango (a rising curve) is the calm shape; an inverted front is stress.",
@@ -827,7 +827,7 @@
     if (segHost) segHost.append(UI.segmented("Radar side", SIDES.map((s) => ({ label: s[1], disabled: !radar[s[0]] })), (i) => { active = i; draw(); }, 0));
     staleMark("mkRadarCard", radar.asOf || regime.sessionDate, "volatility radar");
     infoInto("mkRadarCard", "radar", () => ({
-      title: "Volatility radar", lead: "The vendor's anomaly screen ranks names whose options are rich or cheap against their own history; its sentiment screen ranks bullish and bearish positioning.",
+      title: "Volatility radar", lead: "The feed's anomaly screen ranks names whose options are rich or cheap against their own history; its sentiment screen ranks bullish and bearish positioning.",
       facts: [["As of", radar.asOf], ["Kept per side", count(radar.keep)]],
       notes: ["Rich and cheap use the dealer-regime colours rather than green and red: rich volatility is not bearish.", "A linked name has a card today and opens its reader."],
     }));

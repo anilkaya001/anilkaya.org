@@ -125,7 +125,7 @@ export async function readIndexRows(uw, { date = null, tickers = INDEX_TICKERS }
 export function batchSilence(kind, { res = null, why = null } = {}) {
   if (kind === "deadline") return { status: "unavailable", reason: "not_read", why: why || "the run deadline passed before this batch was read" };
   if (kind === "truncated") {
-    return { status: "unavailable", reason: "unreadable", detail: why || "the batch reached the vendor's row limit before this name" };
+    return { status: "unavailable", reason: "unreadable", detail: why || "the batch reached the feed's row limit before this name" };
   }
   return {
     status: "unavailable", reason: res && res.gated ? "plan_gated" : "unreadable",

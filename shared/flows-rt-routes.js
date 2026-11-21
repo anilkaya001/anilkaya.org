@@ -1,11 +1,12 @@
 import { readMembers, memberOf } from "./flows-auth.js";
 import { fixtureHost, isFixtureTicker } from "./flows-fixture-names.js";
-import { RT_OBJECT_NAME, RT_TOPIC_KEYS, RT_LIMITS, TICKER_RE, rtSwitches, rtIsOwner, rtAdmits } from "./flows-rt.js";
+import { RT_OBJECT_NAME, RT_TOPIC_KEYS, RT_DEFAULT_TOPICS, RT_LIMITS, TICKER_RE, rtSwitches, rtIsOwner, rtAdmits } from "./flows-rt.js";
+import { eventRiskHalts, eventRiskOpen } from "./flows-er-switch.js";
 
 export const RT_PATHS = Object.freeze(["/api/rt/ws", "/api/rt/snap", "/api/rt/status"]);
 
 export function rtTopics(raw) {
-  if (raw === null || raw === "") return { ok: true, topics: RT_TOPIC_KEYS.slice() };
+  if (raw === null || raw === "") return { ok: true, topics: RT_DEFAULT_TOPICS.slice() };
   const out = [];
   for (const k of String(raw).split(",")) {
     const x = k.trim();
@@ -13,6 +14,14 @@ export function rtTopics(raw) {
     if (!out.includes(x)) out.push(x);
   }
   return out.length ? { ok: true, topics: out } : { ok: false };
+}
+
+export const haltsAdmitted = (env, owner) => eventRiskHalts(env) && eventRiskOpen(env, owner === true);
+
+export function gateTopics(topics, admitted) {
+  if (!topics.includes("ht") || admitted) return { ok: true, topics, dropped: null };
+  if (topics.length === 1) return { ok: false };
+  return { ok: true, topics: topics.filter((k) => k !== "ht"), dropped: "ht" };
 }
 
 export async function serveRt(request, env, url, { json, HttpError, getSession, requireSameOrigin }) {
@@ -32,7 +41,9 @@ export async function serveRt(request, env, url, { json, HttpError, getSession, 
   } else if (!rtAdmits(sw, session.username)) {
     throw new HttpError(403, "rt_forbidden", "Real-time access is limited to the owner");
   }
-  const asked = rtTopics(url.searchParams.get("k"));
+  const parsed = rtTopics(url.searchParams.get("k"));
+  if (!parsed.ok) throw new HttpError(400, "invalid_topic", "Unknown topic");
+  const asked = path === "/api/rt/status" ? { ...parsed, dropped: null } : gateTopics(parsed.topics, haltsAdmitted(env, rtIsOwner(sw, session.username)));
   if (!asked.ok) throw new HttpError(400, "invalid_topic", "Unknown topic");
   const stub = ns.get(ns.idFromName(RT_OBJECT_NAME), sw.hint ? { locationHint: sw.hint } : undefined);
   const target = new URL("https://pulse.internal" + path.slice("/api/rt".length));
@@ -68,6 +79,7 @@ export async function serveRt(request, env, url, { json, HttpError, getSession, 
         res = new Response(res.body, res);
         res.headers.set("X-RT-Poll-Ms", String(owner ? RT_LIMITS.pollOwnerMs : RT_LIMITS.pollMemberMs));
         res.headers.set("X-RT-Poll-Cap-Ms", String(owner ? 0 : RT_LIMITS.pollMemberCapMs));
+        if (asked.dropped) res.headers.set("X-RT-Dropped", asked.dropped);
       }
     }
   } catch (error) {

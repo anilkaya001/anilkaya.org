@@ -430,7 +430,7 @@ export const RECORD_NOTES = {
     "roughly n/10",
   calendar: "the trading calendar is the union of observed close dates; a k-session " +
     "horizon walks that calendar, never calendar days",
-  attrition: "a name with no close at the exit date, or whose vendor price history breaks " +
+  attrition: "a name with no close at the exit date, or whose feed price history breaks " +
     "between entry and exit (an unadjusted split or a re-listed series), is counted in `lost` " +
     "and excluded from every mean — never scored as zero and never scored across the break",
   epoch: "the selection rule that decides which names a board publishes changed on the " +

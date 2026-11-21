@@ -5,7 +5,7 @@ import { STRUCTURE_BY_ID, AFFINITY, BUCKET_LINES } from "./flows-quant-structure
 import { CLAIM_LINES } from "./flows-fact-ids.js";
 import { formatScaled } from "./flows-display-round.js";
 
-export const NEURON_CONTEXT_VERSION = 6;
+export const NEURON_CONTEXT_VERSION = 7;
 export const NEURON_MAX_IDEAS = 3;
 
 const article = (noun, capital) => (/^[aeiou]/i.test(noun) ? (capital ? "An " : "an ") : (capital ? "A " : "a ")) + noun;
@@ -151,7 +151,7 @@ function levelFigures(p) {
   return out;
 }
 
-const TRUNCATED_LADDER = "the strike ladder filled the vendor's 500-row page, so strikes beyond it are missing and its sums and crossing depend on where the window ended";
+const TRUNCATED_LADDER = "the strike ladder filled the feed's 500-row page, so strikes beyond it are missing and its sums and crossing depend on where the window ended";
 
 function zeroGammaClash(card) {
   const lv = card && card.panels && card.panels.levels;
@@ -211,7 +211,7 @@ function panelRobustness(key, group, p, card) {
     case "aggressor": {
       const rep = num(p.reported), un = num(p.unreported);
       return rep !== null && un !== null && rep + un > 0 && rep / (rep + un) >= 0.9
-        ? { r: 3, why: "the vendor reported a side on nine in ten contracts" }
+        ? { r: 3, why: "the feed reported a side on nine in ten contracts" }
         : { r: 2, why: "a side is missing on more than one contract in ten" };
     }
     case "darkpool":
@@ -862,7 +862,7 @@ export function neuronTier(card, context) {
 }
 
 
-const EXPOSURE_CONVENTION = "the vendor's convention that dealers hold every call long and every put short, a convention and not an observed position";
+const EXPOSURE_CONVENTION = "the feed's convention that dealers hold every call long and every put short, a convention and not an observed position";
 
 export function dealerExposure(card) {
   const c = card && typeof card === "object" ? card : {};
@@ -892,7 +892,7 @@ export function dealerExposure(card) {
   if (dd !== null) {
     facts.push({ key: "dex", label: "Dealer delta", value: dd, unit: "dollars of stock-equivalent delta across the live expiries",
       timesAdv: adv !== null && adv > 0 ? Number((dd / adv).toFixed(2)) : null, grade: 1,
-      note: "Call delta less the put delta as the vendor signs it (multiplier " + (num(put.delta) === null ? "not settled" : num(put.delta)) + " on the put leg, an assumption the run cannot probe). On the dealer convention this is positive by construction and measures the size of the hedge book, not which way dealers lean." });
+      note: "Call delta less the put delta as the feed signs it (multiplier " + (num(put.delta) === null ? "not settled" : num(put.delta)) + " on the put leg, an assumption the run cannot probe). On the dealer convention this is positive by construction and measures the size of the hedge book, not which way dealers lean." });
   } else {
     withheld.push({ key: "dex", reason: silent("deltaLegs") });
   }
@@ -905,7 +905,7 @@ export function dealerExposure(card) {
   }
   if (ch.charm && num(ch.charm.perSession) !== null) {
     facts.push({ key: "charm", label: "Dealer charm", value: ch.charm.perSession, unit: "dollars of delta over the next session", grade: 1,
-      note: "Call less put net across the expiries that outlive the session. Its scale is estimated from the vendor's vanna at zero rates, so its size is approximate; the vendor documents no unit for it." });
+      note: "Call less put net across the expiries that outlive the session. Its scale is estimated from the feed's vanna at zero rates, so its size is approximate; the feed documents no unit for it." });
   } else {
     withheld.push({ key: "charm", reason: silent("charm") });
   }

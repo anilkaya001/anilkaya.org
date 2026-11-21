@@ -322,4 +322,4 @@ for (const [name, patches] of BUILDS) {
   }
 }
 
-console.log(`✓ flows-horizon: ${checks} assertions, no server, no vendor data: the page kernel's earnings state, inside test, elapsed-session count and sentences held equal to shared/flows-horizon.js over ${EDS.length * RDS.length * RDMAXS.length * HZS.length * JS.length} cells and the calendar's own reaction sessions over 12 sessions, 76 report dates, four report times, six elapsed counts and three windows, and ${BUILDS.length} planted wrong builds`);
+console.log(`✓ flows-horizon: ${checks} assertions, no server, no feed data: the page kernel's earnings state, inside test, elapsed-session count and sentences held equal to shared/flows-horizon.js over ${EDS.length * RDS.length * RDMAXS.length * HZS.length * JS.length} cells and the calendar's own reaction sessions over 12 sessions, 76 report dates, four report times, six elapsed counts and three windows, and ${BUILDS.length} planted wrong builds`);

@@ -152,7 +152,7 @@ const planted = (from, to) => {
   eq(a.res.headers.get("X-Fresh-Class"), "nightly", "X-Fresh headers as the other Flows routes send them");
   ok(a.res.headers.get("X-Dossier-Fingerprint") === body.dossier.fingerprint && Number(a.res.headers.get("X-Dossier-Tokens")) === body.prompt.tokensEst, "the fingerprint and the token estimate ride on headers");
   eq(a.res.headers.get("Cache-Control"), "no-store", "no-store, as every /api response");
-  eq(a.res.headers.get("X-Dossier-Vendor-Calls"), "8", "and the vendor calls the read made");
+  eq(a.res.headers.get("X-Dossier-Vendor-Calls"), "8", "and the feed calls the read made");
   await a.settle();
   same(storedKinds(f), SLOW, "AFTER THE RESPONSE the five slow kinds are written to flows_dossier_cache, one row each");
   ok(f.db.prepare("SELECT max(length(payload)) AS n FROM flows_dossier_cache").get().n <= 8192, "none over 8 KiB (" + f.db.prepare("SELECT max(length(payload)) AS n FROM flows_dossier_cache").get().n + ")");
@@ -310,9 +310,9 @@ const planted = (from, to) => {
   const get = await client(f.D1);
   stub.state.bodies.set("screener", { data: [] });
   const none = await get("/api/flows/dossier?t=ZZZZ");
-  eq(none.res.status, 200, "AN UNKNOWN TICKER the vendor's screener does not know: 200");
+  eq(none.res.status, 200, "AN UNKNOWN TICKER the feed's screener does not know: 200");
   eq(none.body.tier, "none", "tier none, the word /api/flows/summary uses");
-  eq(vendorCallsMade(), 0, "and not one vendor call beyond the classification (" + keysCalled().join(",") + ")");
+  eq(vendorCallsMade(), 0, "and not one feed call beyond the classification (" + keysCalled().join(",") + ")");
   ok(none.body.dossier.packets.options.status === "withheld" && none.body.dossier.packets.price.status === "withheld", "every packet withheld, nothing guessed");
   stub.reset();
   stub.state.bodies.delete("screener");
@@ -353,9 +353,9 @@ const planted = (from, to) => {
   const get = await client(f.D1, { UW_ONDEMAND: limited });
   const a = await get("/api/flows/dossier?t=EXMP");
   eq(a.res.status, 200, "RATE-LIMIT REFUSAL: the site's own limiter refusing every call is still a 200");
-  eq(vendorCallsMade(), 0, "with no vendor call made");
+  eq(vendorCallsMade(), 0, "with no feed call made");
   const p = a.body.dossier.packets;
-  ok(p.analysts.status === "pending" && /^limited:/.test(p.analysts.withheld[0].reason), "the packets that waited on the vendor are pending, saying the limiter held them back");
+  ok(p.analysts.status === "pending" && /^limited:/.test(p.analysts.withheld[0].reason), "the packets that waited on the feed are pending, saying the limiter held them back");
   ok(p.fundamentals.status === "pending" && p.identity.status !== "unavailable", "pending, not failed");
   ok(p.options.status === "partial" && p.price.status !== "withheld", "while everything held nightly or live still answers");
   eq(a.res.headers.get("X-Dossier-Pending"), "", "none were left to a timeout");
@@ -384,7 +384,7 @@ const planted = (from, to) => {
   await a.settle();
   const p = a.body.dossier.packets;
   ok(p.analysts.status === "partial" && p.analysts.withheld.some((w) => /^limited:/.test(w.reason)), "A VENDOR 429 reads as limited and the packet as partial: only the profile route's target price is left in it");
-  ok(p.fundamentals.facts.length > 0 && p.fundamentals.withheld.some((w) => /^failed:/.test(w.reason)), "a vendor 500 is a failed part, the rest of the packet unharmed");
+  ok(p.fundamentals.facts.length > 0 && p.fundamentals.withheld.some((w) => /^failed:/.test(w.reason)), "a feed 500 is a failed part, the rest of the packet unharmed");
   ok(p.fundamentals.withheld.some((w) => w.k === "mix" && /^large:/.test(w.reason)), "a body over the parse ceiling is not read, and says so");
   const cached = Object.fromEntries(f.db.prepare("SELECT kind, payload FROM flows_dossier_cache").all().map((r) => [r.kind, JSON.parse(r.payload)]));
   ok(!cached.analysts && (!cached.fundamentals || !cached.fundamentals.parts.financials), "neither a 429 nor a 500 is cached: both are retried next read");
@@ -465,7 +465,7 @@ const planted = (from, to) => {
   const again = await DW.assembleDossier(env, { waitUntil: (p) => bg.push(p) }, T, deps, { now: F.NOW });
   await Promise.all(bg);
   eq(again.dossier.coverage.pending, 0, "so the next read is complete");
-  eq(again.trace.vendorCalls, 0, "and costs no vendor call");
+  eq(again.trace.vendorCalls, 0, "and costs no feed call");
 }
 
 {
@@ -479,7 +479,7 @@ const planted = (from, to) => {
   const b = await get("/api/flows/dossier?t=EXMP");
   await b.settle();
   eq(f.trips.length - n0, 0, "the next read inside thirty seconds costs no D1 trip at all");
-  eq(vendorCallsMade(), 0, "and no vendor call");
+  eq(vendorCallsMade(), 0, "and no feed call");
   eq(b.res.headers.get("X-Dossier-Vendor-Calls"), "0", "which the header says");
   eq(b.body.dossier.fingerprint, a.body.dossier.fingerprint, "and it is the same dossier, with the same fingerprint");
   eq(b.body.tier, a.body.tier, "with the same Neuron tier");
@@ -506,7 +506,7 @@ const planted = (from, to) => {
   const get = await client(f.D1, { UW_ONDEMAND: { limit: async () => ({ success: false }) } });
   const a = await get("/api/flows/dossier?t=EXMP");
   await a.settle();
-  ok(a.body.dossier.coverage.pending > 0, "an incomplete dossier (the limiter held the vendor back) has pending packets");
+  ok(a.body.dossier.coverage.pending > 0, "an incomplete dossier (the limiter held the feed back) has pending packets");
   ok(![...cache.store.keys()].some((k) => k.includes("/assembled/")), "and is NOT kept in the hot cache, so the next read tries again");
 }
 
@@ -533,7 +533,7 @@ const planted = (from, to) => {
   const all = await Promise.all(Array.from({ length: 6 }, () => get("/api/flows/dossier?t=EXMP")));
   await Promise.all(all.map((x) => x.settle()));
   ok(all.every((x) => x.res.status === 200), "SINGLE-FLIGHT: six concurrent reads of one name all answer");
-  eq(calls("info").length, 1, "the vendor was asked once, not six times");
+  eq(calls("info").length, 1, "the feed was asked once, not six times");
   eq(vendorCallsMade(), 8, "eight calls in all for six readers");
   const reads = f.trips.slice(n0).filter((t) => t.sqls.some((s) => /FROM flows_payload/.test(s) && /card:/.test(String(t.args[0]))));
   eq(reads.length, 1, "and the nightly batch ran once");
@@ -717,7 +717,7 @@ const planted = (from, to) => {
   eq(a.res.status, 200, "MEMBER VENDOR: a cold dossier read by member A past A's window still answers 200");
   eq(vendorCallsMade(), 0, "A REFUSED MEMBER'S DOSSIER MAKES 0 VENDOR CALLS (" + vendorCallsMade() + ")");
   eq(a.res.headers.get("X-Dossier-Vendor-Calls"), "0", "and says so on its header");
-  ok(a.body.dossier.coverage.pending > 0, "the vendor packets are pending (" + a.body.dossier.coverage.pending + " pending), not failed and not shown as empty");
+  ok(a.body.dossier.coverage.pending > 0, "the feed packets are pending (" + a.body.dossier.coverage.pending + " pending), not failed and not shown as empty");
   same(consulted, [A], "the member limiter is consulted ONCE for the whole assembly, before the fan-out, keyed by the member");
   eq(ondemand.n, 0, "and a refused member never spends a token of the shared UW_ONDEMAND budget");
   eq(storedKinds(f).length, 0, "nothing is written to flows_dossier_cache from a refused assembly");
@@ -729,9 +729,9 @@ const planted = (from, to) => {
   const b = await getB("/api/flows/dossier?t=EXMP");
   await b.settle();
   ok(b.res.status === 200 && vendorCallsMade() === 8 && b.body.dossier.coverage.pending === 0,
-    "MEMBER B IS SERVED while A is refused: B's cold read makes its 8 vendor calls with 0 pending (" + vendorCallsMade() + ", " + b.body.dossier.coverage.pending + ")");
-  same(consulted, [B], "one member token for B's whole assembly, however many vendor calls it makes");
-  eq(ondemand.n, 8, "and one shared UW_ONDEMAND token per vendor call, as before");
+    "MEMBER B IS SERVED while A is refused: B's cold read makes its 8 feed calls with 0 pending (" + vendorCallsMade() + ", " + b.body.dossier.coverage.pending + ")");
+  same(consulted, [B], "one member token for B's whole assembly, however many feed calls it makes");
+  eq(ondemand.n, 8, "and one shared UW_ONDEMAND token per feed call, as before");
 
   const g = world();
   const sumA = await client(g.D1, { MEMBER_VENDOR, UW_ONDEMAND, FLOWS_READ_MODE: "on" }, A);
@@ -742,7 +742,7 @@ const planted = (from, to) => {
   await s.settle();
   ok(s.res.status === 200 && s.body && s.body.read && typeof s.body.read.status === "string",
     "THE SUMMARY ROUTE'S READING for a refused member still answers, with a read field (" + (s.body && s.body.read && s.body.read.status) + ")");
-  eq(vendorCallsMade(), 0, "and its dossier makes 0 vendor calls for a refused member");
+  eq(vendorCallsMade(), 0, "and its dossier makes 0 feed calls for a refused member");
   ok(consulted.length >= 1 && consulted.every((k) => k === A), "the reading's assembly is metered under A's key (" + consulted.join(",") + ")");
 }
 
@@ -761,11 +761,11 @@ const planted = (from, to) => {
   const cold = await get("/api/flows/ask", ASK({ question: "what does EXMP do", subject: T }));
   await cold.settle();
   eq(cold.res.status, 200, "P1-42, THE ASK PATH: a cold, carded name answers");
-  eq(stub.calls.length, 0, "and the question makes 0 vendor calls (" + stub.calls.length + "), where the same assembly made 8");
+  eq(stub.calls.length, 0, "and the question makes 0 feed calls (" + stub.calls.length + "), where the same assembly made 8");
   ok(cold.body.dossierFacts > 0 && factIds(cold).some((id) => /^dossier:EXMP\//.test(id)), "the answer still carries dossier facts from what the site holds (" + cold.body.dossierFacts + ")");
   ok(factIds(cold).some((id) => /^dossier:EXMP\/identity\.name$/.test(id)) && !factIds(cold).some((id) => /^dossier:EXMP\/(identity\.description|fundamentals\.)/.test(id)),
-    "from the nightly alone: the name is there, the vendor's description and fundamentals are not, because nothing has fetched them");
-  same(consulted, [], "the member limiter is not consulted: a question spends no vendor allowance");
+    "from the nightly alone: the name is there, the feed's description and fundamentals are not, because nothing has fetched them");
+  same(consulted, [], "the member limiter is not consulted: a question spends no feed allowance");
   eq(ondemand.n, 0, "and no token of the shared UW_ONDEMAND budget");
   eq(storedKinds(f).length, 0, "nothing is written to flows_dossier_cache from the question");
   ok(![...cache.store.keys()].some((k) => k.includes("/assembled/")), "and no 30-second assembled copy is kept, so a reader after it is not handed a dossier nobody fetched");
@@ -803,7 +803,7 @@ const planted = (from, to) => {
   const d = await fetching;
   const dAt = Date.now() - t0;
   eq(a.res.status, 200, "P1-42, THE FLIGHT IS KEYED BY cacheOnly: a question asked while a full read is fetching answers");
-  ok(askedAt < 500 && dAt >= 700, "without joining the fetching flight: it came back at " + askedAt + " ms, the full read at " + dAt + " ms, which waited for the 700 ms vendor");
+  ok(askedAt < 500 && dAt >= 700, "without joining the fetching flight: it came back at " + askedAt + " ms, the full read at " + dAt + " ms, which waited for the 700 ms feed");
   eq(d.res.headers.get("X-Dossier-Vendor-Calls"), "8", "and the full read made its own 8 calls, none lost to the question");
   await d.settle();
   dropHot();
@@ -825,7 +825,7 @@ const planted = (from, to) => {
   const open = plan({});
   ok(ids(open).includes("financials") && open.queued.includes("breakdown"), "PLAN WITHOUT A MARKER: financials is picked and the revenue mix waits behind the budget");
   const marked = plan({ financials: now - 1000 });
-  ok(!ids(marked).includes("financials"), "A MARKED SOURCE IS NOT PICKED: no vendor call and no wait for financials a second after it failed");
+  ok(!ids(marked).includes("financials"), "A MARKED SOURCE IS NOT PICKED: no feed call and no wait for financials a second after it failed");
   same(marked.resting, ["financials"], "it is named resting, so its packet reads pending with reason failed");
   ok(marked.skipped.some((s) => s.id === "financials" && s.why === "failed-recently"), "and the skip says why");
   ok(ids(marked).includes("breakdown"), "ANOTHER SOURCE OF THE SAME KIND IS NOT BLOCKED: the revenue mix takes the freed slot");
@@ -860,7 +860,7 @@ async function failOnce(mod) {
   ok(!partsOf(r.f, "fundamentals").includes("financials"), "and nothing is stored for the failed source");
   eq(r.again, 0, "THE NEXT READ DOES NOT CALL IT AGAIN inside the marker (" + r.again + " calls)");
   ok(r.took < READ_BOX_MS, "and returns in " + r.took + " ms, inside the reading's " + READ_BOX_MS + " ms box, not after another 2.5 s wait");
-  eq(r.second.trace.vendorCalls, 0, "with no vendor call at all");
+  eq(r.second.trace.vendorCalls, 0, "with no feed call at all");
   ok(r.second.trace.skipped.some((s) => s.id === "financials" && s.why === "failed-recently"), "financials is skipped as failed recently");
   ok(r.second.dossier.packets.fundamentals.withheld.some((w) => /^failed:/.test(w.reason)), "and its part of the packet reads failed");
 

@@ -247,7 +247,8 @@ const GROUPS = {
     R.eq("preview", [uni.view.control, typeof uni.view.expWeek.v], ["bh", "number"], "and states its expected false alarms");
 
     const windows = await ask({ v: 1, cadence: "nightly", scope: { kind: "universe" }, all: [{ m: "contract.premium", op: ">=", x: 1000000 }], persist: 1 });
-    R.eq("preview", [windows.view.status, windows.view.reason], ["unavailable", "source_missing"], "a nightly wire on flagged windows says the preview cannot read them, never that none holds");
+    R.eq("preview", [windows.view.status, windows.view.reason, windows.view.detail], ["unavailable", "source_missing", "windows_unread"], "a nightly wire on flagged windows says the preview cannot read them, never that none holds");
+    R.ok("preview", /^— source missing: the nightly run reads this wire from the session's flagged windows/.test(windows.view.reasonText) && /add open interest confirmed/.test(windows.view.reasonText), "and says why, and what would let it preview", windows.view.reasonText);
 
     const before = await ask(liveAst());
     R.eq("preview", [before.view.status, before.view.coverage.evaluated, before.view.coverage.unknown, before.view.freshness.session], ["ok", 0, 1, null], "a live wire with no live record stored is unknown for its name");
@@ -544,6 +545,8 @@ const MUTANTS = [
     transforms: [["return { subject: \"n:\" + symbol, symbol, verdict: \"unknown\", reason: Object.keys(one.reasons)[0] || lost, clauses: [] };", "return { subject: \"n:\" + symbol, symbol, verdict: \"false\", reason: null, clauses: [] };"]] },
   { name: "a nightly window wire previews as nothing holding", group: "preview", target: "worker.js",
     transforms: [["if (nightly && wire.subjectKind === \"c\" && !wire.clauses.some((c) => c.m === \"contract.oi_confirm\")) {", "if (false) {"]] },
+  { name: "a nightly window wire previews with no reason why", group: "preview", target: "worker.js",
+    transforms: [["return { status: \"unavailable\", reason: \"source_missing\", detail: \"windows_unread\", subjects: [] };", "return { status: \"unavailable\", reason: \"source_missing\", subjects: [] };"]] },
   { name: "the first-use DDL is probed on every request", group: "ddl", target: "worker.js",
     transforms: [["    .then(() => { state.ffReady = true; }, (error) => logFailure(\"warn\", \"ff schema bootstrap failed\", {}, error))", "    .then(() => { state.ffReady = false; }, (error) => logFailure(\"warn\", \"ff schema bootstrap failed\", {}, error))"]] },
   { name: "the tables are never created at first use", group: "ddl", target: "worker.js",
@@ -626,8 +629,8 @@ if (exit === 0) {
     const m = new RegExp("\\[\\[ratelimits\\]\\]\\nname = \"" + name + "\"\\nnamespace_id = \"(\\d+)\"\\nsimple = \\{ limit = (\\d+), period = (\\d+) \\}").exec(src);
     return m ? [m[1], Number(m[2]), Number(m[3])] : null;
   };
-  R.eq("scan", [limiter(toml, "FF_WRITE"), limiter(toml, "FF_HEAVY"), limiter(toml, "FF_HEALTH")], [["1131", 10, 60], ["1132", 6, 60], ["1133", 4, 60]], "wrangler.toml binds the three limiters lane B reads, at its limits");
-  R.eq("scan", [limiter(staging, "FF_WRITE"), limiter(staging, "FF_HEAVY"), limiter(staging, "FF_HEALTH")], [["2131", 10, 60], ["2132", 6, 60], ["2133", 4, 60]], "and staging binds them under its own namespaces");
+  R.eq("scan", [limiter(toml, "FF_WRITE"), limiter(toml, "FF_HEAVY"), limiter(toml, "FF_HEALTH"), limiter(toml, "FF_PREVIEW")], [["1131", 10, 60], ["1132", 6, 60], ["1133", 4, 60], ["1134", 30, 60]], "wrangler.toml binds the four limiters lane B reads, at its limits");
+  R.eq("scan", [limiter(staging, "FF_WRITE"), limiter(staging, "FF_HEAVY"), limiter(staging, "FF_HEALTH"), limiter(staging, "FF_PREVIEW")], [["2131", 10, 60], ["2132", 6, 60], ["2133", 4, 60], ["2134", 30, 60]], "and staging binds them under its own namespaces");
   const ids = [...toml.matchAll(/namespace_id = "(\d+)"/g)].map((m) => m[1]);
   ok(new Set(ids).size === ids.length, "no two production limiters share a namespace");
   for (const [key, value] of Object.entries(FF_ON)) ok(new RegExp("^" + key + " = \"" + value + "\"$", "m").test(toml), "wrangler.toml ships " + key + " = " + value);

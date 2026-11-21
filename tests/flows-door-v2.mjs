@@ -124,7 +124,7 @@ const tickerOfDepth = (depth) => Object.keys(rosterDepth).find((t) => rosterDept
   const base = { b: 1, a: [3, 2, { y: 1, x: 2 }], generatedAt: "2026-08-24T21:45:00Z", readAt: "x", producer: { run: 1 }, fresh: { readAt: "t", vendorAt: "v" } };
   const shuffled = { fresh: { vendorAt: "v", readAt: "other" }, producer: "p", readAt: "y", generatedAt: "2026-08-25T00:00:00Z", a: [3, 2, { x: 2, y: 1 }], b: 1 };
   eq(DOOR.canonicalize(base).text, DOOR.canonicalize(shuffled).text, "the canonical form orders keys and drops the volatile stamps: generatedAt, readAt, producer and fresh.readAt");
-  eq(DOOR.canonicalize({ a: 1, fresh: { vendorAt: "v" } }).text, "{\"a\":1,\"fresh\":{\"vendorAt\":\"v\"}}", "while the vendor's own time inside fresh stays in");
+  eq(DOOR.canonicalize({ a: 1, fresh: { vendorAt: "v" } }).text, "{\"a\":1,\"fresh\":{\"vendorAt\":\"v\"}}", "while the feed's own time inside fresh stays in");
   ok(DOOR.canonicalize({ a: [1, 2] }).text !== DOOR.canonicalize({ a: [2, 1] }).text, "array order is content");
   ok(DOOR.canonicalize({ a: 1 }).text !== DOOR.canonicalize({ a: 1.0000001 }).text, "and so is any digit");
   eq(DOOR.canonicalize({ a: -0 }).text, DOOR.canonicalize({ a: 0 }).text, "negative zero is zero");

@@ -23,6 +23,7 @@ const PREV = "2026-09-28";
 const T0 = easternInstant(DAY, 10 * 60 + 30);
 const T1 = T0 + 5000;
 const TOPICS = RT.RT_TOPIC_KEYS;
+const POLLED = TOPICS.filter((k) => k !== "ht");
 const FIELDS = STRIP_FIELDS.map(([n]) => n);
 const iso = (ms) => new Date(ms).toISOString();
 const RTH = { phase: "rth", session: DAY, trading: true, lastClosed: PREV, endsAt: iso(easternInstant(DAY, 16 * 60)) };
@@ -321,7 +322,7 @@ try {
     const { ctx, page, R } = await mount(browser, { html: coreHtml() });
     eq(await rt(page, "typeof window.FlowsUI.rt"), "object", "FlowsUI.rt is attached to the allowlisted global, no new global");
     deep(await rt(page, "Object.keys(window.FlowsUI.rt).sort()"),
-      ["alerts", "connect", "feeds", "fresh", "gex", "market", "measure", "news", "on", "quote", "status", "strips", "transport"],
+      ["alerts", "connect", "feeds", "fresh", "gex", "halts", "market", "measure", "news", "on", "quote", "status", "strips", "transport"],
       "and offers connect, on and transport with the adapters the pages read");
     eq(await transport(page), "off", "before any page asks for a topic the rail is off and nothing is opened");
     eq(R.conns.length, 0, "no socket without a connect");
@@ -339,7 +340,7 @@ try {
     const s = await strips(page);
     deep(s.fields, FIELDS, "px rows map back to the live:strips field order the pages already read");
     deep(Object.keys(s.rows).sort(), ["AMD", "NVDA", "SPY"], "one row per ticker");
-    eq(s.rows.NVDA.length, FIELDS.length, "each row is the strip values, without the ticker and the vendor stamp");
+    eq(s.rows.NVDA.length, FIELDS.length, "each row is the strip values, without the ticker and the feed stamp");
     eq(s.rows.NVDA[0], 200, "px first");
     eq(s.rows.NVDA[FIELDS.indexOf("chg")], chgOf(200, 190), "and the change the server computed from the same row's prev");
     eq(s.session, DAY, "the session comes from the frame's fresh entry");
@@ -357,8 +358,8 @@ try {
     R.send(c1, R.delta("px", [quote("NVDA", 201, 190, q0 + 2000), quote("AMD", 1, 99, q0 - 5000), quote("MSFT", 400, 399, q0)]));
     await R.pump();
     const d = await strips(page);
-    eq(d.rows.NVDA[0], 201, "a delta with a newer vendor quote time replaces the row");
-    eq(d.rows.AMD[0], 100, "a delta with an OLDER quote time is ignored: the latest vendor stamp wins, not the latest arrival");
+    eq(d.rows.NVDA[0], 201, "a delta with a newer feed quote time replaces the row");
+    eq(d.rows.AMD[0], 100, "a delta with an OLDER quote time is ignored: the latest feed stamp wins, not the latest arrival");
     eq(d.rows.MSFT[0], 400, "a name the page had not seen is added");
     deep((await page.evaluate(() => window.__ch)).map((c) => [c.snap, c.ids.sort().join()]), [[false, "MSFT,NVDA"]], "and the listener hears only the names that changed, once, after one animation frame");
     R.send(c1, R.delta("px", [quote("NVDA", 201, 190, q0 + 2000, { qa: 9 })]));
@@ -366,6 +367,44 @@ try {
     eq((await page.evaluate(() => window.__ch)).length, 1, "a row that differs only in its read lag (qa) is not a change and wakes nobody");
     eq(R.messages(c1).filter((m) => m.t === "rs").length, 0, "no resync was asked for on a clean run");
     deep(page.errors, [], "nothing threw");
+    await ctx.close();
+  }
+
+  if (want("halts")) {
+    const { ctx, page, R } = await mount(browser, { html: coreHtml() });
+    R.sq.ht = 0;
+    eq(await rt(page, "window.FlowsUI.rt.halts()"), null, "HALTS: before a page asks for the channel the adapter has nothing to say");
+    await connect(page, { topics: ["ht"], primary: [] });
+    const c = await R.nextConn();
+    eq(new URL(c.url).searchParams.get("k"), "ht", "a page that asks for halts names ht alone, so no polled topic is woken for it");
+    const since = new Date(R.now - 3600000).toISOString();
+    const down = RT.socketOnlyStream("ht", DAY);
+    R.send(c, RT.ctlFrame("hello", { ep: R.ep, at: R.now, meta: { transport: "ws", upstream: "socket", mode: "on", audience: "members", topics: ["ht"], hbS: 5, cold: false, phase: "rth", session: DAY, f: null },
+      rows: [RT.frame("ht", { ep: R.ep, sq: 0, at: R.now, snap: true, fresh: down, meta: { since, dropped: 0 }, rows: [] })] }));
+    await R.pump();
+    eq(await rt(page, "window.FlowsUI.rt.halts()"), null, "SOCKET-ONLY: while the hub says the channel is down the adapter answers null, which a page prints as not connected and never as no halts");
+    ok(!(await rt(page, "JSON.stringify(window.FlowsUI.rt.status().topics.ht)")).includes("\"state\":\"live\""), "and the topic is not called live");
+    R.send(c, R.ctl("hb", { upstream: "up", phase: "rth", sockets: 1, degraded: null, topics: { ht: { sq: 0, readAt: R.now, lagMs: null, fresh: R.fresh("ht") } } }));
+    await R.pump();
+    deep(await rt(page, "(() => { const h = window.FlowsUI.rt.halts(); return h && { n: h.length, since: h.since }; })()"), { n: 0, since },
+      "LIVE: a heartbeat that says the channel is live turns the adapter to an empty list with the epoch's start");
+    ok((await rt(page, "window.__ch.filter((c) => c.k === 'ht').length")) >= 2, "and tells the page's listener the state turned, though no row came");
+    const T = R.now - 5000;
+    const first = { id: "SYH101|" + T + "|halted", ts: T, t: "SYH101", state: "halted", reason: "LUDP" };
+    R.send(c, R.delta("ht", [first]));
+    await R.pump();
+    deep(await rt(page, "window.FlowsUI.rt.halts().map((r) => [r.id, r.t, r.state, r.reason, r.at])"), [[first.id, "SYH101", "halted", "LUDP", new Date(T).toISOString()]],
+      "a streamed halt is read back with its own time as an instant");
+    R.send(c, R.delta("ht", [first]));
+    const later = { id: "SYH101|" + (T + 3000) + "|resumed", ts: T + 3000, t: "SYH101", state: "resumed", reason: null };
+    R.send(c, R.delta("ht", [later]));
+    await R.pump();
+    deep(await rt(page, "window.FlowsUI.rt.halts().map((r) => r.state)"), ["resumed", "halted"], "a halt sent again is held once, and the list is newest first");
+    R.send(c, R.ctl("hb", { upstream: "up", phase: "rth", sockets: 1, degraded: null, topics: { ht: { sq: R.sq.ht, readAt: null, lagMs: null, fresh: down } } }));
+    await R.pump();
+    eq(await rt(page, "window.FlowsUI.rt.halts()"), null, "when the channel goes down again the adapter says so rather than keep showing the old list as current");
+    deep(await rt(page, "window.__html.filter((h) => /SYH/.test(h)).length"), 0, "no halt row ever reaches innerHTML");
+    eq(page.errors.length, 0, "no page error");
     await ctx.close();
   }
 
@@ -683,7 +722,7 @@ try {
     await R.until(() => R.snapHits.length >= 1);
     await R.pump();
     const drops = await page.evaluate(() => window.__drops.slice());
-    deep([...new Set(drops.filter((s) => /^rt:/.test(s)))].sort(), ["rt:fl", "rt:gx", "rt:mk", "rt:nw", "rt:px"], "WHEN THE SOCKET FALLS every rt:* freshness entry is dropped, so a dead socket cannot leave the pill stale");
+    deep([...new Set(drops.filter((s) => /^rt:/.test(s)))].sort(), ["rt:fl", "rt:gx", "rt:ht", "rt:mk", "rt:nw", "rt:px"], "WHEN THE SOCKET FALLS every rt:* freshness entry is dropped, so a dead socket cannot leave the pill stale");
     const f2 = await facts(page);
     ok(!f2["Price read"] && !f2.Payloads, `and the price-read claim and the payload count go with them (${JSON.stringify(f2)})`);
     await ctx.close();
@@ -749,7 +788,7 @@ try {
     R.send(c1, R.hello(["px"], { px: [quote("NVDA", 200, 190, R.now - 40000)] }, { lag: 40000 }));
     await R.pump();
     const f = await page.evaluate(() => ({ s: window.FlowsUI.freshness.state(), d: window.FlowsUI.freshness.details(), p: document.getElementById("fxFresh").dataset.state }));
-    ok(f.p !== "live" && f.s !== "live", `A FRAME WHOSE OWN FRESH STATE IS NOT LIVE (the vendor's quote is 40 s old: fresh, vendor-lag) NEVER CLAIMS A LIVE PILL (${f.p}/${f.s})`);
+    ok(f.p !== "live" && f.s !== "live", `A FRAME WHOSE OWN FRESH STATE IS NOT LIVE (the feed's quote is 40 s old: fresh, vendor-lag) NEVER CLAIMS A LIVE PILL (${f.p}/${f.s})`);
     ok(!f.d.facts.some(([k, v]) => k === "Price read" && v), "and sets no price-read time");
     await ctx.close();
   }
@@ -1210,7 +1249,7 @@ try {
     await step(12);
     eq(await transport(page), "socket", "THE CLIENT AGAINST THE REAL HUB: hello over a bridged socket lands the page on the socket rung");
     const st = await status(page);
-    ok(TOPICS.every((k) => st.topics[k].synced && !st.topics[k].resync), `every topic synced (${JSON.stringify(Object.fromEntries(TOPICS.map((k) => [k, st.topics[k].sq])))})`);
+    ok(POLLED.every((k) => st.topics[k].synced && !st.topics[k].resync), `every topic synced (${JSON.stringify(Object.fromEntries(POLLED.map((k) => [k, st.topics[k].sq])))})`);
     ok(hub.topics.px.state.rows.size >= 3, `the hub holds ${hub.topics.px.state.rows.size} px rows`);
     let cmp = await same();
     deep([...cmp.mine.keys()].sort(), [...cmp.held.keys()].sort(), "the page holds exactly the hub's tickers");
@@ -1234,19 +1273,19 @@ try {
     hub.start(clock.t, { notify: "restart" });
     await step(10);
     const st3 = await status(page);
-    ok(TOPICS.every((k) => st3.topics[k].synced && !st3.topics[k].resync), "A HUB RESTART (new epoch, resync, fresh snapshots) is absorbed: every topic is synced in the new epoch");
+    ok(POLLED.every((k) => st3.topics[k].synced && !st3.topics[k].resync), "A HUB RESTART (new epoch, resync, fresh snapshots) is absorbed: every topic is synced in the new epoch");
     eq(st3.topics.px.ep, hub.ep, "on the hub's epoch");
     cmp = await same();
     ok(cmp.held.size > 0 && [...cmp.held].every(([t, v]) => JSON.stringify(cmp.mine.get(t)) === JSON.stringify(v)), "with equal state");
 
     vendor.fault = "500";
     await step(25);
-    ok((await status(page)).degraded !== null, `a vendor that fails twenty-five seconds shows as degraded (${JSON.stringify((await status(page)).degraded)})`);
+    ok((await status(page)).degraded !== null, `a feed that fails twenty-five seconds shows as degraded (${JSON.stringify((await status(page)).degraded)})`);
     vendor.fault = null;
     await step(25);
     const st4 = await status(page);
     eq(st4.degraded, null, "and recovery clears it");
-    ok(TOPICS.every((k) => st4.topics[k].synced && !st4.topics[k].resync), "with every topic resynced from the recovery snapshots");
+    ok(POLLED.every((k) => st4.topics[k].synced && !st4.topics[k].resync), "with every topic resynced from the recovery snapshots");
 
     const gxT = [...hub.topics.gx.state.rows.keys()][0];
     const gxRow = await page.evaluate((t) => window.FlowsUI.rt.gex(t), gxT);
@@ -1299,7 +1338,7 @@ try {
     const px = diff("px");
     const snap = async (ks) => JSON.stringify((await rig.hub.snap(ks)).frames).length;
     const one = await snap(["px"]);
-    const all = await snap(TOPICS);
+    const all = await snap(POLLED);
     const strips = (await import("../shared/flows-live.js")).shapeStrips;
     const live = await import("../scripts/flows-legs/live-fake.mjs");
     const rest = JSON.stringify(strips(live.fakeScreenerRows(NAMES, { session: DAY, dated: true, now: R.now }), { at: R.now, session: DAY, names: NAMES, writer: "w" })).length;
@@ -1307,7 +1346,7 @@ try {
     console.log("MEASURE per kind [frames, mean bytes, mean ms]:", JSON.stringify(Object.fromEntries(kinds.map((k) => { const d = diff(k); return [k, [d[0], Math.round(d[1] / Math.max(1, d[0])), +(d[2] / Math.max(1, d[0])).toFixed(3)]]; }))));
     console.log("MEASURE animation-frame flushes:", m.raf.length, "mean ms", avg(m.raf).toFixed(2), "max", Math.max(0, ...m.raf).toFixed(2), "| DOM mutation records:", m.mut, "per px frame", (m.mut / Math.max(1, px[0])).toFixed(1));
     console.log("MEASURE transitMs (an estimate, relative to the hello):", JSON.stringify((await measure(page)).transitMs));
-    console.log("MEASURE bytes per minute received on the socket (every topic, a vendor that moves every row each poll):", bytes, "in", msgs, "messages");
+    console.log("MEASURE bytes per minute received on the socket (every topic, a feed that moves every row each poll):", bytes, "in", msgs, "messages");
     console.log("MEASURE one snapshot response: px", one, "all five topics", all, "=> poll rung per minute: px only", one * 12, "all five", all * 12, "| stored strips body, 157 names:", rest);
     const pxs = { length: px[0] };
     ok(pxs.length >= 10, "measure: about twelve px frames in a minute");
@@ -1315,7 +1354,7 @@ try {
 
     let rig2 = null;
     const all5 = await mount(browser, { html: coreHtml(), fake: false, setup: async (R2, page2) => { rig2 = rigHub(page2, R2, { roster }); } });
-    await connect(all5.page, { topics: TOPICS });
+    await connect(all5.page, { topics: POLLED });
     await all5.R.nextConn();
     await rig2.step(14);
     const j0 = JSON.parse(JSON.stringify((await measure(all5.page)).kinds));
