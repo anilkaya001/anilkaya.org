@@ -117,11 +117,19 @@
     const p95 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))];
     const cap = Math.max(0.002, Math.min(sorted[sorted.length - 1], p95 * 4) * 1.04);
     const lo = Math.min(0, Math.max(sorted[0], -cap) * 1.04);
-    const raw = (cap - lo) / 5, mag = 10 ** Math.floor(Math.log10(raw)), e = raw / mag;
-    const step = (e >= 7.5 ? 10 : e >= 3.5 ? 5 : e >= 1.5 ? 2 : 1) * mag;
-    const d = step >= 0.01 - 1e-12 ? 0 : step >= 0.001 - 1e-12 ? 1 : 2;
+    const raw = (cap - lo) / 5, exp = Math.floor(Math.log10(raw)), e = raw / 10 ** exp;
+    const mult = e >= 7.5 ? 10 : e >= 3.5 ? 5 : e >= 1.5 ? 2 : 1;
+    const step = mult * 10 ** exp;
+    const d = Math.max(0, -(exp + 2));
+    const said = (units) => {
+      const s = String(Math.abs(units) * (d ? 1 : 10 ** (exp + 2))).padStart(d + 1, "0");
+      return (units < 0 ? "\u2212" : "") + (d ? s.slice(0, -d) + "." + s.slice(-d) : s) + "%";
+    };
     const ticks = [];
-    for (let i = Math.ceil(lo / step - 1e-9); i * step <= cap + 1e-12; i++) ticks.push({ v: +(i * step).toFixed(10), text: (i < 0 ? "\u2212" : "") + Math.abs(i * step * 100).toFixed(d) + "%" });
+    for (let i = Math.ceil(lo / step - 1e-9); i * step <= cap + 1e-12; i++) {
+      const text = said(i * mult);
+      ticks.push({ v: (i < 0 ? -1 : 1) * Number(text.replace(/[^0-9.]/g, "")) / 100, text });
+    }
     return { lo, cap, step, ticks };
   }
 
