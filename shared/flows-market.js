@@ -22,6 +22,32 @@ function jointRatio(rows, numKey, denKey) {
   return { ratio: den > 0 ? num / den : null, n };
 }
 
+export function sessionPremium(eligibleRows, funds) {
+  const rows = Array.isArray(eligibleRows) ? eligibleRows.filter(Boolean) : [];
+  const seen = new Set();
+  const stocks = { calls: 0, puts: 0, n: 0, of: rows.length };
+  for (const row of rows) {
+    const c = numOrNull(row.call_premium), p = numOrNull(row.put_premium);
+    if (c === null || p === null || c < 0 || p < 0 || typeof row.ticker !== "string" || seen.has(row.ticker)) continue;
+    seen.add(row.ticker);
+    stocks.calls += c; stocks.puts += p; stocks.n++;
+  }
+  const table = funds && funds.status === "ok" && funds.rows && typeof funds.rows === "object" ? funds.rows : null;
+  const other = table ? { calls: 0, puts: 0, n: 0, of: 0 } : null;
+  if (other) {
+    for (const [ticker, r] of Object.entries(table)) {
+      if (seen.has(ticker)) continue;
+      other.of++;
+      const c = r ? numOrNull(r.cp) : null, p = r ? numOrNull(r.pp) : null;
+      if (c === null || p === null || c < 0 || p < 0) continue;
+      other.calls += c; other.puts += p; other.n++;
+    }
+  }
+  if (!stocks.n && !(other && other.n)) return null;
+  for (const part of [stocks, other]) if (part) { part.calls = Math.round(part.calls); part.puts = Math.round(part.puts); }
+  return { stocks, funds: other, total: stocks.calls + stocks.puts + (other ? other.calls + other.puts : 0) };
+}
+
 export function marketAggregate(eligibleRows, tiltsByTicker = new Map(), { screened = null } = {}) {
   const rows = Array.isArray(eligibleRows) ? eligibleRows.filter(Boolean) : [];
   const n = rows.length;

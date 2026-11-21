@@ -476,12 +476,12 @@
         }),
       }),
       chip({
-        key: "Flagged", value: seen === null ? DASH : (atLimit ? "≥" : "") + seen,
+        key: "Alerts", value: seen === null ? DASH : (atLimit ? "≥" : "") + seen,
         silence: flSilence, stamp: stamps.flagged,
         g: UI.iconChip("unusual", "--s-orange"),
         info: () => ({
-          title: "Flagged windows",
-          lead: flSilence ? silenceSaid(flSilence, "the flagged-window count") : "Option windows the feed's own rules flagged in this read." +
+          title: "Unusual-activity alerts",
+          lead: flSilence ? silenceSaid(flSilence, "the flagged-window count") : "An alert is a window of activity in one contract that the feed's unusual-activity rules picked out. This counts the alerts in this read; it is not the market's volume." +
             (atLimit ? " The read hit the feed's ceiling, so the count is a floor and never a census." : ""),
           facts: [["Seen", seen === null ? DASH : (atLimit ? "≥" : "") + seen], ["Carried", alertRows === null ? DASH : String(alertRows)], sessionFact(aDay)],
         }),
@@ -2088,12 +2088,24 @@
     const of = seen === null ? rows && rows.length : seen;
     const floor = rows && (alerts.vendorTruncated === true || alerts.readTruncated === true);
     const off = rows ? null : gone(alerts, "flagged windows") || ["unavailable", "The flagged windows were read and carry no rows, so no figure is shown.", "flagged windows", "not on this payload"];
-    big("hmAlerts", rows ? (floor ? "≥" : "") + of : null, "windows flagged this session", "ice", off);
+    big("hmAlerts", rows ? (floor ? "≥" : "") + of : null, "unusual-activity alerts this session", "ice", off);
     const premSum = rows ? rows.reduce((a, r) => a + (isNum(r && r.prem) ?? 0), 0) : null;
     big("hmNet", rows && rows.length ? (floor ? "≥" : "") + usd(premSum) : null, floor ? "premium in carried windows" : "flagged premium routed", "ice",
       rows && !rows.length ? ["quiet", "Nothing was flagged in this read, so no premium was routed.", "flagged premium", "nothing flagged"] : off);
     subSaid($("ccAlertsSub"), rows ? floor ? shown + " of ≥" + of : countSaid(shown, of) : "",
-      rows && (floor ? shown + " of at least " + of : capSaid(shown, of)) + " flagged windows — open the unusual flow page");
+      rows && (floor ? shown + " of at least " + of : capSaid(shown, of)) + " alerts — open the unusual flow page");
+  });
+
+  when(["alerts", "market"], ({ alerts, market }) => {
+    const rows = ans(alerts) && Array.isArray(alerts.rows) ? alerts.rows : null;
+    const m = ans(market) ? market : null;
+    if (!rows || !rows.length || !m || m.sessionDate !== alerts.sessionDate) return;
+    const whole = m.session && isNum(m.session.total) !== null ? m.session.total : 0;
+    const prem = rows.reduce((a, r) => a + (isNum(r && r.prem) ?? 0), 0);
+    if (!(whole > 0) || !(prem > 0)) return;
+    const floor = alerts.vendorTruncated === true || alerts.readTruncated === true;
+    const seen = isNum(alerts.seen);
+    big("hmAlerts", (floor ? "≥" : "") + (seen === null ? rows.length : seen), "alerts, " + F.pct(prem / whole, prem / whole < 0.1 ? 1 : 0) + " of " + usd(whole) + " traded", "ice", null);
   });
 
   when(["b", "events"], ({ events }) => {

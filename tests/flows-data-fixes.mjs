@@ -122,4 +122,25 @@ eq(shortAgain.length, 0, "a short-history name is not retried for 20 days");
   }
 }
 
+{
+  const { sessionPremium } = await import("../shared/flows-market.js");
+  const { loadMutated } = await import("./truth/mutants.mjs");
+  const rows = [{ ticker: "SYXA", call_premium: "100.4", put_premium: "50" }, { ticker: "SYXB", call_premium: "10", put_premium: null }, { ticker: "SYXF", call_premium: "7", put_premium: "3" }, { ticker: "SYXN", call_premium: "-1", put_premium: "3" }];
+  const funds = { status: "ok", rows: { SYXF: { cp: 1000, pp: 2000 }, SYXI: { cp: 5, pp: 6 }, SYXQ: { cp: null, pp: 1 } } };
+  const want = { stocks: { calls: 107, puts: 53, n: 2, of: 4 }, funds: { calls: 5, puts: 6, n: 1, of: 2 }, total: 171 };
+  assert.deepEqual(sessionPremium(rows, funds), want, "WHOLE-SESSION PREMIUM is calls plus puts over the screened names and the funds, a name counted once, a one-sided or negative row left out and counted"); checks++;
+  eq(sessionPremium([], null), null, "nothing read is null, never a zero");
+  assert.deepEqual(sessionPremium(rows, { status: "pending", rows: funds.rows }).funds, null, "funds that were not read are absent, not zero"); checks++;
+  for (const [name, from, to] of [
+    ["a fund that is also a screened name counted twice", "if (seen.has(ticker)) continue;\n      other.of++;", "other.of++;"],
+    ["a one-sided row counted", "if (c === null || p === null || c < 0 || p < 0 || typeof row.ticker", "if (c === null || c < 0 || typeof row.ticker"],
+    ["puts left out of the total", "total: stocks.calls + stocks.puts + (other ? other.calls + other.puts : 0)", "total: stocks.calls + (other ? other.calls : 0)"],
+  ]) {
+    const m = await loadMutated("shared/flows-market.js", [[from, to]]);
+    let same = false;
+    try { assert.deepEqual(m.sessionPremium(rows, funds), want); same = true; } catch { same = false; }
+    ok(!same, "A PLANTED WRONG BUILD (" + name + ") is caught");
+  }
+}
+
 console.log(`flows-data-fixes: ${checks} checks passed`);

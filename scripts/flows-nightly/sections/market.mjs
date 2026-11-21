@@ -1,5 +1,5 @@
 import { buildEvents, fitEvents, EVENTS_NOTES } from "../../../shared/flows-events.js";
-import { marketAggregate, MARKET_NOTES } from "../../../shared/flows-market.js";
+import { marketAggregate, sessionPremium, MARKET_NOTES } from "../../../shared/flows-market.js";
 import { withPrefetched } from "../../flows-legs/universe.mjs";
 import { runMarketLegs, windowTickersOf } from "../../flows-legs/market.mjs";
 import { makeCardXStore } from "../../flows-legs/card-x.mjs";
@@ -55,6 +55,7 @@ export async function runMarket(ctx) {
         new Map(withTilt.map((w) => [w.row.ticker, w.tilt])),
         { screened: screener.length },
       ),
+      session: sessionPremium(withTilt.map((w) => w.row), funds),
       notes: MARKET_NOTES,
       status: "ok",
     });

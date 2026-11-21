@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "445";
+export const ASSET_VERSION = "446";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -602,7 +602,7 @@ ${shell("Session", "overview", username, `
 ${neuronVerdict(summary)}
     <i hidden data-defer="nn-orb" data-src="${v("/assets/js/flows-nn-orb.js")}"></i>
 ${homeNetModule(net)}
-${homeModule("hmAlerts", "Flagged", "ccAlerts", { page: "flow", big: true, sub: `<a class="hm-count" href="/flows/unusual/" id="ccAlertsSub"></a>` })}
+${homeModule("hmAlerts", "Alerts", "ccAlerts", { page: "flow", big: true, sub: `<a class="hm-count" href="/flows/unusual/" id="ccAlertsSub"></a>` })}
 ${homeModule("hmLean", "Sectors", "ccLean", { page: net ? "glance" : "flow", big: true, nofit: true, sub: `<span class="hm-count" id="ccLeanSub"></span>`, seg: `<div class="hm-seg" id="ccLeanSeg"></div>` })}
 ${homeModule("hmBull", "Bullish", "ccBull", { page: "names", big: true, sub: `<a class="hm-count cc-bull" href="/flows/long/" id="ccBullSub" hidden></a>` })}
 ${homeModule("hmBear", "Bearish", "ccBear", { page: "names", big: true, sub: `<a class="hm-count cc-bear" href="/flows/short/" id="ccBearSub" hidden></a>` })}

@@ -1092,7 +1092,7 @@ The market aggregate and its notes.
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-market.js` | `shared/flows-market.js#MARKET_NOTES`, `shared/flows-market.js#marketAggregate` | flows, flows-cap-tide, flows-engine-budget, flows-events, flows-garch, flows-live and 8 more |
+| `shared/flows-market.js` | `shared/flows-market.js#MARKET_NOTES`, `shared/flows-market.js#marketAggregate`, `shared/flows-market.js#sessionPremium` | flows, flows-cap-tide, flows-data-fixes, flows-engine-budget, flows-events, flows-garch and 9 more |
 
 ### `shared/flows-neuron.js`
 
@@ -1510,7 +1510,7 @@ The cap-weighted Market Tide, a leaf that imports nothing. `capTide(rows, option
 
 | File | Exports | Suites |
 |---|---|---|
-| `shared/flows-cap-tide.js` | `shared/flows-cap-tide.js#CAP_TIDE_CLASSES`, `shared/flows-cap-tide.js#CAP_TIDE_COPY`, `shared/flows-cap-tide.js#CAP_TIDE_MIN_COVERAGE`, `shared/flows-cap-tide.js#CAP_TIDE_MIN_NAMES`, `shared/flows-cap-tide.js#CAP_TIDE_REASONS`, `shared/flows-cap-tide.js#CAP_TIDE_TOP`, `shared/flows-cap-tide.js#CAP_TIDE_VERSION`, `shared/flows-cap-tide.js#capTide`, `shared/flows-cap-tide.js#capTideNumber`, `shared/flows-cap-tide.js#exactSum` | academy, architecture, ff-b-budget, ff-b-health, ff-b-mutants-routes, ff-b-mutants-store and 146 more |
+| `shared/flows-cap-tide.js` | `shared/flows-cap-tide.js#CAP_TIDE_CLASSES`, `shared/flows-cap-tide.js#CAP_TIDE_COPY`, `shared/flows-cap-tide.js#CAP_TIDE_MIN_COVERAGE`, `shared/flows-cap-tide.js#CAP_TIDE_MIN_NAMES`, `shared/flows-cap-tide.js#CAP_TIDE_REASONS`, `shared/flows-cap-tide.js#CAP_TIDE_TOP`, `shared/flows-cap-tide.js#CAP_TIDE_VERSION`, `shared/flows-cap-tide.js#capTide`, `shared/flows-cap-tide.js#capTideNumber`, `shared/flows-cap-tide.js#exactSum` | academy, architecture, ff-b-budget, ff-b-health, ff-b-mutants-routes, ff-b-mutants-store and 147 more |
 | `tests/flows-cap-tide.mjs` |  | flows-cap-tide |
 
 ### `server/desk-sc.js`, `shared/flows-premium-rank.js`, `shared/flows-quant-rank.js`, `shared/flows-quant-forward.js`, `shared/flows-quant-bracket.js`, `tests/flows-premium-rank.mjs`, `tests/server-desk-sc.mjs`, `tests/flows-desk-sc.mjs`, `tests/flows-forward.mjs`, `tests/flows-forward-lab.mjs`, `tests/lib/forward-lab.mjs`, `tests/lib/sc-chain.mjs`, `tests/lib/sc-world.mjs`, `tests/lib/crr.mjs`, `tests/flows-decisions-closed.mjs`

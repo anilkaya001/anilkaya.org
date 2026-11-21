@@ -275,7 +275,12 @@ const asked = (cases) => {
     same(moved.filter((x) => x.startsWith("-live-")), [], "and no live key moved: the pass makes no fund read under either setting");
     const a = { ...emitRead(dir, "market") }, b = { ...emitRead(off, "market") };
     delete a.funds; delete b.funds;
+    const sa = a.session, sb = b.session;
+    delete a.session; delete b.session;
     same(a, b, "and the market payload is otherwise the same");
+    same(sb.stocks, sa.stocks, "the session total's stock part is the same under either setting");
+    ok(sb.funds === null && sb.total === sb.stocks.calls + sb.stocks.puts, "with the funds off the session total is the screened names alone and says so with no fund part");
+    ok(sa.funds && sa.funds.n > 0 && sa.total === sa.stocks.calls + sa.stocks.puts + sa.funds.calls + sa.funds.puts, "with the funds on it adds the fund part, each figure a whole dollar");
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

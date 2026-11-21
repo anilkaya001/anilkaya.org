@@ -236,6 +236,8 @@ const readBattery = async () => {
     [/\s*<section class="fx-doc-term" id="[a-z0-9-]+" aria-labelledby="[a-z0-9-]+">(?:(?!<\/section>)[\s\S])*<a href="\/flows\/macro\/">Macro<\/a>(?:(?!<\/section>)[\s\S])*<\/section>/g, ""],
     [", each name&#39;s Ticker page and Macro, collected", " and each name&#39;s Ticker page, collected"],
     [/ data-past="[0-9,-]*"/, ""],
+    ['id="hmAlertsT">Alerts</h2>', 'id="hmAlertsT">Flagged</h2>'],
+    [/\s*<section class="fx-doc-term" id="(?:flagged-premium|flagged-windows|alert-premium|alerts)" aria-labelledby="[a-z-]+">(?:(?!<\/section>)[\s\S])*<\/section>/g, ""],
   ];
   const render = async (root) => {
     const saved = Date.now;

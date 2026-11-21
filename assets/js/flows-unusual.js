@@ -238,11 +238,15 @@
     const seen = n(a.seen);
     const share = (x, w) => (w ? x / w : null);
     const ask = F.askShare(rows);
+    const whole = S.session && a.sessionDate && S.session.day === a.sessionDate ? S.session : null;
+    const sh = whole && prem ? prem / whole.total : 0;
     host.chips.replaceChildren(UI.chips([
-      UI.gaugeChip({ icon: "unusual", color: "--accent-ink", value: prem ? F.money(prem) : DASH, label: "Premium",
-        info: { title: "Flagged premium", lead: "The feed's total premium across every flagged window in the record.", facts: [["Windows", count(rows.length)]] } }),
-      UI.gaugeChip({ icon: "list", color: "--label-2", value: (floor ? "≥" : "") + count(seen ?? rows.length), label: "Windows",
-        info: { title: "Windows", lead: floor ? "The read hit a ceiling, so this count is a floor." : "Flagged windows held.", facts: [["Drawn", count(rows.length)], ["Seen", seen === null ? null : (floor ? "at least " : "") + count(seen)]] } }),
+      ...(whole ? [UI.gaugeChip({ icon: "market", color: "--label-1", value: F.money(whole.total), label: "All options",
+        info: { title: "Session option premium", lead: "Call and put premium traded in the session: screened names, index options and funds.", facts: [["Names and funds", count(whole.names)]] } })] : []),
+      UI.gaugeChip({ icon: "unusual", color: "--accent-ink", value: prem ? F.money(prem) : DASH, label: "Alerts" + (sh ? " · " + F.pct(sh, sh < 0.1 ? 1 : 0) : ""),
+        info: { title: "Alert premium", lead: "An alert is a window of activity in one contract that the feed's unusual-activity rules picked out. Their premium, not the market's.", facts: [["Alerts held", count(rows.length)]] } }),
+      UI.gaugeChip({ icon: "list", color: "--label-2", value: (floor ? "≥" : "") + count(seen ?? rows.length), label: "Alert windows",
+        info: { title: "Alert windows", lead: floor ? "The read hit a ceiling, so this count is a floor." : "Flagged windows held.", facts: [["Drawn", count(rows.length)], ["Seen", seen === null ? null : (floor ? "at least " : "") + count(seen)]] } }),
       UI.gaugeChip({ ring: share(call, cpW), color: "--up-mark", value: pct0(share(call, cpW)), label: "Calls",
         info: { title: "Call share", lead: "Call premium as a share of the premium on windows whose contract side could be read." } }),
       UI.gaugeChip({ ring: ask.share, color: "--label-1", value: pct0(ask.share), label: "Ask side",
@@ -444,6 +448,11 @@
     else if (body && typeof body === "object") UI.freshness({ sessionDate: body.sessionDate, generatedAt: body.generatedAt, updatedAt: upd, source });
   }
 
+  function sessionOf(m) {
+    const x = m && m.session, t = x ? n(x.total) : null;
+    return t > 0 ? { total: t, day: m.sessionDate || null, names: (x.stocks?.n || 0) + (x.funds?.n || 0) } : null;
+  }
+
   function loadAlerts() {
     return get("/api/flows/flowalerts").then((res) => {
       if (res.status === 401) { location.replace("/flows/"); return; }
@@ -554,6 +563,7 @@
   buildFilters();
   wireInfos();
   syncNote();
+  get("/api/flows/market").then((r) => (r.ok ? r.json() : null)).then((m) => { if ((S.session = sessionOf(m))) paintChips(); }).catch(() => {});
   Promise.all([loadAlerts(), loadFeed()]).then(() => {
     wireInfos();
     streamFlow();
