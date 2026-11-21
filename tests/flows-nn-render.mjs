@@ -189,7 +189,7 @@ const contrastOf = (l) => (0.9 + 0.05) / (l + 0.05);
   const ask = read("assets/js/flows-ask.js"), tick = read("assets/js/flows-ticker.js");
   ok(/UI\.nn\(nnHead, "think", "ask"\)/.test(ask) && /nnSettle\(kind\)/.test(ask) && /nnSettle\("off"\)/.test(ask), "the dock head thinks on ask and settles on every answer path");
   ok(/kind === "spoke"/.test(ask) && /used = /.test(ask), "spoke needs a model answer that no guard refused");
-  ok(/NN\.strip = 0; return settle/.test(tick), "the strip's think is cleared at the give-up");
+  ok(/if \(i > 6\) \{\s*NN\.strip = 0;[\s\S]{0,600}?renderVerdict\(card, done\);/.test(tick), "the strip's think is cleared at the give-up, before the terminal state is drawn");
   ok(/b = "plain"/.test(tick) && /status: "fallback"/.test(tick), "the rail settles by what it shows and stops claiming it is generating");
   const oracle = read("assets/js/flows-oracle.js");
   ok(!/requestAnimationFrame/.test(oracle) && /U\.nn\(host, want, "oracle"\)/.test(oracle) && /#g-neuron-s/.test(oracle), "the oracle drives its orb through FlowsUI.nn and draws the lens glyph");

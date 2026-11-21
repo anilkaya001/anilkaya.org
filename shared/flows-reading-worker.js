@@ -10,11 +10,21 @@ import { KINDS } from "./flows-dossier.js";
 import { sessionsBetween } from "./flows-cross.js";
 import { expectedNightlySession } from "./flows-freshness.js";
 import { SCREEN_LINES } from "./flows-neuron-screen.js";
+import { salvageReading } from "./flows-ai-salvage.js";
 
 export const READ_SCOPE = "read:";
 export const READ_GEN_SCOPE = "gen:read:";
 export const READ_GENERATING_MS = 90 * 1000;
 export const READ_LIMITED_RETRY_S = 60;
+export const READ_STORE_RETRY_S = 60;
+export const READ_STALL_MS = 5 * 60 * 1000;
+export const READ_DAY_MS = 24 * 60 * 60 * 1000;
+
+export function claimState(ageMs) {
+  if (!isNum(ageMs) || ageMs < READ_GENERATING_MS) return { state: "live", retryAfterS: null };
+  if (ageMs < READ_GENERATING_MS + READ_STALL_MS) return { state: "stalled", retryAfterS: Math.max(1, Math.ceil((READ_GENERATING_MS + READ_STALL_MS - ageMs) / 1000)) };
+  return { state: "dead", retryAfterS: null };
+}
 export const READ_BOX_MS = 1500;
 export const READ_BUDGET_SHARE = 0.75;
 
@@ -49,7 +59,33 @@ export function readMode(env) {
   return raw === "off" ? "off" : "on";
 }
 
-export const cooldownMs = (guard) => (Object.hasOwn(READ_COOLDOWN_MS, guard) ? READ_COOLDOWN_MS[guard] : READ_COOLDOWN_DEFAULT_MS);
+const DAILY_GUARDS = new Set(["unreachable:budget", "unreachable:allowance"]);
+
+export const untilUtcDay = (at) => READ_DAY_MS - (((at % READ_DAY_MS) + READ_DAY_MS) % READ_DAY_MS);
+
+export function cooldownMs(guard, at) {
+  if (DAILY_GUARDS.has(guard) && isNum(at)) return Math.max(READ_LIMITED_RETRY_S * 1000, untilUtcDay(at));
+  return Object.hasOwn(READ_COOLDOWN_MS, guard) ? READ_COOLDOWN_MS[guard] : READ_COOLDOWN_DEFAULT_MS;
+}
+
+export const READ_REASONS = Object.freeze({
+  "read:refused": "The model's last wording for this dossier did not pass the checks against its facts.",
+  "read:unparsable": "The model's last reply could not be read as a reading.",
+  "read:overlong": "The model's last reply was longer than the limit.",
+  "unreachable:budget": "The site's daily model budget for readings is spent; it renews at 03:00 TRT.",
+  "unreachable:allowance": "The day's model allowance is spent; it renews at 03:00 TRT.",
+  "unreachable:capacity": "The model was busy and did not take the request.",
+  "unreachable:unreachable": "The model could not be reached.",
+  "unreachable:plan": "The model is not available on this site's plan.",
+  "unreachable:empty": "The model's last reply had no text.",
+  "unreachable:length": "The model spent its whole answer budget before writing any text.",
+  stalled: "The last request for model wording did not finish.",
+  store: "The store could not record a request for model wording.",
+});
+
+export const READ_REASON_DEFAULT = "The last request for model wording failed.";
+
+export const reasonFor = (key) => (Object.hasOwn(READ_REASONS, key) ? READ_REASONS[key] : READ_REASON_DEFAULT);
 
 export function readSignature(env) {
   return aiCallSignature(env) + "|r" + READING_VERSION;
@@ -102,6 +138,7 @@ function fallbackProvenance(why, describe, guard) {
     case "generating": return "Deterministic reading: assembled from templates over the dossier's facts while a model writes its wording. The model's wording replaces this only if every sentence of it passes the checks against the facts it cites.";
     case "limited": return "Deterministic reading: assembled from templates over the dossier's facts. Some of the dossier's feed reads were held back by a rate limit, this site's own or the feed's, so no model wording was asked for from an incomplete dossier; a later read asks again.";
     case "store": return "Deterministic reading: assembled from templates over the dossier's facts. The store could not record a request for model wording, so none was made.";
+    case "stalled": return "Deterministic reading: assembled from templates over the dossier's facts. The last request for model wording did not finish, so the next one waits a short while rather than ask again at once.";
     case "cooldown": {
       if (guard === "read:refused") return "Deterministic reading: a model's wording for this dossier was refused by the checks against its facts, and the next attempt waits a short while.";
       if (guard === "read:unparsable") return "Deterministic reading: a model's reply could not be read as the required shape, and the next attempt waits a short while.";
@@ -123,6 +160,14 @@ function sleep(ms) {
 }
 
 const BOXED = Symbol("boxed");
+
+export const SALVAGED_SENTENCE = "The model's reply was cut off at its length limit, so only the parts that closed before the cut were kept and checked; the list of what is not known is the site's own.";
+
+export function cutAtLength(said) {
+  const list = said && Array.isArray(said.attempts) ? said.attempts : [];
+  const own = list.filter((a) => a && a.failed === null && typeof a.text === "string" && a.text === said.text);
+  return own.length > 0 && own[own.length - 1].finish === "length";
+}
 
 const flights = new Map();
 
@@ -151,6 +196,28 @@ async function generate({ env, deps, ticker, dossier, tags, fingerprint, started
     return { stored: "failed", guard: "read:overlong" };
   }
   const parsed = parseReading(said.text);
+  if (parsed === null && cutAtLength(said)) {
+    const kept = salvageReading(said.text, dossier, tags, { shown: prompt.shown, rendered: prompt.user });
+    if (kept.ok && kept.salvaged && kept.guard) {
+      const sections = { ...kept.sections };
+      if (sections.identity === null) {
+        const fb = readingFallback(dossier, tags);
+        if (fb.identity) sections.identity = { ...fb.identity, template: true };
+      }
+      const model = billed || said.model;
+      const cost = neuronCost(env, model, used);
+      const label = deps.modelLabel ? deps.modelLabel(model) : model;
+      const refusedCount = kept.refused.filter((x) => x.section !== "tags").length;
+      const shape = readingShape({
+        dossier, tags, sections, chosen: kept.tags, status: "ready", generated: true, model, modelLabel: label,
+        neurons: cost ? cost.neurons : null, tokens: cost ? { in: cost.tokensIn, out: cost.tokensOut } : null,
+        provenance: readyProvenance(label, cost, refusedCount) + " " + SALVAGED_SENTENCE, generatedAt: startedAt, refused: kept.refused,
+      });
+      await said.call.settle({ llm: true, guard: kept.guard });
+      await store(kept.sections.identity ? kept.sections.identity.text : kept.sections.now.text, shape, true, model, kept.guard, kept.refused.slice(0, 16));
+      return { stored: "ready", shape, salvaged: true };
+    }
+  }
   if (parsed === null) {
     await said.call.settle({ llm: false, guard: "read:unparsable" });
     await store("", null, false, said.model, "read:unparsable", []);
@@ -285,7 +352,7 @@ export async function readingFor(env, ctx, ticker, deps, opts = {}) {
   }
   const ageMs = stored && stored.at !== null ? now - stored.at : Infinity;
 
-  if (canModel && good(stored) && stored.fingerprint.endsWith("|" + signature) && ageMs < AI_INTRADAY_REFRESH_MS) {
+  if (canModel && good(stored) && stored.fingerprint.endsWith("|" + signature) && ageMs < AI_INTRADAY_REFRESH_MS && !(sessionsBehind(stored.shape.session || null, expectedNightlySession(now)) > 0)) {
     return readyFrom(stored, { held: "floor" });
   }
 
@@ -323,37 +390,44 @@ export async function readingFor(env, ctx, ticker, deps, opts = {}) {
 
   if (mode === "off") return fb("fallback", "off");
   if (!canModel) return fb("fallback", "no-model");
-  if (storeDown) return fb("fallback", "store");
+  if (storeDown) return fb("fallback", "store", { note: reasonFor("store"), retryAfterS: READ_STORE_RETRY_S });
 
   if (good(stored) && stored.fingerprint === fingerprint) return readyFrom(stored, { held: "fingerprint" });
 
   const kept = good(stored) && stored.fingerprint.endsWith("|r" + READING_VERSION)
     ? heldReading(stored, dossier, result.neuron ? result.neuron.tier : null, ticker, tags) : null;
   const previous = (refreshing, otherwise, extra) => (kept ? readyFrom(kept, { held: "previous", refreshing, note: kept.note, ...(extra || {}) }) : otherwise());
+  const storeFault = () => previous(false, () => fb("fallback", "store", { note: reasonFor("store"), retryAfterS: READ_STORE_RETRY_S }), { retryAfterS: READ_STORE_RETRY_S });
   const read = await attemptRead;
-  if (read.failed) return previous(false, () => fb("fallback", "store"));
+  if (read.failed) return storeFault();
   const attempt = read.row || (stored && !good(stored) ? stored : null);
   const attemptAge = attempt && attempt.at !== null ? now - attempt.at : Infinity;
 
-  if (attempt && attempt.guard === "generating" && attemptAge < READ_GENERATING_MS) return previous(true, () => fb("generating", "generating"));
+  const claim = attempt && attempt.guard === "generating" ? claimState(attemptAge) : null;
+  if (claim && (claim.state === "live" || flights.has(ticker))) return previous(true, () => fb("generating", "generating"));
+
+  if (claim && claim.state === "stalled") {
+    const retryAfterS = claim.retryAfterS;
+    return previous(false, () => fb("fallback", "stalled", { note: reasonFor("stalled"), retryAfterS }), { retryAfterS });
+  }
 
   if (attempt && attempt.guard !== "generating" && attempt.guard) {
-    const wait = cooldownMs(attempt.guard);
+    const wait = cooldownMs(attempt.guard, attempt.at);
     if (attemptAge < wait) {
-      const retryAfterS = Math.ceil((wait - attemptAge) / 1000);
-      return previous(false, () => fb("fallback", "cooldown", { guard: attempt.guard, retryAfterS }), { retryAfterS });
+      const retryAfterS = Math.max(1, Math.ceil((wait - attemptAge) / 1000));
+      return previous(false, () => fb("fallback", "cooldown", { guard: attempt.guard, note: reasonFor(attempt.guard), retryAfterS }), { retryAfterS });
     }
   }
 
   if (heldBack(result)) {
     if (kept && stored.fingerprint.endsWith("|" + signature)) return readyFrom(kept, { held: "limited", refreshing: false, note: limitedNote(ticker), retryAfterS: READ_LIMITED_RETRY_S });
-    return fb("fallback", "limited", { retryAfterS: READ_LIMITED_RETRY_S });
+    return fb("fallback", "limited", { note: "Some of the dossier's reads were held back by a rate limit, so no model wording was asked for.", retryAfterS: READ_LIMITED_RETRY_S });
   }
 
   if (flights.has(ticker)) return previous(true, () => fb("generating", "generating"));
 
   const marked = await deps.mark(genScope, fingerprint, chain[0]);
-  if (marked.failed) return previous(false, () => fb("fallback", "store"));
+  if (marked.failed) return storeFault();
   if (!marked.startedAt) return previous(true, () => fb("generating", "generating"));
 
   const work = generate({ env, deps, ticker, dossier, tags, fingerprint, startedAt: marked.startedAt, chain })
