@@ -405,12 +405,12 @@ export async function runCards(ctx) {
     if (extraTickers.length) {
       const unfetched =
         "this name was measured in the run's cross-section but is not on today's board, " +
-        "so the run did not spend the per-name vendor calls this panel needs — it was " +
+        "so the run did not spend the per-name feed calls this panel needs — it was " +
         "never requested, rather than requested and refused, and reloading will not " +
         "produce it";
       const lane = poolWidth(2);
       console.log(`  cross-section cards: ${extraTickers.length} name(s) off the board, ` +
-        `${lane.width} in flight — no vendor calls, the enrichment is already in hand`);
+        `${lane.width} in flight — no feed calls, the enrichment is already in hand`);
       const run = await runPooled(extraTickers, async (ticker) => {
         const e = byTicker.get(ticker);
         if (!e) return { status: "unenriched" };

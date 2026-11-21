@@ -184,15 +184,15 @@ export async function noVendorCalls(c, build) {
     live.world.core.setSession("2026-10-27");
     const lv = await live.call("POST", "/api/ff/preview", { body: { ast: { v: 1, cadence: "live", scope: { kind: "names", symbols: ["SYA101"] }, all: [{ m: "contract.dte", op: "<=", x: 21 }, { m: "contract.premium", op: ">=", x: 1000000 }], persist: 1 } }, user: alice });
     text.push(lv.text);
-    c.eq(seen, [], "vendor: no route makes a network call");
-    c.ok(!text.join("\n").includes("SENTINEL-vendor-key-9c1"), "vendor: the vendor key appears in no reply");
+    c.eq(seen, [], "feed: no route makes a network call");
+    c.ok(!text.join("\n").includes("SENTINEL-vendor-key-9c1"), "feed: the feed key appears in no reply");
   } finally {
     globalThis.fetch = realFetch;
   }
   const files = ["server/ff-store.js", "server/ff-health.js", "server/ff-preview.js", "server/ff-records.js", "server/ff-digest.js", "server/ff-export.js", "server/routes/flows-ff.js"];
   for (const f of files) {
     const src = readFileSync(new URL("../../" + f, import.meta.url), "utf8");
-    c.ok(!/\bfetch\s*\(|uwFetch|UW_API_KEY|UW_BASE|unusualwhales|\bAI\b\s*[.\[]|env\.AI/.test(src), "vendor: " + f + " reaches for neither the network, the vendor key nor a model");
+    c.ok(!/\bfetch\s*\(|uwFetch|UW_API_KEY|UW_BASE|unusualwhales|\bAI\b\s*[.\[]|env\.AI/.test(src), "feed: " + f + " reaches for neither the network, the feed key nor a model");
   }
 }
 

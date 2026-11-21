@@ -27,28 +27,28 @@ export const ALERT_ROWS = 60;
 export const ALERTS_NOTES = Object.freeze({
   unit:
     "One row is one alert: a window of activity in one contract that one of " +
-    "the vendor's own rules flagged, carrying the vendor's stated span, its " +
+    "the feed's own rules flagged, carrying the feed's stated span, its " +
     "count of executions, a total size and a total premium with its " +
     "ask-side/bid-side split. A row aggregates that whole window, so it is " +
     "never a single transaction and this page does not present it as one.",
   selection:
-    "The population is what the vendor's rules chose to flag. The rules are " +
-    "named per row but their definitions are the vendor's own — not " +
+    "The population is what the feed's rules chose to flag. The rules are " +
+    "named per row but their definitions are the feed's own — not " +
     "published, not reproducible from this payload — so absence from this " +
     "list is not evidence of quiet, and presence is not a ranking of the " +
     "whole market. The premium ordering below ranks only within what was " +
     "flagged.",
   sides:
-    "Ask-side and bid-side premium are the vendor's attribution of the " +
+    "Ask-side and bid-side premium are the feed's attribution of the " +
     "window's dollars against the quote. The split is carried as published; " +
     "this page adds no inference about who initiated, and the two need not " +
-    "sum to the total where the vendor left dollars between the quotes.",
+    "sum to the total where the feed left dollars between the quotes.",
   flags:
-    "Sweep, floor, single-leg and all-opening are the vendor's flags, " +
-    "reported as sent. A dash means the vendor did not carry the flag on " +
+    "Sweep, floor, single-leg and all-opening are the feed's flags, " +
+    "reported as sent. A dash means the feed did not carry the flag on " +
     "that row — which is not the same fact as the flag being off.",
   record:
-    "During the session this feed is a RECORD, not a snapshot. The vendor's " +
+    "During the session this feed is a RECORD, not a snapshot. The feed's " +
     "list is a rolling window \u2014 a name flagged at 09:31 has usually " +
     "fallen off it by midday \u2014 so each fifteen-minute read is merged " +
     "into the day's record rather than replacing it. Every row says when the " +
@@ -137,7 +137,7 @@ export function alertBand(shapedRows, { cap = ALERT_BAND_ROWS } = {}) {
     prem: r.prem, sweep: r.sweep, rule: r.rule,
   }));
   return {
-    basis: "vendor-flagged windows",
+    basis: "feed-flagged windows",
     rows,
     seen: usable.length,
     cap,

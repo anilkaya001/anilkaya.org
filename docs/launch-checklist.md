@@ -9,10 +9,10 @@ Classes shown to members: A, B, C, D
 ## Lines
 
 1. OD-01 answered and the plan matches the caps in wrangler.toml.
-2. OD-03a's written vendor answer covering every data class shown to members, and OD-37's price and tiers.
+2. OD-03a's written feed answer covering every data class shown to members, and OD-37's price and tiers.
 3. OD-06 counsel on ranked ideas; neutral forms live (P1-63).
 4. Accounts, session v2, entitlements, audit, legal pages, deletion and export live (P2-24..P2-27).
-5. Limiters live: Lab, login, member vendor, Ask, prefs writes (P0-10, P0-11, P0-13, P0-16, P3-35).
+5. Limiters live: Lab, login, member feed, Ask, prefs writes (P0-10, P0-11, P0-13, P0-16, P3-35).
 6. Deploy gate: test required on main (A-15) and staging in place (P2-33); the five audited promotions dropped by OD-02 (c).
 7. Revocation closes sockets within one roster refresh (P1-35).
 8. Status members view and alerts live (P1-25, P2-03).
@@ -27,7 +27,7 @@ Every part is a repository check the script runs against config, schema, routes 
 |---|---|---|---|
 | 1a | 1 | readback | A dated readback of the Workers plan from the Cloudflare invoice or plan page, as plan=paid or plan=free. |
 | 1b | 1 | repo | FLOWS_AI_DAILY_CAP_NEURONS in wrangler.toml is the cap of the recorded plan: 30000 on paid, at most 9000 on free. |
-| 2a | 2 | readback | The vendor's written answer, dated, as classes=A+B+C+D naming every data class the checklist lists as shown to members. |
+| 2a | 2 | readback | The feed's written answer, dated, as classes=A+B+C+D naming every data class the checklist lists as shown to members. |
 | 2b | 2 | readback | The launch price and tiers, dated, as price=<amount> and tiers=<count>. |
 | 3a | 3 | readback | Counsel's written answer on ranked ideas, dated, as counsel=ranked-ideas. |
 | 3b | 3 | repo | No verdict word in VERDICT_WORD begins with an imperative verb. |

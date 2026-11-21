@@ -130,7 +130,7 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
       refs.set(m[1], [...(refs.get(m[1]) || []), f]);
     }
   }
-  deep(literals, [], "NO VENDOR PATH IS SPELLED OUTSIDE THE REGISTRY: no /api/ literal that names a vendor operation remains in worker.js, shared/ or scripts/");
+  deep(literals, [], "NO VENDOR PATH IS SPELLED OUTSIDE THE REGISTRY: no /api/ literal that names a feed operation remains in worker.js, shared/ or scripts/");
   const ids = new Set(OPS.map((e) => e.id));
   eq(ids.size, OPS.length, "every registry id is unique");
   deep(bad.filter(([, id]) => !ids.has(id)), [], "and every id a call site names is in the registry");
@@ -405,20 +405,20 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
   eq(probe.buildUrl("https://x.test", "/api/a", { a: "", b: null, c: undefined, d: "1", e: ["x", "", null, "y"], f: 0 }),
      "https://x.test/api/a?d=1&e=x&e=y&f=0", "empty values are skipped, zero is kept, arrays repeat");
   deep(probe.vendorHeaders("K"), { Authorization: "Bearer K", Accept: "application/json" },
-       "the probe sends exactly the pipeline's two vendor headers");
+       "the probe sends exactly the pipeline's two feed headers");
 
   const src = nightlySource();
   const baseLine = /const BASE_INFO = vendorBaseInfo\(process\.env\.(\w+)\);/.exec(src);
-  ok(baseLine, "the pipeline still names its vendor base URL once, through the vendor core's allow-list");
+  ok(baseLine, "the pipeline still names its feed base URL once, through the feed core's allow-list");
   eq(baseLine[1], probe.BASE_ENV, "the probe honours the pipeline's base-URL override");
-  eq(VENDOR_BASE_DEFAULT, probe.DEFAULT_BASE, "and the probe defaults to the core's vendor host, which the pipeline uses for an unset base");
+  eq(VENDOR_BASE_DEFAULT, probe.DEFAULT_BASE, "and the probe defaults to the core's feed host, which the pipeline uses for an unset base");
   const uwBody = slice(src, "async function uw(", "\n}\n");
-  ok(uwBody.length > 0, "the pipeline's vendor helper is still uw()");
+  ok(uwBody.length > 0, "the pipeline's feed helper is still uw()");
   ok(/Authorization:\s*"Bearer "\s*\+\s*process\.env\.UW_API_KEY/.test(uwBody),
      "the pipeline authenticates with the same Bearer header the probe sends");
   ok(/Accept:\s*"application\/json"/.test(uwBody), "and asks for the same content type");
   ok(!/User-Agent/i.test(uwBody),
-     "and sets no User-Agent, so the probe sets none either: the vendor sees the runtime default from both");
+     "and sets no User-Agent, so the probe sets none either: the feed sees the runtime default from both");
   ok(/url\.searchParams\.append\(k, String\(item\)\)/.test(uwBody) &&
      /url\.searchParams\.set\(k, String\(v\)\)/.test(uwBody),
      "the pipeline builds arrays and scalars into the query the way buildUrl does");
@@ -442,7 +442,7 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
   ok(!("sample" in analysed) && probe.SAMPLE_CHARS === undefined, "no sample row is kept or printed: the log is public");
   const printed = probe.renderBlock(analysed).join("\n");
   ok(!printed.includes("187.25") && !printed.includes("xxxx") && !printed.includes(KEY.slice(0, 8)),
-     "so neither a vendor value nor the key reaches the block");
+     "so neither a feed value nor the key reaches the block");
   eq(probe.vendorError({ rows: [{ px: "187.25" }], n: 3 }, "", redact), "body {rows:[1],n:num}",
      "an error body with no message is described by its shape, not printed");
 }
@@ -530,7 +530,7 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
   const page = probe.analyse({ id: "p", tier: "2", op: "/p", expect: null },
     { url: "https://x.test/p", status: 502, ms: 1, text: "<html>Bad gateway</html>" }, probe.makeRedactor(KEY));
   ok(probe.renderBlock(page).join("\n").includes("error <html>Bad gateway</html>"),
-    "while a non-2xx error page is still clipped into the block, since it is the vendor's own error and not its data");
+    "while a non-2xx error page is still clipped into the block, since it is the feed's own error and not its data");
 
   const keyed = { data: { "187.50": 1200, "190.00": 800, as_of: "2026-09-22" } };
   const keyedResult = probe.analyse({ id: "k", tier: "2", op: "/k", expect: null },
@@ -698,7 +698,7 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
   for (const [base, loads] of [["https://evil.example", false], ["https://user:pw@api.unusualwhales.com", false], ["http://127.0.0.1:9", true], ["https://vendor.test", true], ["", true]]) {
     const child = spawnSync(process.execPath, ["--input-type=module", "-e", `await import(${JSON.stringify(vendorModule)})`],
       { env: { ...process.env, FLOWS_UW_BASE_URL: base }, encoding: "utf8" });
-    ok((child.status === 0) === loads, `the nightly's vendor client ${loads ? "loads" : "refuses to load"} with a vendor base of ${JSON.stringify(base)}`);
+    ok((child.status === 0) === loads, `the nightly's feed client ${loads ? "loads" : "refuses to load"} with a feed base of ${JSON.stringify(base)}`);
   }
 }
 
@@ -719,7 +719,7 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
   ok(lines.length > 20, "and the run printed enough lines for that to mean something");
   ok(!/x-echo-auth=/.test(out), "a header that is not a rate-limit header never has its value printed");
   ok(out.includes("x-ratelimit-remaining=117") && out.includes("x-uw-daily-req-count=42"),
-     "rate-limit headers are printed, including the vendor's own x-uw- counters");
+     "rate-limit headers are printed, including the feed's own x-uw- counters");
   ok(out.includes(`x-ratelimit-debug=${"y".repeat(60)}${probe.REDACTED}`),
      "a rate-limit header value is redacted before its 80-character clip, so the clip cannot cut the key in half");
 
@@ -736,7 +736,7 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
   ok(vendor.calls.some((c) => c.url === "https://vendor.test/api/stock/AAPL/greek-flow?date=2026-09-22"),
      "dated probes read that session");
   ok(vendor.calls.some((c) => c.url === "https://vendor.test/api/option-contract/AAPL261016C00200000/historic?limit=60"),
-     "the bound contract is the largest open interest, even when the vendor sends it as a string");
+     "the bound contract is the largest open interest, even when the feed sends it as a string");
 
   const cls = Object.fromEntries(run.results.map((r) => [r.id, r.cls]));
   deep(cls, {
@@ -744,10 +744,10 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
     "historic:AAPL": "ok", "historic:NVDA": "skipped", gated: "4xx", broken: "5xx", offline: "network", limited: "ok",
   }, "each probe lands in its class");
   eq(run.results.find((r) => r.id === "limited").limited, 1, "a 429 is retried and counted");
-  ok(vendor.sleeps.includes(2000), "after waiting the Retry-After the vendor asked for");
+  ok(vendor.sleeps.includes(2000), "after waiting the Retry-After the feed asked for");
   eq(run.code, 0, "an informational run with failures still exits 0");
 
-  ok(out.includes("spec 1 of 3 documented names UNSEEN"), "a documented name the vendor did not send is flagged");
+  ok(out.includes("spec 1 of 3 documented names UNSEEN"), "a documented name the feed did not send is flagged");
   ok(/^ {3}drift +2 {2}flow:AAPL \(1 unseen\) {2}flow:NVDA \(1 unseen\)$/m.test(out),
      "and the summary names every probe that drifted");
   ok(/== chain:NVDA[^\n]*\n(?: {3}[^\n]*\n)*? {3}spec unchecked: no rows arrived/.test(out) &&
@@ -756,7 +756,7 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
   ok(/== chain:AAPL[^\n]*\n(?: {3}[^\n]*\n)*? {3}spec all 2 documented names seen/.test(out),
      "a probe whose names all arrived says so");
   ok(/^ {3}4xx +1 {2}gated 403 volatility_scope_required$/m.test(out), "a plan refusal is summarised with its code");
-  ok(out.includes("code=volatility_scope_required"), "and its block prints the vendor's code");
+  ok(out.includes("code=volatility_scope_required"), "and its block prints the feed's code");
   ok(/^ {3}skipped +1 {2}historic:NVDA \(no option_symbol from chain:NVDA\)$/m.test(out),
      "an unresolvable binding is skipped with its reason, not called with a hole in the path");
   ok(out.includes("envelope {chains:[1]}  rows 1 at chains[]"), "rows under chains are found and counted");
@@ -764,15 +764,15 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
      out.includes("timestamp:str  dir_delta_flow:str#  echo:str"), "the key union is printed with types");
   ok(!out.includes("   sample "), "no sample row is printed");
   for (const value of ["12.5", "2026-09-22T14:00:00Z", "AAPL261016C00200000", "0.31", "90000"]) {
-    ok(!out.includes(value), `the vendor value ${value} reaches no printed line`);
+    ok(!out.includes(value), `the feed value ${value} reaches no printed line`);
   }
   ok(out.includes("GET /api/option-contract/{symbol}/historic?limit=60"),
-     "a path filled from a vendor row is printed with its template name, not the contract the vendor sent");
+     "a path filled from a feed row is printed with its template name, not the contract the feed sent");
   const names = ["timestamp", "dir_delta_flow", "echo", "option_symbol", "open_interest", "date", "iv", "net_call_premium", "start_time"];
   const valueAfterName = new RegExp(`\\b(${names.join("|")})"?\\s*[:=]\\s*"?[-+.]?\\d`);
   deep(lines.filter((l) => !l.startsWith("   GET ") && valueAfterName.test(l)), [],
     "VALUE-FREE: no printed line has a digit-bearing value after a field name (the request line prints our own query, " +
-      "and the one vendor value it could carry, a bound contract, is checked above)");
+      "and the one feed value it could carry, a bound contract, is checked above)");
   deep(printedLabels(lines).filter((l) => DIGIT_RUN.test(l)), [],
     "VALUE-FREE: no fields, values or rows-at label carries a run of four digits (a date, a price, a contract)");
   ok(/^== summary {2}session 2026-09-22 {2}10 calls {2}1 x 429/m.test(out), "the summary counts calls and 429s");
@@ -793,7 +793,7 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
     { fetch: auth, log: (l) => lines.push(l), now: vendor.now, sleep: vendor.sleep,
       clock: () => new Date("2026-09-23T13:32:00Z") });
   eq(run.code, 1, "when every call fails the key is broken, and the probe exits 1");
-  ok(lines.some((l) => l.includes("reason=malformed_token")), "and prints the vendor's reason");
+  ok(lines.some((l) => l.includes("reason=malformed_token")), "and prints the feed's reason");
   eq(run.session, SESSION, "a failed session probe falls back to the Eastern calendar");
 
   const echoed = [];
@@ -821,7 +821,7 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
 
   const dry = await probe.runProbe(
     { key: KEY, base: "https://vendor.test", tickers: ["AAPL", "NVDA"], filter: "", dryRun: true, date: SESSION, list: mini },
-    { fetch: async () => { throw new Error("a dry run called the vendor"); }, log: (l) => lines.push(l) });
+    { fetch: async () => { throw new Error("a dry run called the feed"); }, log: (l) => lines.push(l) });
   eq(dry.code, 0, "a dry run exits 0");
   ok(lines.some((l) => l === "flow:NVDA  [used]  GET https://vendor.test/api/stock/NVDA/greek-flow?date=2026-09-22"),
      "a dry run prints every URL");
@@ -986,7 +986,7 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
   ok(out.includes("nbbo_bid_quantity:num|null(48/50)") && out.includes("nbbo_ask_quantity:num|str(46/50)"),
     "FILL RATES: how often a print carries the NBBO sizes is a count of rows, the question P2-35 needs answered");
   for (const value of ["3.17", "13004", "211.37", "718843880", "9f1c4000", "300", "1.5", "2026-09-22T19:55:00Z"]) {
-    ok(!out.includes(value), `the vendor value ${value} reaches no printed line`);
+    ok(!out.includes(value), `the feed value ${value} reaches no printed line`);
   }
   const names = ["id", "price", "size", "premium", "report_flags", "upstream_condition_detail", "tracking_id",
     "nbbo_bid_quantity", "nbbo_ask_quantity", "trade_code", "net_call_premium", "timestamp"];
@@ -999,7 +999,7 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
      /trades:NVDA 200 \(50 rows, [\d.]+ KB\)/.test(out) && /prints:AAPL 200 \(50 rows, [\d.]+ KB\)/.test(out),
     "the summary says which entitlement routes answered, with their row counts and sizes");
   ok(/^ {3}refused +2 {2}prints:NVDA 403 lit_flow_scope_required {2}future 403 futures_addon_required$/m.test(out),
-    "and which refused, with the vendor's code");
+    "and which refused, with the feed's code");
   deep(run.strict.failures, [], "STRICT: a refusal of an entitlement route is a finding, not a failure, so the weekly run stays green");
   ok(run.strict.notes.includes("future 403 futures_addon_required: refused, an entitlement or parameter answer; read the code"),
     "and it is noted as a refusal to read by its code, not asserted to be the plan: a parameter refusal answers 4xx too");
@@ -1013,9 +1013,9 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
   eq(run.code, 0, "the strict run exits 0");
   ok(lines.every((l) => !l.includes(KEY)), "and never prints the key");
   const hard = probe.strictVerdict([{ id: "prints:NVDA", op: "/api/lit-flow/{ticker}", cls: "5xx", status: 502, entitlement: true }], tape);
-  deep(hard.failures, ["FAIL prints:NVDA 502"], "a 5xx from an entitlement route is still a failure: the vendor broke, the plan did not answer");
+  deep(hard.failures, ["FAIL prints:NVDA 502"], "a 5xx from an entitlement route is still a failure: the feed broke, the plan did not answer");
   ok(out.includes("x-uw-daily-req-count counts every caller of the key") && out.includes(".mcp.json"),
-    "THE ACCOUNTING says the daily counter includes every caller, an agent session's vendor MCP server among them");
+    "THE ACCOUNTING says the daily counter includes every caller, an agent session's feed MCP server among them");
 }
 
 {
@@ -1054,7 +1054,7 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
     { fetch: fetchBound, log: (l) => bound.push(l), now: () => clock, sleep: async (ms) => { clock += ms; } });
   const boundOut = bound.join("\n");
   ok(!boundOut.includes(symbol) && boundOut.includes("message=contract {symbol} ({symbol}) is not listed"),
-    "BOUND VALUES: a vendor error that echoes the bound contract prints its template name instead, raw or URL-encoded");
+    "BOUND VALUES: a feed error that echoes the bound contract prints its template name instead, raw or URL-encoded");
 }
 
 {
@@ -1099,7 +1099,7 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
   const crons = [...on.matchAll(/cron: "([^"]+)"/g)].map((m) => m[1]);
   deep(crons, ["23 14 * * 0"],
     "THE PROBE IS A WEEKLY MONITOR now (Sunday 14:23 UTC, off the hour GitHub drops most), not only a hand-run " +
-      "measurement: 170 calls a week against a 100M-call plan, so vendor drift turns a run red within a week");
+      "measurement: 170 calls a week against a 100M-call plan, so feed drift turns a run red within a week");
   ok(/^\s*workflow_dispatch:/m.test(on) && !/push|pull_request/.test(on), "and it can still be dispatched by hand");
   ok(/FLOWS_PROBE_STRICT: \$\{\{ \(github\.event_name == 'schedule' \|\| inputs\.strict\) && '1' \|\| '' \}\}/.test(wf),
     "the scheduled run is always strict; a dispatched one is strict only when asked");
@@ -1148,9 +1148,9 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
   ];
   const emit = ({ info, changelog, ops }) => [
     "---", "components:", "  schemas: {}", "info:", "  description: |",
-    "    Documentation for the vendor API", "    ", "    ## Startup Tier", `    ${info}`, "    ",
+    "    Documentation for the feed API", "    ", "    ## Startup Tier", `    ${info}`, "    ",
     "    ## Changelog", "    ", ...changelog.flatMap((v) => [`    # ${v}`, "    - Changed a thing", "    "]),
-    "  title: Vendor Api", "  version: '1.0'", "openapi: 3.0.0", "paths:", ...ops.flatMap(op),
+    "  title: Feed Api", "  version: '1.0'", "openapi: 3.0.0", "paths:", ...ops.flatMap(op),
     "security:", "  - bearer: []", "tags: []", "",
   ].join("\n");
   const A = emit({
@@ -1300,7 +1300,7 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
   deep([wrote.observed, wrote.run], [SESSION, "424242"], "the session and the Actions run");
   ok(lines.some((l) => /shapes +wrote \/tmp\/shapes\.json \(1 operation\)/.test(l)), "and the log says so");
   const flat = written[0][1];
-  for (const value of ["12.5", "0002012383", "2026-09-22T14:00:00Z", "0.5"]) ok(!flat.includes(value), `VALUE-FREE: the vendor value ${value} is not in the manifest`);
+  for (const value of ["12.5", "0002012383", "2026-09-22T14:00:00Z", "0.5"]) ok(!flat.includes(value), `VALUE-FREE: the feed value ${value} is not in the manifest`);
   ok(!/\d{4}/.test(flat.replace(/"observed": "[^"]*"/, "").replace(/"run": "[^"]*"/, "")), "VALUE-FREE: no run of four digits anywhere but the day and the run it records");
 
   const committed = JSON.parse(fs.readFileSync(path.join(ROOT, "scripts/flows-probe-shapes.json"), "utf8"));
@@ -1377,7 +1377,7 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
   for (const f of REGENERATED) {
     const doc = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", f), "utf8"));
     ok(FIXTURES.includes(f) && doc.provenance && doc.provenance.generator === "tests/gen-probe-fixtures.py", `${f} names its generator`);
-    ok(/synthetic/.test(doc.provenance.nature) && /not vendor data/.test(doc.provenance.nature) && /not vendor data/.test(doc.source), `${f} says it is synthetic and not vendor data`);
+    ok(/synthetic/.test(doc.provenance.nature) && /not vendor data/.test(doc.provenance.nature) && /not vendor data/.test(doc.source), `${f} says it is synthetic and not feed data`);
     eq(doc.provenance.shapesSha256, probeShapes, `${f} was built to this shape manifest: if scripts/flows-probe-shapes.json moved, run python3 tests/gen-probe-fixtures.py and read the diff`);
   }
   ok(PHRASES.test("Rows are the probe's printed first row, verbatim") && PHRASES.test("Unusual Whales live probe") && PHRASES.test("nl/probe-report.json") && !PHRASES.test("synthetic bodies built to the schema"),
@@ -1459,10 +1459,10 @@ for (const hostile of ["https://evil.example", "https://api.unusualwhales.com.ev
 console.log(`✓ flows-probe: ${checks} assertions — a registry that declares each vendor operation once, with no vendor path spelled ` +
   `anywhere else and the probe's strict read list derived from it, a spec reader whose diff names added, removed and changed ` +
   `operations, parameters, deprecations, plan sentences and changelog entries, a value-free shape manifest the dossier fixture ` +
-  `generator is held to, no fixture that calls itself vendor data, a probe list whose used label is true (every vendor path a ` +
+  `generator is held to, no fixture that calls itself feed data, a probe list whose used label is true (every feed path a ` +
   `production call site names is probed as used, and nothing else is), the live-only operations named, the eight ` +
   `entitlement routes asked for AAPL and NVDA (a refusal a finding, not a failure), output that names keys, types, ` +
-  `fill counts and documented enum tokens and never a vendor value, every token filled from one session date (weekly, both monthlies, ` +
+  `fill counts and documented enum tokens and never a feed value, every token filled from one session date (weekly, both monthlies, ` +
   `the next session, calendar look-backs) with the session itself read from SPY's daily candles the way the ` +
   `pipeline reads it, the pipeline's base URL, Bearer header, missing User-Agent and array encoding held in parity ` +
   `by reading the pipeline's own source, bound values taken from the largest open interest and skipped rather than ` +

@@ -1213,7 +1213,7 @@
   }
 
   function cellTitle(cell, e, sf) {
-    const parts = [cell.strike + " " + (cell.type === "P" ? "put" : "call") + " " + cell.expiry + " · " + fmtM(cell.m) + " from the money · " + fmtVol(cell.iv) + "% vendor volatility"];
+    const parts = [cell.strike + " " + (cell.type === "P" ? "put" : "call") + " " + cell.expiry + " · " + fmtM(cell.m) + " from the money · " + fmtVol(cell.iv) + "% feed volatility"];
     parts.push(isNum(cell.skew) !== null ? fmtSkew(cell.skew) + " vol points against this expiry's at-the-money " + fmtVol(e.atmIv) + "%" : "No skew: " + (e.atmReason || "this expiry has no at-the-money level"));
     if (cell.traded === false) parts.push(T("sm-untraded"));
     else if (cell.traded === null) parts.push(T("sm-novol"));

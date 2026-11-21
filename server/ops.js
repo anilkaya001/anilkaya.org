@@ -50,14 +50,14 @@ export function limitsOf(env) {
   const cap = aiCapOf(env);
   return [
     { name: "UW_ONDEMAND", scope: "all members together", limit: 120, periodS: 60,
-      effect: "A member's on-demand vendor read past it is answered from the kept copy, or with a 429 when none is kept." },
+      effect: "A member's on-demand feed read past it is answered from the kept copy, or with a 429 when none is kept." },
     { name: "MEMBER_VENDOR", scope: "one member", limit: 60, periodS: 60,
       effect: "A member's vendor-backed read past it is answered from the kept copy stamped throttled, or with a 429." },
     { name: "AI_ASK", scope: "one member", limit: 10, periodS: 60,
       effect: "The eleventh question in a minute is a 429 with no model call." },
     { name: "LAB_WRITE", scope: "one Lab user", limit: 30, periodS: 60,
       effect: "The thirty-first Lab write in a minute is a 429; the browser keeps it in its outbox." },
-    { name: "Rail vendor calls", scope: "the real-time rail", limit: RT_LIMITS.callsPerMinute, periodS: 60,
+    { name: "Rail feed calls", scope: "the real-time rail", limit: RT_LIMITS.callsPerMinute, periodS: 60,
       effect: "A topic past it is degraded with reason budget and the pages fall back to their own heartbeats." },
     { name: "Tier 2 calls", scope: "one Tier 2 pass", limit: LIVE_BUDGET.tier2MaxCalls, periodS: null,
       effect: "The pass stops reading and publishes what it has." },

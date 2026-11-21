@@ -1,5 +1,5 @@
 {
-  "label": "Ask-side share of the premium the vendor sided",
+  "label": "Ask-side share of the premium the feed sided",
   "definition": "share = sum(ask) / (sum(ask) + sum(bid)) over the windows that state askPrem, bidPrem and a positive prem, with neither side negative, where a window whose two sides sum past its premium is scaled by prem / (askPrem + bidPrem) before it is pooled; classified = sum over those windows of those scaled dollars (at most the window premium) / sum(prem) over every window with a positive prem, so premium on a window that states no side counts against the coverage and never as sided",
   "sides": {
     "ask": "classified >= 0.5 and share >= 0.65, both read as the whole percents printed",

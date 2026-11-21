@@ -295,7 +295,7 @@ function chain({
   }];
   const agg = buildAggressor(rows, { spot: SPOT });
   eq(agg.status, "ok", "a split without a volume field still measures the aggression");
-  eq(agg.bars[0].net, 800, "the net is the split the vendor did report");
+  eq(agg.bars[0].net, 800, "the net is the split the feed did report");
   eq(agg.bars[0].vol, null,
      "while the volume it did NOT report is null, never a zero beside 800 lifted contracts");
   eq(agg.bars[0].volMissing, 1, "and the missing count is published");
@@ -407,7 +407,7 @@ function chain({
   eq(built.ivSurface.status, "ok", "the surface still builds without an aggressor split");
   eq(built.aggressor.status, "unavailable",
      "THE LADDER IS WITHHELD: summing absent splits as zero would draw a flat, confident " +
-     "'no aggression anywhere' over a chain the vendor simply did not report");
+     "'no aggression anywhere' over a chain the feed simply did not report");
   ok(/no aggressor split|reported no aggressor/.test(built.aggressor.reason),
      `and says why (${built.aggressor.reason})`);
   ok(built.topContracts.status === "ok" && built.topContracts.rows.every((r) => r.aggr === null),
@@ -585,7 +585,7 @@ function chain({
 
   const ignored = mergeChainPages([pageOf(0), pageOf(0)]);
   eq(ignored.duplicates, CHAIN_PAGE_SIZE,
-     "a vendor that ignores `page` returns the first page again, and every row of it is a repeat");
+     "a feed that ignores `page` returns the first page again, and every row of it is a repeat");
   eq(ignored.rows.length, CHAIN_PAGE_SIZE, "which the merge keeps once");
   eq(ignored.complete, false, "and never calls complete, whatever the last page's length");
   eq(mergeChainPages([pageOf(0), []]).complete, true,
@@ -644,7 +644,7 @@ function chain({
   for (const key of ["ivSurface", "skewTerm", "topContracts", "aggressor"]) {
     eq(bare.panels[key].status, "unavailable", `a chainless card withholds ${key}`);
     ok(/chain leg/.test(bare.panels[key].reason),
-       `naming why the chain is absent rather than implying the vendor had nothing (${key})`);
+       `naming why the chain is absent rather than implying the feed had nothing (${key})`);
   }
 }
 
@@ -864,14 +864,14 @@ function chain({
   ok(q25.atmIv !== null && Math.abs(q25.atmIv - truth) <= 0.02,
      `the quote ATM IV at 25 days (${q25.atmIv}) sits within two vol points of the smile that priced the quotes (${truth.toFixed(4)})`);
   ok(v25.atmIv !== null && Math.abs(v25.atmIv - truth) > 0.1,
-     `while the vendor's last-trade IV at the same expiry reads ${v25.atmIv}, eleven points off, which is card B's 0.2924 against 0.4017`);
+     `while the feed's last-trade IV at the same expiry reads ${v25.atmIv}, eleven points off, which is card B's 0.2924 against 0.4017`);
   const atm = quotes.ivSurface.expiries.map((e) => e.atmIv).filter((v) => v !== null);
   const maxCell = Math.max(...quotes.ivSurface.iv.flat().filter((v) => v !== null));
   ok(maxCell <= 3 * Math.max(...atm),
      `no surface cell exceeds three times an at-the-money level (max ${maxCell}): the minimum-tick wings never reach it (defect 2)`);
   ok(quotes.quoteRejected > 0, `and the rejected quotes are counted (${quotes.quoteRejected})`);
   ok(Math.max(...vendor.ivSurface.iv.flat().filter((v) => v !== null)) > 2,
-     "where the vendor path would have drawn the 2.1495 wing print");
+     "where the feed path would have drawn the 2.1495 wing print");
 }
 
 console.log(`✓ flows-chain: ${checks} assertions — a smile whose skew is known in closed form, ` +
@@ -879,5 +879,5 @@ console.log(`✓ flows-chain: ${checks} assertions — a smile whose skew is kno
   `strike, never between a traded and an untraded quote, a fixed 30-day skew in total ` +
   `variance, one at-the-money answer shared ` +
   `with the surface, an aggressor ladder signed by what the buyer is long and withheld rather ` +
-  `than zeroed when the vendor did not report it, and a tape that keeps the no-bid contract ` +
+  `than zeroed when the feed did not report it, and a tape that keeps the no-bid contract ` +
   `the sale pricer must refuse`);

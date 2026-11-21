@@ -152,7 +152,7 @@ export function homeFrame(fx, vp, state) {
   const tag = replay ? `<span class="tag amb">ambient</span>` : `<span class="tag live">Live</span>`;
   const replayLine = replay ? `<p class="note"><b>replay of ${world.network.replayOf}, flagged windows; ambient motion, not data.</b> The session is closed; the scene replays the last session's flagged windows at 60x.</p>` : "";
   const body = `${sample()}<h1>Home</h1>
-<section class="card" aria-label="Market tide"><div class="hero"><span class="big up">+$412M</span><span class="cap">Market tide: net call premium minus net put premium, vendor market tide, read 15:41:07 ET</span></div></section>
+<section class="card" aria-label="Market tide"><div class="hero"><span class="big up">+$412M</span><span class="cap">Market tide: net call premium minus net put premium, feed market tide, read 15:41:07 ET</span></div></section>
 <section class="card" aria-labelledby="nh"><div class="card-h"><h2 id="nh">Flow network</h2>${tag}<span class="spacer"></span>${seg(["All sided premium", "Flagged"], "All sided premium", "Data")} ${compact ? "" : seg(["Session", "Since you opened", "Last 30 min"], "Session", "Window")}</div>
 ${replayLine}${arrivalNote}
 ${svg}
@@ -218,13 +218,13 @@ ${fig}
 export function terrainFrame(fx, vp) {
   const v = VIEWPORTS[vp], world = fx.world, tr = world.terrain, conv = fx.copy.convention;
   const sc = terrainScene(world, {});
-  const fig = v.phone ? gridSvg(sc, { aria: "Dealer gamma by strike and expiry" }) : terrainSvg(sc, { aria: "Dealer gamma terrain by strike and expiry, on the vendor's convention" });
+  const fig = v.phone ? gridSvg(sc, { aria: "Dealer gamma by strike and expiry" }) : terrainSvg(sc, { aria: "Dealer gamma terrain by strike and expiry, on the feed's convention" });
   const body = `${sample()}<h1>${tr.underlying} terrain</h1>
 <div class="tabs" role="group" aria-label="Mode"><span>Overview</span><span>Move</span><span aria-current="page">Terrain</span><span>Surface</span></div>
 <div class="card-h"><span class="tag">Gamma ${esc(conv)}</span><span class="tag">Book: open interest as of ${esc(tr.bookAsOf)}</span><span class="tag">Spot: ${tr.underlying} ${tr.spot.toFixed(2)} as of ${esc(tr.spotStamp)}</span></div>
 <section class="card" aria-labelledby="tt"><div class="card-h"><h2 id="tt">Dealer gamma, dollars per 1% move</h2><span class="spacer"></span>${seg(["Book", "Traded", "Flow"], "Book", "Layer")}</div>
 ${fig}
-<p class="note">${v.phone ? "On a phone the 2D grid stands in: strike across, expiry down." : "Strike (log-moneyness) across, expiry down the depth at the square root of time. Blue is positive dealer gamma and orange negative, " + esc(conv) + ". The bold white line is the zero-gamma strike of each expiry; contours are solid above zero and dashed below. The gold line on the back wall is the book summed over expiries, with its flip. The spot plane carries its own vendor stamp."}</p></section>`;
+<p class="note">${v.phone ? "On a phone the 2D grid stands in: strike across, expiry down." : "Strike (log-moneyness) across, expiry down the depth at the square root of time. Blue is positive dealer gamma and orange negative, " + esc(conv) + ". The bold white line is the zero-gamma strike of each expiry; contours are solid above zero and dashed below. The gold line on the back wall is the book summed over expiries, with its flip. The spot plane carries its own feed stamp."}</p></section>`;
   return { html: pageHtml({ title: `Flows concept: terrain, ${vp}`, placement: "p4", state: "default", vp, active: "", body }) };
 }
 

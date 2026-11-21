@@ -32,7 +32,7 @@ export const TICKER_PANELS = Object.freeze([
 
   { key: "deltaExposure", id: "ftDelta", span: 1, group: "convexity", tier: "chart",
     title: "Open-interest delta by expiry",
-    question: "How much delta does open interest carry along the term, each leg as the vendor signs it?" },
+    question: "How much delta does open interest carry along the term, each leg as the feed signs it?" },
   { key: "vanna", id: "ftVanna", span: 1, group: "convexity", tier: "chart",
     title: "Vanna by expiry",
     question: "How does that delta move with implied volatility, expiry by expiry?" },

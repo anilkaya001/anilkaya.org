@@ -327,7 +327,7 @@ export const DRY_SCENARIOS = Object.freeze([
     },
   },
   {
-    name: "a weekend afternoon: no pass, no vendor call, one clock read per quarter hour and one meta read at the start",
+    name: "a weekend afternoon: no pass, no feed call, one clock read per quarter hour and one meta read at the start",
     world: () => fakeWorld({ day: DRY_WEEKEND, start: at(12, 0, DRY_WEEKEND), tier1Down: [] }),
     budgetMs: LIVE_LOOP.budgetMs,
     expect: (r, w) => {

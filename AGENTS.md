@@ -272,7 +272,7 @@ full generated index, and `docs/map-2026-10-05.md` is the frozen system map
 | `tests/worker-regression.mjs` | Real local Wrangler routing, headers, API, and D1 tests. |
 | `tests/regression.mjs` | Full Playwright browser regression suite. |
 | `shared/markets.js`, `assets/js/market-ticker.js` | The landing index ticker: the Worker's Yahoo parse (the change is against the previous session's close taken from the same response's dated bars, never `chartPreviousClose`; each quote keeps its own `asOf`, `asOfDay`, `prevClose`, `prevDay` and, when the response names the session of the quote's own day, `sessionEnd`) and the strip that prints each quote's own İstanbul time, `Close <weekday>` for a closed market (a close is a quote struck within five minutes of the exchange's `sessionEnd`; the lag of the quote behind the fetch decides only where there is none), and a dash for a quote with no base. |
-| `tests/flows-copy-lint.mjs` | The vendor-term lint: no `at ask`, `at the ask`, `at bid` or `at the bid` in any browser, Worker, pipeline or model-visible string (an empty allowlist), and no quoted `NOW` badge in a browser file; it plants a string of each rule, and the network's side names (`Calls . ask side`, `Puts . bid side`, `Calls . bid side`, `Puts . ask side`) and legend sentence are checked, and no lean surface may carry an Unsided or Unattributed label in `assets/js/flows-net.js`. The vendor's ask side is a fill above the midpoint for contract volume and its alert field is undocumented, so the lean is a convention. |
+| `tests/flows-copy-lint.mjs` | The vendor-term lint: no `at ask`, `at the ask`, `at bid` or `at the bid` in any browser, Worker, pipeline or model-visible string (an empty allowlist), and no quoted `NOW` badge in a browser file; it plants a string of each rule, and the network's side names (`Calls . ask side`, `Puts . bid side`, `Calls . bid side`, `Puts . ask side`) and legend sentence are checked, and no lean surface may carry an Unsided or Unattributed label in `assets/js/flows-net.js`. The vendor's ask side is a fill above the midpoint for contract volume and its alert field is undocumented, so the lean is a convention. The source rule: no string, multi-line template or rendered page (every page function, as a member and as an owner with every optional module on) names the data source by its trade or its company; copy says the feed or the source, and identifiers, reason codes, hosts and file names pass. Planted strings of each shape (a sentence, a capitalised label, a plural possessive, a sentence-final name, the company name, a multi-line template, a title attribute) must each be caught. |
 | `tests/flows-desk-client.mjs`, `tests/desk-fixtures.mjs` | The Premium desk's client alone: its pure functions (the frontier against a brute-force Pareto set, balance parsing, tenor buckets, cent sizing, net delta) in a Node `vm`, and the page in Chromium against payload fixtures built to the chain contract (basis, time-value yield, tooltips, banners); no server. `syxChain` builds the synthetic SYX chains the short-call suites use, `openDesk` takes a `before` hook for routes, and `showView` opens one of the desk's tabs. |
 | `tests/flows-desk-wiring.mjs`, `tests/fixtures-desk-lab.json`, `tests/gen-desk-lab.py` | The desk's Win % (implied) against an independent reference: `gen-desk-lab.py` (mpmath at 40 digits) prices skewed SVI chains and takes the risk-neutral probability of profit by Breeden-Litzenberger, and the suite proves the page, given the card's smile expiries, lands within 0.5pp of it and of the strategy lab on every line, while the flat fit it replaced misses by 2.5pp; the carry and the smile each line was priced on are read back from its disclosure. Chromium against `page.route` stubs, no server. |
 | `tests/markets-contract.mjs`, `tests/market-ticker-render.mjs` | The Yahoo parse against dated five-day responses (weekend, Tokyo morning, null trailing bar, no timestamps) and the strip rendered in Chromium with a fixed clock; neither starts a server. |
@@ -442,6 +442,7 @@ full generated index, and `docs/map-2026-10-05.md` is the frozen system map
 | `shared/flows-page-flowlab.js`, `shared/flows-flowlab-shell.js`, `assets/js/flows-flowlab.js`, `assets/js/flows-drill.js`, `assets/css/flows-flowlab.css`, `tests/flows-flowlab-render.mjs`, `tests/flows-flowlab-onescreen.mjs` | The Flow Lab page (`/flows/flowlab/`) and the contract drill. The page is one screen at four sizes with no scroll: a ticker field and a tablist of eight views (Screen, Strikes, Greeks, Ladders, Routing, Lit prints, Groups, Relations) over stacked panels, the inactive ones `inert` and hidden in the same box, a module switch below 900 px, and a fitter that hides trailing rows with a Show all dialog. Every figure is read from `GET /api/flows/flowlab/*` and prints its unit or a dash with the reason; a failed read prints the sentence of its class and status, and a held, kept or earlier copy says so above the module. The ask share is a range, never a point, and an undecided lean is a hollow mark; the strike map colours a cell only when its range excludes zero (the heatmap kernel's `undecided` option draws the rest as outlines) beside the day's totals by strike with their ranges; premium by expiry prints the sided net as net plus or minus the premium of unknown side with its sided share, and Greek flow takes its expiry from it, places its time ticks at their own times and states that read's failure; the ladders name each half that did not read; the trade codes come from the ticker's own read and ask for a ticker otherwise; the lit module is titled for the prints over $500K it reads; group tiles open with the reading line and print the feed's net with no direction glyph; Relations says off. The address keeps `#view=&t=&c=&p=&e=`. `flows-drill.js` is `FlowsUI.drill`, a native dialog with six tabs (Prints, Minutes, Profile, Alerts, Structure, Routing) that the Unusual feed rows, the ticker Flow network and the Moves drill panel open through the deferred group `drill`, which `flowlabShell` declares only when the switch is on, so with it off the three pages are byte for byte what they were; it maps each part's read class to the same sentences and counts the packages a structure search read. `tests/flows-flowlab-render.mjs` holds the order of every rank key, the ask range and lean, null ratios, failed reads and their classes, the address, focus return, the prints, the tabs, the strike cells and rail, the expiry net, Greek flow's ticks and its failure, the ladder notes, the codes, the lit title, Relations off, the banners, the drill classes and the group tiles against independent computations with 28 planted wrong builds, and `tests/flows-flowlab-onescreen.mjs` sweeps every tab at four sizes for scroll, clipping and inert panels with three more. |
 | `shared/ff-pages-inbox.js`, `assets/js/flows-ff-digest.js`, `assets/css/flows-ff-inbox.css`, `tests/ff-e-digest.mjs` | The Fire & Forget Digest (lane E), `/flows/digest/`, replacing its not-released placeholder. `digestBody` in `shared/ff-pages-inbox.js` (served by `digestPage` in `shared/flows-pages.js`) writes the four quadrants of the contract (House · Nightly, House · Live, Yours · Nightly, Yours · Live) as two columns, a Record so far panel and an info dialog; `FlowsUI.ffDigest` in `assets/js/flows-ff-digest.js` reads `GET /api/ff/digest` (the `?d=` in the address passed through) and `GET /api/ff/house` through `FlowsUI.ffClient` and paints each quadrant's hits grouped by wire (more than three in a session are grouped, with the count of the rest), each wire's rarity, the quadrant's receipts line with the run's status and finish time, and a line when the stored hits do not reach back to the session; the record panel lists every house wire with its firings over sessions and rarity, and the silent wires of yours. Nothing is computed in the browser but counts: every time and session string is the API's. In shadow (`FF_MODE = "shadow"`) the banner says every hit is held, each quadrant says `0 delivered` with the reason, and the receipts lines stay real. Calibration is shown as not released, because `ff-calibration` has no writer yet. A failed read is an em dash with its reason and Retry, and a session outside the window links the latest. One screen with no page scroll at the contract's seven sizes: trailing groups are hidden by `fit.rows` behind a Show all dialog, and a phone shows House, Yours and Record behind three tabs. `tests/ff-e-digest.mjs` (Chromium, `page.route`, no server) holds the model in a `vm`, the page at seven sizes in shadow and busy (no scroll, no row outside its quadrant, every truncation titled, no zero in an absent figure, no banned word, TRT only), the behaviours (Show all, tabs by key, Retry, the window error, `?d=`), the served HTML and the page row, and eleven planted wrong builds that must each fail. Not built: near misses, which the digest API does not return. |
 | `assets/css/flows-ff-tokens.css`, `assets/js/flows-ff-kernel.js`, `assets/js/flows-ff-client.js`, `tests/ff-u-kit.mjs`, `tests/ff-u-fire.mjs`, `tests/server-ff.mjs`, `docs/ff/ff-u-mount.md` | Fire & Forget lanes U and G: the shared client pieces and the mount, shipped in shadow (`FF_MODE = "shadow"`: wires are evaluated, every hit is stored held, nothing is delivered; anything but `on` or `shadow` is off and every route is a 404 `ff_off`). Lane U: the eleven `--ff-*` tokens, each one existing page token, with the two fit classes; `FlowsUI.ffKernel` (`hooks`: page, slot, state, absent, present, figure, emit, on; `fit`: rows, clip, watch; an absent figure is an em dash with its reason and never zero, an unchanged write mutates nothing); and `FlowsUI.ffClient` (`get`, `post`, `patch`, `put`, `del`), which reads only this site's `/api/ff/*` and `GET /api/flows/*` paths through the page's own fetch, rejects with the Worker's `code`, `status`, `message`, the fields the Worker puts beside the error as `details` and `retryAfterS`, names `timeout`, `network`, `unreadable`, `fixture` and `client_path` itself, keeps sixteen ETags for conditional reads, and unwraps the preview route's envelope. Lane G in `worker.js`: `flowsFfRows` mounted in the route table with the store, the evaluator and the compile and preview core injected; the first-use DDL run once per isolate before any Fire statement; `/flows/fire/` and three not-released placeholder pages through the page family, with the sidebar's Fire entry when `FF_ROUTE_FIRE` is on; `POST /api/ff/run` behind the ingest credential (the nightly token for a nightly run, refused with `source_missing` until `ff-metrics` for that session is stored); a guard on the housekeeping firing that retries the night's run while it is open (three attempts, never inside a lease, never on older figures), flags a missed night past the deadline and prunes run rows after fourteen days in the 03:00 ET window; and a hook after a landed `live:alerts` write that starts the live evaluation in `ctx.waitUntil`, inside a catch that only logs, so the write is answered whatever the engine does. Evaluation calls no vendor route and no model. `tests/ff-u-kit.mjs` (Chromium, `page.route`, no server) holds the tokens to the contract, the kernel and the client to worked answers and 40 planted wrong builds; `tests/ff-u-fire.mjs` serves the Fire page from the in-process Worker (`tests/lib/ff-u-mount.mjs`: counting D1 over `node:sqlite`, pinned clock, a refusing fetch) and drives preview, arm and a refused arm through the real client at the contract's seven viewports with no page scroll, and fails five planted clients, the lane D test double among them; `tests/server-ff.mjs` drives the mount in Node (routes and methods against the contract, switches, DDL, compile, preview, run, housekeeping, the live hook) with 27 planted wrong builds of `worker.js`. `docs/ff/ff-u-mount.md` lists what is deferred and the findings handed to the other lanes. |
+| `shared/ff-pages-inbox.js`, `assets/js/flows-ff-inbox.js`, `assets/js/flows-ff-evidence.js`, `assets/css/flows-ff-inbox.css`, `tests/ff-e-inbox-render.mjs`, `tests/ff-e-inbox-plants-a.mjs`, `tests/ff-e-inbox-plants-b.mjs`, `tests/ff-e-inbox-plants-c.mjs`, `tests/lib/ff-e-inbox-world.mjs` | The Fire & Forget Inbox (`/flows/inbox/`, lane E), which replaces its not-released placeholder: `inboxPage` in `shared/flows-pages.js` writes `inboxBody` (`data-ff-page="inbox"`, a server-rendered shadow banner when `FF_MODE` is `shadow`) and `server/routes/flows-pages.js` serves it behind `FF_MODE` and `FF_ROUTE_INBOX`. `flows-ff-inbox.js` (`FlowsUI.ffInbox.page`) reads `/api/ff/health` once (it listens to `ff:health` and `ff:unread` and never polls) for the health strip and the unread caption, pages through the member's two streams with `/api/ff/hits` (All, Unread, Pinned and Dismissed, the API's cursor for Load more, more than `groupInboxAfter` hits of one wire in one session folded into one row), opens a hit by `?hit=` with its version's sentence, its frozen evidence (`flows-ff-evidence.js`, `FlowsUI.ffInbox.evidence`, the browser twin of `evidenceRows` in `shared/ff-sentence.js` on the shared rounding rule) and the receipts of its wire (`/api/ff/receipts`), marks it (Pin, Dismiss, Useful, Noise) and moves both read cursors to exactly the stream heads the page read (`/api/ff/read`, then `ff:read` for each stream), never past a hit that arrived later. Shadow is a held state that says so, an empty stream says there are no hits, a failed or off read is a dash with its reason and a Retry, and loading says it is reading. One screen at the seven contract sizes, rows trimmed by the kernel's fitter behind Show all, a Hits and Hit switch below 1,100 px. `ff-e-inbox-render` (Chromium, `page.route`, no server) builds its hits, health and receipts with the server's own view functions and holds the rows, evidence, receipts, cursors, events, states, health strip, copy, keyboard and layout to them; `ff-e-inbox-plants-a`, `-b` and `-c` run the twenty planted wrong builds, a third each, and every one must fail. |
 <!-- /gen:filemap -->
 
 ## Curriculum and stage contracts
@@ -1595,7 +1596,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 289 suites: 233 that need only Node (N), 41 that also
+`tests/suites/` registers 295 suites: 239 that need only Node (N), 41 that also
 need Playwright's Chromium (C) and 15 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1610,59 +1611,60 @@ ff-a-core                 ff-a-engine               ff-a-grammar              ff
 ff-b-budget               ff-b-health               ff-b-mutants-routes       ff-b-mutants-store
 ff-b-routes               ff-b-store                ff-c-chain                ff-c-eval
 ff-c-legs                 ff-contract               ff-d-fire-plants          ff-d-fire-render
-ff-d-model                ff-e-digest               ff-u-fire                 ff-u-kit
-fixture-guard             flows                     flows-ai-broker           flows-ai-salvage
-flows-alert-grid          flows-alerts              flows-basis               flows-board-hit-render
-flows-brief               flows-calendar            flows-calibration         flows-cap-tide
-flows-card-pack           flows-chain-panels        flows-contracts           flows-conviction
-flows-copy-lint           flows-coverage            flows-d1-budget           flows-data-fixes
-flows-decisions-closed    flows-deepen              flows-defer-render        flows-desk-audit
-flows-desk-calls          flows-desk-sc             flows-dispatch-check      flows-dispersion
-flows-door-v2             flows-dossier             flows-dossier-reads       flows-engine-budget
-flows-er-fire-render      flows-er-leaves           flows-er-nightly          flows-er-render
-flows-er-route            flows-er-rt               flows-er-switch           flows-events-odds-render
-flows-evt                 flows-fact-ids            flows-feeds-onescreen     flows-film
-flows-floor-funds         flows-floor-funds-live    flows-flow-below-render   flows-flow-registry
-flows-flowlab             flows-flowlab-nightly     flows-flowlab-onescreen   flows-flowlab-render
-flows-forward             flows-forward-lab         flows-freshness           flows-garch
-flows-glass-render        flows-guard-lexicon       flows-home-below-render   flows-home-composition
-flows-home-net-render     flows-home-onescreen      flows-horizon             flows-horizon-lint
-flows-lean                flows-ledger              flows-ledger-book         flows-ledger-live
-flows-ledger-live-plants-a flows-ledger-live-plants-b flows-ledger-live-render  flows-ledger-live-render-b
-flows-legs                flows-live                flows-macro               flows-macro-render
-flows-market-below-render flows-market-floor-render flows-market-onescreen    flows-market-river-render
-flows-market-visual       flows-member-export       flows-member-mutants      flows-member-onescreen
-flows-member-render       flows-member-shell        flows-member-since        flows-member-state
-flows-member-worker       flows-meter-worker        flows-mint                flows-moves-render
-flows-moves-sig           flows-net-map-render      flows-neuron              flows-neuron-screen
-flows-nn-render           flows-now-render          flows-oracle              flows-oracle-core
-flows-oracle-home-render  flows-oracle-live         flows-oracle-render       flows-oracle-restore-render
-flows-overlay             flows-payload-shape       flows-permits             flows-pipeline-chaos
-flows-pipeline-mutants    flows-plan-facts          flows-political           flows-political-render
-flows-popout-render       flows-pos-firstpaint      flows-pos-leaves          flows-pos-nightly
-flows-pos-plan            flows-pos-render          flows-pos-route           flows-pos-switch
-flows-positioning         flows-premium-rank        flows-private-render      flows-probe
-flows-public              flows-pulse               flows-quant               flows-quant-audit
-flows-quant-card          flows-read-failures       flows-readers             flows-reading
-flows-reading-worker      flows-reads               flows-ready               flows-record
-flows-registry-contract   flows-relations-render    flows-reports             flows-round
-flows-rt                  flows-scores              flows-sfc                 flows-sfc-render
-flows-sfc-route           flows-sfc-view            flows-sides               flows-sign
-flows-skyline-render      flows-starts              flows-stats               flows-stock
-flows-tape-stats          flows-targets             flows-time                flows-transport
-flows-truth               flows-universe            flows-variation           flows-vendor-budget
-flows-vendor-extras       flows-verdict             flows-vol                 flows-voldesk
-flows-voldesk-render      flows-warnings            flows-weight              flows-write-batch
-flows-ws-probe            flows-xcheck-render       lab-write                 launch-readiness
-markets                   mastery                   math-browser              math-darkpool
-math-dealer               math-duplicates           math-flow                 math-format
-math-print                math-short                math-sigma                math-site
-math-time                 math-units                math-vol                  pipeline
-route-matrix              server-ai                 server-desk               server-desk-sc
-server-ff                 server-flowlab            server-ingest             server-kernel
-server-log                server-macro              server-ops                server-oracle
-server-pages              server-router             server-rt                 server-voldesk
-staging
+ff-d-model                ff-e-digest               ff-e-inbox-plants-a       ff-e-inbox-plants-b
+ff-e-inbox-plants-c       ff-e-inbox-render         ff-e-inbox-render-b       ff-e-inbox-render-c
+ff-u-fire                 ff-u-kit                  fixture-guard             flows
+flows-ai-broker           flows-ai-salvage          flows-alert-grid          flows-alerts
+flows-basis               flows-board-hit-render    flows-brief               flows-calendar
+flows-calibration         flows-cap-tide            flows-card-pack           flows-chain-panels
+flows-contracts           flows-conviction          flows-copy-lint           flows-coverage
+flows-d1-budget           flows-data-fixes          flows-decisions-closed    flows-deepen
+flows-defer-render        flows-desk-audit          flows-desk-calls          flows-desk-sc
+flows-dispatch-check      flows-dispersion          flows-door-v2             flows-dossier
+flows-dossier-reads       flows-engine-budget       flows-er-fire-render      flows-er-leaves
+flows-er-nightly          flows-er-render           flows-er-route            flows-er-rt
+flows-er-switch           flows-events-odds-render  flows-evt                 flows-fact-ids
+flows-feeds-onescreen     flows-film                flows-floor-funds         flows-floor-funds-live
+flows-flow-below-render   flows-flow-registry       flows-flowlab             flows-flowlab-nightly
+flows-flowlab-onescreen   flows-flowlab-render      flows-forward             flows-forward-lab
+flows-freshness           flows-garch               flows-glass-render        flows-guard-lexicon
+flows-home-below-render   flows-home-composition    flows-home-net-render     flows-home-onescreen
+flows-horizon             flows-horizon-lint        flows-lean                flows-ledger
+flows-ledger-book         flows-ledger-live         flows-ledger-live-plants-a flows-ledger-live-plants-b
+flows-ledger-live-render  flows-ledger-live-render-b flows-legs                flows-live
+flows-macro               flows-macro-render        flows-market-below-render flows-market-floor-render
+flows-market-onescreen    flows-market-river-render flows-market-visual       flows-member-export
+flows-member-mutants      flows-member-onescreen    flows-member-render       flows-member-shell
+flows-member-since        flows-member-state        flows-member-worker       flows-meter-worker
+flows-mint                flows-moves-render        flows-moves-sig           flows-net-map-render
+flows-neuron              flows-neuron-screen       flows-nn-render           flows-now-render
+flows-oracle              flows-oracle-core         flows-oracle-home-render  flows-oracle-live
+flows-oracle-render       flows-oracle-restore-render flows-overlay             flows-payload-shape
+flows-permits             flows-pipeline-chaos      flows-pipeline-mutants    flows-plan-facts
+flows-political           flows-political-render    flows-popout-render       flows-pos-firstpaint
+flows-pos-leaves          flows-pos-nightly         flows-pos-plan            flows-pos-render
+flows-pos-route           flows-pos-switch          flows-positioning         flows-premium-rank
+flows-private-render      flows-probe               flows-public              flows-pulse
+flows-quant               flows-quant-audit         flows-quant-card          flows-read-failures
+flows-readers             flows-reading             flows-reading-worker      flows-reads
+flows-ready               flows-record              flows-registry-contract   flows-relations-render
+flows-reports             flows-round               flows-rt                  flows-scores
+flows-sfc                 flows-sfc-render          flows-sfc-route           flows-sfc-view
+flows-sides               flows-sign                flows-skyline-render      flows-starts
+flows-stats               flows-stock               flows-tape-stats          flows-targets
+flows-time                flows-transport           flows-truth               flows-universe
+flows-variation           flows-vendor-budget       flows-vendor-extras       flows-verdict
+flows-vol                 flows-voldesk             flows-voldesk-render      flows-warnings
+flows-weight              flows-write-batch         flows-ws-probe            flows-xcheck-render
+lab-write                 launch-readiness          markets                   mastery
+math-browser              math-darkpool             math-dealer               math-duplicates
+math-flow                 math-format               math-print                math-short
+math-sigma                math-site                 math-time                 math-units
+math-vol                  pipeline                  route-matrix              server-ai
+server-desk               server-desk-sc            server-ff                 server-flowlab
+server-ingest             server-kernel             server-log                server-macro
+server-ops                server-oracle             server-pages              server-router
+server-rt                 server-voldesk            staging
 ```
 
 Confirmed to run with no server but with Chromium (C; set `PLAYWRIGHT_BROWSERS_PATH`):

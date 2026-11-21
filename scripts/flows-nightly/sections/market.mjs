@@ -180,7 +180,7 @@ export async function runMarket(ctx) {
         if (sec.er) cardX.add(t, "er", sec.er);
       }
     }
-    console.log(`  market legs: ${marketLegs.calls ?? 0} vendor call(s)`);
+    console.log(`  market legs: ${marketLegs.calls ?? 0} feed call(s)`);
   }, (error) => {
     console.warn(`  market legs: ${error.message} — universe, regime and card-x were not built this run`);
   });
