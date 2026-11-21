@@ -1599,7 +1599,7 @@ string and run fine, and a suite can need a server without naming it. Each
 entry below was run and timed.
 
 <!-- gen:suites-local -->
-`tests/suites/` registers 302 suites: 241 that need only Node (N), 46 that also
+`tests/suites/` registers 303 suites: 241 that need only Node (N), 47 that also
 need Playwright's Chromium (C) and 15 that boot workerd (W). The class is derived from
 each suite's import closure, so this list cannot drift from it. A name is the
 `test:<name>` script in `tests/package.json`: run one with `npm run test:<name>` or
@@ -1679,13 +1679,13 @@ flows-defaults-render     flows-desk-audit-render   flows-desk-calls-render   fl
 flows-desk-onescreen      flows-desk-ratio          flows-desk-wiring         flows-er-firstpaint
 flows-events              flows-export              flows-fixture-guard-render flows-flow-net-render
 flows-glance-frame-render flows-glance-live-render  flows-glance-render       flows-index
-flows-kit                 flows-layout-sweep        flows-link                flows-movelab-render
-flows-moves0              flows-net-render          flows-orb-clear-render-a  flows-orb-clear-render-b
-flows-orb-clear-render-c  flows-orb-clear-render-d  flows-pages-render        flows-readers-render
-flows-reading-render      flows-render              flows-rt-client           flows-sfc-firstpaint
-flows-side-keep-render    flows-status-render       flows-strip               flows-surface-render
-flows-ticker              flows-ticker-age-render   flows-ticker-firstpaint-render landing-motion
-market-ticker             placement
+flows-kit                 flows-layout-sweep        flows-layout-sweep-b      flows-link
+flows-movelab-render      flows-moves0              flows-net-render          flows-orb-clear-render-a
+flows-orb-clear-render-b  flows-orb-clear-render-c  flows-orb-clear-render-d  flows-pages-render
+flows-readers-render      flows-reading-render      flows-render              flows-rt-client
+flows-sfc-firstpaint      flows-side-keep-render    flows-status-render       flows-strip
+flows-surface-render      flows-ticker              flows-ticker-age-render   flows-ticker-firstpaint-render
+landing-motion            market-ticker             placement
 ```
 <!-- /gen:suites-local -->
 
