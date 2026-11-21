@@ -140,7 +140,7 @@ try {
   for (const r of results.filter((x) => x.f.placement === "p1")) {
     const t = r.info.text, k = r.f.id;
     ok(t.includes(SEAM), `${k}: THE LEGEND LINE SAYS BANDS DO NOT CONNECT ACROSS NAMES, in the plan's words`);
-    ok(t.includes("Ask side and bid side are the vendor's split") && t.includes("ask-side calls and bid-side puts are drawn bullish"), `${k}: ask side and bid side are the vendor's words`);
+    ok(t.includes("Ask side and bid side are the feed's split") && t.includes("ask-side calls and bid-side puts are drawn bullish"), `${k}: ask side and bid side are the feed's words`);
     ok(t.includes(LIVE) && t.includes(AMBIENT), `${k}: says what Live and Ambient each mean, in the plan's words`);
     ok(/network data held since 10:02/.test(r.info.text) || r.info.aria.some((a) => /holds data from 10:02/.test(a)), `${k}: the time strip says what the network has held`);
     if (r.f.state === "replay") ok(/replay of 2026-10-08, flagged windows; ambient motion, not data/.test(t) && /ambient/.test(t), `${k}: the replay is labelled as ambient motion, not data`);

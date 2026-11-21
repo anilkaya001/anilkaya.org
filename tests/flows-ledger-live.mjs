@@ -180,14 +180,14 @@ function readTideAt(breadth) {
   const poll = stripModel(f("poll", { mode: "poll", transit: { n: 5, p50: 100, p95: 200 } }));
   ok(/^Polling 5 s/.test(poll.chips[0].value) && /not measured while polling/.test(poll.chips[3].value), "polling names its interval and measures no transit");
   const sock = stripModel(f("sock", { transit: { n: 12, p50: 300, p95: 900 }, lag: { n: 42, p50: 6000, p95: 11000 } }));
-  eq([sock.chips[2].value, sock.chips[3].value], ["6.0 s p50 · 11 s p95 · n 42", "+0.3 s over best seen · n 12 · estimate"], "socket latency prints the vendor to hub spread and the hub to screen excess");
+  eq([sock.chips[2].value, sock.chips[3].value], ["6.0 s p50 · 11 s p95 · n 42", "+0.3 s over best seen · n 12 · estimate"], "socket latency prints the feed to hub spread and the hub to screen excess");
   const off = stripModel(f("off", { mode: "off", serverReadAtMs: 9e12 - 5000, hub: null }));
   ok(/^as of \d\d:\d\d:\d\d TRT$/.test(off.chips[0].value) && off.verdict.word === "Server copy", "with the rail off the strip names the time of the server's copy");
   const few = stripModel(f("few", { lag: { n: 7, p50: 6000, p95: 11000 } }));
   eq(few.chips[2].value, "6.0 s p50 · n 7", "under twenty samples the spread is not printed: a 95th percentile of seven numbers is their largest");
   const held = stripModel(f("held", { holdText: "held while you select text" }));
   ok(/ · held while you select text$/.test(held.chips[0].value), "a held repaint is said in the strip, never hidden behind Live");
-  eq(off.chips[2].value, "— rail off", "and measures no vendor lag");
+  eq(off.chips[2].value, "— rail off", "and measures no feed lag");
   const paused = stripModel(f("paused", { paused: "Live ledger paused.", parity: { state: "mismatch", text: "x" } }));
   eq([paused.verdict.state, paused.chips[5].tone], ["paused", "bad"], "a mismatch pauses the ledger and fails the check chip");
   const drift = stripModel(f("d", { drift: { runs: 3, count: 2, events: 1, at: 1, rebuiltAt: 5e12 } }));

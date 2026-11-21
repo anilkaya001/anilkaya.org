@@ -280,9 +280,9 @@ export async function runs(c, build) {
   const t = rawOne(api, "SELECT status, attempts, hits_written, rows_read, rows_written, finished_at FROM ff_run WHERE id = ?", tick.id);
   c.eq(t, { status: "done", attempts: 2, hits_written: 3, rows_read: 40, rows_written: 10, finished_at: NOW + 900000 }, "ticks: hits and rows accumulate, finished_at follows the latest");
   c.eq(await api.store.tickRun(api.world.env, { ...tick, now: NOW - 5000 }), false, "ticks: a tick that started before the recorded one is ignored");
-  await api.store.tickRun(api.world.env, { ...tick, now: NOW + 1800000, error: "vendor down" });
+  await api.store.tickRun(api.world.env, { ...tick, now: NOW + 1800000, error: "feed down" });
   const e = rawOne(api, "SELECT status, error, finished_at FROM ff_run WHERE id = ?", tick.id);
-  c.eq([e.status, e.error, e.finished_at], ["failed", "vendor down", NOW + 900000], "ticks: a failed tick marks the row failed and keeps the last finish time");
+  c.eq([e.status, e.error, e.finished_at], ["failed", "feed down", NOW + 900000], "ticks: a failed tick marks the row failed and keeps the last finish time");
   const pruned = await api.store.pruneRuns(api.world.env, "2026-10-24");
   c.eq(pruned, 2, "ticks: the prune removes the two runs before the cutoff");
   c.eq(rawAll(api, "SELECT id FROM ff_run ORDER BY id").map((r) => r.id), ["live:" + SESSION, "nightly:" + PREV_SESSION], "ticks: and keeps the rest");

@@ -169,8 +169,8 @@ export function buildEvents(withTilt, {
           "each against this name's own 30-day average",
         ot: "open-interest tilt — call minus put open-interest change over the " +
           "standing book, a share",
-        pcr: "the vendor's own put/call ratio, passed through",
-        rvol: "the vendor's own relative volume, passed through",
+        pcr: "the feed's own put/call ratio, passed through",
+        rvol: "the feed's own relative volume, passed through",
       },
       units: "every tilt is a share or a log ratio, so all of them are unit-free " +
         "and comparable across names; none is a dollar amount",
@@ -209,14 +209,14 @@ export const EVENTS_NOTES = Object.freeze({
     "violates it: the 30-day implied volatility already contains the event's " +
     "variance, and spreading it evenly over the two sessions before the report " +
     "understates the pre-event move badly. So this column is a CONSTANT-VOL " +
-    "BENCHMARK computed by this desk, it is expected to sit below the vendor's " +
+    "BENCHMARK computed by this desk, it is expected to sit below the feed's " +
     "own event-bracketing quote beside it, and the amount by which it does is " +
     "published as its own column rather than left as a discrepancy.",
-  eventPremium: "The event premium is the vendor's own implied move divided by " +
+  eventPremium: "The event premium is the feed's own implied move divided by " +
     "the constant-vol benchmark beside it — a ratio of two published numbers, " +
     "unit-free, and the only quantity on this row that is about the REPORT " +
     "rather than about the name's ambient volatility. A reading of 1 means the " +
-    "vendor is charging no more than an ordinary stretch of the same length; a " +
+    "feed is charging no more than an ordinary stretch of the same length; a " +
     "reading of 3 means it is charging three times that. It is not an average " +
     "of the two horizons, which the note above refuses: an average of two " +
     "numbers quoted to two horizons is quoted to neither, while their ratio is " +
@@ -224,17 +224,17 @@ export const EVENTS_NOTES = Object.freeze({
   flow: "The flow columns are the tilts the screener already carries for every " +
     "eligible name: premium, net premium, aggressed contracts, volume surprise " +
     "and open-interest change, each as a share of that name's own gross, plus " +
-    "the vendor's own put/call ratio and relative volume. They were computed on " +
+    "the feed's own put/call ratio and relative volume. They were computed on " +
     "every run and published for no name on this page, so the surface built for " +
     "the most event-exposed names in the universe could not say which of them " +
-    "was seeing anomalous option activity. They cost no vendor call.",
+    "was seeing anomalous option activity. They cost no feed call.",
   cap: "The table publishes the nearest reporters up to a row cap. Because the " +
     "rows are ordered by date, a bound cap does not thin the table — it ENDS " +
     "it, at a date earlier than the window, and everything past that date is " +
     "absent from the drawing rather than sparse in it. Whether the cap bound is " +
     "published beside the last date shown, so an empty right-hand half is never " +
     "attributed to the window when the cap is what stopped it.",
-  vendorMove: "The vendor's own implied move is quoted to the vendor's own next " +
+  vendorMove: "The feed's own implied move is quoted to the feed's own next " +
     "expiry, which is a different horizon from the one beside it. Both are " +
     "published and neither is reconciled into the other: an average of two " +
     "numbers quoted to two horizons is quoted to neither.",

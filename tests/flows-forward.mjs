@@ -463,7 +463,7 @@ ok(Object.isFrozen(FWD.FWD_LINES), "the lines are frozen");
   near(fit.forward.F, Ftrue, 1e-12, "the forward behind the fit is the chosen one");
   const resolved = impliedVolB76(Ftrue, Math.exp(-r * Tm), K, Tm, (row.bid + row.ask) / 2, "C", null);
   near(fit.slice.contract.iv, resolved, 1e-9, "the volatility is re-solved from the mid under the chosen forward");
-  ok(Math.abs(fit.slice.contract.iv - vendorIv) > 1e-4, "and is not the vendor's, which was solved under another forward");
+  ok(Math.abs(fit.slice.contract.iv - vendorIv) > 1e-4, "and is not the feed's, which was solved under another forward");
   eq(fit.forward.method, "parity", "the fit says which forward it used");
   const carryFit = QC.contractFit({ expiry: day, asOfMs, spot: S, rate: r, rateMethod: "given", facts: [{ id: "carry.implied", v: q, g: 3 }], expiries: null, row, fwd: { F: Ftrue, se: 0.01, src: "carry", n: 0 } });
   near(carryFit.forward.F, S * Math.exp((r - q) * Tm), 1e-12, "a record that says carry is not used as a forward");
@@ -621,7 +621,7 @@ ok(Object.isFrozen(FWD.FWD_LINES), "the lines are frozen");
   eq(probe(QC), [], "the card's fit passes the probe");
   const cases = [
     ["parity forward ignored: the carry forward is used and the volatility re-solved there", [["const used = fwd && fin(fwd.F) && fwd.F > 0 && (fwd.src === \"parity\" || fwd.src === \"blend\") ? fwd : null;", "const used = null;"]]],
-    ["the vendor's volatility combined with our forward", [["const iv = impliedVolB76(f.F, f.D, K, f.T, mid, type, seed);", "const iv = seed !== null ? seed : impliedVolB76(f.F, f.D, K, f.T, mid, type, seed);"]]],
+    ["the feed's volatility combined with our forward", [["const iv = impliedVolB76(f.F, f.D, K, f.T, mid, type, seed);", "const iv = seed !== null ? seed : impliedVolB76(f.F, f.D, K, f.T, mid, type, seed);"]]],
     ["T in whole days", [["const T = yearFraction(asOfMs, expiry);\n  if (!(T > 0)) return { bad: \"expired\" };", "const T = calendarDays(etDayOf(asOfMs), expiry) / 365;\n  if (!(T > 0)) return { bad: \"expired\" };"]]],
     ["the forward refit on the rate alone", [["const F = used ? used.F : S * Math.exp((r - carry) * T);", "const F = S * Math.exp((r - carry) * T);"]]],
   ];

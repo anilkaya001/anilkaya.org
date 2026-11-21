@@ -107,7 +107,7 @@ const browser = await launch();
   const lags = rows.map((r) => readAt - r.ts).sort((a, b) => a - b);
   const at = (q) => lags[Math.min(lags.length - 1, Math.max(0, Math.ceil(q * lags.length) - 1))];
   const st = await statusOf(m.page);
-  eq([st.lag.n, st.lag.p50, st.lag.p95], [rows.length, at(0.5), at(0.95)], "vendor to hub is the hub's read time less each window's own stamp, p50 and p95 by nearest rank");
+  eq([st.lag.n, st.lag.p50, st.lag.p95], [rows.length, at(0.5), at(0.95)], "feed to hub is the hub's read time less each window's own stamp, p50 and p95 by nearest rank");
   const strip = await m.page.evaluate(() => window.FlowsUI.ledgerLive.strip());
   const lagChip = strip.chips.find((c) => c.id === "lag").value;
   ok(new RegExp("^" + (at(0.5) / 1000).toFixed(1).replace(".", "\\.") + " s p50").test(lagChip) && /n 6$/.test(lagChip) && !/p95/.test(lagChip), "and the strip prints it, without a spread from six samples: " + lagChip);

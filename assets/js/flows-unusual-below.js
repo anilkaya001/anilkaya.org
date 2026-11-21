@@ -153,7 +153,7 @@
       title: "Flagged windows",
       state: S.alertsState.state === "ok" ? null : S.alertsState.state,
       asOf: typeof a.sessionDate === "string" ? a.sessionDate : null,
-      lead: "Each bubble is one window the vendor's rules flagged, placed at the vendor's stated start or, without one, at the read that first held it. Calls sit above the line and puts below; distance and size both grow with premium, and the fill reads the vendor's side of the quote: solid where at least 65% of the premium it sided was on the ask side, a ring where at most 35% was, a faint fill where it was mixed or under half the premium was sided, and a dashed ring where it stated no side.",
+      lead: "Each bubble is one window the feed's rules flagged, placed at the feed's stated start or, without one, at the read that first held it. Calls sit above the line and puts below; distance and size both grow with premium, and the fill reads the feed's side of the quote: solid where at least 65% of the premium it sided was on the ask side, a ring where at most 35% was, a faint fill where it was mixed or under half the premium was sided, and a dashed ring where it stated no side.",
       facts: [
         ["Read", instant(a.readAt)],
         ["Windows", rows.length ? count(rows.length) + (seen === null ? " windows" : " of " + (floor ? "at least " : "") + count(seen) + " flagged windows") : null],
@@ -165,7 +165,7 @@
       ],
       sections: [
         { title: "What a window is", lines: [notes.unit, notes.selection] },
-        { title: "Sides and flags", lines: [notes.sides, notes.flags, "Each row carries the vendor's own stated span, shown in TRT."] },
+        { title: "Sides and flags", lines: [notes.sides, notes.flags, "Each row carries the feed's own stated span, shown in TRT."] },
         { title: "The record", lines: [notes.record] },
         { title: "The ceiling", lines: [vendorCeilingSaid().trim()] },
         { title: "Refused", lines: [notes.refusals] },
@@ -277,11 +277,11 @@
   function namesInfo() {
     return {
       title: "Names",
-      lead: "The flagged windows, summed by name and ranked by premium. The bar is the name's premium against the largest, split into calls and puts; Sweep and Open are premium-weighted shares of the windows that carry each vendor field; Ask is the ask-side share of the premium the vendor sided, coloured only where at least half the premium was sided and the ask-side share is 65% or more, or 35% or less.",
+      lead: "The flagged windows, summed by name and ranked by premium. The bar is the name's premium against the largest, split into calls and puts; Sweep and Open are premium-weighted shares of the windows that carry each feed field; Ask is the ask-side share of the premium the feed sided, coloured only where at least half the premium was sided and the ask-side share is 65% or more, or 35% or less.",
       notes: [
-        "A share is taken only over windows where the vendor carried that field. A dash is a name with no window carrying it, not a zero.",
+        "A share is taken only over windows where the feed carried that field. A dash is a name with no window carrying it, not a zero.",
         "In Ask, a dash is a name with no window that states both sides; none sided is a name whose windows put none of the premium on either side; thin marks a share taken over less than half of the premium.",
-        "These are shares of what the vendor's rules flagged, not of the name's whole session.",
+        "These are shares of what the feed's rules flagged, not of the name's whole session.",
       ],
     };
   }
@@ -334,7 +334,7 @@
         if (cx && cx.status !== "pending" && !tape && cx.scope !== "deep") S.urgency.set(t, { shallow: true });
         else if (!cx || cx.status === "pending") S.urgency.set(t, { st: { state: "pending", reason: "This name's card extension has not been published yet." } });
         else if (!tape) S.urgency.set(t, { st: { state: "unavailable", reason: "This name's card carries no alert prints." } });
-        else if (tape.status !== "ok") S.urgency.set(t, { st: UI.stateOf({ status: tape.status === "unreadable" ? "withheld" : tape.status, reason: tape.why ? "Vendor code: " + tape.why + "." : null }, "alert prints"), tape: null });
+        else if (tape.status !== "ok") S.urgency.set(t, { st: UI.stateOf({ status: tape.status === "unreadable" ? "withheld" : tape.status, reason: tape.why ? "Feed code: " + tape.why + "." : null }, "alert prints"), tape: null });
         else S.urgency.set(t, { st: { state: "ok" }, tape });
       } catch (e) {
         S.urgency.set(t, { st: { state: "unavailable", reason: "This name's card could not be loaded (" + (e && e.message ? e.message : "no message") + ")." } });
@@ -444,7 +444,7 @@
         lo === null || hi === null ? "no notional bracket" : "notional " + F.money(lo) + " to " + F.money(hi),
       ];
       if (Array.isArray(r.cls)) title.push("by exchange code, as of " + F.day(String((activityOf() || {}).asOf || "")) + ": " + codeText(r) + (n(r.pm) === null ? "" : "; premium " + F.money(n(r.pm))));
-      if (flagged) title.push("also flagged by the vendor's rule " + (flagged.rule || "") + (n(flagged.prem) === null ? "" : ", carrying " + F.money(n(flagged.prem)) + " of premium"));
+      if (flagged) title.push("also flagged by the feed's rule " + (flagged.rule || "") + (n(flagged.prem) === null ? "" : ", carrying " + F.money(n(flagged.prem)) + " of premium"));
       const covered = S.payload && Array.isArray(S.payload.coverage) && S.payload.coverage.some((c) => c && c.t === r.t);
       const row = h(covered ? "a" : "div", {
         class: "fu-crow", href: covered ? tickerHref(r.t) : null, role: covered ? null : "listitem", title: title.join(" " + MID + " "),
@@ -453,7 +453,7 @@
       h("span", { class: "ui-badge", "data-tone": r.cp === "P" ? "down" : "up", "aria-label": r.cp === "P" ? "Put" : "Call" }, r.cp === "P" ? "P" : "C"),
       h("span", { class: "fu-tk" }, h("b", null, n(r.k) === null ? DASH : F.px(n(r.k), n(r.k) % 1 ? 1 : 0).replace(/\.0$/, "")),
         h("small", null, String(r.t || DASH) + " " + MID + " " + F.day(String(r.expiry || ""))),
-        sideGlyph(r.st), flagged ? h("span", { class: "fu-both", title: "Also flagged by the vendor" }, UI.glyph("levels")) : null),
+        sideGlyph(r.st), flagged ? h("span", { class: "fu-both", title: "Also flagged by the feed" }, UI.glyph("levels")) : null),
       h("span", { class: "fu-meter", "aria-hidden": "true" }, vor === null ? null : h("i", { style: { width: ((Math.log10(Math.max(1, vor)) / lmax) * 100).toFixed(1) + "%", "--i": String(i) } })),
       h("span", { class: "fu-v fu-strong" }, vor === null ? DASH : (vor >= 100 ? vor.toFixed(0) : vor.toFixed(1)) + "×"),
       h("span", { class: "fu-v fu-wide", "data-tone": doi === null ? null : doi > 0 ? "up" : doi < 0 ? "down" : "flat" }, doi === null ? DASH : F.num(doi, true)));
@@ -497,7 +497,7 @@
       facts: [
         ["Read", instant(payload.readAt)],
         ["Contracts", S.feedKind === "ok" ? count(n(c.shown) ?? rows.length) + (n(c.eligible) === null ? "" : " of " + count(c.eligible) + " that cleared the floors") : null],
-        ["Chains read", n(payload.namesSeen) === null ? null : count(payload.namesSeen) + (n(payload.namesTruncated) ? ", " + count(payload.namesTruncated) + " cut short by the vendor" : "")],
+        ["Chains read", n(payload.namesSeen) === null ? null : count(payload.namesSeen) + (n(payload.namesTruncated) ? ", " + count(payload.namesTruncated) + " cut short by the feed" : "")],
         ["Cap", S.feedKind === "ok" ? bound : null],
         ["Days to expiry from", payload.dteAnchor === "sessionDate" ? String(payload.sessionDate || "") : null],
         ["Exchange-code unit", activityOf() ? (activityOf().status === "ok"
@@ -510,7 +510,7 @@
           : S.feedKind === "failed" || S.feedKind === "withheld" ? "The basis travels inside the same payload as the numbers, so it could not be read either. Nothing in this module has been explained by the pipeline." : null] }],
       notes: [
         "volumeAsOf is null: " + (payload.volumeAsOfReason ? String(payload.volumeAsOfReason) : "the endpoint publishes no as-of stamp") + ", so the span the counter covers is unobserved and this page stamps only when it was read.",
-        "The accent mark beside a contract means the vendor's rules also flagged it, matched on name, side, strike and expiry: two independent selections agreeing.",
+        "The accent mark beside a contract means the feed's rules also flagged it, matched on name, side, strike and expiry: two independent selections agreeing.",
         ...(activityOf() && activityOf().status === "ok" ? ["The exchange-code shares come from a second, dated screen with its own floors. A contract in both lists carries them on its row; the list under the ranking is that screen's own largest by premium. The classes overlap and are not summed."] : []),
       ],
     };

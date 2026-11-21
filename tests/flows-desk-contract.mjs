@@ -311,7 +311,7 @@ try {
        "the buying-power field is there before any symbol, so a balance can be set first");
     const frontier = await page.locator("#dkScatter .ui-silent").getAttribute("aria-label");
     ok(/Frontier/.test(frontier || ""), `the frontier says it is empty in the silence vocabulary rather than drawing empty axes (${frontier})`);
-    eq(upstreamCalls, 0, "an empty desk spends no vendor call");
+    eq(upstreamCalls, 0, "an empty desk spends no feed call");
   }
 
   {
@@ -352,7 +352,7 @@ try {
        "lowercase input is normalised to a ticker");
 
     const foot = await page.locator("#deskFoot").textContent();
-    ok(/of 3 quoted contracts/.test(foot), `the screened total is the vendor's, not the survivors' (${foot})`);
+    ok(/of 3 quoted contracts/.test(foot), `the screened total is the feed's, not the survivors' (${foot})`);
     ok(/first gate it failed/.test(foot), "and the counts are declared a partition");
 
     ok((await tickers()).every((s) => s === "AAA"), "only the added symbol is priced");
@@ -389,7 +389,7 @@ try {
     ok(!/close/.test(note), "and a live print is not labelled a close");
     eq(await page.locator(".desk-chip .dk-chip-t").first().getAttribute("title"), note,
        "the chip carries the same note where a pointer reads it");
-    ok(/regular session/.test(await statusText()), "the vendor's session name reaches the status line");
+    ok(/regular session/.test(await statusText()), "the feed's session name reaches the status line");
     eq(await statusShown(), false, "which stays off the surface while there is nothing to warn about");
   }
 
@@ -404,7 +404,7 @@ try {
     await page.fill("#deskInput", "BBB");
     await page.click(".desk-add");
     await settle(3);
-    ok(upstreamCalls > before, "the new symbol costs its own vendor call");
+    ok(upstreamCalls > before, "the new symbol costs its own feed call");
 
     const syms = await tickers();
     ok(syms.includes("AAA") && syms.includes("BBB"), "both symbols are in one list");
@@ -471,7 +471,7 @@ try {
     await page.waitForFunction(() => (document.querySelector("#dkList .dk-row") || {}).dataset?.t === "BBB",
       null, { timeout: 8000 });
     eq((await tickers())[0], "BBB", "by premium dollars the expensive underlying leads — a different answer");
-    eq(upstreamCalls, before, "re-sorting rows already in hand spends no vendor call");
+    eq(upstreamCalls, before, "re-sorting rows already in hand spends no feed call");
     eq(new URL(page.url()).searchParams.get("rank"), "premium", "and the key is in the URL");
     await page.selectOption("#deskRank", "annualized");
   }
@@ -533,7 +533,7 @@ try {
     await page.fill("#deskInput", "!!!");
     await page.click(".desk-add");
     await page.waitForTimeout(600);
-    eq(upstreamCalls, before, "an unparseable symbol costs no vendor call");
+    eq(upstreamCalls, before, "an unparseable symbol costs no feed call");
     ok(/not a symbol/.test(await statusText()), "and says so rather than failing silently");
     eq(await statusShown(), true, "visibly");
   }
@@ -602,7 +602,7 @@ try {
     const callsBefore = upstreamCalls;
     await page.fill("#deskBP", "10,000");
     await page.waitForFunction(() => document.querySelectorAll("#dkList .dk-col").length > 0, null, { timeout: 5000 });
-    eq(upstreamCalls, callsBefore, "sizing to a balance spends no vendor call — it is arithmetic on rows already here");
+    eq(upstreamCalls, callsBefore, "sizing to a balance spends no feed call — it is arithmetic on rows already here");
     eq(chainRequests.length, 0, "and issues no request at all");
     ok(await page.locator("#dkList .dk-head").evaluate((n) => /Earns/.test(n.textContent) && !/Collect/.test(n.textContent)), "the Earns column is drawn, and is no longer called Collect");
 
@@ -660,7 +660,7 @@ try {
       return t.length === 3 && t[1] === "AAA";
     }, null, { timeout: 5000 }).catch(() => {});
     assert.deepEqual(await tickers(), ["AAA", "AAA", "BBB"], "ranking by time value collectible sinks the line this account cannot buy"); checks++;
-    eq(upstreamCalls, callsBefore, "and re-ranking still spends no vendor call");
+    eq(upstreamCalls, callsBefore, "and re-ranking still spends no feed call");
     await showView(page, "frontier");
 
     {
@@ -981,7 +981,7 @@ try {
       ok(stale.every((c) => c.dash === "3 2"), "each is drawn with a BROKEN border — a form, so it survives a greyscale print and a colour-blind reader");
       const fresh = ccc.cells.filter((c) => c.traded === "true");
       ok(fresh.length > 0 && fresh.every((c) => c.dash === null), "and a contract that traded today carries no such border, or the mark would mean nothing");
-      ok(/LAST TRANSACTION/.test(note), "the disclosure says this vendor's implied volatility is a fill and not a quote");
+      ok(/LAST TRANSACTION/.test(note), "the disclosure says this feed's implied volatility is a fill and not a quote");
       ok(/13 of 16 cells traded today/.test(note), `and how much of the surface is today's (${(note.match(/\d+ of \d+ cells traded today/) || [])[0]})`);
       ok(/NONE of them set an expiry's level/.test(note),
          "and that a stale print never sets a level — a stale cell is one marked number, a stale level tilts a whole column with no marker on it");

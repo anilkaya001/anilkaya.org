@@ -70,12 +70,12 @@
    "id": "p4",
    "n": 4,
    "slug": "terrain",
-   "title": "The strike by expiry terrain: dealer gamma on the vendor's convention",
+   "title": "The strike by expiry terrain: dealer gamma on the feed's convention",
    "for": "F-96",
    "releases": [
     "F-96"
    ],
-   "purpose": "One floor of log-moneyness by expiry, coloured by the dealer gamma of the open-interest book in dollars per 1% move, with a zero-gamma line per expiry, a gold back-wall profile with its flip, and a spot plane that carries its own vendor stamp. Every gamma figure names the convention. On a phone the 2D grid stands in.",
+   "purpose": "One floor of log-moneyness by expiry, coloured by the dealer gamma of the open-interest book in dollars per 1% move, with a zero-gamma line per expiry, a gold back-wall profile with its flip, and a spot plane that carries its own feed stamp. Every gamma figure names the convention. On a phone the 2D grid stands in.",
    "useTest": "At least 10% of ticker sessions open the world; under 5% it moves behind the mode bar's overflow.",
    "states": [
     "default"

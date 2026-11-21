@@ -32,8 +32,8 @@ const factOf = (r, key) => r.facts.find((f) => f.key === key);
   near(factOf(r, "hedge").value, 0.0222 * daily * 100, 2e-3,
     "HEDGING FOR A TYPICAL DAY: 0.0222 of average daily dollar volume per 1% move, times the implied daily move 0.339 / sqrt(252) = 2.1355%, is 4.74% of a day's dollar volume");
   eq(factOf(r, "hedge").text, "4.7%", "printed to one decimal");
-  eq(factOf(r, "gamma").text, "+2.22%", "and the gamma itself as the vendor's fraction times 100, signed");
-  eq(r.gamma, "long", "a positive vendor gamma is long: dealers hold the book long on the vendor's convention");
+  eq(factOf(r, "gamma").text, "+2.22%", "and the gamma itself as the feed's fraction times 100, signed");
+  eq(r.gamma, "long", "a positive feed gamma is long: dealers hold the book long on the feed's convention");
   eq(read({ gexAdv: -0.0222 }).gamma, "short", "and a negative one is short");
   eq(factOf(read({ gexAdv: -0.0222 }), "gamma").text, "−2.22%", "signed with U+2212, never a hyphen");
   const move = 0.3 / 15.874507866 * 100;
@@ -52,7 +52,7 @@ const factOf = (r, key) => r.facts.find((f) => f.key === key);
   const d = factOf(read({ dex: 3.3 }), "dex");
   eq(d.text, "+3.30", "dealer delta prints as a multiple of average daily dollar volume, signed");
   ok(d.grade === 1 && /no direction is read/.test(d.note), "graded weak, and its note says no direction is read from it");
-  ok(/positive by construction/.test(d.note) && /documents no sign convention/.test(d.note), "and says why: the vendor documents no sign for this field");
+  ok(/positive by construction/.test(d.note) && /documents no sign convention/.test(d.note), "and says why: the feed documents no sign for this field");
   eq(read({ dex: -1.5 }).state, read({ dex: 6 }).state, "the sign and size of dealer delta never move the state");
   same(read({ dex: -1.5 }).families, read({ dex: 6 }).families, "or the families");
   const v = factOf(read({ vanna: 0.0065 }), "vanna");
@@ -64,7 +64,7 @@ const factOf = (r, key) => r.facts.find((f) => f.key === key);
   eq(c.grade, 0, "charm is graded zero: shown, not read");
   eq(c.text, "negative", "and prints its sign only");
   ok(!/\d/.test(c.display), "no magnitude of a figure whose unit is undocumented is printed: " + c.display);
-  eq(factOf(read({ charm: 12 }), "charm").text, "positive", "a positive vendor charm reads positive");
+  eq(factOf(read({ charm: 12 }), "charm").text, "positive", "a positive feed charm reads positive");
   eq(read({ charm: 12 }).state, read({ charm: -12 }).state, "and never moves the state");
   same(read({ charm: 12 }).families, read({ charm: -12 }).families, "or the families");
 }
@@ -91,12 +91,12 @@ const factOf = (r, key) => r.facts.find((f) => f.key === key);
   ok(read({ ...rel(0.24, 0.30), ivp: 80 }).conflicts.length === 1, "cheap to realised at the 80th percentile is the mirror conflict");
   ok(read({ ...rel(0.24, 0.30), ivp: 74 }).conflicts.length === 0, "and 74 is under the 75th-percentile line");
   const ivpFact = factOf(read({ ivp: 37 }), "ivp");
-  eq(ivpFact.label, "Vendor 1-year IV percentile (tenor not documented)", "the percentile's label says it is the vendor's and that its tenor is not documented");
+  eq(ivpFact.label, "Feed 1-year IV percentile (tenor not documented)", "the percentile's label says it is the feed's and that its tenor is not documented");
   ok(/tenor no document held for it states/.test(ivpFact.unit) && ivpFact.display.endsWith(ivpFact.unit), "its unit says the same and is printed with the figure");
   ok(/not read as the 30-day figure/.test(ivpFact.note) && !/past year of 30-day/.test(ivpFact.unit + ivpFact.note), "and its note no longer claims the percentile ranks 30-day implied volatility");
   eq(ivpFact.text, "37th", "the figure prints as before");
   ok(ivpFact.grade === 1, "and stays graded weak");
-  eq(read({ ivp: null }).withheld.find((w) => w.key === "ivp").label, "Vendor 1-year IV percentile (tenor not documented)", "a withheld percentile carries the same label");
+  eq(read({ ivp: null }).withheld.find((w) => w.key === "ivp").label, "Feed 1-year IV percentile (tenor not documented)", "a withheld percentile carries the same label");
   eq(read({ ts: 0.05 }).facts.find((f) => f.key === "term").note.includes("front is bid"), true, "a 30-day over 90-day slope over +3% says the front is bid");
   eq(read({ ts: -0.05 }).facts.find((f) => f.key === "term").note.includes("back is bid"), true, "and under -3% the back is bid");
 }
@@ -153,7 +153,7 @@ const factOf = (r, key) => r.facts.find((f) => f.key === key);
     for (const g of gone) ok(!r.facts.some((f) => f.key === g) || drop[0] === "iv30", `and no ${g} fact is printed without its input`);
     const nulled = screenReading({ ticker: "SYN", u: { ...partial, [drop[0]]: null }, pct: {}, sessionDate: SESSION, expectedSession: SESSION });
     const w2 = nulled.withheld.find((x) => x.key === drop[0]);
-    ok(w2 && /carried no value/.test(w2.reason), `${drop[0]} set to null is withheld and says the vendor row carried no value`);
+    ok(w2 && /carried no value/.test(w2.reason), `${drop[0]} set to null is withheld and says the feed row carried no value`);
     ok(nulled.facts.every((f) => Number.isFinite(f.value) || typeof f.value === "string"), `${drop[0]} null leaves no NaN or undefined behind`);
   }
   {
@@ -228,7 +228,7 @@ const factOf = (r, key) => r.facts.find((f) => f.key === key);
   same(r.families, ["calendar spread"], "and the pinned, cheap row of the consolidated table prefers a calendar spread alone");
   ok(r.conflicts.length === 0, "with the 7.1th-percentile implied volatility agreeing with a cheap premium");
   eq(factOf(r, "dex").text, "+3.48", "dealer delta 3.48 times a day's dollar volume");
-  eq(factOf(r, "charm").text, "negative", "charm negative in the vendor's sign");
+  eq(factOf(r, "charm").text, "negative", "charm negative in the feed's sign");
   eq(factOf(r, "move30").text, "±5.8%", "and the 30-day priced move");
   eq(r.lean, null, "the row's tilt (+12%) is under the line and its delta flow is negative: no lean");
 }
@@ -241,7 +241,7 @@ const factOf = (r, key) => r.facts.find((f) => f.key === key);
   samples.push(read({}, { sessionDate: "2026-09-10" }), read({}, { sessionDate: "2026-09-14" }), read({ ivp: 10, vrp: 0.1, iv30: 0.4, rv20: 0.3 }));
   ok(samples.length > 140, `${samples.length} readings swept for wording`);
   const delta = factOf(read({ dDelta: 0.012 }), "delta");
-  ok(/ask side/.test(delta.unit) && /bid side/.test(delta.unit) && !/\bat (the )?(ask|bid)\b/i.test(delta.unit + " " + delta.note), "the delta flow's unit is named in the vendor's terms, ask side and bid side");
+  ok(/ask side/.test(delta.unit) && /bid side/.test(delta.unit) && !/\bat (the )?(ask|bid)\b/i.test(delta.unit + " " + delta.note), "the delta flow's unit is named in the feed's terms, ask side and bid side");
   ok(guardAnswer(delta.label + " " + delta.text + " " + delta.unit + ". " + delta.note, [{ say: delta.label + " " + delta.text + " " + delta.unit + " " + delta.note }], { smallIntegers: false, modals: true }).forecast === false, "and passes the ask guard's forecast and modal lexicon");
   const banned = /\b(will|should|expect\w*|likely|going to|forecast\w*|predict\w*|anticipat\w*|poised|target\w*|odds|would|could|might|may)\b/i;
   let sentences = 0, families = 0;
@@ -320,4 +320,4 @@ const factOf = (r, key) => r.facts.find((f) => f.key === key);
   ok(!/flows-neuron/.test(cross), "and neither does the universe");
 }
 
-console.log(`✓ flows-neuron-screen: ${checks} assertions — a reading from the screener row alone for a name that has no card: book-gamma sign and size worked by hand against the implied daily move, dealer delta and vanna shown as the vendor's numbers with no direction claimed, charm as a sign only, a premium axis on the card's own lines with the earnings-window and percentile conflicts that turn it into No position, a flow lean that needs the tilt and the delta flow to agree, the same state and structure families as regimeState across twenty-seven synthetic states, every input withheld with its reason when null or unpublished, the vendor's own NVDA row end to end, an expired reading at two sessions, and every emitted sentence free of forecast and modal words, with a unit on every fact`);
+console.log(`✓ flows-neuron-screen: ${checks} assertions — a reading from the screener row alone for a name that has no card: book-gamma sign and size worked by hand against the implied daily move, dealer delta and vanna shown as the feed's numbers with no direction claimed, charm as a sign only, a premium axis on the card's own lines with the earnings-window and percentile conflicts that turn it into No position, a flow lean that needs the tilt and the delta flow to agree, the same state and structure families as regimeState across twenty-seven synthetic states, every input withheld with its reason when null or unpublished, the feed's own NVDA row end to end, an expired reading at two sessions, and every emitted sentence free of forecast and modal words, with a unit on every fact`);

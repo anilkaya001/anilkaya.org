@@ -218,7 +218,7 @@ function checkAlertCeiling(s) {
   if (al.vendorTruncated !== true) return [];
   const reads = recordReads(al);
   return [warn("caution", "ceiling:alerts",
-    "flowalerts hit the vendor's " + limit + "-row ceiling on " +
+    "flowalerts hit the feed's " + limit + "-row ceiling on " +
     (reads === null ? "the read that built it" : "the latest of the " + reads + " reads merged into its record") +
     ", so the windows flagged this session are unknown in number and at least " + limit +
     ", and the row count on the page below is what our own cap kept of that " +
@@ -238,7 +238,7 @@ function checkNewsCeiling(s) {
   if (returned < requested) return null;
   return [warn("caution", "ceiling:news",
     "news returned " + returned + " " + plural(returned, "headline", "headlines") +
-    " against the " + requested + " it requested, so the response ended at the vendor's own " +
+    " against the " + requested + " it requested, so the response ended at the feed's own " +
     "ceiling and the population above it is unknown and at least that large.",
     { returned, requested },
     [KEY.news])];
@@ -276,7 +276,7 @@ function checkInheritedCeiling(s) {
   return [warn("caution", "ceiling:inherited",
     "The movers per-contract premium band is cut from a flowalerts " +
     (reads === null ? "read that" : "record whose latest read") + " hit the " +
-    "vendor's " + limit + "-row ceiling, so the " + ranked + " contract " +
+    "feed's " + limit + "-row ceiling, so the " + ranked + " contract " +
     plural(ranked, "window", "windows") + " it ranks " + plural(ranked, "is", "are") +
     " the largest of what arrived under that ceiling rather than the largest of the session.",
     { limit, ranked },

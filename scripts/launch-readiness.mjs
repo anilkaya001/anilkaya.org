@@ -185,7 +185,7 @@ export const PARTS = Object.freeze([
   }),
   readback({
     id: "2a", line: 2, tokens: ["classes"],
-    text: "The vendor's written answer, dated, as classes=A+B+C+D naming every data class the checklist lists as shown to members.",
+    text: "The feed's written answer, dated, as classes=A+B+C+D naming every data class the checklist lists as shown to members.",
     check: (rb, ctx, sheet) => {
       const named = rb.tokens.classes.split("+");
       if (named.some((c) => !CLASS_LETTER.test(c))) return fail(`classes=${rb.tokens.classes} holds a class that is not A to D`);
@@ -327,10 +327,10 @@ export const PARTS = Object.freeze([
 
 export const LINES = Object.freeze([
   { id: 1, mode: "all", title: "OD-01 answered and the plan matches the caps in wrangler.toml." },
-  { id: 2, mode: "all", title: "OD-03a's written vendor answer covering every data class shown to members, and OD-37's price and tiers." },
+  { id: 2, mode: "all", title: "OD-03a's written feed answer covering every data class shown to members, and OD-37's price and tiers." },
   { id: 3, mode: "all", title: "OD-06 counsel on ranked ideas; neutral forms live (P1-63)." },
   { id: 4, mode: "all", title: "Accounts, session v2, entitlements, audit, legal pages, deletion and export live (P2-24..P2-27)." },
-  { id: 5, mode: "all", title: "Limiters live: Lab, login, member vendor, Ask, prefs writes (P0-10, P0-11, P0-13, P0-16, P3-35)." },
+  { id: 5, mode: "all", title: "Limiters live: Lab, login, member feed, Ask, prefs writes (P0-10, P0-11, P0-13, P0-16, P3-35)." },
   { id: 6, mode: "all", title: "Deploy gate: test required on main (A-15) and staging in place (P2-33); the five audited promotions dropped by OD-02 (c)." },
   { id: 7, mode: "all", title: "Revocation closes sockets within one roster refresh (P1-35)." },
   { id: 8, mode: "all", title: "Status members view and alerts live (P1-25, P2-03)." },

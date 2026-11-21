@@ -1206,8 +1206,8 @@ ok(rel(cpu.worst.median) < 1.2, `warmed, the Worker path (parity forward, IV inv
   "an absolute threshold moved with the machine's load from 4.6 to 6.4 ms between runs of the same code while this ratio held)");
 ok(rel(cpu.worst.p95) < 2, `and the costliest window, garbage collection included, averages ${cpu.worst.p95.toFixed(2)} ms a run, ${rel(cpu.worst.p95).toFixed(2)} of the reference`);
 ok(cpu.normal.mean <= cpu.worst.mean + 0.5, `the default five families (${cpu.normal.structures} structures) take ${cpu.normal.mean.toFixed(2)} ms a run`);
-ok(cpu.route.rows === 400 && cpu.route.structures > 0, `the Worker's /api/flows/strategy engine path reads ${cpu.route.rows} vendor rows and prices ${cpu.route.structures} structures`);
-ok(rel(cpu.route.median) < 1.2, `from vendor strings to the card-shaped block (row shaping, parity, inversion, fit, pricing, compaction) in ${cpu.route.median.toFixed(2)} ms median, ${rel(cpu.route.median).toFixed(2)} of the reference`);
+ok(cpu.route.rows === 400 && cpu.route.structures > 0, `the Worker's /api/flows/strategy engine path reads ${cpu.route.rows} feed rows and prices ${cpu.route.structures} structures`);
+ok(rel(cpu.route.median) < 1.2, `from feed strings to the card-shaped block (row shaping, parity, inversion, fit, pricing, compaction) in ${cpu.route.median.toFixed(2)} ms median, ${rel(cpu.route.median).toFixed(2)} of the reference`);
 ok(rel(cpu.route.p95) < 2, `and ${cpu.route.p95.toFixed(2)} ms in its costliest window, ${rel(cpu.route.p95).toFixed(2)} of the reference`);
 
 console.log(`✓ flows-quant: ${n} assertions — all ${CASES.length} known-answer cases at their stated tolerances ` +
@@ -1217,6 +1217,6 @@ console.log(`✓ flows-quant: ${n} assertions — all ${CASES.length} known-answ
   "edge, a drift-neutral 64-bin P law, byte-identical reruns under shuffled rows and expiries, the selection vetoes, and the " +
   `Worker CPU budget on the ${cpu.clock} clock, held as a ratio to a same-process reference workload: fit + 24 structures median ${cpu.worst.median.toFixed(2)} ms (${rel(cpu.worst.median).toFixed(2)}x), p95 ${cpu.worst.p95.toFixed(2)} ms, ` +
   `min ${cpu.worst.min.toFixed(2)} ms; the default ${cpu.normal.structures} structures median ${cpu.normal.median.toFixed(2)} ms, p95 ${cpu.normal.p95.toFixed(2)} ms; ` +
-  `the strategy route's engine path from ${cpu.route.rows} vendor rows median ${cpu.route.median.toFixed(2)} ms, p95 ${cpu.route.p95.toFixed(2)} ms; ` +
+  `the strategy route's engine path from ${cpu.route.rows} feed rows median ${cpu.route.median.toFixed(2)} ms, p95 ${cpu.route.p95.toFixed(2)} ms; ` +
   `and the surface pass over ${surfaceReport.surfaces} noisy SSVI surfaces (${surfaceReport.clean} already clean, ${surfaceReport.settled} calendar-free after, ${surfaceReport.left} named and left, ` +
   `${surfaceReport.repairedSlices} slices refitted, worst fit-in-spread drop ${surfaceReport.worstDrop.toFixed(3)}, ${surfaceReport.ms.toFixed(1)} ms a surface on the ${cpu.clock} clock)`);

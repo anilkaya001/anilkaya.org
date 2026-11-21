@@ -219,7 +219,7 @@
       h("div", { class: "ft-ml-h" }, h("h3", { id: "ftMlImplied" }, "The options market's own number"),
         info("the options market's number", () => ({
           title: "The options market's own number",
-          lead: "What the nearest expiry's options charge for a move, as the vendor quotes it. It is a price set by traders, not a forecast made here.",
+          lead: "What the nearest expiry's options charge for a move, as the feed quotes it. It is a price set by traders, not a forecast made here.",
           facts: [["Move", im.move === undefined ? null : "±" + pctText(im.move)], ["Expiry", im.rule || null], ["Read", im.asOf ? F.day(im.asOf) : null]],
         }))));
     if (im.move === undefined) { box.append(why(im.why)); return box; }
@@ -294,7 +294,7 @@
       ticker: card.ticker, spot: raw.spot, asOf: card.sessionDate || null, closes: raw.closes,
       breaks: ctx && Array.isArray(ctx.breaks) ? ctx.breaks.map((b) => b && b.date).filter(isoDay) : [],
       implied: pm && num(pm.movePerc) !== null ? { move: pm.movePerc, low: pm.low, high: pm.high, rule: pm.horizonRule, asOf: pm.asOf || card.sessionDate }
-        : { why: pm ? "The vendor quoted no implied move for the nearest end-of-week expiry on this card." : "The card carries no priced move." },
+        : { why: pm ? "The feed quoted no implied move for the nearest end-of-week expiry on this card." : "The card carries no priced move." },
       report: nx ? { d: nx.d, sessions: nx.sessions, when: nx.when, confirmed: nx.confirmed, em: E.impliedNext ? E.impliedNext.em : null } : gate ? { d: gate, sessions: null, gate: true } : null,
       reportWhy: E ? "No upcoming report on the calendar." : "The card carries no earnings record for this name.",
     };

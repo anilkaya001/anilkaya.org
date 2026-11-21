@@ -65,9 +65,9 @@ const quiet = () => {
   eq(staging.vars.FLOWS_READ_MODE, "off", "and its readings are the deterministic ones");
   eq(staging.vars.FLOWS_RT_MODE, "on", "the rail is on, so the socket rung can be measured");
   eq(staging.vars.FLOWS_RT_AUDIENCE, "members", "for members, so simulated members can open sockets");
-  eq(production.vars.FLOWS_UW_PLAN, "advanced", "production records its vendor plan");
+  eq(production.vars.FLOWS_UW_PLAN, "advanced", "production records its feed plan");
   ok(!("FLOWS_UW_PLAN" in staging.vars) && !("FLOWS_UW_DAILY_LIMIT" in staging.vars),
-     "staging records none: it holds no vendor key, so its plan lines stay the unread plan's strict ones and no staging figure claims production's day line");
+     "staging records none: it holds no feed key, so its plan lines stay the unread plan's strict ones and no staging figure claims production's day line");
   const text = readFileSync(path.join(ROOT, "wrangler.staging.toml"), "utf8");
   ok(!/^\s*(GOOGLE_CLIENT_ID|GOOGLE_CLIENT_SECRET|SESSION_SECRET|FLOWS_PEPPER|FLOWS_CREDENTIALS|UW_API_KEY|FLOWS_INGEST|FLOWS_GITHUB)\w*\s*=/m.test(text),
      "the staging file carries no secret: its own are set with wrangler secret put");

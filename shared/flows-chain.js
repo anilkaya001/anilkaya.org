@@ -474,7 +474,7 @@ export function buildTopContracts(rows, {
   const v = saidMagnitude(top.vol);
   const share = volTotal > 0 ? Math.round((top.vol / volTotal) * 100) : null;
   const aggrClause = top.aggr === null
-    ? " (the vendor reported no aggressor split on that line)"
+    ? " (the feed reported no aggressor split on that line)"
     : top.aggr === 0
       ? ", with its two sides exactly balanced"
       : (() => { const a = saidMagnitude(top.aggr);
@@ -505,7 +505,7 @@ export function buildTopContracts(rows, {
     shown: shown.length,
     total: parsed.length,
     aggressorReported: shown.filter((r) => r.aggr !== null).length,
-    relation: "aggr = ask_volume − bid_volume, in contracts, as the vendor counted each " +
+    relation: "aggr = ask_volume − bid_volume, in contracts, as the feed counted each " +
       "print against the side of the book it hit; not dollarised",
   };
 }
@@ -542,7 +542,7 @@ export function buildAggressor(rows, {
   }
   if (!byStrike.size) {
     return dead(unreported
-      ? `the vendor reported no aggressor split on any of the ${unreported} contracts that traded`
+      ? `the feed reported no aggressor split on any of the ${unreported} contracts that traded`
       : "no contract on this chain carried an aggressor split");
   }
 
@@ -656,9 +656,9 @@ export function buildChainPanels(chainRows, {
   const foreignRows = all.length - rows.length;
   if (!rows.length) {
     const reason = foreignRows
-      ? `every one of the ${foreignRows} contracts the vendor returned belongs to an ` +
+      ? `every one of the ${foreignRows} contracts the feed returned belongs to an ` +
         `adjusted series, not to ${ticker}`
-      : "the vendor returned no contracts for this symbol";
+      : "the feed returned no contracts for this symbol";
     return {
       status: "unavailable", reason, truncated: false, rowsSeen: 0,
       ivSurface: dead(reason), skewTerm: dead(reason),
@@ -704,8 +704,8 @@ export function buildChainPanels(chainRows, {
 
   if (truncated && !answersRequest) {
     const why = (pages > 1
-      ? `the vendor still filled the last of ${pages} pages of ${CHAIN_PAGE_SIZE} contracts, `
-      : `the vendor returned a full page of ${CHAIN_PAGE_SIZE} contracts `) + "in no " +
+      ? `the feed still filled the last of ${pages} pages of ${CHAIN_PAGE_SIZE} contracts, `
+      : `the feed returned a full page of ${CHAIN_PAGE_SIZE} contracts `) + "in no " +
       "documented order, so this is an arbitrary subset of the book and \"the nearest " +
       "expiry\" cannot be identified within it";
     scalars = {

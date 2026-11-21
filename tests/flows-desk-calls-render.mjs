@@ -438,7 +438,7 @@ try {
     const [dl] = await Promise.all([page.waitForEvent("download"), page.locator(".ui-exp-i", { hasText: /^CSV$/ }).click()]);
     const grid = parseCsv(fs.readFileSync(await dl.path(), "utf8").slice(1));
     same(grid[0], ["Ticker", "Structure", "Expiry", "Chain session", "Days to expiry", "Strike (USD)", "Contracts used (contracts)", "Collateral per contract (USD)", "Collateral on contracts used (USD)", "Collateral convention", "Haircut (fraction)", "Floor (fraction)", "Premium ÷ collateral (fraction)", "Time value ÷ collateral (fraction)", "Annualised time value ÷ collateral (fraction)", "Net delta (delta)", "Net delta band (delta)", "Win probability (implied) (fraction)", "Win probability (real-world) (fraction)", "Expected value (real-world) on contracts used (USD)", "Reg-T style collateral per contract (USD)"], "the export has exactly the stated columns and units");
-    ok(!grid[0].some((c) => /^(bid|ask|spot)\b|quoted|^Premium \(/i.test(c)) && !grid[0].some((c) => /premium \(usd\)/i.test(c)), "no bid, ask, premium or spot column: the vendor's quoted figures are not exported");
+    ok(!grid[0].some((c) => /^(bid|ask|spot)\b|quoted|^Premium \(/i.test(c)) && !grid[0].some((c) => /premium \(usd\)/i.test(c)), "no bid, ask, premium or spot column: the feed's quoted figures are not exported");
     const body = grid.slice(1, -2);
     ok(body.length === 48 && body.every((r) => r[1] === "short call, uncovered" && r[9] === "Delta-adjusted"), "every line is a row, named as uncovered, with its convention");
     ok(body.every((r) => r.every((c) => !/−/.test(c))), "no U+2212 in a CSV number");
@@ -545,7 +545,7 @@ try {
       const page = await openDesk(browser, { payloads: one, query: "?t=SYX101&strategy=sc", errors });
       await ready(page, 24);
       const st = await statusOf(page);
-      ok(st.text.includes("Partial chain: the site's market-data budget ran out after 7 contracts; ranking covers these only and is not exact."), `a chain the vendor budget cut short says so and names the contracts read (${st.text.slice(0, 160)})`);
+      ok(st.text.includes("Partial chain: the site's market-data budget ran out after 7 contracts; ranking covers these only and is not exact."), `a chain the feed budget cut short says so and names the contracts read (${st.text.slice(0, 160)})`);
       ok(!/SYX101: /.test(st.text.replace(/^\d+ symbols? priced.*?(?=Partial)/, "")), "one name carries no symbol prefix");
       await page.close();
     }

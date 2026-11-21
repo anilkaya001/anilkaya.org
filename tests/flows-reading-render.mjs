@@ -29,7 +29,7 @@ const READ = {
   provenance: "Model wording by Glm 4.7 Flash, checked sentence by sentence against the facts it cites; every figure was copied from them. It cost 56 neurons.", note: null, why: null,
   fingerprint: "d1.abc", asOf: AT, session: "2026-10-01", generatedAt: "2026-10-02T14:31:00.000Z", coverage: { ok: 10, partial: 1, withheld: 1, pending: 0 },
   tags: [
-    { code: "dealer-pinned", label: "Dealers pinning", sentence: "The implied dealer state is pinned on the vendor's convention (dealers long calls, short puts).", evidence: ["options.state"] },
+    { code: "dealer-pinned", label: "Dealers pinning", sentence: "The implied dealer state is pinned on the feed's convention (dealers long calls, short puts).", evidence: ["options.state"] },
     { code: "news-driven", label: "News driven", sentence: "4 headlines in the last 24 hours.", evidence: ["news.count24h"] },
   ],
   sections: {
@@ -37,11 +37,11 @@ const READ = {
     now: { text: "The last price is $127.40, +1.27% from the previous close.", cites: [cite("price.last", "Last price", "$127.40"), cite("price.change", "Change from the previous close", "+1.27%")] },
     drivers: [
       { text: "News flow is steady, and Reuters reports a cloud contract win.", cites: [cite("news.count24h", "Headlines in the last 24 hours", "4"), cite("news.h1", "Headline, Reuters", "positive: wins a multi-year cloud contract", { untrusted: true })] },
-      { text: "The implied dealer state is pinned on the vendor's convention (dealers long calls, short puts).", cites: [cite("options.state", "Implied dealer state", "pinned", { asOf: "2026-10-02T00:10:00.000Z" })] },
+      { text: "The implied dealer state is pinned on the feed's convention (dealers long calls, short puts).", cites: [cite("options.state", "Implied dealer state", "pinned", { asOf: "2026-10-02T00:10:00.000Z" })] },
     ],
     tensions: [{ text: "Flow leans to puts while price is stretched.", cites: [cite("flow.strip.lean", "Bullish against bearish premium", MINUS + "0.47")] }],
     unknown: [{ text: "Fundamentals are withheld, so nothing is claimed about revenue.", missing: ["fundamentals"] }],
-    watch: [{ text: "Below the gamma flip at $124.00 dealers are net short gamma on the vendor's convention (dealers long calls, short puts).", cites: [cite("options.engine.level.flip", "Gamma flip", "$124.00")] }],
+    watch: [{ text: "Below the gamma flip at $124.00 dealers are net short gamma on the feed's convention (dealers long calls, short puts).", cites: [cite("options.engine.level.flip", "Gamma flip", "$124.00")] }],
   },
   refused: [],
 };
