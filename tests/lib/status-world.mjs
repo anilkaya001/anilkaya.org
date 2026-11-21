@@ -53,7 +53,7 @@ export const META = {
   callStats: { retries: 14, rateLimited: 2, failures: 1, timedOut: 0, networkMs: 810000, permitWaitMs: 12000, rateLimitWaitMs: 3000 },
   stages: [
     { id: "universe", status: "ok", ms: 4200, calls: 12, keys: 1, cpu: 900 },
-    { id: "roster", status: "failed", ms: 900, calls: 3, keys: 0, why: "vendor 5xx", cpu: 120 },
+    { id: "roster", status: "failed", ms: 900, calls: 3, keys: 0, why: "feed 5xx", cpu: 120 },
   ],
 };
 

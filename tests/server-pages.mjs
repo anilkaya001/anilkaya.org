@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import * as K from "../server/http.js";
 import { createRouter } from "../server/router.js";
 import { flowsPageRows, FLOWS_PAGE_SLUGS, FLOWS_PUBLIC_SLUGS, FLOWS_GONE_SLUGS } from "../server/routes/flows-pages.js";
-import { FLOWS_NAV, FLOWS_PAGES, FLOWS_TABS, FIRE_SHADOW_LINE, ownerNav } from "../shared/flows-pages.js";
+import { FLOWS_NAV, FLOWS_PAGES, FLOWS_TABS, FIRE_SHADOW_LINE, ffSlots, ownerNav } from "../shared/flows-pages.js";
+import { INBOX_SHADOW_LINE } from "../shared/ff-pages-inbox.js";
 import { positioningMode } from "../shared/flows-pos-switch.js";
 import { workerSource, expect, absent, moduleSource } from "./lib/source-scan.mjs";
 
@@ -43,6 +44,11 @@ const withFireEntry = (page) => {
   const parts = page.split('<a href="/flows/strategy/"');
   return parts.length === 2 ? parts[0] + FIRE_ENTRY + parts[1] : page;
 };
+
+const unslot = (html) => html
+  .replace(/\n    <div class="ffx-mark-slot" data-ff-slot="mark"[^>]*><\/div>/, "")
+  .replace(/<span class="ffx-np-slot" data-ff-slot="name-panel"><\/span>/, "")
+  .replace(/<i hidden data-defer="ff-(?:kit|mark)"[^>]*><\/i>\n|<script src="\/assets\/js\/flows-ff-(?:mark|name-panel)\.js\?v=\d+" defer><\/script>\n/g, "");
 
 const POSITIONING_ENTRY = '<a href="/flows/positioning/" data-pos-nav><svg class="ui-g" aria-hidden="true" focusable="false"><use href="#g-stack"/></svg><span class="rail-label">Positioning</span></a>';
 const RAIL_TOOLS = '\n    </div>\n    <p class="rail-group" id="railTools">';
@@ -94,14 +100,21 @@ function oldChain(path, rc, d) {
       "/flows/unusual/": (u, summary, owner) => FLOWS_PAGES.unusualPage({ username: u, owner }),
       "/flows/ledger/": (u) => FLOWS_PAGES.ledgerPage({ username: u }),
       "/flows/macro/": (u) => FLOWS_PAGES.macroPage({ username: u }),
-      "/flows/events/": (u) => FLOWS_PAGES.eventsPage({ username: u }),
+      "/flows/events/": (u, summary, owner, env) => {
+        const w = String(env && env.FLOWS_EVENTRISK || "").trim().toLowerCase();
+        const open = w === "on" || ((w !== "off") && owner === true);
+        return FLOWS_PAGES.eventsPage({ username: u, eventrisk: open, halts: String(env && env.FLOWS_EVENTRISK_HALTS || "").trim().toLowerCase() === "on" });
+      },
       "/flows/political/": (u, summary, owner, env) => FLOWS_PAGES.politicalPage({ username: u, layers: positioningMode(env, owner) }),
       "/flows/positioning/": (u) => FLOWS_PAGES.positioningPage({ username: u }),
       "/flows/status/": (u) => FLOWS_PAGES.statusPage({ username: u }),
-      "/flows/fire/": (u, summary, owner, e) => FLOWS_PAGES.firePage({ username: u, shadow: ffModeOf(e) === "shadow" }),
-      "/flows/inbox/": (u, summary, owner, e) => FLOWS_PAGES.ffPendingPage({ username: u, page: "inbox", shadow: ffModeOf(e) === "shadow" }),
-      "/flows/digest/": (u, summary, owner, e) => FLOWS_PAGES.ffPendingPage({ username: u, page: "digest", shadow: ffModeOf(e) === "shadow" }),
-      "/flows/wires/": (u, summary, owner, e) => FLOWS_PAGES.ffPendingPage({ username: u, page: "wires", shadow: ffModeOf(e) === "shadow" }),
+      "/flows/fire/": (u, summary, owner, e) => {
+        const w = String(e && e.FLOWS_EVENTRISK || "").trim().toLowerCase();
+        return FLOWS_PAGES.firePage({ username: u, shadow: ffModeOf(e) === "shadow", feed: w === "on" || ((w !== "off") && owner === true) });
+      },
+      "/flows/inbox/": (u, summary, owner, e) => FLOWS_PAGES.inboxPage({ username: u, shadow: ffModeOf(e) === "shadow" }),
+      "/flows/digest/": (u, summary, owner, e) => FLOWS_PAGES.digestPage({ username: u, shadow: ffModeOf(e) === "shadow" }),
+      "/flows/wires/": (u, summary, owner, e) => FLOWS_PAGES.wiresPage({ username: u, shadow: ffModeOf(e) === "shadow" }),
     };
     if (Object.hasOwn(FLOWS_ROUTES, path)) {
       requireMethod(request, ["GET", "HEAD"]);
@@ -122,7 +135,8 @@ function oldChain(path, rc, d) {
       if (session && path === "/flows/status/" && !owner) throw new HttpError(404, "not_found", "Not found");
       const drawn = session ? FLOWS_ROUTES[path](session.username, summary, owner, env) : FLOWS_PAGES.loginPage();
       const fired = session && ffOpen(env, "FF_ROUTE_FIRE") && path !== "/flows/fire/" ? withFireEntry(drawn) : drawn;
-      const page = session && path !== "/flows/positioning/" && (posWord(env) === "on" || (posWord(env) === "owner" && owner)) ? withPositioningEntry(fired) : fired;
+      const slotted = session ? ffSlots(fired, { mark: ffOpen(env, "FF_ROUTE_WIRES"), panel: ffOpen(env, "FF_ROUTE_INBOX"), slug: path === "/flows/" ? "overview" : path.split("/")[2] }) : fired;
+      const page = session && path !== "/flows/positioning/" && (posWord(env) === "on" || (posWord(env) === "owner" && owner)) ? withPositioningEntry(slotted) : slotted;
       const body = session && owner ? ownerNav(page) : page;
       return new Response(body, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
@@ -257,9 +271,17 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     if (slug === "status") continue;
     const asMember = await call({ ...scenario({ username: "anilkaya" }).deps, isOwner: () => false });
     ok(!asMember.includes("railOps") && !asMember.includes("/flows/status/"), path + ": a member's HTML names neither the group nor the page");
-    if (slug === "market" || slug === "unusual") continue;
+    if (slug === "events") ok(asOwner.includes("erRiskCard") && !asMember.includes("erRiskCard") && !asMember.includes("flows-er"), path + ": the event-risk views are the owner's alone while the switch ships owner");
+    if (slug === "market" || slug === "unusual" || slug === "events") continue;
     const brand = /<a class="ff-brand" href="([^"]*)"/;
     ok((asOwner.match(brand) || [])[1] === "/flows/status/#view=coverage" && (asMember.match(brand) || [])[1] === "/flows/about/", path + ": the trade-mark opens data coverage for an owner and About for a member");
+    if (slug === "fire") {
+      ok(asOwner.includes('id="ffxSeg"') && asOwner.includes('data-defer="er-fire"') && !asMember.includes("ffxSeg") && !asMember.includes("flows-er-fire"), path + ": the feed templates are the owner's alone while the event-risk switch ships owner");
+      const noBrand = (t) => t.replace(/<a class="ff-brand"[\s\S]*?<\/a>/, "");
+      const strip = (t) => noBrand(t).replace(/<div class="ffx-seg"[\s\S]*?<\/div>/, "").replace(/\n        <ul class="ffx-tpls ffx-feed"[\s\S]*?<\/i>/, "").replace(' id="ffxTplFoot"', "").replace('\n        <p class="ffx-foot" id="ffxFeedFoot" hidden></p>', "");
+      eq(strip(asOwner), strip(asMember), path + ": and is otherwise byte-identical to the member's");
+      continue;
+    }
     if (slug === "political") continue;
     const noBrand = (t) => t.replace(/<a class="ff-brand"[\s\S]*?<\/a>/, "");
     eq(noBrand(asOwner), noBrand(asMember), path + ": and is otherwise byte-identical to the member's");
@@ -326,7 +348,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
       const [status, kind, text] = await ffAs(slug, member, { ...FF_ON, FF_MODE: mode });
       eq([status, kind], [200, "page"], slug + ": open to every member under FF_MODE " + mode.trim());
       const shadow = mode.trim().toLowerCase() === "shadow";
-      eq(text.split(FIRE_SHADOW_LINE).length - 1, shadow ? 1 : 0, slug + ": the shadow sentence is on the page exactly when the mode is shadow");
+      eq(text.split(slug === "inbox" ? INBOX_SHADOW_LINE : FIRE_SHADOW_LINE).length - 1, shadow ? 1 : 0, slug + ": the shadow sentence is on the page exactly when the mode is shadow");
       ok(text.includes('data-ff-page="' + slug + '"'), slug + ": the page carries its data-ff-page hook");
     }
   }
@@ -339,10 +361,24 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     ok(banner && !/\bhidden\b/.test(banner[1]) && banner[2] === FIRE_SHADOW_LINE, "in shadow the Fire page's banner is shown and says so");
     const live = /<p class="ffx-banner" id="ffxBanner"([^>]*)>([^<]*)<\/p>/.exec((await ffAs("fire", member, FF_ON))[2]);
     ok(live && /\bhidden\b/.test(live[1]) && live[2] === "", "and with FF_MODE on the banner is hidden and empty");
-    for (const slug of ["inbox", "digest", "wires"]) {
-      const text = (await ffAs(slug, member, FF_ON))[2];
-      ok(/— unavailable: the [A-Za-z ]+ is not released yet\./.test(text) && text.includes('data-ff-absent="not_released"'), slug + ": a page that is not built says so as an em dash with its reason, never an empty list");
-      ok(text.includes('<a class="ds-btn" href="/flows/fire/">Open Fire</a>'), slug + ": and links to Fire");
+    {
+      const text = (await ffAs("inbox", member, FF_ON))[2];
+      ok(!text.includes("not_released") && text.includes('id="ffxInbox"') && text.includes("/assets/js/flows-ff-inbox.js"), "inbox: the Inbox is the built page, not the not-released placeholder");
+    }
+    {
+      const text = (await ffAs("digest", member, FF_ON))[2];
+      ok(!text.includes('data-ff-absent="not_released">') || !text.includes("is not released yet."), "digest: the Digest is built, not the not-released placeholder");
+      ok(/<p class="ffx-banner" id="ffxDigBanner" hidden><\/p>/.test(text), "digest: with FF_MODE on its shadow banner is hidden and empty");
+      ok(/<p class="ffx-banner" id="ffxDigBanner" data-ff-mode="shadow" data-past="Running in shadow: [^"]*">Running in shadow: /.test((await ffAs("digest", member, { ...FF_ON, FF_MODE: "shadow" }))[2]), "digest: in shadow the banner is shown");
+    }
+    {
+      const text = (await ffAs("wires", member, FF_ON))[2];
+      ok(!text.includes("not_released") && text.includes('id="ffxWires"') && text.includes("/assets/js/flows-ff-wires.js"), "wires: the Wires page is the built page, not the not-released placeholder");
+    }
+    {
+      const text = FLOWS_PAGES.ffPendingPage({ username: "m", page: "wires", shadow: false });
+      ok(/— unavailable: the [A-Za-z ]+ is not released yet\./.test(text) && text.includes('data-ff-absent="not_released"'), "the placeholder for a page that is not built still says so as an em dash with its reason, though no route serves it now that the Inbox, the Digest and the Wires page are built");
+      ok(text.includes('<a class="ds-btn" href="/flows/fire/">Open Fire</a>'), "and links to Fire");
     }
   }
   const NAV_PAGES = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "flowlab", "unusual", "ledger", "events", "political", "inbox", "digest", "wires"];
@@ -358,7 +394,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     for (const env of [navEnv, { ...navEnv, ...FF_ON, FF_MODE: "off" }, { ...navEnv, ...FF_ON, FF_ROUTE_FIRE: "off" }, { ...navEnv, FF_ROUTE_FIRE: "on" }]) {
       const shut = await draw(env);
       ok(!shut.includes("/flows/fire/") && !shut.includes("data-ff-nav"), path + ": with Fire closed no member page names it");
-      eq(open.replace('<a href="/flows/fire/" data-ff-nav><svg class="ui-g" aria-hidden="true" focusable="false"><use href="#g-fire"/></svg><span class="rail-label">Fire</span></a>\n      ', ""), shut, path + ": and the entry is the only difference the switch makes");
+      eq(unslot(open.replace('<a href="/flows/fire/" data-ff-nav><svg class="ui-g" aria-hidden="true" focusable="false"><use href="#g-fire"/></svg><span class="rail-label">Fire</span></a>\n      ', "")), unslot(shut), path + ": and the entry is the only difference the switch makes, beside the Wires mark");
     }
   }
   {
@@ -423,7 +459,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     absent(text, new RegExp('path === "' + p.replace(/[-/]/g, "\\$&") + '"'), { anchor: /path === "\/flows\/login"/, why: p + " is a table row and no longer a branch of the chain" });
   }
   absent(text, /\bFLOWS_ROUTES\b|\bFLOWS_READER_FROM\b/, { anchor: /path === "\/flows\/logout"/, why: "the page table moved out of the Worker" });
-  absent(text, /FLOWS_PAGES\.(overviewPage|sidePage|watchPage|marketPage|networkPage|nowPage|deskPage|strategyPage|tickerPage|unusualPage|movesPage|ledgerPage|macroPage|eventsPage|politicalPage|positioningPage|statusPage|firePage|ffPendingPage)/, { anchor: /FLOWS_PAGES\.loginPage\(/, why: "the Worker renders only the sign-in page itself" });
+  absent(text, /FLOWS_PAGES\.(overviewPage|sidePage|watchPage|marketPage|networkPage|nowPage|deskPage|strategyPage|tickerPage|unusualPage|movesPage|ledgerPage|macroPage|eventsPage|politicalPage|positioningPage|statusPage|firePage|inboxPage|digestPage|wiresPage|ffPendingPage)/, { anchor: /FLOWS_PAGES\.loginPage\(/, why: "the Worker renders only the sign-in page itself" });
   const src = moduleSource("server/routes/flows-pages.js");
   ok(!/from "\.\.\/\.\.\/worker\.js"|cloudflare:|\bfetch\(|\benv\.DB\b/.test(src), "the family imports neither the Worker nor the platform and reads no store: the session and the summary are injected");
   ok(!/\bsetCookie\b|Set-Cookie|\.json\(/.test(src), "and sets no cookie and answers no JSON");

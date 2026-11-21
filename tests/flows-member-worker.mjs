@@ -139,14 +139,14 @@ async function call(worker, env, path, { principal = "member", method = "GET", b
   ];
   globalThis.fetch = realFetch;
   eq(statuses.slice(0, 1).concat(statuses.slice(2)), [200, 200, 200, 200, 200, 200, 200], "every /api/me route answers while the network and the model are refused");
-  eq(reads, [], "none made a network call, so none reached the vendor");
+  eq(reads, [], "none made a network call, so none reached the feed");
   eq(waited, 0, "none used waitUntil");
   const allowed = new Set(["DB", "SESSION_SECRET", "FLOWS_CREDENTIALS", "FLOWS_SESSION_EPOCH", "FLOWS_MEMBER_STATE", "FLOWS_EXPORTS", "MEMBER_STATE_KEY", "MEMBER_STATE_KEY_PREV",
     "MEMBER_STATE_READ", "MEMBER_STATE_WRITE", "MEMBER_EXPORT", "FLOWS_RT_USERS", "FLOWS_RT_MODE", "FLOWS_RT_AUDIENCE", "FLOWS_RT_HINT", "FLOWS_RT_UPSTREAM",
     "FLOWS_RT_SOCKET_HOURS", "FLOWS_RT_USER_CAP", "FLOWS_RT_CALLS_PER_MIN", "FLOWS_RT_SCALE", "UW_BASE", "UW_NOW", "FLOWS_METER", "FLOWS_READ_MODE", "then"]);
   const extra = [...touched].filter((k) => !allowed.has(k));
   eq(extra, [], "and the environment properties they touched are the database, the session, the switches and the limiters: " + extra.join(", "));
-  ok(!touched.has("AI") && !touched.has("UW_API_KEY") && !touched.has("PULSE"), "never the model, the vendor key or the rail");
+  ok(!touched.has("AI") && !touched.has("UW_API_KEY") && !touched.has("PULSE"), "never the model, the feed key or the rail");
   eq([limits.read.calls.length > 0, limits.write.calls.length > 0, limits.export.calls.length > 0], [true, true, true], "each route spent its own limiter");
 }
 
@@ -169,7 +169,7 @@ async function call(worker, env, path, { principal = "member", method = "GET", b
   }
   globalThis.fetch = realFetch2;
   eq(seen, [["rth", false, false], ["focus", false, false], ["summary", false, false], ["housekeeping", false, false], ["housekeeping", true, true]],
-    "the vendor ticks, the summary and an ordinary housekeeping firing never name the member tables; only the 03:00 ET prune does");
+    "the feed ticks, the summary and an ordinary housekeeping firing never name the member tables; only the 03:00 ET prune does");
 }
 
 const MODULES = ["server/member-store.js", "server/routes/flows-me.js", "shared/flows-member-crypto.js", "shared/flows-member-state.js", "shared/flows-member-calendar.js",
@@ -179,8 +179,8 @@ for (const file of MODULES) {
   const text = readFileSync(new URL("../" + file, import.meta.url), "utf8");
   const imports = [...text.matchAll(/\bfrom\s+"([^"]+)"/g)].map((m) => m[1]);
   const banned = imports.filter((s) => /vendor|flows-live|dossier|reading|flows-ai|neuron|flows-rt|quant/.test(s));
-  eq(banned, [], file + " imports no vendor, live, model or rail module");
-  ok(!/\bAI\b|env\.AI|uwFetch|\bfetch\(|XMLHttpRequest|WebSocket/.test(text), file + " names no model, no vendor call and no network call");
+  eq(banned, [], file + " imports no feed, live, model or rail module");
+  ok(!/\bAI\b|env\.AI|uwFetch|\bfetch\(|XMLHttpRequest|WebSocket/.test(text), file + " names no model, no feed call and no network call");
   ok(!/console\./.test(text), file + " writes nothing to the console");
   const logs = [...text.matchAll(/logFailure\(([^;]*)\);/g)].map((m) => m[1]);
   for (const log of logs) ok(/^"error", "member state unreadable", \{ route: "\/api\/me\/state", code: "unreadable", reason \}$/.test(log.trim()), file + " logs only a fixed event with a route and a code: " + log);

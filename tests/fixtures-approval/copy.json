@@ -12,6 +12,6 @@
   "ambient": "Ambient: pulses and breathing encode premium by speed and density, not individual trades; labelled ambient motion, not data."
  },
  "seam": "Bands do not connect across names: calls and puts, and bullish and bearish, are two ways to split the same dollars.",
- "convention": "on the vendor's convention (dealers long calls, short puts)",
- "askSide": "Ask side and bid side are the vendor's split of each flagged window's premium. For contract volume the vendor defines the ask side as a fill above the midpoint; it does not document the alert field. Lean is a convention: ask-side calls and bid-side puts are drawn bullish. Unsided premium is never guessed into a side."
+ "convention": "on the feed's convention (dealers long calls, short puts)",
+ "askSide": "Ask side and bid side are the feed's split of each flagged window's premium. For contract volume the feed defines the ask side as a fill above the midpoint; it does not document the alert field. Lean is a convention: ask-side calls and bid-side puts are drawn bullish. Unsided premium is never guessed into a side."
 }

@@ -111,7 +111,7 @@ export async function clientScenario(seed, mod, { time, calls = 24, width = 3 } 
     globalThis.fetch = realFetch;
   }
 
-  w.check(!hung, "LIVENESS: a call to a vendor that stalls must settle (the run hung after " + results.size + " of " + plan.length + " calls)");
+  w.check(!hung, "LIVENESS: a call to a feed that stalls must settle (the run hung after " + results.size + " of " + plan.length + " calls)");
   for (const c of plan) {
     const got = results.get(c.i);
     if (!got) continue;
@@ -136,11 +136,11 @@ export async function clientScenario(seed, mod, { time, calls = 24, width = 3 } 
 
   const after = mod.wire.snapshot();
   const delta = after.total.n - before.total.n;
-  w.check(delta === vendor.requests.length, `CONSERVATION: the vendor saw ${vendor.requests.length} attempts and the meter counted ${delta}`);
+  w.check(delta === vendor.requests.length, `CONSERVATION: the feed saw ${vendor.requests.length} attempts and the meter counted ${delta}`);
   const seen = diffOps(before, after);
   const truth = vendor.classes();
-  w.check(JSON.stringify(sortKeys(seen)) === JSON.stringify(sortKeys(truth)), `the meter's classes by operation differ from what the vendor answered: meter ${JSON.stringify(sortKeys(seen))} vendor ${JSON.stringify(sortKeys(truth))}`);
-  for (const [op] of Object.entries(seen)) w.check(truth[op] !== undefined, `the meter names an operation the vendor never served: ${op}`);
+  w.check(JSON.stringify(sortKeys(seen)) === JSON.stringify(sortKeys(truth)), `the meter's classes by operation differ from what the feed answered: meter ${JSON.stringify(sortKeys(seen))} feed ${JSON.stringify(sortKeys(truth))}`);
+  for (const [op] of Object.entries(seen)) w.check(truth[op] !== undefined, `the meter names an operation the feed never served: ${op}`);
   const codes = {};
   for (const [op, e] of Object.entries(after.ops)) {
     const was = before.ops[op] ? before.ops[op].codes || {} : {};
@@ -149,7 +149,7 @@ export async function clientScenario(seed, mod, { time, calls = 24, width = 3 } 
       if (d) { codes[op] = codes[op] || {}; codes[op][code] = d; }
     }
   }
-  w.check(JSON.stringify(sortKeys(codes)) === JSON.stringify(sortKeys(vendor.codes())), `the meter's exact failure codes by operation differ from what the vendor answered: meter ${JSON.stringify(sortKeys(codes))} vendor ${JSON.stringify(sortKeys(vendor.codes()))}`);
+  w.check(JSON.stringify(sortKeys(codes)) === JSON.stringify(sortKeys(vendor.codes())), `the meter's exact failure codes by operation differ from what the feed answered: meter ${JSON.stringify(sortKeys(codes))} feed ${JSON.stringify(sortKeys(vendor.codes()))}`);
   for (const e of Object.values(after.ops)) {
     for (const f of e.first || []) {
       w.check(typeof f.code === "string" && Number.isInteger(f.ms) && Number.isInteger(f.pg) && Number.isInteger(f.a) && f.a < SPEC.attempts && Object.keys(f).every((k) => ["code", "ms", "t", "pg", "a"].includes(k)),

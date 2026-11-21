@@ -24,7 +24,10 @@ export const MUTANTS = [
   ]], ["shadowMode"]),
   m("route-flag-ignored", "a route flag is not read on entry", ROUTE, [["if (!flagOn(env, ROUTE_FLAGS[name])) throw E(\"ff_off\"", "if (false) throw E(\"ff_off\""]], ["routeFlags"]),
   m("arming-flag-ignored", "arming reads no route flag", ROUTE, [["if (!flagOn(ctx.env, ROUTE_FLAGS[name])) throw E(\"ff_off\"", "if (false) throw E(\"ff_off\""]], ["routeFlags"]),
-  m("preview-without-fire", "a preview needs no fire route", ROUTE, [["const { at } = await enter(ctx, { flags: [\"fire\"], limiter: LIMITER_BINDINGS.heavy, mutate: true });", "const { at } = await enter(ctx, { flags: [], limiter: LIMITER_BINDINGS.heavy, mutate: true });"]], ["routeFlags"]),
+  m("preview-without-fire", "a preview needs no fire route", ROUTE, [["const { at } = await enter(ctx, { flags: [\"fire\"], limiter: LIMITER_BINDINGS.preview, mutate: true });", "const { at } = await enter(ctx, { flags: [], limiter: LIMITER_BINDINGS.preview, mutate: true });"]], ["routeFlags"]),
+  m("preview-on-heavy", "a preview spends the export's heavy budget", ROUTE, [["const { at } = await enter(ctx, { flags: [\"fire\"], limiter: LIMITER_BINDINGS.preview, mutate: true });", "const { at } = await enter(ctx, { flags: [\"fire\"], limiter: LIMITER_BINDINGS.heavy, mutate: true });"]], ["previews"]),
+  m("preview-unlimited", "a preview is not throttled at all", ROUTE, [["const { at } = await enter(ctx, { flags: [\"fire\"], limiter: LIMITER_BINDINGS.preview, mutate: true });", "const { at } = await enter(ctx, { flags: [\"fire\"], limiter: null, mutate: true });"]], ["previews"]),
+  m("preview-window-why-dropped", "a nightly window wire previews as unavailable with no reason why", PREVIEW, [["    reasonText: result.status === \"ok\" ? null : unavailableText(result),", "    reasonText: result.status === \"ok\" ? null : reasonTextOf(result.reason || \"missing\"),"]], ["previews"]),
   m("restore-without-arming", "restoring a wire skips the arming checks", ROUTE, [[
     "    await requireArming(ctx, member);\n    const runId = runIdOf(at);\n    const done = await store.setStatus(env, member, { id, to: \"armed\"",
     "    const runId = runIdOf(at);\n    const done = await store.setStatus(env, member, { id, to: \"armed\"",

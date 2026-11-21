@@ -121,7 +121,7 @@ export async function verifyDating(sessionDate, { read = uw } = {}) {
     console.warn(
       `WARNING: /greek-exposure/expiry?date=${sessionDate} returns no usable gamma for ` +
       `${PROBE} while the undated call does — dropping \`date\` for this run. The board ` +
-      "will carry whatever session the vendor defaults to, which is the behaviour " +
+      "will carry whatever session the feed defaults to, which is the behaviour " +
       "that mislabelled it before.");
   }
   if (!endDate) {
@@ -132,7 +132,7 @@ export async function verifyDating(sessionDate, { read = uw } = {}) {
   } else if (cap.honoured === false) {
     console.warn(
       `WARNING: /ohlc/1d?end_date=${sessionDate} returned ${cap.past} bar(s) dated after ` +
-      `the session for ${PROBE} (latest ${cap.latest}) — the vendor does NOT honour ` +
+      `the session for ${PROBE} (latest ${cap.latest}) — the feed does NOT honour ` +
       "end_date on this read. The parameter is kept, since it costs nothing, and every " +
       `candle series is cut at ${sessionDate} locally before any feature reads it.`);
   }
@@ -140,7 +140,7 @@ export async function verifyDating(sessionDate, { read = uw } = {}) {
     console.warn(
       `WARNING: /screener/stocks?date=${sessionDate} is not usable — ${screener.reason}. ` +
       "Dropping `date` from the screener for this run, so its volumes and prices are " +
-      "whatever the vendor holds at read time.");
+      "whatever the feed holds at read time.");
   }
 
   if (!usable(dated) || !usable(undated)) {
@@ -164,7 +164,7 @@ export async function runUniverse(ctx) {
   const dating = await verifyDating(sessionDate);
   console.log(`dating: date=${dating.date} end_date=${dating.endDate ? "sent" : "dropped"}` +
     (dating.endDateHonoured === null ? ""
-      : dating.endDateHonoured ? " (honoured by the vendor)"
+      : dating.endDateHonoured ? " (honoured by the feed)"
         : ` (NOT honoured: the probe returned ${dating.endDateLatest}; candles are cut locally)`) +
     ` screener date=${dating.screenerDate}`);
 
@@ -253,7 +253,7 @@ export async function runUniverse(ctx) {
   console.log(`  nasdaq-100: ${membership.members.length} member(s) from ` +
     (membership.fallback
       ? `the ${NDX_AS_OF} constant plus the read — FALLBACK: ${membership.fallback}`
-      : `the vendor's QQQ holdings dated ${membership.asOf || "undated"}`) +
+      : `the feed's QQQ holdings dated ${membership.asOf || "undated"}`) +
     (membership.added.length ? `; ${membership.added.length} not in the constant (${membership.added.slice(0, 12).join(", ")})` : "") +
     (membership.dropped.length ? `; ${membership.dropped.length} in the constant and no longer held (${membership.dropped.slice(0, 12).join(", ")})` : ""));
   console.log(`  NDX 10: ${ndx.tickers.join(", ") || "none"} (${ndx.source})`);

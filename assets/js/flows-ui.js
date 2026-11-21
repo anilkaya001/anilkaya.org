@@ -396,7 +396,7 @@
       return { share, classified, side: share === null || w(classified) < 50 ? "thin" : w(share) >= 65 ? "ask" : w(share) <= 35 ? "bid" : "mixed" };
     },
     askSaid: (x) => (!x || x.classified === null ? DASH : x.share === null ? "none sided" : F.pct(x.share, 0) + " ask side " + MID + " " + F.pct(x.classified, 0) + " sided"),
-    askLabel: "Ask-side share of the premium the vendor sided",
+    askLabel: "Ask-side share of the premium the feed sided",
   };
   const shortUsd = (n, signed) => formatScaled(n, shortDp, "$", signed);
   const exactUsd = (n, signed) => formatFixed(n, { dp: Math.abs(n) < 1000 ? 2 : 0, prefix: "$", plus: signed, group: true });
@@ -890,7 +890,7 @@
     return { open, weekday, today: n.date, expected: SRV.day || local, source: SRV.day ? "server" : "local" };
   }
 
-  const FRESH = { sessionDate: null, primary: null, nightly: null, meta: false, generatedAt: null, updatedAt: null, readAt: null, readSkew: 0, readSource: null, transport: null, sources: new Map(), ffs: new Map(), roles: new Map(), explicit: false, settled: false };
+  const FRESH = { sessionDate: null, primary: null, nightly: null, meta: false, generatedAt: null, updatedAt: null, readAt: null, readSkew: 0, readSource: null, transport: null, sources: new Map(), ffs: new Map(), roles: new Map(), explicit: false, settled: false, stamps: new Map(), beaten: [], beats: 0, beatAt: null, beatSource: null };
   const NAMES = { strips: "Live prices", news: "Headlines", flowalerts: "Flow alerts", "rt:px": "Streamed prices", "rt:fl": "Streamed flow alerts", "rt:gx": "Streamed gamma", "rt:mk": "Streamed market tide", "rt:nw": "Streamed headlines" };
   const named = (k) => { k = k.replace(/^(?:lk\?k=|live:)|\?.*/g, ""); return NAMES[k] || k[0].toUpperCase() + k.slice(1); };
   function freshAggregate(list, phase) {
@@ -949,7 +949,7 @@
     const slow = m.open ? all.filter((e) => e.state !== "live" && e.f.klass !== "nightly" && (e.f.liveUntil != null || /^rt/.test(e.f.klass || ""))).sort((a, b) => b.primary - a.primary) : [];
     const unlive = slow.length ? "Not live: " + slow.map((e) => {
       const w = LIVE_S[e.f.klass] || (e.f.liveUntil != null && e.f.readAt != null ? Math.round((e.f.liveUntil - e.f.readAt) / 1000) : 0);
-      return named(e.k) + (e.f.reason === "vendor-lag" ? " behind the vendor" : e.f.readAt != null ? " last read " + span(Math.max(0, (t0 + (e.f.skewMs || 0) - e.f.readAt) / 1000)) + " ago" : " not live") + (w ? " (live within " + w + " s)" : "");
+      return named(e.k) + (e.f.reason === "vendor-lag" ? " behind the feed" : e.f.readAt != null ? " last read " + span(Math.max(0, (t0 + (e.f.skewMs || 0) - e.f.readAt) / 1000)) + " ago" : " not live") + (w ? " (live within " + w + " s)" : "");
     }).join("; ") + ". " : "";
     const age = state === "fresh" && m.open && !all.some((e) => e.primary) ? readAge() : null;
     const quiet = age !== null ? "Nothing on this page is a live stream, so it does not claim Live; the newest price was read " + span(age) + " ago. " : "";
@@ -966,6 +966,7 @@
       ["Written", FRESH.updatedAt ? F.when(FRESH.updatedAt, t0) : null],
       ["Price read", FRESH.readAt ? F.when(FRESH.readAt, t0) : null],
       ["Feed", FRESH.transport],
+      ["Pulse", pulseSaid(state, late)],
       ["Payloads", total ? (bad ? total - bad + " of " + total + " current" : total + " current") : null],
       ...behind.map(([k, v]) => [named(k), F.day(v)]),
     ];
@@ -973,6 +974,39 @@
       title: "Freshness", state, asOf: S ? "Session " + F.day(S) : null, lead, facts,
       notes: ["Readings come from the dated post-close archive. During market hours only price is re-read live.", "Times are T\u00fcrkiye time (TRT, UTC+3, no daylight saving). Session dates are US exchange dates."],
     };
+  }
+  const BEATS = new Set(["live", "fresh", "closed"]);
+  function pulseSaid(state, late) {
+    if (state === "stale") return "Not breathing: " + (late ? "these readings are behind the last completed session." : "a source is past its stale line.");
+    if (state === "pending") return "Not breathing: no source has reported its session yet.";
+    if (FRESH.beatAt === null) return "Still: no new write has been read since this page opened.";
+    return "Last beat " + F.time(FRESH.beatAt) + ": a new write of " + named(FRESH.beatSource) + " was read.";
+  }
+  function stampOf(o) {
+    if (num(o.updatedAt) !== null && o.updatedAt > 0) return o.updatedAt;
+    return o.ff && num(o.ff.updatedAt) !== null && o.ff.updatedAt > 0 ? o.ff.updatedAt : null;
+  }
+  function writeKey(o) {
+    if (typeof o.key === "string" && o.key) return o.key;
+    return !o.ff && typeof o.source === "string" && o.source ? o.source : null;
+  }
+  function advanced(src, stamp) {
+    if (src === null || stamp === null) return false;
+    const prev = FRESH.stamps.get(src);
+    if (prev !== undefined && stamp <= prev) return false;
+    FRESH.stamps.set(src, stamp);
+    if (prev === undefined || FRESH.beaten.includes(stamp)) return false;
+    FRESH.beaten.push(stamp);
+    if (FRESH.beaten.length > 32) FRESH.beaten.shift();
+    return true;
+  }
+  function pulse(src) {
+    if (!BEATS.has(freshState().state)) return;
+    FRESH.beats++;
+    FRESH.beatAt = Date.now();
+    FRESH.beatSource = src;
+    const b = $("fxFresh");
+    if (b) b.dataset.beat = FRESH.beats % 2 ? "a" : "b";
   }
   let paintT = 0;
   function schedulePaint(state, age) {
@@ -1023,7 +1057,10 @@
     if (num(o.updatedAt) !== null && o.updatedAt > 0) FRESH.updatedAt = Math.max(FRESH.updatedAt || 0, o.updatedAt);
     if (typeof o.readAt === "string") { FRESH.readAt = o.readAt; FRESH.readSkew = (o.ff && o.ff.skewMs) || 0; FRESH.readSource = o.source || null; }
     FRESH.settled = true;
+    const wrote = writeKey(o);
+    const moved = advanced(wrote, stampOf(o));
     paintFresh();
+    if (moved) pulse(wrote);
     return freshState().state;
   }
   freshness.drop = (source) => {
@@ -1044,6 +1081,7 @@
   freshness.state = () => freshState().state;
   freshness.details = freshDetails;
   freshness.market = market;
+  freshness.pulse = () => ({ beats: FRESH.beats, beatAt: FRESH.beatAt, source: FRESH.beatSource });
 
   const nativeFetch = window.fetch ? window.fetch.bind(window) : null;
   const FIXTURE = (() => {

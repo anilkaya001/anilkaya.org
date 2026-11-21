@@ -83,6 +83,11 @@ name = "FF_HEALTH"
 namespace_id = "2133"
 simple = { limit = 4, period = 60 }
 
+[[ratelimits]]
+name = "FF_PREVIEW"
+namespace_id = "2134"
+simple = { limit = 30, period = 60 }
+
 [[durable_objects.bindings]]
 name = "PULSE"
 class_name = "Pulse"
@@ -107,3 +112,5 @@ FF_ROUTE_WIRES = "on"
 FF_ROUTE_INBOX = "on"
 FF_ROUTE_FIRE = "on"
 FF_ROUTE_EXPORT = "on"
+FLOWS_EVENTRISK = "on"
+FLOWS_EVENTRISK_HALTS = "off"

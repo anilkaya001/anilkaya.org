@@ -64,7 +64,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   });
   eq(alt.side, "buy", "the alternate spelling of the side is classified, not dropped");
   eq(alt.mid, 3000000.5,
-    "AND THE MIDPOINT IS COMPUTED FROM THE BOUNDS, not lifted from the vendor's " +
+    "AND THE MIDPOINT IS COMPUTED FROM THE BOUNDS, not lifted from the feed's " +
     "own mid_value (3,000,000) — one basis produces every summed number on the " +
     "page, and SIZE_BASIS states that basis");
   eq(alt.asset, "Bbb Corporation - Common Stock",
@@ -94,7 +94,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
   const oneBound = valueBand({ low_value: "1000001", mid_value: "9999999" });
   eq(oneBound.mid, null,
-    "a floor with no ceiling stays open-ended even when the vendor volunteers a " +
+    "a floor with no ceiling stays open-ended even when the feed volunteers a " +
     "midpoint — a stated mid is not evidence of the missing bound");
   eq(oneBound.open, true, "and it is flagged as such");
   eq(valueBand({ mid_value: "42" }).mid, 42,
@@ -341,7 +341,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     { full_name: "Alpha", id: "a", owner: "self", min_amount: 1, mid_amount: 76, max_amount: 143 },
     { full_name: "Beta", id: "b", owner: "spouse", min_amount: 5, mid_amount: 500, max_amount: 900 },
   ] }, "AAA");
-  deep(h.rows.map((r) => r.who), ["Beta", "Alpha"], "ranked by the vendor's own midpoint");
+  deep(h.rows.map((r) => r.who), ["Beta", "Alpha"], "ranked by the feed's own midpoint");
   eq(h.rows[0].midQty, 500,
     "AND THE NUMBER IS NAMED FOR ITS UNIT. The spec calls all three fields a " +
     "\"share quantity\"; every other number in this module is dollars, so a " +
@@ -417,7 +417,7 @@ console.log(`✓ flows-political: ${checks} assertions — an open-ended band wi
   `carried beside every midpoint total, disclosure lag on the row and the median under the ` +
   `total, an owner that stays unknown rather than becoming "self", recency by filing date, ` +
   `caps with counted shed, byte-identical rebuilds, both wire spellings of a filing read ` +
-  `onto one row, a holder count named for the unit the vendor gives it, a filer whose ` +
+  `onto one row, a holder count named for the unit the feed gives it, a filer whose ` +
   `disclosures named no listed security reporting no name count rather than a count of ` +
   `zero, a listed/other split that makes the two panels reconcile exactly, the self-filed ` +
   `share the attribution note has always promised, a breadth ordering whose fixture puts ` +

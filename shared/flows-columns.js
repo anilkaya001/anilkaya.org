@@ -87,7 +87,7 @@ export const COLUMNS = Object.freeze([
   C("political", "senate_n", "Senate transactions", "count", "agg", "not carried by the feed", { dp: 0, minN: 1 }),
   C("political", "score", "Political score", "score", "own", "not published by the feed"),
   ...["px", "chg", "mcap", "iv30p", "total_premium", "prem", "strike", "expiry", "span_start", "span_end", "event_date", "implied_move", "sector", "amount_lo", "amount_hi", "filer"]
-    .map((k) => C("*", k, k, "label", "vendor", "a field of the vendor's row")),
+    .map((k) => C("*", k, k, "label", "vendor", "a field of the feed's row")),
 ]);
 
 export const ALLOW = Object.freeze({
@@ -115,7 +115,7 @@ export function plan(page, { holds = HOLDS, pageHolds = PAGE_HOLDS, forbidden = 
     const hits = COLUMNS.filter((c) => c.key === key && (c.page === page || c.page === "*"));
     if (hits.length !== 1) throw new Error("export: unregistered or ambiguous " + page + "." + key);
     const col = hits[0];
-    if (col.prov !== "own" && col.prov !== "agg") throw new Error("export: vendor column " + page + "." + key);
+    if (col.prov !== "own" && col.prov !== "agg") throw new Error("export: feed column " + page + "." + key);
     if (col.prov === "agg" && !(col.minN >= 1)) throw new Error("export: agg without minN " + key);
     if (col.hold !== null && !Object.hasOwn(HOLDS, col.hold)) throw new Error("export: unknown hold " + key);
     return col;

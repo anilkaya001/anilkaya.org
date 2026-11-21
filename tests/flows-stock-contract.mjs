@@ -46,7 +46,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     { option_symbol: "AAPL261218C00160000" },
   ]);
   deep(oi.rows.map((r) => r.diff), [5892, -900],
-    "VENDOR ORDER PRESERVED — the selection is the vendor's, and re-sorting by " +
+    "VENDOR ORDER PRESERVED — the selection is the feed's, and re-sorting by " +
     "magnitude would claim a rule this payload cannot state (the fixture's order " +
     "differs from magnitude order on purpose)");
   ok(Math.abs(oi.rows[0].ratio - (33253 - 27361) / 27361) < 1e-9,
@@ -74,9 +74,9 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     { date: "2026-08-28", volatility: "0.32" },
   ]);
   eq(rank.rows[0].date, "2026-08-28", "the rank series is newest first");
-  eq(rank.rows[0].rank1y, null, "a day the vendor sent no rank is a gap, not a zero rank");
+  eq(rank.rows[0].rank1y, null, "a day the feed sent no rank is a gap, not a zero rank");
   ok(/0-100/.test(rank.rankUnit),
-    "THE UNIT TRAVELS WITH THE NUMBER: this vendor's rank fields have burned a " +
+    "THE UNIT TRAVELS WITH THE NUMBER: this feed's rank fields have burned a " +
     "“1352% of its year” once already, so the payload states the scale " +
     "instead of leaving the renderer to guess it");
 
@@ -151,7 +151,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 }
 
 console.log(`✓ flows-stock: ${checks} assertions — prints ranked only by a key every row carries ` +
-  `with the unpriced counted out, vendor order preserved on the vendor's selection, streak ` +
+  `with the unpriced counted out, feed order preserved on the feed's selection, streak ` +
   `counters that are null rather than zero when unsent, a rank unit that travels with its ` +
   `number, a half-empty vol panel that stays ok, caps with counted shed, byte-identical ` +
   `rebuilds, and notes holding the execution-word line at the dark pool boundary`);

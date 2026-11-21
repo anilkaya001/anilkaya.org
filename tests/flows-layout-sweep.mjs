@@ -19,7 +19,7 @@ checks++;
 
 
 const SIZES = (process.env.SIZES || "1920x1080,1440x820,1024x768,390x844").split(",").map((s) => s.split("x").map(Number));
-const ONE_SCREEN = new Set(["overview", "market", "moves", "unusual", "events", "political", "status", "network", "now", "ledger", "flowlab", "fire", "inbox"]);
+const ONE_SCREEN = new Set(["overview", "market", "moves", "unusual", "events", "political", "status", "network", "now", "ledger", "flowlab", "fire", "inbox", "digest", "wires"]);
 
 const SWEEP = () => {
   const vis = (e) => {

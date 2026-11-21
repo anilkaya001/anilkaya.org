@@ -241,9 +241,9 @@ export function buildGammaProfile(strikeRows, { spot, maxBars = 60 } = {}) {
 }
 
 export const GAMMA_FLOW_READS =
-  "Gamma dealers added today: the vendor's directionalized volume by strike (ask and bid legs " +
+  "Gamma dealers added today: the feed's directionalized volume by strike (ask and bid legs " +
   "summed, each signed by its aggressor), not the standing open-interest book. The strike " +
-  "ladder aggregates every expiry the vendor carries at the session, including any that " +
+  "ladder aggregates every expiry the feed carries at the session, including any that " +
   "expired at its close. The open-interest book's net is on the hedging panel.";
 
 export function buildCalendar(expiryRows, { asOf = null, maxRows = 10 } = {}) {
@@ -537,7 +537,7 @@ export function buildPricedMove({
     const lo = Number((s * (1 - m)).toFixed(2));
     const hi = Number((s * (1 + m)).toFixed(2));
     return panelLead(
-      `The vendor's end-of-week figure: ±${pct(m)}% to the nearest end-of-week expiry, ` +
+      `The feed's end-of-week figure: ±${pct(m)}% to the nearest end-of-week expiry, ` +
       `about 0.85 of the at-the-money straddle, a band the market prices to hold about half the time ` +
       `— ${lo.toFixed(2)} to ${hi.toFixed(2)}. Not a forecast and not a one-day move. No interpolated implied ` +
       `volatility, so no fixed-horizon band to compare across names.`,
@@ -987,7 +987,7 @@ function chainPanel(chain, key, missing = null) {
       status: "unavailable",
       reason: typeof missing === "string" && missing ? missing
         : "no option chain was fetched for this name this session — the chain leg is the " +
-          "last vendor call the pipeline spends, and it stopped before reaching this name " +
+          "last feed call the pipeline spends, and it stopped before reaching this name " +
           "to keep the run inside its deadline",
     };
   }
@@ -1006,7 +1006,7 @@ function chainPanel(chain, key, missing = null) {
       rowsReturned: numOrNull(chain.rowsReturned),
       rowsSeen: numOrNull(chain.rowsSeen),
       pricedRows: numOrNull(chain.pricedRows),
-      filter: "contracts with no open interest are excluded upstream by the vendor",
+      filter: "contracts with no open interest are excluded upstream by the feed",
     },
   };
 }
@@ -1027,7 +1027,7 @@ function greekLead(name, built) {
     const only = rows[0];
     return panelLead(
       `${subject} sits entirely in one expiry, ${only.expiry}` +
-      (only.dte === null ? " (the vendor sent no horizon in days)"
+      (only.dte === null ? " (the feed sent no horizon in days)"
         : only.dte === 0 ? ", expiring today" : `, ${only.dte} days out`) + ".",
       { expiry: only.expiry, dte: only.dte, expiries: 1 });
   }
@@ -1039,7 +1039,7 @@ function greekLead(name, built) {
   const leg = c === pu ? null : c > pu ? "call" : "put";
   return panelLead(
     `${subject} concentrates at ${top.expiry}` +
-    (top.dte === null ? " (the vendor sent no horizon in days)"
+    (top.dte === null ? " (the feed sent no horizon in days)"
       : top.dte === 0 ? ", expiring today" : `, ${top.dte} days out`) +
     `: ${share}% of the ${scope}'s gross size sits on that one expiry, ` +
     (leg === null
@@ -1300,7 +1300,7 @@ export function indexCrossFeed(feed, raw, { limit = null, tickers = [], sessionD
   } else if (byValue) {
     ordered = byValue;
     orderedBy = feed === "oiChange"
-      ? "the vendor's own open-interest change field"
+      ? "the feed's own open-interest change field"
       : "the print's dollar size";
     cut = edgeOf(byValue, (r) => r.value);
   }
@@ -1417,7 +1417,7 @@ export function readCrossFeed(indexed, ticker) {
             "name was below the cut rather than outside the request. "
           : "The feed returned fewer rows than the " + indexed.requested +
             " requested, so nothing was cut off by this run's own limit: the name is " +
-            "outside the vendor's selection for this list, not below a threshold we set. ") +
+            "outside the feed's selection for this list, not below a threshold we set. ") +
         "Either way it is a fact about a market-wide selection, not about this name's own " +
         "activity — the per-name feeds on this page are what measure that",
     };
@@ -1522,12 +1522,12 @@ export const CROSS_NOTES = Object.freeze({
     "one did not make a market-wide list; it is not a name with no " +
     "open-interest change and no off-exchange prints. The per-name feeds on " +
     "this page are what measure that, and they are read separately for every " +
-    "name on the board. The vendor states that its open-interest list carries " +
+    "name on the board. The feed states that its open-interest list carries " +
     "no index or exchange-traded-fund contracts at all, so a fund cannot " +
     "appear in it at any size and its absence there says nothing whatever " +
     "about it.",
   timing:
-    "The vendor states that its market-wide open-interest feed updates once a " +
+    "The feed states that its market-wide open-interest feed updates once a " +
     "trading day at about 06:45 Eastern, and this pipeline runs after the close, " +
     "at 17:30 Eastern (16:30 in winter), so a run reads the update published that " +
     "morning rather than one describing the session just closed. The session each " +
@@ -1536,13 +1536,13 @@ export const CROSS_NOTES = Object.freeze({
     "states no date of its own, that is said rather than assumed, and a rank " +
     "from another session is never presented as today's.",
   rank:
-    "A rank is the row's position in the feed as the vendor returned it, and " +
+    "A rank is the row's position in the feed as the feed returned it, and " +
     "it is meaningless without the population it sits inside, which is " +
     "published beside it. Whether that order is an order at all is measured " +
-    "here rather than taken from the vendor's documentation.",
+    "here rather than taken from the feed's documentation.",
   units:
     "The open-interest feed's own change field is reconciled against the two " +
-    "clearing snapshots the same rows publish, because the vendor's example " +
+    "clearing snapshots the same rows publish, because the feed's example " +
     "carries it as a ratio and this repository's fixtures have carried it as " +
     "a contract count. Where neither reconciles, the number is published " +
     "with no unit rather than with the more plausible of two guesses.",
@@ -1747,11 +1747,11 @@ export const READ_FAILURE_PANELS = Object.freeze({
 export const READ_FAILURES_MAX = 12;
 
 export function failedRead(failure) {
-  const route = String((failure && failure.route) || "a vendor");
+  const route = String((failure && failure.route) || "a feed");
   const status = failure && Number.isInteger(failure.status) ? failure.status : null;
   const how = status !== null ? `answered HTTP ${status}` : failure && failure.kind === "timeout" ? "timed out"
     : failure && failure.kind === "parse" ? "answered with a body that could not be read" : "could not be reached";
-  return `the vendor's ${route} read ${how} on this run, so this is a failed read and not an empty one`;
+  return `the feed's ${route} read ${how} on this run, so this is a failed read and not an empty one`;
 }
 
 export function applyReadFailures(card, failures) {
@@ -1884,7 +1884,7 @@ function oiDeltasLead(panel) {
   const say = (v) => { const m = saidMagnitude(v); return sign(v) + m.shown + m.suffix; };
   const side = net > 0 ? "grew" : net < 0 ? "fell" : "is unchanged on net";
   return panelLead(
-    `Of the ${rows.length} line${rows.length === 1 ? "" : "s"} the vendor ` +
+    `Of the ${rows.length} line${rows.length === 1 ? "" : "s"} the feed ` +
     `surfaced with a contract count, open interest ${side}: ` +
     `${say(c)} across ${calls.length} call line${calls.length === 1 ? "" : "s"} ` +
     `against ${say(pu)} across ${puts.length} put line${puts.length === 1 ? "" : "s"} ` +
@@ -1928,8 +1928,8 @@ export const SURFACE_OI_LEGS = Object.freeze({
   vanna: Object.freeze(["call_vanna_oi", "put_vanna_oi"]),
 });
 
-export const SURFACE_OI_BASIS = "The vendor's open-interest exposures from the same strike-by-expiry read as the gamma grid: " +
-  "call plus put as the vendor signs them. Gamma is dollars per 1% move; the vendor states no unit for charm or vanna.";
+export const SURFACE_OI_BASIS = "The feed's open-interest exposures from the same strike-by-expiry read as the gamma grid: " +
+  "call plus put as the feed signs them. Gamma is dollars per 1% move; the feed states no unit for charm or vanna.";
 
 export function buildSurface(rows, {
   spot, maxStrikes = SURFACE_STRIKES, maxExpiries = SURFACE_EXPIRIES, asOf = null,

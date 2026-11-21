@@ -3639,6 +3639,20 @@ How to read it: the stamp beside the title is the session of the payload and the
 Turning it off: set `FLOWS_POSITIONING = "off"` in `wrangler.toml` and deploy; set `FLOWS_POSITIONING_NIGHTLY` to `off` in the repository variables to stop the nightly reading. Neither changes another page.
 
 What is not proven here: that the live feed returns the shapes the fixtures were generated to, which the weekly probe checks; the planned probes (tier `planned`) have not yet been answered by a weekly run.
+### 10.5q The event-risk console: four switches, the order to turn them on, how to turn them off
+
+Four switches, each read by `shared/flows-er-switch.js` and by nothing else:
+
+- `FLOWS_EVENTRISK` (`wrangler.toml` [vars], shipped `on`) is `on`, `off` or anything else, and anything else is `owner`. It opens the Risk, New issues and Policy views on the Events page and the `/api/flows/eventrisk` route. A member the switch does not admit gets the Events page byte for byte as before, the route answers 404 `eventrisk_off`, and the `er` block of a `card-x` is removed from the answer while the split engine is still merged onto it.
+- `FLOWS_EVENTRISK_NIGHTLY` (workflow variable, shipped on: the workflow passes `on` when the repository variable is unset, and only the word `off` turns it off) runs the `eventrisk` stage, the weekly `er-sectors` key and the `er` parts of every `card-x`. The stage reads only through the run's own client, so a dry run reads the fake; `tests/flows-er-nightly.mjs` runs the dry run with outbound sockets refused.
+- `FLOWS_EVENTRISK_CAP` (default 400, at most 1,000) caps the names that get the `er` parts in a night.
+- `FLOWS_EVENTRISK_HALTS` (shipped `off`) turns the Halts view's live pane on. The halt channel is not yet a topic on the rail, so with the switch on the pane says the channel is not connected; leave it off until the rail carries it. With it off the view shows the 14-day record alone.
+
+After a deploy: wait for one nightly, read `meta.stages` for the `eventrisk` record and `GET /api/flows/eventrisk` while signed in, and open the Events page. Until the first nightly has written the `eventrisk` key the views say the data is pending. A dry-run emit (`node scripts/flows-pipeline.mjs --dry-run --emit <dir>`) shows the stage locally without the feed.
+
+Turning them off: set the repository variable `FLOWS_EVENTRISK_NIGHTLY` to `off` (the nightly) or `FLOWS_EVENTRISK = "off"` in `wrangler.toml` and deploy (`owner` keeps it for owners). The stored keys stay and are read by nobody.
+
+What it costs: one row read for each form of the route (the quote form reads none and takes one member check and at most one token of the shared budget on a miss, kept 15 s), and about 105 feed calls a night for the stage on top of the extras leg.
 
 ### 10.6 The staging Worker, the external prober and the load test
 
@@ -3754,10 +3768,12 @@ with a not-released page. The Fire page says so in one sentence.
 EXISTS` statements once per isolate before its first Fire statement
 (`ensureFf`), so a database that has not had the migration still works; the
 migration is the reviewed path and the first-use DDL the fallback. No secret
-is added. Three rate-limit bindings are new in both configurations:
+is added. Four rate-limit bindings are new in both configurations:
 `FF_WRITE` (namespace 1131, staging 2131, 10 a minute), `FF_HEAVY` (1132,
-2132, 6 a minute, shared by preview and export) and `FF_HEALTH` (1133, 2133,
-4 a minute). They are flood brakes that fail open.
+2132, 6 a minute, the export and the heavy reads), `FF_HEALTH` (1133, 2133,
+4 a minute) and `FF_PREVIEW` (1134, 2134, 30 a minute, the composer's
+preview alone, so an editor who changes a wire quickly never spends the
+export's budget). They are flood brakes that fail open.
 
 **Switches** (`wrangler.toml` [vars]; a deploy overwrites the dashboard's
 list, so the file is what the next deploy runs):

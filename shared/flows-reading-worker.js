@@ -100,7 +100,7 @@ function fallbackProvenance(why, describe, guard) {
     case "off": return "Deterministic reading: assembled from templates over the dossier's facts. Model wording is switched off on this site.";
     case "no-model": return "Deterministic reading: assembled from templates over the dossier's facts. No model is configured for this site.";
     case "generating": return "Deterministic reading: assembled from templates over the dossier's facts while a model writes its wording. The model's wording replaces this only if every sentence of it passes the checks against the facts it cites.";
-    case "limited": return "Deterministic reading: assembled from templates over the dossier's facts. Some of the dossier's vendor reads were held back by a rate limit, this site's own or the vendor's, so no model wording was asked for from an incomplete dossier; a later read asks again.";
+    case "limited": return "Deterministic reading: assembled from templates over the dossier's facts. Some of the dossier's feed reads were held back by a rate limit, this site's own or the feed's, so no model wording was asked for from an incomplete dossier; a later read asks again.";
     case "store": return "Deterministic reading: assembled from templates over the dossier's facts. The store could not record a request for model wording, so none was made.";
     case "cooldown": {
       if (guard === "read:refused") return "Deterministic reading: a model's wording for this dossier was refused by the checks against its facts, and the next attempt waits a short while.";
@@ -183,7 +183,7 @@ async function generate({ env, deps, ticker, dossier, tags, fingerprint, started
 }
 
 function limitedNote(ticker) {
-  return "This reading was written for an earlier dossier of " + ticker + ". Some of the current dossier's vendor reads were held back by a rate limit, so no new reading was asked for; a later read asks again.";
+  return "This reading was written for an earlier dossier of " + ticker + ". Some of the current dossier's feed reads were held back by a rate limit, so no new reading was asked for; a later read asks again.";
 }
 
 function heldNote(ticker, sameDossier) {
@@ -308,7 +308,7 @@ export async function readingFor(env, ctx, ticker, deps, opts = {}) {
       const boxed = boxedReading(stored, now, ticker);
       if (boxed) return boxed;
       return absentShape(ticker, { status: "generating", why: "assembling", note: "The dossier for " + ticker + " is still being assembled.",
-        provenance: "The dossier is being assembled from what the nightly, the live layer and the vendor hold; the reading follows it." });
+        provenance: "The dossier is being assembled from what the nightly, the live layer and the feed hold; the reading follows it." });
     }
     result = raced;
   } else {
