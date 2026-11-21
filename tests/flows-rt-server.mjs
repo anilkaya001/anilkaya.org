@@ -472,9 +472,10 @@ async function runMain() {
       vendor.retryAfterS = 2;
       const d429 = await until(() => c.ctl("degraded").find((f) => f.meta.reason === "vendor-throttled"), 15000, "a 429 degrade");
       ok(d429.meta.retryAt, "429: degraded at once with the instant of the next try");
+      await sleep(300);
       const quietAt = vendor.calls.length;
       await sleep(900);
-      ok(vendor.calls.length - quietAt <= 2, `429: the pause holds the hub off the feed (${vendor.calls.length - quietAt} calls in 0.9 s)`);
+      ok(vendor.calls.length - quietAt <= 1, `429: the pause holds the hub off the feed (${vendor.calls.length - quietAt} calls in 0.9 s, counted once the calls already in flight at the refusal have landed)`);
       vendor.fault = null;
       vendor.retryAfterS = null;
       const mark2 = c.ctl("resync").length;
