@@ -56,6 +56,10 @@
     if (isObj(a) && a.used >= a.max) return DASH + " " + a.used + " of " + a.max + " wires are armed. Pause or retire one before arming this.";
     if (wire.cadence === "live" && isObj(l) && l.used >= l.max) return DASH + " " + l.used + " of " + l.max + " live wires are armed. Pause or retire a live wire before arming this.";
     if (wire.scope && wire.scope.kind === "universe" && isObj(u) && u.used >= u.max) return DASH + " " + u.used + " of " + u.max + " universe-wide wires are armed. Pause or retire one before arming this.";
+    var b = limits.budget, add = isObj(wire.expWeek) && typeof wire.expWeek.v === "number" ? wire.expWeek.v : null;
+    if (wire.control === "bh" && add !== null && isObj(b) && typeof b.used === "number" && typeof b.max === "number" && Math.round((b.used + add) * 1000) > Math.round(b.max * 1000)) {
+      return DASH + " the weekly false-alarm budget would be overrun: " + b.used + " used, this wire adds " + add + ", of " + b.max + ". Loosen or retire a wire before arming this.";
+    }
     return null;
   }
 
@@ -107,6 +111,27 @@
       fitAll();
     }
 
+    function focusDetail() {
+      var t = $("ffxWrDetailT");
+      if (!t) return;
+      t.tabIndex = -1;
+      t.focus();
+    }
+
+    function noneSelected() {
+      selected = null;
+      current = null;
+      dticket++;
+      detail.removeAttribute("aria-busy");
+      detail.textContent = "";
+      ver.textContent = "";
+      detail.appendChild(el("p", { class: "ffx-wait", "data-ff-absent": "none_selected", text: DASH + " no wire selected" }));
+      try {
+        var u = new URL(location.href);
+        if (u.searchParams.has("wire")) { u.searchParams.delete("wire"); history.replaceState(history.state, "", u.pathname + u.search + u.hash); }
+      } catch (e) { void e; }
+    }
+
     function keyNav(items, pick) {
       items.forEach(function (t, i) {
         t.addEventListener("keydown", function (e) {
@@ -152,7 +177,7 @@
       b.addEventListener("click", function () {
         if (inDialog) allDlg.close();
         select(w.id);
-        if (root.getAttribute("data-view") === "list" && window.matchMedia("(max-width: 1099.98px)").matches) view("wire");
+        if (root.getAttribute("data-view") === "list" && window.matchMedia("(max-width: 1099.98px)").matches) { view("wire"); focusDetail(); }
       });
       return el("li", { class: "ffx-wr-li" }, [b]);
     }
@@ -205,6 +230,7 @@
 
     function setFilter(f) {
       if (f === filter && rows.length) return;
+      if (f !== filter) noneSelected();
       filter = f;
       root.setAttribute("data-filter", f);
       filters.forEach(function (t) {
@@ -316,22 +342,26 @@
       var kids = [head, sentence, dl, acts];
       if (!house) {
         var versions = Array.isArray(found.versions) ? found.versions.slice().sort(function (a, b) { return b.version - a.version; }) : [];
+        var older = typeof w.version === "number" && w.version > versions.length ? w.version - versions.length : 0;
+        var olderLine = older ? DASH + " " + older + " older " + (older === 1 ? "version is" : "versions are") + " not listed: only the newest " + versions.length + " are returned." : "";
         var vl = el("ol", { class: "ffx-wr-vers", "aria-label": "Versions, newest first" });
         versions.forEach(function (v) { vl.appendChild(versionRow(v, v.version === w.version)); });
         var vall = el("button", { type: "button", class: "ffx-link ffx-wr-vall", "aria-haspopup": "dialog", hidden: true });
         vall.addEventListener("click", function () {
           histList.textContent = "";
           versions.forEach(function (v) { histList.appendChild(versionRow(v, v.version === w.version)); });
+          if (older) histList.appendChild(el("li", { class: "ffx-wr-v ffx-wr-vmore", "data-ff-absent": "not_listed" }, [el("span", { class: "ffx-wr-vh", text: olderLine })]));
           histDlg.showModal();
         });
         kids.push(el("div", { class: "ffx-wr-vbox" }, [
-          el("div", { class: "ffx-sub" }, [el("span", { text: "Versions" }), el("span", { class: "ffx-ph-n", text: versions.length ? String(versions.length) : "" })]),
+          el("div", { class: "ffx-sub" }, [el("span", { text: "Versions" }), el("span", { class: "ffx-ph-n", text: versions.length ? (older ? versions.length + " of " + w.version : String(versions.length)) : "", title: olderLine || null })]),
           versions.length ? vl : el("p", { class: "ffx-wait", "data-ff-absent": "missing", text: DASH + " no version returned" }),
           vall,
         ]));
       }
       kids.forEach(function (k) { detail.appendChild(k); });
       fitAll();
+      if (window.requestAnimationFrame) window.requestAnimationFrame(function () { window.requestAnimationFrame(fitAll); });
     }
 
     function select(id, quiet) {
@@ -377,6 +407,11 @@
           return select(id, true);
         }
         return select(id, true);
+      }).then(function () {
+        var at = document.activeElement;
+        if (at && at !== document.body && document.contains(at) && at.offsetParent !== null) return;
+        var b = detail.querySelector('button[data-k]:not([aria-disabled="true"])');
+        if (b && b.offsetParent !== null) b.focus(); else focusDetail();
       });
     }
 
@@ -429,7 +464,7 @@
     else window.addEventListener("resize", fitAll);
     if (typeof UI.defer === "function" && !(UI.ffFire && UI.ffFire.openFireSheet)) UI.defer("ff-sheet");
     var asked = new URLSearchParams(location.search).get("wire") || "";
-    if (HOUSE_RE.test(asked)) setFilter("house");
+    if (HOUSE_RE.test(asked)) { setFilter("house"); selected = asked; }
     else load("live").then(function () {
       if (WIRE_RE.test(asked) && !rows.some(function (w) { return w.id === asked; })) {
         selected = null;

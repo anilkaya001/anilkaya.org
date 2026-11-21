@@ -36,7 +36,8 @@ a.ffx-np:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
 .ffx-np[data-kind="hit"] { background: var(--accent-fill); color: var(--accent-ink); }
 .ffx-np-x { color: var(--ff-absent, var(--label-3)); background: none; padding: 0; }
 @media (pointer: coarse) {
-  a.ffx-np { min-height: 32px; }
+  a.ffx-np { min-height: 32px; position: relative; }
+  a.ffx-np::after { content: ""; position: absolute; inset: -6px 0; }
 }
 @media (forced-colors: active) {
   .ffx-np { border: 1px solid CanvasText; }

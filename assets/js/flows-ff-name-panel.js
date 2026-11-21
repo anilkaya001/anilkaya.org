@@ -20,7 +20,8 @@
     }
     var hit = wires.some(function (w) { return w.state === "hit"; });
     var lead = wires.filter(function (w) { return w.state === "hit"; })[0] || wires.filter(function (w) { return w.status === "armed"; })[0] || wires[0];
-    var head = armed > 0 ? armed + (armed === 1 ? " wire" : " wires") + " armed" : wires.length + (wires.length === 1 ? " wire" : " wires") + " paused";
+    var total = panel && typeof panel.total === "number" && panel.total >= wires.length ? panel.total : wires.length;
+    var head = armed > 0 ? armed + (armed === 1 ? " wire" : " wires") + " armed" : total + (total === 1 ? " wire" : " wires") + " paused";
     var lines = wires.map(function (w) {
       return (w.title || w.id) + ": " + (STATE_WORD[w.state] || w.status) + (w.state === "quiet" && w.quietUntil ? " until the " + w.quietUntil + " session" : "");
     });
@@ -29,7 +30,7 @@
       text: head + (hit ? " · hit today" : ""),
       href: "/flows/wires/?wire=" + encodeURIComponent(lead.id),
       wire: lead.id,
-      title: "Your wires on " + symbol + ". " + lines.join(". ") + ".",
+      title: "Your wires on " + symbol + ". " + lines.join(". ") + "." + (total > wires.length ? " " + (total - wires.length) + " more on the Wires page." : ""),
     };
   }
 

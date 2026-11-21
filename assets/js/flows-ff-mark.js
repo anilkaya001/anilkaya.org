@@ -10,9 +10,18 @@
   var WORD = { live: "Live", resting: "Resting", degraded: "Degraded", down: "Down", unknown: DASH };
   var KEPT = "ff_mark";
 
+  function who() {
+    var n = document.querySelector(".fx-who-n");
+    return n ? String(n.textContent || "").trim() : "";
+  }
+
+  function drop() {
+    try { document.cookie = KEPT + "=; Path=/flows; Max-Age=0; SameSite=Lax" + (location.protocol === "https:" ? "; Secure" : ""); } catch (e) { void e; }
+  }
+
   function keep(v, seconds) {
     try {
-      var body = { state: v.state, line: v.line, reason: v.reason || null, reasonText: v.reasonText || null, evaluator: v.evaluator || null, unread: v.unread || null, next: Date.now() + seconds * 1000 };
+      var body = { who: who(), state: v.state, line: v.line, reason: v.reason || null, reasonText: v.reasonText || null, evaluator: v.evaluator || null, unread: v.unread || null, next: Date.now() + seconds * 1000 };
       document.cookie = KEPT + "=" + encodeURIComponent(JSON.stringify(body)) + "; Path=/flows; Max-Age=" + Math.round(seconds) + "; SameSite=Lax" + (location.protocol === "https:" ? "; Secure" : "");
     } catch (e) { void e; }
   }
@@ -23,6 +32,7 @@
       if (!m) return null;
       var v = JSON.parse(decodeURIComponent(m[1]));
       if (!v || typeof v !== "object" || typeof v.next !== "number") return null;
+      if (v.who !== who()) { drop(); return null; }
       var left = (v.next - Date.now()) / 1000;
       return left > 0 && left <= MAX_S ? { v: v, left: left } : null;
     } catch (e) { return null; }
@@ -171,6 +181,11 @@
       owed = false;
       api.get("/api/ff/health").then(apply, fail);
     }
+
+    document.addEventListener("ff:read", function () {
+      drop();
+      if (api && !stopped) poll();
+    });
 
     document.addEventListener("visibilitychange", function () {
       if (document.hidden) {

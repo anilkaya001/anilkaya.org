@@ -328,6 +328,9 @@
   .ffx-wr .ffx-cap { order: 5; flex-basis: 100%; }
   .ffx-wr-acts .ffx-btn { min-height: 40px; padding: 0 12px; }
 }
+@media (pointer: coarse) {
+  .ffx-wr-new, .ffx-wr-acts .ffx-btn { min-height: 44px; }
+}
 @media (max-height: 700px) {
   .ffx-wr-sentence { -webkit-line-clamp: 2; }
   .ffx-wr-row { min-height: 44px; }

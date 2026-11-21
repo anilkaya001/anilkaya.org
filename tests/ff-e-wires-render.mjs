@@ -169,6 +169,64 @@ const SUITES = {
     await off.ctx.close();
   },
 
+  async followups(b) {
+    const st = makeState();
+    const m = await mount(b, 1440, 820, { state: st, search: "?wire=" + st.wires[0].id });
+    await m.page.focus('#ffxWrDetail [data-k="pause"]');
+    await m.page.keyboard.press("Enter");
+    await m.page.waitForSelector('#ffxWrDetail [data-k="arm"]');
+    await m.page.waitForTimeout(300);
+    eq(await m.page.evaluate(() => !!(document.activeElement && document.activeElement.closest("#ffxWrDetailPanel"))), true, "focus: after Pause from the keyboard, focus is inside the wire's panel again, not on the page body");
+    await m.page.click('#ffxWrFilters [data-f="house"]');
+    await m.page.waitForSelector('#ffxWrDetail [data-k="follow"]');
+    eq(await m.page.$$eval('#ffxWrDetail [data-k="pause"], #ffxWrDetail [data-k="arm"], #ffxWrDetail [data-k="retire"]', (x) => x.length), 0, "filter: the House list never keeps a member wire's Pause, Arm or Retire beside it");
+    eq(await m.page.$$eval('#ffxWrList [aria-current="true"]', (x) => x.map((r) => r.getAttribute("data-ff-wire"))), ["h-t01"], "filter: the wire shown is a row of the list shown");
+    await m.page.click('#ffxWrFilters [data-f="retired"]');
+    await m.page.waitForSelector('#ffxWrDetail [data-k="restore"]');
+    eq(await m.page.$$eval('#ffxWrList [aria-current="true"]', (x) => x.map((r) => r.getAttribute("data-ff-wire"))), [st.wires[4].id], "filter: Retired shows a retired wire, with Restore and nothing else");
+    await m.ctx.close();
+
+    const n = await mount(b, 1024, 768, { state: makeState() });
+    await n.page.waitForSelector("#ffxWrList .ffx-wr-row");
+    await n.page.focus("#ffxWrList .ffx-wr-row");
+    await n.page.keyboard.press("Enter");
+    await n.page.waitForFunction(() => document.querySelector("#ffxWires").getAttribute("data-view") === "wire");
+    eq(await n.page.evaluate(() => !!(document.activeElement && document.activeElement.closest("#ffxWrDetailPanel"))), true, "focus: choosing a row below 1100 px moves focus into the wire's panel, which replaced the list");
+    await n.ctx.close();
+
+    const long = makeState({ wires: [makeWire(0, { version: 25 }), makeWire(1)] });
+    long.wires[0].versions = long.wires[0].versions.slice(-20);
+    const v = await mount(b, 1440, 820, { state: long, search: "?wire=" + long.wires[0].id });
+    await v.page.waitForSelector("#ffxWrDetail .ffx-wr-v");
+    eq(await v.page.textContent("#ffxWrDetail .ffx-wr-vbox .ffx-ph-n"), "20 of 25", "versions: when only the newest 20 are returned the count says 20 of 25");
+    await v.page.click("#ffxWrDetail .ffx-wr-vall");
+    eq(await v.page.textContent("#ffxWrHistList .ffx-wr-vmore"), DASH + " 5 older versions are not listed: only the newest 20 are returned.", "versions: and the full list ends with a dash and its reason for the five it does not hold");
+    await v.ctx.close();
+
+    const bud = makeState({ wires: [makeWire(0, { status: "paused", cadence: "nightly", expWeek: { v: 0.5, text: "0.5" } }), makeWire(1)] });
+    bud.wires[0].control = "bh";
+    bud.limits = limitsOf(bud.wires, { budget: { used: 1.8, max: 2, choices: [1, 2, 5] } });
+    const g = await mount(b, 1440, 820, { state: bud, search: "?wire=" + bud.wires[0].id });
+    eq(await g.page.getAttribute('#ffxWrDetail [data-k="arm"]', "aria-disabled"), "true", "budget: a wire that would overrun the weekly false-alarm budget cannot be armed");
+    ok(/^— the weekly false-alarm budget would be overrun: 1\.8 used, this wire adds 0\.5, of 2\./.test(await g.page.textContent("#ffxWrDetail .ffx-wr-out")), "budget: and the page says so with the three figures before any request");
+    await g.page.click('#ffxWrDetail [data-k="arm"]', { force: true });
+    await g.page.waitForTimeout(200);
+    eq(g.calls.filter((c) => c.method === "PATCH").length, 0, "budget: nothing is sent");
+    await g.ctx.close();
+    const fit = makeState({ wires: [makeWire(0, { status: "paused", cadence: "nightly", expWeek: { v: 0.5, text: "0.5" } }), makeWire(1)] });
+    fit.wires[0].control = "bh";
+    fit.limits = limitsOf(fit.wires, { budget: { used: 1.5, max: 2, choices: [1, 2, 5] } });
+    const h = await mount(b, 1440, 820, { state: fit, search: "?wire=" + fit.wires[0].id });
+    eq(await h.page.getAttribute('#ffxWrDetail [data-k="arm"]', "aria-disabled"), null, "budget: a wire that exactly fills the budget can be armed");
+    await h.ctx.close();
+
+    const t = await mount(b, 390, 844, { state: makeState(), search: "?wire=" + makeState().wires[0].id, context: { hasTouch: true, isMobile: true } });
+    await t.page.waitForSelector('#ffxWrDetail [data-k="pause"]');
+    const small = await t.page.$$eval("#ffxWrNew, #ffxWrDetail .ffx-wr-acts .ffx-btn", (x) => x.map((n) => Math.round(n.getBoundingClientRect().height)).filter((hh) => hh < 44));
+    eq(small, [], "touch: Arm a wire, Pause, Adjust and Retire are 44 px tall on a coarse pointer");
+    await t.ctx.close();
+  },
+
   async house(b) {
     const m = await mount(b, 1440, 820, { search: "?wire=h-t05" });
     await m.page.waitForSelector('#ffxWrDetail [data-k="follow"]');
@@ -240,6 +298,27 @@ const SUITES = {
     eq(k.calls.filter((c) => c.path === "/api/ff/health").length, 2, "mark: with nothing kept a page reads once");
     await k.ctx.close();
 
+    const five = { house: 2, member: 3, total: 5, capped: false, label: "5" };
+    const whoState = makeState({ health: health("resting", { pollAfterS: 300, unread: five }) });
+    const s = await mount(b, 1440, 820, { state: whoState });
+    await s.page.waitForFunction(() => document.querySelector(".ffx-mark-n") && document.querySelector(".ffx-mark-n").textContent === "5", null, { timeout: 10000 });
+    await s.page.evaluate(() => { const c = document.cookie.match(/ff_mark=([^;]*)/); const v = JSON.parse(decodeURIComponent(c[1])); v.who = "another member"; document.cookie = "ff_mark=" + encodeURIComponent(JSON.stringify(v)) + "; Path=/flows; Max-Age=300"; });
+    whoState.health = health("resting", { pollAfterS: 300 });
+    await s.page.goto("https://example.test/flows/wires/");
+    await s.page.waitForFunction(() => document.querySelector(".ffx-mark[data-ff-state=resting]"), null, { timeout: 10000 });
+    await s.page.waitForTimeout(300);
+    eq([s.calls.filter((c) => c.path === "/api/ff/health").length, await s.page.$eval(".ffx-mark-n", (x) => x.hidden)], [2, true], "mark: health kept for another member is thrown away and read again, so nobody is shown someone else's unread count");
+    whoState.health = health("resting", { pollAfterS: 300, unread: five });
+    await s.page.goto("https://example.test/flows/wires/");
+    await s.page.waitForFunction(() => document.querySelector(".ffx-mark[data-ff-state=resting]"), null, { timeout: 10000 });
+    whoState.health = health("resting", { pollAfterS: 300 });
+    const before = s.calls.filter((c) => c.path === "/api/ff/health").length;
+    await s.page.evaluate(() => document.dispatchEvent(new CustomEvent("ff:read", { detail: { stream: "member", seq: 9 } })));
+    await s.page.waitForFunction((n0) => true, before);
+    await s.page.waitForTimeout(400);
+    ok(s.calls.filter((c) => c.path === "/api/ff/health").length > before, "mark: reading the Inbox drops the kept count and reads health again");
+    await s.ctx.close();
+
     const p = await mount(b, 1440, 820, {
       state: makeState({ health: health("resting", { pollAfterS: 60 }) }),
       before: (page) => page.clock.install({ time: new Date("2026-11-13T21:00:00Z") }),
@@ -300,6 +379,15 @@ const PLANTS = [
   { name: "the mark reads health on every page load", suite: "mark", files: () => [plant(MARK_JS, "      if (held) apply(held.v, held.left); else poll();", "      poll();")] },
   { name: "the mark keeps nothing between pages", suite: "mark", files: () => [plant(MARK_JS, "      keep(v, wait);\n", "")] },
   { name: "the mark drops the unread event", suite: "mark", files: () => [plant(MARK_JS, '        if (v.unread) K.hooks.emit("ff:unread"', '        if (false) K.hooks.emit("ff:unread"')] },
+  { name: "the mark shows health kept for another member", suite: "mark", files: () => [plant(MARK_JS, "      if (v.who !== who()) { drop(); return null; }\n", "")] },
+  { name: "the mark keeps a read count after the Inbox is read", suite: "mark", files: () => [plant(MARK_JS, "      if (api && !stopped) poll();\n", "")] },
+  { name: "focus is lost after an action", suite: "followups", files: () => [plant(WIRES_JS, "        if (b && b.offsetParent !== null) b.focus(); else focusDetail();", "")] },
+  { name: "a filter change keeps the old wire", suite: "followups", files: () => [plant(WIRES_JS, "      if (f !== filter) noneSelected();\n", "")] },
+  { name: "a row chosen on a narrow screen loses focus", suite: "followups", files: () => [plant(WIRES_JS, '{ view("wire"); focusDetail(); }', '{ view("wire"); }')] },
+  { name: "older versions vanish without a note", suite: "followups", files: () => [plant(WIRES_JS, 'var older = typeof w.version === "number" && w.version > versions.length ? w.version - versions.length : 0;', "var older = 0;")] },
+  { name: "the false-alarm budget is not checked before arming", suite: "followups", files: () => [plant(WIRES_JS, "Math.round((b.used + add) * 1000) > Math.round(b.max * 1000)", "false")] },
+  { name: "the budget check refuses a wire that exactly fits", suite: "followups", files: () => [plant(WIRES_JS, "Math.round((b.used + add) * 1000) > Math.round(b.max * 1000)", "Math.round((b.used + add) * 1000) >= Math.round(b.max * 1000)")] },
+  { name: "touch controls are 40 px", suite: "followups", files: () => [plant(INBOX_CSS, "  .ffx-wr-new, .ffx-wr-acts .ffx-btn { min-height: 44px; }", "  .ffx-wr-new, .ffx-wr-acts .ffx-btn { min-height: 40px; }")] },
   { name: "the name panel offers Fire without the name", suite: "namePanel", files: () => [plant(PANEL_JS, 'href: "/flows/fire/?symbol=" + encodeURIComponent(symbol)', 'href: "/flows/fire/"')] },
   { name: "the name panel reads a refusal as no wire", suite: "namePanel", files: () => [plant(PANEL_JS, '        absent(slot, err && err.code ? err.code : "error", errLine(err));', '        paint(slot, model({ wires: [] }, symbol));')] },
 ];

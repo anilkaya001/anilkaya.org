@@ -206,10 +206,11 @@ export function flowsFfRows(deps) {
     const raw = ctx.url.searchParams.get("status");
     const status = raw === null || raw === "" || raw === "live" ? "live" : ["armed", "paused", "retired"].includes(raw) ? raw : null;
     if (status === null) throw E("ff_grammar_invalid", "status must be live, armed, paused or retired");
-    const listed = await store.listWires(ctx.env, member, { status, limit: FF_STORE_LIMITS.listMax });
+    const listed = await store.listWires(ctx.env, member, { status, limit: FF_STORE_LIMITS.listMax, runId: status === "retired" ? null : runIdOf(at) });
     if (!listed) throw HttpError.of("store_unreadable");
     const budgetB = listed.member ? listed.member.budget_b : LIMITS.budgetDefault;
-    return reply({ status, wires: listed.rows.map((r) => wireView(r, { now: at })), limits: status === "retired" ? null : limitsFrom(listed.rows, budgetB) });
+    const limits = status === "retired" ? null : listed.cap ? limitsView(listed.cap, Number(listed.cap.budget_b)) : limitsFrom(listed.rows, budgetB);
+    return reply({ status, wires: listed.rows.map((r) => wireView(r, { now: at })), limits });
   };
 
   const create = async (ctx, member, at) => {
@@ -512,7 +513,7 @@ export function flowsFfRows(deps) {
   };
 
   const symbol = async (ctx) => {
-    const { member, at } = await enter(ctx, { flags: ["wires", "inbox"], limiter: LIMITER_BINDINGS.heavy, mutate: false });
+    const { member, at } = await enter(ctx, { flags: ["wires", "inbox"], limiter: null, mutate: false });
     const ticker = requireTicker(ctx.url, "t");
     const found = await store.symbolWires(ctx.env, member, ticker, { limit: 3 });
     if (!found) throw HttpError.of("store_unreadable");
