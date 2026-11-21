@@ -31,7 +31,7 @@ export function liveFunds({ session = FUNDS_SESSION, at = Date.parse(session + "
 }
 
 export function marketFallback({ session = FUNDS_SESSION, at = Date.parse(session + "T20:05:00.000Z"), why = "throttled" } = {}) {
-  const held = new Set([...FLOOR_FUNDS.funds, ...FLOOR_FUNDS.etf]);
+  const held = new Set(["SPY", ...FLOOR_FUNDS.etf]);
   const rows = rowsOf(screenerBody(session)).filter((r) => held.has(r.ticker)).map((r) => ({
     etf: r.ticker, callPrem: Number(r.call_premium), putPrem: Number(r.put_premium), callVol: Number(r.call_volume), putVol: Number(r.put_volume),
     bull: Number(r.bullish_premium), bear: Number(r.bearish_premium),

@@ -4,7 +4,7 @@ import { FLOWS_COOKIE, sessionEpoch, signFlowsSession } from "../shared/flows-au
 import { FIXTURE_OWNER, FIXTURE_MEMBER } from "./lib/fixture-roster.mjs";
 import { easternInstant } from "../shared/flows-freshness.js";
 import { readList, FLOOR_FUNDS, FUND_WHY } from "../shared/flows-floor-funds.js";
-import { FUNDS_KEY, FUNDS_WRITERS, FUNDS_FILL, fundsNote, marketSectors, fundsFromMarket } from "../shared/flows-floor-funds-live.js";
+import { FUNDS_KEY, FUNDS_WRITERS, FUNDS_FILL, fundsNote, marketSectors, fundsFromMarket, fallbackReason } from "../shared/flows-floor-funds-live.js";
 import { fakeFundsRead, FUNDS_FAKE_SCREENER_GAPS } from "../scripts/flows-legs/funds-fake.mjs";
 import { loadMutated } from "./truth/mutants.mjs";
 import * as REAL from "../shared/flows-live-worker.js";
@@ -339,6 +339,10 @@ for (const [m, pass] of await workerChecks(loadReal, "worker")) ok(pass, m);
   ok(fb.session === PREV && fb.writer === FUNDS_WRITERS.market && fp.session === PREV && fp.status === "partial" && fp.counts.read === 2, "THE MARKET FALLBACK is the sector row's own session, partial, two funds read");
   ok(FUND_WHY.limited && fp.rows.TLT.why === "limited" && fp.rows.SPXW.alias === "SPX", "a fund it does not hold is limited when the fill was refused, and a weekly root keeps its parent");
   eq(JSON.parse(fundsFromMarket({ session: PREV, read_at: 1, sectors: JSON.stringify(marketRow(PREV).sectors) }, "no-fund-read").payload).rows.TLT.why, "failed", "and failed when the read failed");
+  eq(["throttled", "no-fund-read", "over-cap", "store", "recent:store", undefined, "no-key", "no-session", "no-db"].map(fallbackReason), ["limited", "failed", "failed", "failed", "failed", "failed", "not_read", "not_read", "not_read"], "ONLY A READ THAT WAS TRIED AND FAILED SAYS IT FAILED AND WILL BE TRIED AGAIN: a site with no feed access, no session or no store says not read");
+  ok(FUND_WHY.not_read && !/tried again/.test(FUND_WHY.not_read), "and that sentence promises no retry");
+  eq(JSON.parse(fundsFromMarket({ session: PREV, read_at: 1, sectors: JSON.stringify(marketRow(PREV).sectors) }, "no-key").payload).rows.TLT.why, "not_read", "in the payload too");
+  eq([null, 0, "x", undefined].map((r) => fundsFromMarket({ session: PREV, read_at: r, sectors: JSON.stringify(marketRow(PREV).sectors) }, "throttled")), [null, null, null, null], "A SECTOR ROW WITH NO READ TIME IS NO FALLBACK: a missing time is never served as zero");
   eq(fundsFromMarket(null, "throttled"), null, "no market row is no fallback");
   eq(fundsFromMarket({ session: "yesterday", sectors: JSON.stringify(marketRow(PREV).sectors) }, "throttled"), null, "nor a row with no session date");
 }

@@ -45,6 +45,7 @@
     refused: "The feed refused this read.",
     failed: "The read failed; it will be tried again.",
     limited: "Not read yet: the site's read limit was reached; it will be tried again.",
+    not_read: "Not read this session.",
     off: "Whole-session activity is switched off.",
   };
   const SRC_WORD = { screener: "the feed's screener row", "sector-etfs": "the feed's sector fund row", "options-volume": "the feed's per-fund volume" };
@@ -498,6 +499,9 @@
       if (t) return W < 640 ? shortSentence(t) : tileSentence(t);
       const best = M.groups.filter((g) => g.n).sort((a, b) => b.prem - a.prem)[0];
       const l = leader();
+      if (W < 640 && M.fundsOn && M.basis === "session" && M.funds) {
+        return (M.funds.previous ? "Previous session" : "Session") + MID + M.funds.session + (M.funds.fallback ? MID + "sector funds only" : "") + ". " + (best ? "Most premium: " + best.label + MID + money(best.prem) + "." : "");
+      }
       return (best ? "Most premium: " + groupSentence(best) + ". " : "") + (W < 640 ? "" : l ? "Tallest pillar: " + l.label + MID + (measure === "volume" ? F.num(valueOf(l, measure)) + " contracts" : measure === "lean" ? "net lean " + moneyS(valueOf(l, measure)) : money(valueOf(l, measure))) + "." : "");
     };
     const paintRead = () => { read.textContent = sentence(); };

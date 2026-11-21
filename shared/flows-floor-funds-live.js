@@ -54,18 +54,22 @@ export function shapeFunds(raw, { at, session, writer, sectorEtfs = null, reason
   };
 }
 
+const UNTRIED = new Set(["no-key", "no-session", "no-db"]);
+
+export const fallbackReason = (why) => (why === "throttled" ? "limited" : UNTRIED.has(why) ? "not_read" : "failed");
+
 export function fundsFromMarket(row, why) {
   if (!row || typeof row.session !== "string" || !DAY_RE.test(row.session)) return null;
   const sectorEtfs = marketSectors(row, row.session);
   if (!sectorEtfs) return null;
-  const at = Number(row.read_at);
-  const readAt = Number.isFinite(at) && at > 0 ? at : null;
-  const payload = shapeFunds(null, { at: readAt, session: row.session, writer: FUNDS_WRITERS.market, sectorEtfs, reason: why === "throttled" ? "limited" : "failed" });
+  const readAt = Number(row.read_at);
+  if (!Number.isFinite(readAt) || readAt <= 0) return null;
+  const payload = shapeFunds(null, { at: readAt, session: row.session, writer: FUNDS_WRITERS.market, sectorEtfs, reason: fallbackReason(why) });
   if (payload.status === "unavailable") return null;
   const text = JSON.stringify({ ...payload, fallback: { from: "live:market", why: String(why || "failed").slice(0, 40) } });
   const spec = LIVE_KEYS[FUNDS_KEY];
   if (text.length > spec.maxBytes) return null;
-  return { payload: text, readAt: readAt || 0, session: row.session, cadenceS: spec.cadenceS, source: "worker", writer: FUNDS_WRITERS.market, updatedAt: readAt || 0 };
+  return { payload: text, readAt, session: row.session, cadenceS: spec.cadenceS, source: "worker", writer: FUNDS_WRITERS.market, updatedAt: readAt };
 }
 
 export function fundsNote(stored) {

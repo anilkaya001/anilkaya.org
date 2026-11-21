@@ -590,6 +590,7 @@ try {
       const sub = document.getElementById("mkFloorSub");
       return {
         state: host.querySelector(".mk-fl").dataset.state, basis: M ? M.basis : null, measure: api.measure_(), hash: location.hash, sub: sub ? sub.textContent : null,
+        readShown: (() => { const n = host.querySelector(".mk-fl-read"); return n.getClientRects().length ? { text: n.innerText, cut: n.scrollHeight > n.clientHeight + 1 } : null; })(), subShown: Boolean(sub && sub.getClientRects().length),
         read: host.querySelector(".mk-fl-read").textContent, note: host.querySelector(".mk-fl-note").textContent, legend: host.querySelector(".mk-fl-leg").textContent, empty: host.querySelector(".mk-fl-empty").textContent,
         funds: M && M.funds ? { src: M.funds.src, previous: M.funds.previous, session: M.funds.session, readAt: M.funds.readAt } : null, fundsWhy: M ? M.fundsWhy : null,
         tiles: M ? M.tiles.map((t) => ({ id: t.id, group: t.group, label: t.label, basis: t.basis, n: t.n, v: window.FlowsUI.floor.valueOf(t, api.measure_()), lean: t.lean ? t.lean.cat : null, share: t.share, sess: t.sess ? { read: t.sess.read, of: t.sess.of, prem: t.sess.prem, premN: t.sess.premN, vol: t.sess.vol, volN: t.sess.volN, net: t.sess.net, gross: t.sess.gross, netN: t.sess.netN, whys: t.sess.whys, alias: t.sess.alias } : null })) : [],
@@ -838,13 +839,19 @@ try {
     {
       const fb = marketFallback();
       const unavailable = { v: 1, status: "unavailable", why: "not_read" };
-      const held = [...L.FLOOR_FUNDS.funds, ...L.FLOOR_FUNDS.etf];
+      const held = ["SPY", ...L.FLOOR_FUNDS.etf];
+      const lacking = L.FLOOR_FUNDS.funds.filter((t) => t !== "SPY");
       const checkFallback = async (page) => {
         const f = await page.evaluate(INSPECT_F);
         const bad = [];
         if (f.basis !== "session") bad.push("the floor opened on " + f.basis);
         for (const t of held) { const tile = f.tiles.find((x) => x.label === t); if (!tile || tile.v === null || !(tile.v > 0)) bad.push(t + " is empty"); }
+        for (const t of lacking) { const tile = f.tiles.find((x) => x.label === t); const hit = f.hits.find((x) => tile && x.id === tile.id); if (!tile || tile.v !== null) bad.push(t + ", which the sector row never holds, carries a figure"); else if (!hit || !hit.label.includes(L.FUND_WHY.limited)) bad.push(t + " does not give its reason: " + (hit && hit.label)); }
         if (f.sub !== "Session · 2026-09-29 · read 23:05 TRT") bad.push("the subtitle is " + f.sub);
+        if (f.canvas.w < 640) {
+          if (!f.readShown || !/^Session · 2026-09-29 · sector funds only\. /.test(f.readShown.text)) bad.push("on a phone the visible line does not name the session and that only sector funds were read: " + (f.readShown && f.readShown.text));
+          else if (f.readShown.cut) bad.push("on a phone the visible line is cut");
+        } else if (!f.subShown) bad.push("the session label is not visible");
         if (!/Only the sector fund row could be read; each other fund says why\./.test(f.note)) bad.push("the caption does not say only the sector fund row was read: " + f.note);
         const bonds = f.hits.find((x) => x.id === "other:Bonds");
         if (!bonds || !bonds.label.includes(L.FUND_WHY.limited)) bad.push("a class the sector row lacks does not give its reason: " + (bonds && bonds.label));
@@ -855,7 +862,7 @@ try {
       for (const [w, h] of [[1440, 820], [390, 844]]) {
         const { context, page, errors } = await open({ viewport: { width: w, height: h }, coarse: w < 500, funds: { market: unavailable, live: fb, now: NOW } });
         const { f, bad } = await checkFallback(page);
-        eq(bad, [], `${w}x${h} THE FILL REFUSED, NO NIGHTLY BLOCK: the Worker's answer from the sector row draws every index fund and sector ETF with the session's own figures, labelled, and every other class says why`);
+        eq(bad, [], `${w}x${h} THE FILL REFUSED, NO NIGHTLY BLOCK: the Worker's answer from the sector row draws SPY and every sector ETF with the session's own figures, the three index funds that row never holds say why, a phone names the session in a line it shows, and every other class says why`);
         eq(verifyF(f, fb, "premium"), [], `${w}x${h} and every pillar stands at its height on the one session scale`);
         eq(errors, [], `${w}: no page error`);
         await shot(page, `floor-fallback-${w}`);
@@ -896,6 +903,13 @@ try {
       await r3.context.close();
       console.log("  planted fallback-unsaid: " + (c3 || "NOT CAUGHT"));
       ok(c3 !== null, 'THE PLANTED WRONG BUILD "fallback-unsaid: the sector-row answer drawn without saying the rest was not read" FAILS');
+      const phAnchor = 'if (W < 640 && M.fundsOn && M.basis === "session" && M.funds) {';
+      ok(SRC.includes(phAnchor), 'mutant "phone-unnamed" anchors on the served module');
+      const r5 = await open({ viewport: { width: 390, height: 844 }, coarse: true, patch: { [JS]: [[phAnchor, "if (false) {"]] }, funds: { market: unavailable, live: fb, now: NOW } });
+      const c5 = (await checkFallback(r5.page)).bad[0] || null;
+      await r5.context.close();
+      console.log("  planted phone-unnamed: " + (c5 || "NOT CAUGHT"));
+      ok(c5 !== null, 'THE PLANTED WRONG BUILD "phone-unnamed: a phone is shown the fund pillars with no session and no caveat in any visible line" FAILS');
     }
     {
       const from = 'let basis = fromHash() || "session";';

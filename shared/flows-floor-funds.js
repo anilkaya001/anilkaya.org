@@ -31,6 +31,7 @@ export const FUND_WHY = Object.freeze({
   refused: "The feed refused this read.",
   failed: "The read failed; it will be tried again.",
   limited: "Not read yet: the site's read limit was reached; it will be tried again.",
+  not_read: "Not read this session.",
   off: "Whole-session activity is switched off.",
 });
 
