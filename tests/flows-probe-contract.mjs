@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildCatalog, renderCatalog } from "../scripts/gen-feed-catalog.mjs";
 import { spawnSync } from "node:child_process";
 import * as probe from "../scripts/flows-probe.mjs";
 import { createHash } from "node:crypto";
@@ -105,18 +106,25 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
     `the production sources are scanned: worker.js, shared/ and scripts/ less the fakes, the socket probe and the two tools that read this site's own origin (${files.length} files)`);
   const OWN = /^\/api\/(flows|ff|rt|me|bootstrap|progress|stats|mastery|placement|v2|markets|auth)(\/|$)|^\/api\/?$/;
   const REGISTRY = "shared/flows-vendor-ops.js";
+  const CATALOG = "shared/flows-feed-catalog.js";
   const literals = [];
   const refs = new Map();
   const bad = [];
-  for (const f of files) {
-    if (f === REGISTRY) continue;
-    const text = fs.readFileSync(path.join(ROOT, f), "utf8");
+  const literalsIn = (f, text) => {
+    const found = [];
     text.split("\n").forEach((line, i) => {
       for (const m of line.matchAll(/["'`](\/api\/[A-Za-z0-9_{}./:-]*)/g)) {
         const tok = m[1].split("?")[0].replace(/\/+$/, "");
-        if (!OWN.test(tok)) literals.push(`${f}:${i + 1} ${tok}`);
+        if (!OWN.test(tok)) found.push(`${f}:${i + 1} ${tok}`);
       }
     });
+    return found;
+  };
+  ok(files.includes(CATALOG) && files.includes("shared/flows-feed-client.js") && files.includes("scripts/gen-feed-catalog.mjs"), "the feed catalog, its client and its generator are among the scanned sources");
+  for (const f of files) {
+    if (f === REGISTRY || f === CATALOG) continue;
+    const text = fs.readFileSync(path.join(ROOT, f), "utf8");
+    literals.push(...literalsIn(f, text));
     for (const m of text.matchAll(/\b(?:pathFor|opById)\(\s*"([^"]*)"/g)) bad.push([f, m[1]]);
     for (const m of text.matchAll(/\b(?:pathFor|opById)\(([^,)]*)/g)) {
       for (const q of m[1].matchAll(/"([a-z0-9-]+)"/g)) refs.set(q[1], [...(refs.get(q[1]) || []), f]);
@@ -131,6 +139,17 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
     }
   }
   deep(literals, [], "NO VENDOR PATH IS SPELLED OUTSIDE THE REGISTRY: no /api/ literal that names a feed operation remains in worker.js, shared/ or scripts/");
+  const catalogText = fs.readFileSync(path.join(ROOT, CATALOG), "utf8");
+  eq(catalogText, renderCatalog(buildCatalog(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.yaml"), "utf8"))),
+    "THE ONE OTHER FILE THAT SPELLS FEED PATHS IS GENERATED: shared/flows-feed-catalog.js is byte for byte what scripts/gen-feed-catalog.mjs writes from the committed spec, so no path in it is written by hand");
+  const catalogPaths = new Set(literalsIn(CATALOG, catalogText).map((hit) => hit.split(" ")[1]));
+  ok(catalogPaths.size > 200 && [...catalogPaths].every((p) => spec.has(p)), `and every path it spells is a path of the committed spec (${catalogPaths.size})`);
+  const stray = "const stray = \"/api/stock/{ticker}/greeks\";\n";
+  for (const f of ["shared/flows-feed-client.js", "scripts/gen-feed-catalog.mjs", "scripts/feed-spec-refresh.mjs", "shared/flows-feed-catalog-extra.js", "worker.js"]) {
+    const text = fs.existsSync(path.join(ROOT, f)) ? fs.readFileSync(path.join(ROOT, f), "utf8") : "";
+    deep(literalsIn(f, text + stray).slice(-1), [`${f}:${text.split("\n").length} /api/stock/{ticker}/greeks`], `PLANTED WRONG BUILD: a feed path written by hand in ${f} is still found, so the catalog's exemption is that one generated file and nothing beside it`);
+  }
+  ok(catalogText.replace("\"path\":\"/api/alerts\"", "\"path\":\"/api/alerts-by-hand\"") !== catalogText && literalsIn("shared/other.js", catalogText).length > 200, "PLANTED WRONG BUILD: the same paths in a file of any other name are every one a finding, and a path changed by hand in the catalog no longer equals what the generator writes");
   const ids = new Set(OPS.map((e) => e.id));
   eq(ids.size, OPS.length, "every registry id is unique");
   deep(bad.filter(([, id]) => !ids.has(id)), [], "and every id a call site names is in the registry");
