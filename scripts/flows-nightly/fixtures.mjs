@@ -678,7 +678,7 @@ export function fakePoliticalRaws(tickers) {
   return {
     filings,
 
-    holders: { __failed: "HTTP 422 — the status the live vendor returned" },
+    holders: { __failed: "HTTP 422 — the status the live feed returned" },
   };
 }
 

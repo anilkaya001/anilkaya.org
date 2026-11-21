@@ -113,7 +113,7 @@
     const vTrunc = typeof a.vendorTruncated === "boolean" ? a.vendorTruncated : null;
     const rTrunc = typeof a.readTruncated === "boolean" ? a.readTruncated : null;
     if (vTrunc === true) {
-      return " The flagged windows hit the vendor's own ceiling" +
+      return " The flagged windows hit the feed's own ceiling" +
         (vLimit === null ? "" : " of " + count(vLimit) + " rows") +
         ", so how many it withheld above that line is unknown — this count is a " +
         "ceiling rather than a market, and comparing it with another session's " +
@@ -128,13 +128,13 @@
     if (vTrunc === null && rTrunc === false) {
       return " Every intraday read came in under this site's own per-read cap" +
         (rLimit === null ? "" : " of " + count(rLimit) + " rows") +
-        ", so each saw every window the vendor's rolling list still held.";
+        ", so each saw every window the feed's rolling list still held.";
     }
     if (vTrunc === null) {
-      return " Whether the flagged windows hit the vendor's own ceiling was not " +
+      return " Whether the flagged windows hit the feed's own ceiling was not " +
         "recorded on this payload, so this count may be a ceiling rather than a market.";
     }
-    return " The flagged windows came in under the vendor's ceiling, so this count is " +
+    return " The flagged windows came in under the feed's ceiling, so this count is " +
       "the read rather than a limit.";
   }
 
@@ -199,7 +199,7 @@
     }, 0);
     const both = h("button", {
       class: "fu-toggle", type: "button", "aria-pressed": "false",
-      title: "Contracts the vendor's rules flagged and that also cleared this page's own floors",
+      title: "Contracts the feed's rules flagged and that also cleared this page's own floors",
     }, UI.glyph("levels"), h("span", null, "Both feeds"));
     both.addEventListener("click", () => {
       view.both = !view.both;
@@ -240,15 +240,15 @@
     const ask = F.askShare(rows);
     host.chips.replaceChildren(UI.chips([
       UI.gaugeChip({ icon: "unusual", color: "--accent-ink", value: prem ? F.money(prem) : DASH, label: "Premium",
-        info: { title: "Flagged premium", lead: "The vendor's total premium across every flagged window in the record.", facts: [["Windows", count(rows.length)]] } }),
+        info: { title: "Flagged premium", lead: "The feed's total premium across every flagged window in the record.", facts: [["Windows", count(rows.length)]] } }),
       UI.gaugeChip({ icon: "list", color: "--label-2", value: (floor ? "≥" : "") + count(seen ?? rows.length), label: "Windows",
         info: { title: "Windows", lead: floor ? "The read hit a ceiling, so this count is a floor." : "Flagged windows held.", facts: [["Drawn", count(rows.length)], ["Seen", seen === null ? null : (floor ? "at least " : "") + count(seen)]] } }),
       UI.gaugeChip({ ring: share(call, cpW), color: "--up-mark", value: pct0(share(call, cpW)), label: "Calls",
         info: { title: "Call share", lead: "Call premium as a share of the premium on windows whose contract side could be read." } }),
       UI.gaugeChip({ ring: ask.share, color: "--label-1", value: pct0(ask.share), label: "Ask side",
-        info: { title: F.askLabel, lead: "Of the premium the vendor attributed to the ask side or the bid side, the share on the ask side. For contract volume the vendor defines the ask side as a fill above the midpoint; it does not document the alert field, and nothing here says who initiated.", facts: [["Sided", ask.classified === null ? null : pct0(ask.classified) + " of premium"]] } }),
+        info: { title: F.askLabel, lead: "Of the premium the feed attributed to the ask side or the bid side, the share on the ask side. For contract volume the feed defines the ask side as a fill above the midpoint; it does not document the alert field, and nothing here says who initiated.", facts: [["Sided", ask.classified === null ? null : pct0(ask.classified) + " of premium"]] } }),
       UI.gaugeChip({ ring: share(sw, swW), color: "--s-orange", value: pct0(share(sw, swW)), label: "Sweeps",
-        info: { title: "Sweep share", lead: "Premium on windows the vendor flagged as sweeps, over the windows that carry the flag at all." } }),
+        info: { title: "Sweep share", lead: "Premium on windows the feed flagged as sweeps, over the windows that carry the flag at all." } }),
     ], "Flagged windows"));
   }
 
@@ -385,7 +385,7 @@
       S.alertKeys = new Map();
       for (const r of alerts.rows) { const key = joinKey(r.t, r.cp, r.k, r.exp); if (key) S.alertKeys.set(key, r); }
       S.alertsState = alerts.rows.length ? { state: "ok" }
-        : { state: "quiet", reason: "The vendor's rules flagged nothing in this read. Before the open the feed is thin, and absence from that selection is not evidence of a quiet market." };
+        : { state: "quiet", reason: "The feed's rules flagged nothing in this read. Before the open the feed is thin, and absence from that selection is not evidence of a quiet market." };
     } else {
       S.alertsState = {
         state: kind === "unpublished" ? "pending" : kind === "failed" ? "unavailable" : "withheld",

@@ -773,7 +773,7 @@ await section("rt-sim", async () => {
   eq(a.log.filter((e) => e.ch === "periscope").length, 390 * 3, "the index book arrives as three frames a minute");
   eq(a.news.length, a.world.labels.headlines.length, "the headlines are the world's labelled headlines");
   ok(a.alerts.length > 200 && a.alerts.every((e, i) => i === 0 || e.at >= a.alerts[i - 1].at), "flow alerts are a Hawkes stream per active name, in time order");
-  ok(a.pxBy[3].every((e) => e.at > e.quoteTime), "every price reaches the vendor after its own quote time");
+  ok(a.pxBy[3].every((e) => e.at > e.quoteTime), "every price reaches the feed after its own quote time");
 
   a.advanceTo(a.open + 30 * 60000);
   const scr = await a.rest("/api/screener/stocks", { ticker: "SPY,NVDA,UNKNOWN" });
@@ -812,7 +812,7 @@ await section("rt-sim", async () => {
   ok(st.slice(0, 3).every((x) => x === 200) && st.slice(3).every((x) => x === 429), "a per-minute call budget turns the calls over it into 429s");
   a.chaos.restPerMinute = Infinity;
   const rest500 = createMarketSim({ seed: "sim-a", names: 24, chaos: { restFault: "500" } });
-  eq((await rest500.rest("/api/news/headlines", {})).status, 500, "a vendor outage answers 500");
+  eq((await rest500.rest("/api/news/headlines", {})).status, 500, "a feed outage answers 500");
 
   const s1 = createMarketSim({ seed: "sock", names: 12 });
   const c1 = s1.connect({});
@@ -893,7 +893,7 @@ await section("rt-sim", async () => {
   cc.send(JSON.stringify({ channel: "price", msg_type: "join" }));
   clean.advance(10 * 60000);
   const times = cgot.slice(1).map(([, p]) => p.time);
-  ok(times.every((t, i) => i === 0 || t >= times[i - 1] - 5000), "without chaos the stream is ordered to within the vendor's own jitter");
+  ok(times.every((t, i) => i === 0 || t >= times[i - 1] - 5000), "without chaos the stream is ordered to within the feed's own jitter");
 
   const lagged = createMarketSim({ seed: "lag", names: 12 });
   lagged.chaos.lagSpikes = [{ from: lagged.open + 2 * 60000, to: lagged.open + 3 * 60000, extraMs: 20000 }];
@@ -909,7 +909,7 @@ await section("rt-sim", async () => {
   const plain = createMarketSim({ seed: "skew", names: 12 });
   skewed.advance(5 * 60000); plain.advance(5 * 60000);
   const sa = (await skewed.rest("/api/screener/stocks", { ticker: "SPY" })).body.data[0], pa = (await plain.rest("/api/screener/stocks", { ticker: "SPY" })).body.data[0];
-  eq(sa.quote_time - pa.quote_time, 7000, "clock skew shifts the vendor's stamps and nothing else");
+  eq(sa.quote_time - pa.quote_time, 7000, "clock skew shifts the feed's stamps and nothing else");
   eq(sa.close, pa.close, "and not the price");
 
   const dropper = createMarketSim({ seed: "drop", names: 12, chaos: { drops: [{ conn: 0, at: 0 }], stalls: [{ conn: 1, from: 0, to: 0 }] } });
@@ -947,7 +947,7 @@ await section("rt-sim", async () => {
     live.advance(3 * 60000);
     await new Promise((r) => setTimeout(r, 80));
     ws.close();
-    eq(frames[0][1].status, "ok", "a real WebSocket joins the simulated vendor");
+    eq(frames[0][1].status, "ok", "a real WebSocket joins the simulated feed");
     ok(frames.filter(([ch, p]) => ch === "price:SPY" && p.ticker === "SPY").length === 3, "and receives its prices over the wire");
     const res = await fetch(server.httpUrl + "/api/news/headlines");
     eq(res.status, 200, "the same server answers the REST routes");

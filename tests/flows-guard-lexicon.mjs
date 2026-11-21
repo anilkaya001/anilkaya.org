@@ -15,7 +15,7 @@ const POSITIVE = [
 const NEGATIVE = [
   "The put-call ratio is at odds with the dealer lean.", "Calls and puts are in balance.", "Spot sits at the gamma flip.",
   "Open interest grew across the strikes.", "The report was due last week.", "The name was about to report when the data stopped.",
-  "Implied volatility rose against realised volatility.", "Dealers are long gamma on the vendor's convention.",
+  "Implied volatility rose against realised volatility.", "Dealers are long gamma on the feed's convention.",
   "Net premium was positive for the session.", "The put wall holds the lowest strike.", "Volume is above its median.", "The bar is set to $923K.", "Flow keeps returning to the 65 call for Nov 20: 3 flagged windows in 20 minutes, in all.", "SYO001 has one window of contracts in the call for Nov 20, that is the name's usual large window.", "It could not be read.", "Nestl\u00e9 and Soci\u00e9t\u00e9 G\u00e9n\u00e9rale hold the call wall.",
 ];
 const curly = (s) => s.replace(/'/g, "’");

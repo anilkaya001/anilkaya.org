@@ -23,7 +23,7 @@ const MODEL = "@cf/zai-org/glm-4.7-flash";
 const RATES = "5500,36400";
 const USAGE = { prompt_tokens: 5400, completion_tokens: 700 };
 const NEURONS = Math.ceil((5400 * 5500 + 700 * 36400) / 1e6);
-const clause = " on the vendor's convention (dealers long calls, short puts)";
+const clause = " on the feed's convention (dealers long calls, short puts)";
 const OPEN = "UNTRUSTED" + String.fromCharCode(0xab);
 
 let restoreClock = shiftClock();
@@ -682,7 +682,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const ai = rig();
   const get = await client(f.D1, { ...AI_ENV, AI: ai });
   const r = await summary(get, "QQQZ");
-  eq(r.body.tier, "none", "a name outside the universe that the vendor still describes: tier none");
+  eq(r.body.tier, "none", "a name outside the universe that the feed still describes: tier none");
   ok(r.body.read.status === "generating" && r.body.read.sections.now !== null, "gets a reading from what exists (identity, quote, news): " + r.body.read.status);
   ok(r.body.read.coverage.withheld >= 5, "and names what is withheld (" + JSON.stringify(r.body.read.coverage) + ")");
 }
@@ -751,8 +751,8 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const coldAsk = await get("/api/flows/ask", ASK({ question: "what does EXMP do and why is it moving", subject: T }));
   await coldAsk.settle();
   eq(coldAsk.res.status, 200, "ASK, COLD (P1-42): a question about a name nothing has fetched answers");
-  eq(stub.calls.length, 0, "and makes 0 vendor calls (" + stub.calls.length + ")");
-  ok(coldAsk.body.dossierFacts > 0 && !coldAsk.body.facts.some((x) => /^dossier:EXMP\/identity\.description$/.test(x.id)), "and carries the stored facts without a description the vendor has not been asked for");
+  eq(stub.calls.length, 0, "and makes 0 feed calls (" + stub.calls.length + ")");
+  ok(coldAsk.body.dossierFacts > 0 && !coldAsk.body.facts.some((x) => /^dossier:EXMP\/identity\.description$/.test(x.id)), "and carries the stored facts without a description the feed has not been asked for");
 }
 
 {
@@ -777,7 +777,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const callsBefore = stub.calls.length;
   const a = await get("/api/flows/ask", ASK({ question: "what does EXMP do and why is it moving", subject: T }));
   await a.settle();
-  eq(stub.calls.length, callsBefore, "ASK, WARM: the same question after a full read makes no further vendor call");
+  eq(stub.calls.length, callsBefore, "ASK, WARM: the same question after a full read makes no further feed call");
   eq(a.res.status, 200, "ASK: a ticker question answers");
   ok(a.body.dossierFacts > 0 && a.body.dossierFacts <= R.ASK_MAX_FACTS, "it carries " + a.body.dossierFacts + " dossier facts");
   ok(a.body.facts.some((x) => /^dossier:EXMP\//.test(x.id)), "among the picked facts");
@@ -941,7 +941,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   const getB = await client(f.D1, env, B);
 
   const a = await summary(getA);
-  eq(vendorCalls(), 0, "MEMBER VENDOR: member A, past A's own window, assembles with 0 vendor calls");
+  eq(vendorCalls(), 0, "MEMBER VENDOR: member A, past A's own window, assembles with 0 feed calls");
   ok(consulted.length >= 1 && consulted.every((k) => k === A), "metered under A's key (" + consulted.join(",") + ")");
   eq(a.res.status, 200, "A's summary still answers 200");
   eq(a.body.read.status, "fallback", "A REFUSED MEMBER'S READING is the deterministic one, status fallback");
@@ -955,7 +955,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   stub.reset();
   dropHot();
   const b = await summary(getB);
-  eq(vendorCalls(), 8, "MEMBER B, admitted, then assembles the dossier with its 8 vendor calls (" + vendorCalls() + ")");
+  eq(vendorCalls(), 8, "MEMBER B, admitted, then assembles the dossier with its 8 feed calls (" + vendorCalls() + ")");
   eq(b.body.read.status, "generating", "B is not handed A's degraded reading: status generating");
   eq(ai.log.reads.length, 1, "and B's summary generates: one model call");
   const row = readRow(f);
@@ -969,7 +969,7 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   stub.reset();
   const getA2 = await client(f.D1, env, A);
   const late = await summary(getA2);
-  eq(vendorCalls(), 0, "PAST THE FLOOR, refused member A again makes 0 vendor calls");
+  eq(vendorCalls(), 0, "PAST THE FLOOR, refused member A again makes 0 feed calls");
   eq(late.body.read.status, "ready", "and is served the stored model reading");
   eq(late.body.read.held, "limited", "held because the assembly was limited, not regenerated from it");
   ok(/earlier dossier of /.test(late.body.read.note) && /held back by a rate limit/.test(late.body.read.note), "and its note says it was written for an earlier dossier and why no new one was asked for: " + late.body.read.note);

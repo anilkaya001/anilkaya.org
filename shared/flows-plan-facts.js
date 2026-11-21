@@ -49,7 +49,7 @@ export const SOURCES = {
     quote: "Startup + Kafka tier at $3,000/mo adds real-time Kafka cluster access",
   }),
   "uw.advanced": src("observed", "x-uw-token-req-limit=100000000 and no documented day cap", "observed", "2026-10-05"),
-  "uw.dashboard": src("owner", "owner's screenshot of the vendor API dashboard, plan API Advanced, Active", "observed", "2026-10-19", {
+  "uw.dashboard": src("owner", "owner's screenshot of the feed API dashboard, plan API Advanced, Active", "observed", "2026-10-19", {
     readAt: "about 18:00 TRT",
     agrees: "uw.advanced",
     quotes: [

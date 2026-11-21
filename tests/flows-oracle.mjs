@@ -172,7 +172,7 @@ const ivOf = (price, F, D, K, T, type) => {
     strings++;
     ok(!banned.test(t), "no forecast, modal or advice word in: " + t);
     ok(guardAnswer(t, [{ say: t }], { smallIntegers: false, modals: true }).forecast === false, "the ask guard finds no forecast verb in: " + t);
-    ok(!/\bat (the )?(ask|bid)\b/i.test(t), "no vendor side phrase in: " + t);
+    ok(!/\bat (the )?(ask|bid)\b/i.test(t), "no feed side phrase in: " + t);
     for (const sentence of t.split(/(?<=[.!?])\s+/)) ok(sentence.split(/\s+/).length <= 22, "a sentence of at most 22 words: " + sentence);
   }
   ok(strings > 15, `${strings} strings swept`);

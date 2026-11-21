@@ -15,6 +15,7 @@ import { flowsReadyRows } from "../server/routes/flows-ready.js";
 import { flowsDispatchRows } from "../server/routes/flows-dispatch.js";
 import { flowsPipelineRows } from "../server/routes/flows-pipeline.js";
 import { flowsFfRows } from "../server/routes/flows-ff.js";
+import { flowsEventRiskRows } from "../server/routes/flows-eventrisk.js";
 import { createRouter } from "../server/router.js";
 
 const FIXTURE_PATH = new URL("./fixtures-route-matrix.json", import.meta.url);
@@ -61,7 +62,7 @@ const FRESH_PRESENT = ["Read-At", "Live-Until", "Stale-At", "Phase-Ends", "Last-
 
 const FLOWS_API = ["board", "market", "events", "scoretrack", "calib", "dispersion", "meta", "flowalerts", "pulse", "news", "lk", "now", "tape", "political",
   "unusual", "movers", "sectors", "sector-premium", "universe", "regime", "ideas", "focus", "roster", "ai-usage", "summary", "dossier",
-  "live", "brief", "ask", "record", "card", "card-x", "hist", "chain", "strategy", "ingest", "ready", "dispatch-check", "coverage", "ops", "ledger", "macro", "positioning"];
+  "live", "brief", "ask", "record", "card", "card-x", "hist", "chain", "strategy", "ingest", "ready", "dispatch-check", "coverage", "ops", "ledger", "macro", "positioning", "eventrisk"];
 const FLOWS_PAGES_SLASH = ["", "long", "short", "watch", "market", "network", "now", "history", "desk", "strategy", "ask", "ticker", "unusual", "moves", "flowlab", "ledger", "macro", "events", "track", "political", "positioning", "status", "about", "glossary", "fire", "inbox", "digest", "wires"];
 const FLOWS_PAGES_BARE = ["long", "short", "desk", "watch", "history", "market", "network", "now", "ticker", "unusual", "moves", "flowlab", "ledger", "macro", "events", "track", "political", "positioning", "status", "strategy", "ask", "about", "glossary", "fire", "inbox", "digest", "wires"];
 const FF_API = ["health", "wires", "house", "hits", "read", "preview", "receipts", "records", "symbol", "digest", "export", "mute", "note", "run"];
@@ -101,6 +102,9 @@ for (const q of ["board?side=short", "summary?t=NVDA", "dossier?t=NVDA", "card?t
 row("/api/health");
 for (const p of ["/api/flows/ready", "/api/health", "/api/flows/ops", "/api/flows/ops?part=ai"]) row(p, { env: "ready-on" });
 row("/api/flows/coverage", { env: "coverage-on" });
+for (const q of ["eventrisk?t=NVDA", "eventrisk?part=sectors", "eventrisk?part=quote&t=NVDA", "eventrisk?part=zz", "eventrisk?t=SYX101"]) row("/api/flows/" + q);
+for (const q of ["eventrisk", "eventrisk?t=NVDA", "eventrisk?part=sectors", "eventrisk?part=zz"]) row("/api/flows/" + q, { env: "eventrisk-on" });
+light("/flows/fire/", { env: "eventrisk-on", principals: ["anon", "member", "owner"] });
 for (const q of ["screen?preset=premium", "contract?c=SYX101261120C00120000", "name?t=SYX101&view=strikes", "group?g=mag7&exp=2026-11-20", "lit", "venues?t=SPY", "nightly?k=groups"]) light("/api/flows/flowlab/" + q, { principals: ["anon", "member"] });
 for (const q of ["screen?preset=zz", "contract?c=zz", "name?t=SPY&view=zz", "group?g=zz&exp=2026-11-20", "venues?t=SYX101", "nightly?k=zz", "nightly?k=groups"]) row("/api/flows/flowlab/" + q, { env: "flowlab-on" });
 row("/api/flows/zz");
@@ -176,6 +180,7 @@ function envFor(label, D1, tokens) {
   if (label === "pulse-absent") return { ...base, FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "members" };
   if (label === "ready-on") return { ...base, FLOWS_READY: "on", FLOWS_HEALTH: "on", FLOWS_OPS: "on", FLOWS_RT_MODE: "on", FLOWS_RT_AUDIENCE: "owner", PULSE: pulseFake };
   if (label === "flowlab-on") return { ...base, FLOWS_FLOWLAB: "on" };
+  if (label === "eventrisk-on") return { ...base, FLOWS_EVENTRISK: "on", FF_MODE: "shadow", FF_ROUTE_FIRE: "on" };
   if (label === "coverage-on") return { ...base, FLOWS_COVERAGE: "on", FLOWS_METER: "on" };
   if (label === "ff-shadow") return { ...base, FF_MODE: "shadow", FF_ROUTE_WIRES: "on", FF_ROUTE_INBOX: "on", FF_ROUTE_FIRE: "on", FF_ROUTE_EXPORT: "on" };
   if (label === "off") return { ...base, FLOWS_RT_MODE: "off", PULSE: pulseFake };
@@ -287,7 +292,7 @@ const src = workerSource();
   for (const m of slice(src, "const LEGACY_COURSE_PATHS = new Set([", "]);").matchAll(/"(\/lab\/[^"]+)"/g)) literals.add(m[1]);
   expect(src, /\bpath === "\//, { min: 20, why: "the route chain is scanned, not an empty match" });
   const stub = new Proxy({}, { get: () => () => null });
-  const table = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub), flowsPageRows(stub), flowsReadyRows(stub), flowsDispatchRows(stub), flowsPipelineRows(stub), flowsFfRows(stub)).rows;
+  const table = createRouter(flowsReadRows(stub), flowsDeskRows(stub), flowsAiRows(stub), flowsPageRows(stub), flowsReadyRows(stub), flowsDispatchRows(stub), flowsPipelineRows(stub), flowsFfRows(stub), flowsEventRiskRows(stub)).rows;
   ok(table.length >= 77, "the router table holds the flows-read, flows-desk, flows-ai, flows-pages and ff families: " + table.length + " rows");
   for (const r of table) literals.add(r.path);
   ok(literals.size >= 70, "the chain and the table together declare every route literal: " + literals.size);

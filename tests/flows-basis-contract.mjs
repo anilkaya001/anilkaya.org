@@ -52,7 +52,7 @@ const vol = JSON.parse(readFileSync(new URL("./fixtures-vol-probe.json", import.
   eq(got.source, "regular-close", "and the payload says which it took");
   eq(got.note, "regular close 4:00 pm ET", "in words a reader can check");
   eq(got.sessionDate, "2026-09-24", "for the session it belongs to");
-  eq(printOf({ state, bars: [...bars].reverse(), readMs }).spot, 340.18, "and the feed's order does not matter: the vendor sends newest first, the fixtures oldest first");
+  eq(printOf({ state, bars: [...bars].reverse(), readMs }).spot, 340.18, "and the feed's order does not matter: the feed sends newest first, the fixtures oldest first");
 
   const morning = printOf({
     state: { data: { close: "339.90", market_time: "premarket", tape_time: "2026-09-25T11:00:00Z" } },
@@ -101,7 +101,7 @@ const vol = JSON.parse(readFileSync(new URL("./fixtures-vol-probe.json", import.
 
   const recorded = vol.probes["ohlc-1d:SYA101"];
   ok(recorded && recorded.row.market_time === "pr" && recorded.row.date === "2026-09-23",
-     "the recorded vendor row for the newest date IS a pre-market segment, at the head of the list");
+     "the recorded feed row for the newest date IS a pre-market segment, at the head of the list");
   eq(printOf({ state: null, bars: [recorded.row], readMs: Date.parse("2026-09-23T12:00:00Z") }), null,
      "and a chain read priced off it alone has no spot at all");
 }
@@ -126,7 +126,7 @@ const vol = JSON.parse(readFileSync(new URL("./fixtures-vol-probe.json", import.
   eq(offMarket(rows, 227.28, "NVDA").length, 0, "at 227.28 none of them is");
 
   const br = bracket(rows, PRINT, "NVDA");
-  eq(br.bracketed, true, "the request asks the vendor for out-of-the-money contracts only, so the chain brackets its own reference price");
+  eq(br.bracketed, true, "the request asks the feed for out-of-the-money contracts only, so the chain brackets its own reference price");
   eq(br.low, 225, "the highest put strike present is 225");
   eq(br.high, 227.5, "and the lowest call strike present is 227.5");
   eq(br.step, 2.5, "on a 2.50 strike ladder");
@@ -446,7 +446,7 @@ const chainOf = (state, extra = {}) => route("/api/flows/chain?t=AAPL&refresh=1"
 
 {
   const enveloped = await chainOf({ data: REGULAR });
-  eq(enveloped.res.status, 200, "the chain route answers on the vendor stock-state envelope");
+  eq(enveloped.res.status, 200, "the chain route answers on the feed stock-state envelope");
   eq(enveloped.body.spotSource, "stock-state", "AND USES THE LIVE PRINT IT CONTAINS (the audit's parse read this shape as an object with no close and priced every desk off a daily bar)");
   eq(enveloped.body.spot, 183.4, "at the print");
   eq(enveloped.body.tapeTime, "2026-08-25T18:06:00Z", "with its tape time");
@@ -473,7 +473,7 @@ const chainOf = (state, extra = {}) => route("/api/flows/chain?t=AAPL&refresh=1"
   eq(post.body.basis.printSource, "regular-close", "named as one");
   eq(post.body.basis.printNote, "regular close 4:00 pm ET", "in words");
   eq(post.body.spotSource, "daily-close", "the legacy source field says a close");
-  eq(post.body.marketTime, "postmarket", "while the vendor's own session name still passes through");
+  eq(post.body.marketTime, "postmarket", "while the feed's own session name still passes through");
   eq(post.body.basis.printSpot, 183.4, "the print in the basis is the close");
 
   const pre = await chainOf({ data: { close: "181.00", market_time: "premarket", tape_time: "2026-08-26T11:00:00Z" } },
@@ -527,21 +527,21 @@ const chainOf = (state, extra = {}) => route("/api/flows/chain?t=AAPL&refresh=1"
   eq(wall.body.asOf, today, "WITHOUT A PIN the read is the wall clock");
   const pinned = await route("/api/flows/chain?t=AAPL&refresh=1", worldOf({ state: { data: REGULAR }, bars: BARS, chain: AAPL("260918") }),
     { UW_NOW: "2001-01-02T15:00:00Z", UW_BASE: undefined });
-  eq(pinned.body.asOf, today, "and a pin is ignored unless the vendor origin has been redirected away from production too");
+  eq(pinned.body.asOf, today, "and a pin is ignored unless the feed origin has been redirected away from production too");
 
   const hosts = new Set();
   const hostile = await route("/api/flows/chain?t=AAPL&refresh=1", (url, t) => {
     hosts.add(url.host);
     return worldOf({ state: { data: REGULAR }, bars: BARS, chain: AAPL("260918") })(url, t);
   }, { UW_NOW: "2001-01-02T15:00:00Z", UW_BASE: "https://evil.example" });
-  deep(Array.from(hosts), ["api.unusualwhales.com"], "a hostile UW_BASE is ignored: the vendor key goes only to the production host");
+  deep(Array.from(hosts), ["api.unusualwhales.com"], "a hostile UW_BASE is ignored: the feed key goes only to the production host");
   eq(hostile.body.asOf, today, "and it does not unlock the pinned read clock");
   const loop = new Set();
   await route("/api/flows/chain?t=AAPL&refresh=1", (url, t) => {
     loop.add(url.host);
     return worldOf({ state: { data: REGULAR }, bars: BARS, chain: AAPL("260918") })(url, t);
   }, { UW_BASE: "http://127.0.0.1:9" });
-  deep(Array.from(loop), ["127.0.0.1:9"], "a loopback UW_BASE still redirects the Worker's vendor calls");
+  deep(Array.from(loop), ["127.0.0.1:9"], "a loopback UW_BASE still redirects the Worker's feed calls");
 }
 
 {
@@ -610,7 +610,7 @@ const chainOf = (state, extra = {}) => route("/api/flows/chain?t=AAPL&refresh=1"
   deep(r.body.forwards, [], "with the forwards field present and empty");
   eq(r.body.priced, 0, "nothing is priced");
   eq(r.body.gated.offMarket, 4, "every contract is accounted for under the gate that set it aside");
-  eq(r.body.screened, 4, "out of the four the vendor sent");
+  eq(r.body.screened, 4, "out of the four the feed sent");
   eq(r.body.basis.spot, 231.02, "the print is reported as it was");
   eq(r.body.ivSurface.status, "empty", "and no smile is drawn against a spot that does not belong to it");
   ok(/same moment/.test(r.body.ivSurface.reason), `for a stated reason (${r.body.ivSurface.reason})`);
@@ -774,7 +774,7 @@ const chainOf = (state, extra = {}) => route("/api/flows/chain?t=AAPL&refresh=1"
   ok(Math.abs(resid(360, "P", 90)) > Math.abs(resid(180, "P", 90)) && Math.abs(resid(180, "P", 90)) > Math.abs(resid(90, "P", 90)), "the residual grows with the expiry");
 }
 
-console.log(`✓ flows-basis: ${checks} assertions — the vendor stock-state envelope, a spot that is only ever a regular-session price, ` +
+console.log(`✓ flows-basis: ${checks} assertions — the feed stock-state envelope, a spot that is only ever a regular-session price, ` +
   `impossible quotes counted and never ranked, a strike bracket the request itself guarantees, one underlying fitted to the nearest expiries ` +
   `(the screenshot's nine bids give 227.28 against a 231.02 print), a rebase past 0.25% and a refusal when the fit is too thin, ` +
   `an ET read date with the winter close, and the whole thing inside the Free tier's CPU`);

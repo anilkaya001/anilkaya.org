@@ -83,13 +83,13 @@ function build(f, over = {}) {
   eq(body.ledger.days[6].day, "2026-10-06", "and the seventh day back last");
   eq(body.clock.tier1.why, "written", "the clock carries Tier 1's last verdict");
   eq(body.clock.dispatchWhy, "refused:403", "and the GitHub dispatch refusal the Status page never showed");
-  eq(body.clock.vendor, null, "no vendor reading is on the clock row, so it is null and not zero");
-  eq(body.vendor.reading, null, "the vendor reading is null");
+  eq(body.clock.vendor, null, "no feed reading is on the clock row, so it is null and not zero");
+  eq(body.vendor.reading, null, "the feed reading is null");
   eq(body.live.length, Object.keys(LIVE_KEYS).length, "one entry for each live key");
   const market = body.live.find((l) => l.key === "live:market");
-  ok(market.present && market.writer === "worker@tier1" && market.ageS === 20 && market.behindS === 4, "a live key carries its writer, its age and how far behind the vendor's stamp it was read: " + JSON.stringify(market));
+  ok(market.present && market.writer === "worker@tier1" && market.ageS === 20 && market.behindS === 4, "a live key carries its writer, its age and how far behind the feed's stamp it was read: " + JSON.stringify(market));
   const unstamped = body.live[3];
-  eq(unstamped.vendorAt, null, "a key with no vendor stamp has a null vendorAt");
+  eq(unstamped.vendorAt, null, "a key with no feed stamp has a null vendorAt");
   eq(unstamped.behindS, null, "and no distance behind it, not zero");
   ok(["live", "fresh", "stale", "closed"].includes(market.state) && market.liveS > 0 && market.staleS > market.liveS, "state and the live and stale lines come from the freshness table");
   eq(body.ai.spend.calls, 41, "the model day's calls");
@@ -171,10 +171,10 @@ function build(f, over = {}) {
   const body = await (await table.find("/api/flows/ops").handler(rc("/api/flows/ops", {}, "owner.one"))).json();
   deep0(body.clock.vendor, { daily: 21000, at: NOW - 120000 }, "the clock row's reading is on the clock");
   const W12 = { day: "2026-10-12", start: T("2026-10-12T00:00:00Z"), end: T("2026-10-13T00:00:00Z") };
-  deep0(body.vendor.reading, { daily: 21400, at: NOW - 60000, window: W12, current: true }, "THE VENDOR READING is the newest of the clock row's and the day's ledger maximum, with the vendor window it was read in");
+  deep0(body.vendor.reading, { daily: 21400, at: NOW - 60000, window: W12, current: true }, "THE VENDOR READING is the newest of the clock row's and the day's ledger maximum, with the feed window it was read in");
   eq(body.vendor.own.tier1, 366, "the engines' own counts come from the ledger: Tier 1");
   eq([body.vendor.own.focus, body.vendor.own.tier2, body.vendor.own.tier2Failed], [125, 900, 4], "focus and Tier 2");
-  eq(body.vendor.own.current, true, "and the ledger's Eastern day is the vendor window's, so the two can be set against each other");
+  eq(body.vendor.own.current, true, "and the ledger's Eastern day is the feed window's, so the two can be set against each other");
   eq(body.vendor.dayBoundary, "stated", "THE VENDOR'S DAY BOUNDARY IS THE STATED ONE, no longer assumed");
   deep0(body.vendor.window, { ...W12, basis: "stated", resetMinuteEt: 1200, source: "uw.dashboard", via: "observed", readOn: "2026-10-19" },
     "the current window runs from 20:00 ET to 20:00 ET (00:00 to 00:00 UTC in daylight time) and cites the dashboard");
@@ -220,7 +220,7 @@ function build(f, over = {}) {
   const { table, rc } = build(f);
   const body = await (await table.find("/api/flows/ops").handler(rc("/api/flows/ops", {}, "owner.one"))).json();
   const vol = body.live.find((l) => l.key === "live:vol");
-  ok(vol.present && vol.vendorAt === null, "A PAYLOAD THAT IS NOT JSON costs its key a vendor stamp, not the whole read");
+  ok(vol.present && vol.vendorAt === null, "A PAYLOAD THAT IS NOT JSON costs its key a feed stamp, not the whole read");
   f.db.prepare("DELETE FROM flows_live WHERE id = 'live:news'").run();
   const gone = (await (await table.find("/api/flows/ops").handler(rc("/api/flows/ops", {}, "owner.one"))).json()).live.find((l) => l.key === "live:news");
   eq(gone, { key: "live:news", present: false }, "a key with no row is absent and says nothing else");
@@ -239,7 +239,7 @@ function build(f, over = {}) {
   const advanced = await run({ FLOWS_UW_PLAN: "advanced" });
   eq([advanced.plan.uw, advanced.lines["uw.day"].cap, advanced.lines["uw.day"].capFrom], ["advanced", 100000000, "plan"], "THE RECORDED ADVANCED PLAN serves its 100M day line");
   eq([advanced.lines["uw.min"].cap, advanced.lines["uw.min"].capFrom, advanced.lines["uw.min"].planCap], [500, "advisory", null], "and its unread minute line as the 500 working line, never as no line");
-  eq(advanced.vendor.dayBoundary, "stated", "with the vendor's stated day boundary");
+  eq(advanced.vendor.dayBoundary, "stated", "with the feed's stated day boundary");
   const capped = await run({ FLOWS_AI_DAILY_CAP_NEURONS: "12000", FLOWS_AI_DAILY_CAP_CALLS: "900" });
   eq([capped.ai.cap.neurons, capped.ai.cap.calls, capped.ai.cap.readsStopAt], [12000, 900, 9000], "the AI cap follows the Worker's variables");
   eq(limitsOf({ FLOWS_AI_DAILY_CAP_NEURONS: "12000" }).find((l) => l.name === "Model neurons").limit, 12000, "and so does the limits table");
@@ -258,7 +258,7 @@ function build(f, over = {}) {
   const clock = { day: DAY, trading: 1, tier1At: NOW, tier1OkAt: NOW, tier1Why: "written" };
   const rows = [{ id: "live:market", read_at: NOW - 30000, session: DAY, cadence_s: 300, source: "worker", writer: "w", updated_at: NOW, vendor_at: new Date(NOW - 36000).toISOString() }];
   const v = liveView(rows, NOW, clock)[0];
-  eq([v.ageS, v.behindS], [30, 6], "age and distance behind the vendor are whole seconds");
+  eq([v.ageS, v.behindS], [30, 6], "age and distance behind the feed are whole seconds");
   const stale = liveView([{ ...rows[0], read_at: NOW - 4000 * 1000 }], NOW, clock)[0];
   eq(stale.state, "stale", "an old read in the session is stale");
   const results = [{ results: [] }, { results: [] }, { results: [] }, { results: [] }, { results: [] }];
@@ -327,8 +327,8 @@ function build(f, over = {}) {
 {
   const w = workerSource();
   expect(w, /flowsOpsRows\(\{/, { min: 1, max: 1, why: "the Worker mounts the ops family once" });
-  expect(w, /meter: \(\) => state\.keyCounter/, { min: 1, max: 1, why: "the family is handed this isolate's own vendor reading" });
-  expect(w, /state\.keyCounter = newerMeter\(state\.keyCounter, seen\)/, { min: 1, max: 1, why: "and uwFetch, the one door every Worker vendor call passes, is where it is taken, before the status is judged" });
+  expect(w, /meter: \(\) => state\.keyCounter/, { min: 1, max: 1, why: "the family is handed this isolate's own feed reading" });
+  expect(w, /state\.keyCounter = newerMeter\(state\.keyCounter, seen\)/, { min: 1, max: 1, why: "and uwFetch, the one door every Worker feed call passes, is where it is taken, before the status is judged" });
   ok(/const seen = vendorMeter\(response\.headers, Date\.now\(\)\);[\s\S]{0,260}response\.status === 429/.test(w), "the counter header is read from a 429 as well as from a success");
   for (const f of ["server/ops.js", "server/routes/flows-ops.js"]) {
     const t = moduleSource(f);

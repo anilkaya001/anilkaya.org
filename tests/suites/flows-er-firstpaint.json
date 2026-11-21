@@ -1,0 +1,1 @@
+{"name": "flows-er-firstpaint", "class": "C", "group": "shard", "timing": false, "medianS": 30, "shard": 8, "command": "node flows-er-firstpaint.mjs", "files": ["flows-er-firstpaint.mjs"], "covers": ["scripts/flows-pipeline.mjs","tests/fixtures-eventrisk.json"]}

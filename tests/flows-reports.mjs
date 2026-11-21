@@ -35,9 +35,9 @@ const fixtureOf = (ticker, date, timing, origin = "history") => ({ asOf: "2026-0
   eq(R.timingOf(" AMC "), "after-close", "amc, trimmed and in any case, is after the close");
   eq(R.timingOf("bmo"), "before-open", "bmo is before the open");
   eq(R.timingOf("postmarket"), "after-close", "postmarket is after the close");
-  eq(R.timingOf("intraday"), "unknown", "a word the vendor does not use is not stated");
+  eq(R.timingOf("intraday"), "unknown", "a word the feed does not use is not stated");
   eq(R.timingOf(null), "unknown", "null is not stated");
-  eq(R.timingOf("unknown"), "unknown", "and neither is the vendor's own unknown");
+  eq(R.timingOf("unknown"), "unknown", "and neither is the feed's own unknown");
 }
 
 {

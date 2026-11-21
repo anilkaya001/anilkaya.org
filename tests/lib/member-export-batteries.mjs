@@ -69,7 +69,7 @@ export async function columnsBattery(load) {
   const live = C.plan("moves");
   eq([live.find((c) => c.key === "sig").held.reason, live.find((c) => c.key === "rd").held.reason, live.find((c) => c.key === "move_z").held], ["held_licence", "held_event_dates", null], "sig and rd are held, move_z is live");
   const vendorNames = ["px", "chg", "mcap", "iv30p", "total_premium", "prem", "strike", "expiry", "span_start", "span_end", "event_date", "implied_move", "sector", "amount_lo", "amount_hi", "filer"];
-  ok(vendorNames.every((k) => C.COLUMNS.filter((c) => c.key === k).every((c) => c.prov === "vendor") && C.COLUMNS.some((c) => c.key === k)), "the sixteen vendor fields are registered as vendor, so that the builder can refuse them");
+  ok(vendorNames.every((k) => C.COLUMNS.filter((c) => c.key === k).every((c) => c.prov === "vendor") && C.COLUMNS.some((c) => c.key === k)), "the sixteen feed fields are registered as feed, so that the builder can refuse them");
   ok(C.COLUMNS.filter((c) => c.prov === "vendor").length === vendorNames.length, "and nothing else is");
   for (const page of Object.keys(C.ALLOW)) {
     for (const key of C.ALLOW[page]) {
@@ -82,7 +82,7 @@ export async function columnsBattery(load) {
   ok(["a;b", "a:b", "", "a".repeat(49), "a,b", "a\nb"].every((t) => !C.REASON_GRAMMAR.test(t)) && C.REASON_GRAMMAR.test("sided premium under 250k USD"), "and the grammar refuses the separators the absent cell uses");
   ok(C.REASONS.few_windows.includes(String(C.MIN_WINDOWS)), "and the few-windows reason names the minimum the builder applies");
   ok(C.COLUMNS.filter((c) => c.prov === "agg" && c.key !== "windows_n" && c.page !== "political").every((c) => c.minN >= C.MIN_WINDOWS), "every flow aggregate but the count needs at least three windows");
-  ok(await bad([['moves: Object.freeze(["ticker", "sig",', 'moves: Object.freeze(["px", "ticker", "sig",']]), "a vendor column in an allowlist fails the build");
+  ok(await bad([['moves: Object.freeze(["ticker", "sig",', 'moves: Object.freeze(["px", "ticker", "sig",']]), "a feed column in an allowlist fails the build");
   ok(await bad([['moves: Object.freeze(["ticker", "sig",', 'moves: Object.freeze(["ticker", "ask_share_zz", "sig",'], ['C("*", "ask_share_lo",', 'C("*", "ask_share_zz", "x", "fraction", "agg", "x", { dp: 4 }),\n  C("*", "ask_share_lo",']]), "an aggregate without a minimum window count fails the build");
   ok(await bad([['C("moves", "move_z", "Move in typical moves", "z", "own", "ln(1 + universe.cols.chg) over universe.cols.sig", { dp: 2 })', 'C("moves", "move_z", "Move in typical moves", "z", "own", "ln(1 + universe.cols.chg) over universe.cols.sig", { dp: 2, hold: "zz" })']]), "a column that names a hold nobody declared fails the build");
   ok(await bad([['moves: Object.freeze(["ticker", "sig",', 'moves: Object.freeze(["zz_unregistered", "ticker", "sig",']]), "and so does an unregistered one");

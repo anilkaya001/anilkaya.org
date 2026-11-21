@@ -27,7 +27,7 @@ const cellsOf = (row) => (row.plans ? Object.entries(row.plans) : [["free", row.
     "ai.neurons", "ai.usd", "ai.rpm", "ai.calls", "wae.pts", "wae.q", "r2.a", "r2.b", "r2.gb", "wl.events", "queue.ops.day", "gh.api", "gh.min",
   ]) ok(P.RESOURCE_IDS.includes(id), `RESOURCES lists the meter ${id}`);
   ok(P.FACT_IDS.includes("ai.rpm.paidonly"), "the Paid-only model rate (20 a minute) is a fact beside ai.rpm (300)");
-  same(P.RESOURCES.filter((r) => r.kind === "hard").map((r) => r.id), ["uw.day"], "the vendor day is the one hard line");
+  same(P.RESOURCES.filter((r) => r.kind === "hard").map((r) => r.id), ["uw.day"], "the feed day is the one hard line");
 }
 
 {
@@ -62,7 +62,7 @@ const cellsOf = (row) => (row.plans ? Object.entries(row.plans) : [["free", row.
     ok(lines[Number(m[2]) - 1].includes(s.quote), `${name}: line ${m[2]} of ${s.file} says "${s.quote}"`);
     n++;
   }
-  ok(n >= 4, `${n} vendor figures are checked against the spec text in this repository`);
+  ok(n >= 4, `${n} feed figures are checked against the spec text in this repository`);
 }
 
 {
@@ -92,14 +92,14 @@ const cellsOf = (row) => (row.plans ? Object.entries(row.plans) : [["free", row.
     }
     rows++;
   }
-  eq(rows, 5, "five vendor rows resolve unknown");
+  eq(rows, 5, "five feed rows resolve unknown");
   eq(P.RESOURCES.find((r) => r.id === "uw.min").plans.unknown.v, 500, "the per-minute line for an unread plan is Startup's 500, as budget.md's working line says");
   eq(P.RESOURCES.find((r) => r.id === "uw.day").plans.unknown.v, 80000, "and the strictest documented day is 80,000");
   eq(P.FACTS.find((r) => r.id === "uw.lookback").plans.unknown.v, 90, "the lookback of an unread plan is the 90 days Startup documents");
   eq(P.FACTS.find((r) => r.id === "uw.conc").plans.unknown.v, 10, "and its concurrency the 10 the annual plan documents");
   for (const raw of [undefined, null, "", "  ", "UNKNOWN", "Advanced ", "startup", "startup-annual", "kafka", "enterprise", "x".repeat(500), 7, {}]) {
     const r = P.resolveUwPlan(raw);
-    ok(P.UW_PLANS.includes(r.plan), `a vendor plan value ${JSON.stringify(String(raw).slice(0, 12))} resolves inside the known set (${r.plan})`);
+    ok(P.UW_PLANS.includes(r.plan), `a feed plan value ${JSON.stringify(String(raw).slice(0, 12))} resolves inside the known set (${r.plan})`);
   }
   const vendorFigures = {
     "uw.day": { advanced: 100_000_000, startup: 80000, "startup-annual": 80000, kafka: 80000 },
@@ -110,10 +110,10 @@ const cellsOf = (row) => (row.plans ? Object.entries(row.plans) : [["free", row.
   };
   for (const [id, byPlan] of Object.entries(vendorFigures)) {
     const row = ALL_ROWS.find((r) => r.id === id);
-    for (const [plan, v] of Object.entries(byPlan)) eq(row.plans[plan].v, v, `${id} on ${plan} as the vendor's spec or dashboard states it`);
+    for (const [plan, v] of Object.entries(byPlan)) eq(row.plans[plan].v, v, `${id} on ${plan} as the feed's spec or dashboard states it`);
   }
-  eq(P.FACTS.find((r) => r.id === "uw.reset").plans.unknown.v, 1200, "the vendor's window is the vendor's, so an unread plan takes the one stated reset");
-  eq(P.resolveUwPlan("enterprise").plan, "unknown", "an unrecognised vendor plan is the strictest one");
+  eq(P.FACTS.find((r) => r.id === "uw.reset").plans.unknown.v, 1200, "the feed's window is the feed's, so an unread plan takes the one stated reset");
+  eq(P.resolveUwPlan("enterprise").plan, "unknown", "an unrecognised feed plan is the strictest one");
   eq(P.resolveUwPlan("enterprise").recognised, false, "and says it was not recognised");
   eq(P.resolveUwPlan(" Startup-Annual ").plan, "startup-annual", "case and spaces are forgiven");
 }
@@ -152,9 +152,9 @@ const cellsOf = (row) => (row.plans ? Object.entries(row.plans) : [["free", row.
   ], `FLIPPING FLOWS_PLAN_WORKERS MOVES THESE ${moved.length} LINES AND NO OTHER`);
   for (const id of unmoved) {
     const row = P.RESOURCES.find((r) => r.id === id);
-    ok(row.plans || (row.free.v === row.paid.v && row.free.per === row.paid.per), `${id} is unmoved only because it is the same on both plans or is a vendor line`);
+    ok(row.plans || (row.free.v === row.paid.v && row.free.per === row.paid.per), `${id} is unmoved only because it is the same on both plans or is a feed line`);
   }
-  for (const id of ["uw.day", "uw.min"]) eq(free[id].cap, paid[id].cap, `${id} follows the vendor plan, not the Workers plan`);
+  for (const id of ["uw.day", "uw.min"]) eq(free[id].cap, paid[id].cap, `${id} follows the feed plan, not the Workers plan`);
 
   for (const id of P.RESOURCE_IDS) {
     same(free[id].downgrade, paid[id].downgrade, `${id}: the downgrade column does not depend on the active plan`);
@@ -199,7 +199,7 @@ const cellsOf = (row) => (row.plans ? Object.entries(row.plans) : [["free", row.
   eq(P.lines({ FLOWS_PLAN_WORKERS: "free", FLOWS_AI_USD_DAY: "1.5" })["ai.usd"].cap, null, "and on Free there is no dollar line to set");
 
   const day = (e) => P.lines(e)["uw.day"];
-  eq(day({}).cap, 60000, "an unread vendor plan with no owner line runs at the 60,000 working line");
+  eq(day({}).cap, 60000, "an unread feed plan with no owner line runs at the 60,000 working line");
   eq(day({}).capFrom, "advisory", "and says it is advisory");
   eq(day({}).planCap, 80000, "while the table's strictest documented day stays 80,000");
   eq(day({ FLOWS_UW_PLAN: "startup" }).cap, 80000, "Startup is 80,000");
@@ -223,11 +223,11 @@ const cellsOf = (row) => (row.plans ? Object.entries(row.plans) : [["free", row.
   for (const plan of P.UW_PLANS) {
     for (const id of ["uw.day", "uw.min"]) {
       const l = P.lines({ FLOWS_UW_PLAN: plan })[id];
-      ok(Number.isInteger(l.cap) && l.cap > 0, `${id} on ${plan} resolves to a finite line (${l.cap}), so no governor or budget reads an unlimited vendor`);
+      ok(Number.isInteger(l.cap) && l.cap > 0, `${id} on ${plan} resolves to a finite line (${l.cap}), so no governor or budget reads an unlimited feed`);
     }
   }
   eq(P.lines({})["uw.min"].cap, 500, "and an unread plan 500");
-  same(P.lines({ FLOWS_UW_PLAN: "startup-annual" })["uw.min"].downgrade, P.lines({})["uw.min"].design, "the vendor downgrade column is the strictest value: the unread plan");
+  same(P.lines({ FLOWS_UW_PLAN: "startup-annual" })["uw.min"].downgrade, P.lines({})["uw.min"].design, "the feed downgrade column is the strictest value: the unread plan");
 }
 
 {
@@ -279,19 +279,19 @@ const cellsOf = (row) => (row.plans ? Object.entries(row.plans) : [["free", row.
   const files = ["worker.js", "wrangler.toml", ...walk("shared"), ...walk("scripts"), ...walk("assets/js"), ...walk(".github")];
   const named = files.filter((f) => /FLOWS_PLAN_WORKERS|FLOWS_UW_PLAN/.test(read(f)));
   same(named.filter((f) => /\.m?js$/.test(f)), ["shared/flows-plan-facts.js"], "ONE PLACE: no other source file reads either plan variable");
-  same(named.filter((f) => !/\.m?js$/.test(f)).sort(), [".github/workflows/flows-pipeline.yml", "wrangler.toml"], "and two configuration files set the vendor plan: the Worker's and the nightly's");
+  same(named.filter((f) => !/\.m?js$/.test(f)).sort(), [".github/workflows/flows-pipeline.yml", "wrangler.toml"], "and two configuration files set the feed plan: the Worker's and the nightly's");
   const agents = read("AGENTS.md");
   ok(agents.includes("100,000 rows written and 5,000,000 rows read"), "AGENTS.md states the D1 Free caps");
   eq(P.lines({ FLOWS_PLAN_WORKERS: "free" })["d1.write"].cap, 100_000, "which are the Free lines here");
   eq(P.lines({ FLOWS_PLAN_WORKERS: "free" })["d1.read"].cap, 5_000_000, "both of them");
   ok(P.UW_PLANS.includes(P.UW_PLAN_DEFAULT) && P.WORKERS_PLANS.includes(P.WORKERS_PLAN_DEFAULT), "the defaults are members of their sets");
-  ok(RT_LIMITS.callsPerMinute <= P.lines({})["uw.min"].cap, "the rail's default per-minute ceiling is inside the strictest vendor minute line");
+  ok(RT_LIMITS.callsPerMinute <= P.lines({})["uw.min"].cap, "the rail's default per-minute ceiling is inside the strictest feed minute line");
 }
 
 {
   const d = P.SOURCES["uw.dashboard"];
   same([d.kind, d.via, d.readOn], ["owner", "observed", "2026-10-19"], "THE ADVANCED CELLS CITE THE OWNER'S DASHBOARD READBACK of 2026-10-19");
-  ok(/screenshot of the vendor API dashboard/.test(d.page), "and say how it was read");
+  ok(/screenshot of the feed API dashboard/.test(d.page), "and say how it was read");
   for (const q of ["API Advanced", "Daily requests included 100M", "unlimited requests per day", "Window resets 8:00pm ET", "Lookback window 2 years", "Websockets Included"]) {
     ok(d.quotes.includes(q), `the readback quotes "${q}"`);
   }
@@ -302,11 +302,11 @@ const cellsOf = (row) => (row.plans ? Object.entries(row.plans) : [["free", row.
   const advanced = P.facts({ FLOWS_UW_PLAN: "advanced" });
   eq(advanced["uw.lookback"].cap, 730, "two years of lookback, in days");
   eq(advanced["uw.conc"].cap, null, "no concurrency line is stated, so none is claimed");
-  eq(advanced["uw.reset"].cap, 1200, "the vendor's daily window resets at 20:00 ET, minute 1,200 of the Eastern day");
+  eq(advanced["uw.reset"].cap, 1200, "the feed's daily window resets at 20:00 ET, minute 1,200 of the Eastern day");
   eq(advanced["uw.reset"].kind, "clock", "a clock fact, not a cap");
   same(P.vendorDay({ FLOWS_UW_PLAN: "advanced" }), { basis: "stated", resetMinuteEt: 1200, plan: "advanced", source: "uw.dashboard", via: "observed", readOn: "2026-10-19" },
     "vendorDay names the stated boundary with its source and date");
-  eq(P.vendorDay({}).basis, "stated", "an unread plan uses the vendor's stated window too");
+  eq(P.vendorDay({}).basis, "stated", "an unread plan uses the feed's stated window too");
   same(P.vendorDay({ FLOWS_UW_PLAN: "startup" }), { basis: "assumed", resetMinuteEt: null, plan: "startup", source: "uw.tier", via: "page", readOn: "2026-10-11" },
     "a plan whose window nobody has read says the boundary is assumed");
   ok(Object.isFrozen(P.vendorDay({})), "and is frozen");
@@ -322,7 +322,7 @@ const cellsOf = (row) => (row.plans ? Object.entries(row.plans) : [["free", row.
   same([plan.uw, plan.uwRecognised, plan.uwExplicit], ["advanced", true, true], "which the table recognises as an explicit plan");
   const wf = read(".github/workflows/flows-pipeline.yml");
   const w = /^ {10}FLOWS_UW_PLAN: (\S+)$/m.exec(wf);
-  ok(w, "the nightly's build step sets the vendor plan in its env");
+  ok(w, "the nightly's build step sets the feed plan in its env");
   eq(w[1], m[1], "to the same plan as the Worker, so the deepening governor and the Status page read one table");
   const dry = /- name: Verify the pipeline runs against fixtures\n[\s\S]*?run: node scripts\/flows-pipeline\.mjs --dry-run/.exec(wf);
   ok(dry && !/FLOWS_UW_PLAN/.test(dry[0]), "the dry run is left on the unread plan, so the golden emit does not move with the plan");
@@ -333,4 +333,4 @@ const cellsOf = (row) => (row.plans ? Object.entries(row.plans) : [["free", row.
 
 function near(a, b, tol, m) { assert.ok(Math.abs(a - b) <= tol, `${m} (got ${a}, want ${b})`); checks++; }
 
-console.log(`✓ flows-plan-facts: ${checks} assertions — every cap per Workers plan and per vendor plan with its source page and the date read, snippet and recall marks on the figures not yet read from an official page, unknown resolving to the minimum of each vendor row, Paid as the default and a misspelt plan the strict one, the downgrade and design columns, money lines priced beyond the Paid allowance, the AI dollar line equal to the enforced neuron cap priced, the vendor day as the one hard line with owner and advisory lines, the API Advanced cells from the owner's dashboard readback with the unread minute line held to the 500 working line and the vendor's 20:00 ET window as a clock fact, the plan recorded in wrangler.toml and the nightly alike, the Paid renewal monitor, a frozen table and one place that reads either plan variable`);
+console.log(`✓ flows-plan-facts: ${checks} assertions — every cap per Workers plan and per feed plan with its source page and the date read, snippet and recall marks on the figures not yet read from an official page, unknown resolving to the minimum of each feed row, Paid as the default and a misspelt plan the strict one, the downgrade and design columns, money lines priced beyond the Paid allowance, the AI dollar line equal to the enforced neuron cap priced, the feed day as the one hard line with owner and advisory lines, the API Advanced cells from the owner's dashboard readback with the unread minute line held to the 500 working line and the feed's 20:00 ET window as a clock fact, the plan recorded in wrangler.toml and the nightly alike, the Paid renewal monitor, a frozen table and one place that reads either plan variable`);

@@ -92,7 +92,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
   const a = atr14(ascending);
   const d = atr14(descending);
-  near(d, a, 1e-9, "THE FIX: ATR is identical whichever order the vendor returns");
+  near(d, a, 1e-9, "THE FIX: ATR is identical whichever order the feed returns");
   ok(a > 1, `the recent volatile stretch dominates the ATR (${a.toFixed(2)})`);
 
   const naive = (() => {
@@ -125,7 +125,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(one[0].volume === 2341823 && one[1].volume === 1677636,
      "and the bar kept is the fullest revision, not the first or the last by position");
   ok(candlesAscending(revised.slice().reverse())[0].volume === 2341823,
-     "whichever order the vendor returned the revisions in");
+     "whichever order the feed returned the revisions in");
 
   ok(atr14([]) === 0, "no candles yields no ATR");
   ok(atr14(ascending.slice(0, 5)) === 0, "too few candles yields no ATR rather than a guess");
@@ -537,7 +537,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     call_volume: 1, put_volume: 1, total_open_interest: 10,
   });
   ok(Math.abs(tilt("13.52369891956068210400").ivRank - 0.1352369891956068) < 1e-12,
-     "the vendor's own example value reads as a fraction of its year");
+     "the feed's own example value reads as a fraction of its year");
   ok(Math.abs(tilt("88.9").ivRank - 0.889) < 1e-12, "and so does a high percentile");
   ok(tilt("100").ivRank === 1, "the top of the range is exactly one");
   ok(tilt("0").ivRank === 0, "and the bottom exactly zero");
@@ -1138,7 +1138,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
        500000, "a quoted name publishes call premium minus put premium");
 
     eq(row(withScreener({})).netPrem, null,
-       "and a name the vendor quoted NEITHER leg for publishes null, never a balanced zero");
+       "and a name the feed quoted NEITHER leg for publishes null, never a balanced zero");
 
     eq(row(withScreener({ net_call_premium: "250000", net_put_premium: "250000" })).netPrem, 0,
        "while two legs that genuinely cancel still publish zero, which is a measurement");
@@ -1151,7 +1151,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(rows[0].w52, 0.42, "and the watch row publishes the SAME 52-week position, not a second one");
 
   eq(rows[0].surpriseTilt, 1.235, "surpriseTilt is finally published, rounded to a thousandth");
-  eq(rows[0].relVolume, 2.72, "relative volume at the two decimals the vendor quotes");
+  eq(rows[0].relVolume, 2.72, "relative volume at the two decimals the feed quotes");
   eq(rows[0].putCallRatio, 0.877, "and the put/call ratio at three");
 
   const b = rows.find((r) => r.t === "B");
@@ -1220,7 +1220,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     return Math.max(...xs) - Math.min(...xs);
   };
 
-  eq(SECTOR_ETFS.length, 11, "eleven GICS sectors, eleven vendor tickers");
+  eq(SECTOR_ETFS.length, 11, "eleven GICS sectors, eleven feed tickers");
   eq(SECTOR_ETFS.map((s) => s.etf).join(" "),
      "XLB XLC XLE XLF XLI XLK XLP XLRE XLU XLV XLY",
      "the standard SPDR sector ETFs, in one named constant");
@@ -1313,7 +1313,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const by = new Map(rows.map((r) => [r.etf, r]));
 
   eq(rows.length, 11,
-     "ALL ELEVEN SECTORS ARE ALWAYS PRESENT — a panel must not quietly shrink when the vendor stops answering");
+     "ALL ELEVEN SECTORS ARE ALWAYS PRESENT — a panel must not quietly shrink when the feed stops answering");
   eq(rows.map((r) => r.etf).join(" "), SECTOR_ETFS.map((s) => s.etf).join(" "),
      "in the constant's order, so a renderer can index them");
 
@@ -1429,9 +1429,9 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(m.priced, rows.length - 1, "which is published too");
 
   const up1 = m.risers.find((r) => r.t === "UP1");
-  eq(up1.relVolume, 3.2, "relative volume rides along at the two decimals the vendor quotes");
+  eq(up1.relVolume, 3.2, "relative volume rides along at the two decimals the feed quotes");
   eq(up1.surpriseTilt, 0.51, "so does surpriseTilt, at three");
-  eq(up1.sector, "Technology", "and the vendor's own sector string, verbatim");
+  eq(up1.sector, "Technology", "and the feed's own sector string, verbatim");
   eq(moverRow(mk("Y", { sector: null }), {}).sector, null, "an absent sector is null, not an empty string");
   eq(moverRow(mk("Y"), {}).relVolume, null, "a name with no tilt row reports null rather than 0x volume");
   eq(moverRow(mk("Y"), null).surpriseTilt, null, "and does not throw when there is no tilt at all");
@@ -1516,10 +1516,10 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(paged && Number(paged[3]) >= 1,
      `at least one full first page was read to the end of the book (${paged ? paged[3] : 0} complete)`);
   ok(paged && Number(paged[5]) >= 1,
-     "and a vendor that answers a later page with the first one is caught by the repeats, not " +
+     "and a feed that answers a later page with the first one is caught by the repeats, not " +
      "counted as a complete book");
   ok(/page=1 returned the first page again/.test(runLog),
-     "a vendor that counts pages from one (page=1 repeating the first page) is detected and " +
+     "a feed that counts pages from one (page=1 repeating the first page) is detected and " +
      "read from page 2 on, rather than taken for one that ignores the parameter");
   ok(!/\d+ of 2 contracts showed/.test(runLog) && /oi basis: \d+ of \d+ contracts across \d+ chains|oi basis: \d+ contracts? across/.test(runLog),
      "the open-interest basis is judged across every chain, not on one chain's pair");
@@ -1585,7 +1585,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
       "none of them is a board or cross-section name"); checks++;
     assert.deepEqual([...byDepth.fund].sort(), [...FOCUS_FUNDS].sort(),
       "the fund lane writes one dossier per focus fund through the same index-dossier path, as depth " +
-      "fund — never through the market-cap coverage path, whose vendor caps are garbage for funds"); checks++;
+      "fund — never through the market-cap coverage path, whose feed caps are garbage for funds"); checks++;
     for (const t of [...byDepth.index, ...byDepth.fund]) {
       ok(!claimed.has(t), `${t} is an index or fund dossier and no board row advertises it`);
     }
@@ -1623,7 +1623,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
       }
       const paas = JSON.parse(fs.readFileSync(`${prefix}-card-PAAS.json`, "utf8"));
       ok(paas.depth === "focus" || paas.depth === "board",
-         "PAAS, whose fixture carries a vendor market cap below the floor (the TECK failure), is still " +
+         "PAAS, whose fixture carries a feed market cap below the floor (the TECK failure), is still " +
          "fetched by ticker and built deep: a focus name skips only the market-cap floor");
     }
     {
@@ -2144,7 +2144,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   }
 
   const pm = card.panels.pricedMove;
-  ok("atmVol" in pm, "the priced-move panel finally publishes the vendor's own at-the-money vol");
+  ok("atmVol" in pm, "the priced-move panel finally publishes the feed's own at-the-money vol");
   ok(Array.isArray(pm.ivStrip) && pm.ivStrip.length === 4,
      "and a four-point history of this name's 30-day implied vol, at zero extra calls");
   assert.deepEqual(pm.ivStrip.map((p) => p.h), ["−1m", "−1w", "−1d", "now"],
@@ -2299,7 +2299,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
   {
     const wide = fakeChain("AAPL", 200, 4242, { wide: true });
-    eq(wide.length, 500, "the wide fixture is cut at the vendor's page size, not merely large");
+    eq(wide.length, 500, "the wide fixture is cut at the feed's page size, not merely large");
 
     const seq = wide.map((r) => {
       const m = /^AAPL(\d{6})[CP]/.exec(r.option_symbol);
@@ -2311,7 +2311,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     const sorted = seq.every((v, i) => i === 0 || seq[i - 1] <= v);
     ok(!sorted,
        "and the page is NOT in expiry order — a fixture cut from a sorted book would let " +
-       "downstream code identify 'nearest' by position, which the vendor documents nowhere");
+       "downstream code identify 'nearest' by position, which the feed documents nowhere");
 
     const narrow = fakeChain("AAPL", 200, 4242);
     ok(narrow.length < 500,
@@ -3267,7 +3267,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
 {
   const row = (etf, over) => ({
-    ticker: etf, full_name: "Whatever the vendor calls it",
+    ticker: etf, full_name: "Whatever the feed calls it",
     bullish_premium: "1000", bearish_premium: "1000",
     last: "100", prev_close: "80", volume: 1234,
     call_premium: "600", put_premium: "400", call_volume: 7, put_volume: 9,
@@ -3349,7 +3349,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     const oneSided = screenerTilt({ ...base, bearish_premium: 2e6 });
     eq(oneSided.premiumTilt, null,
        "a bearish premium with no bullish side on the wire is no tilt — it was -1, a full bearish " +
-       "vote built from a field the vendor did not send");
+       "vote built from a field the feed did not send");
     eq(screenerTilt({ ...base, bullish_premium: 3e6, bearish_premium: 2e6 }).premiumTilt, 0.2,
        "while both sides present still measure (3 - 2) / 5");
     eq(screenerTilt({ ...base, bullish_premium: "   ", bearish_premium: 2e6 }).premiumTilt, null,
@@ -3381,7 +3381,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   {
     const partial = sectorLean({ data: [row("XLK"), row("SPY"), row("XLV")] });
     eq(partial.length, SECTOR_ETFS.length,
-       "all eleven rows come back however few the vendor sent — a panel that quietly shrinks " +
+       "all eleven rows come back however few the feed sent — a panel that quietly shrinks " +
        "from eleven bars to nine is how an outage goes unnoticed for a week");
     eq(partial.filter((s) => s.read === "ok").length, 2, "the two that were sent are measured");
     const missing = partial.find((s) => s.etf === "XLE");
@@ -3443,7 +3443,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     eq(short.capped, false, "a short page is not capped");
     eq(short.shed, 0, "and sheds nothing");
     eq(short.atVendorLimit, false,
-       "and is NOT at the vendor's ceiling, so its count really is a measurement of the tape " +
+       "and is NOT at the feed's ceiling, so its count really is a measurement of the tape " +
        "rather than of the request");
   }
 
@@ -3453,13 +3453,13 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     const s = shapeNews({ data: oldestFirst }, { cap: 30, requested: 100 });
     const ms = s.rows.map((r) => r.createdAtMs);
     ok(ms.every((v, i) => i === 0 || ms[i - 1] >= v),
-       "the published rows are newest-first whatever order the vendor sent");
+       "the published rows are newest-first whatever order the feed sent");
     eq(s.rows[0].headline, "Headline 0",
        "and the NEWEST row survives a cap applied to an oldest-first wire — slicing before " +
        "the sort would have published the thirty OLDEST headlines, in newest-first order, " +
        "under a `newest` label that was true of none of them");
     eq(s.rows[29].headline, "Headline 29",
-       "and the thirtieth published row is the thirtieth newest, not the thirtieth the vendor " +
+       "and the thirtieth published row is the thirtieth newest, not the thirtieth the feed " +
        "happened to send");
     eq(s.ordered, true, "the payload states that it ordered");
     eq(s.orderedBy, "createdAt", "and names the field");
@@ -3469,7 +3469,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   {
     const s = shapeNews(wire(3), { cap: 60, requested: 100 });
     eq(s.rows[0].createdAt, "2026-08-21T20:00:00.000Z",
-       "the vendor's own timestamp is carried as the STRING they sent — reformatting it would " +
+       "the feed's own timestamp is carried as the STRING they sent — reformatting it would " +
        "make the payload's timestamp ours, and the whole point of the field is that it is theirs");
     eq(s.rows[0].createdAtMs, Date.parse("2026-08-21T20:00:00.000Z"),
        "our parse of it rides beside it under a name that says it is a parse");
@@ -3545,9 +3545,9 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   {
     const s = shapeNews(wire(3, (i) => (i === 1 ? { is_major: undefined } : {})),
       { cap: 60, requested: 100 });
-    eq(s.rows[0].major, false, "a flag the vendor sent as false is false");
+    eq(s.rows[0].major, false, "a flag the feed sent as false is false");
     eq(s.rows[1].major, null,
-       "and a flag the vendor omitted is NULL — \"this was not flagged major\" and \"we do not " +
+       "and a flag the feed omitted is NULL — \"this was not flagged major\" and \"we do not " +
        "know whether it was\" are different sentences");
   }
 }
@@ -3573,18 +3573,18 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(days[days.length - 2], SESSION, "and its previous bar is the 2026-09-21 session the cards were stamped with");
 
   const cut = sessionCandles(vendor, SESSION);
-  eq(cut.length, vendor.length - 1, "THE CUT: a vendor that ignores end_date loses exactly the bar past the session");
+  eq(cut.length, vendor.length - 1, "THE CUT: a feed that ignores end_date loses exactly the bar past the session");
   ok(cut.every((c) => c.start_time.slice(0, 10) <= SESSION), "and nothing dated after the session survives it");
   eq(sessionCandles(vendor, null).length, vendor.length,
      "with no session date there is nothing to cut against, so nothing is invented");
   assert.deepEqual(candleCut(vendor, SESSION), { past: 1, latest: "2026-09-22" },
-    "the cut reports what it removed, so the run can log how often the vendor ignored end_date"); checks++;
+    "the cut reports what it removed, so the run can log how often the feed ignored end_date"); checks++;
 
   const judged = judgeEndDate(vendor, SESSION);
   eq(judged.honoured, false, "A FAKE VENDOR THAT IGNORES end_date IS CAUGHT: max(candleDate) > sessionDate");
   eq(judged.latest, "2026-09-22", "and the offending date is named");
   eq(judged.send, true, "while the parameter is still sent — dropping it would only remove the request, not the bar");
-  eq(judgeEndDate(cut, SESSION).honoured, true, "a vendor that honours it is reported as honouring it");
+  eq(judgeEndDate(cut, SESSION).honoured, true, "a feed that honours it is reported as honouring it");
   eq(judgeEndDate([], SESSION).send, false, "an empty answer drops the parameter, as before");
 
   const calls = [];
@@ -3600,7 +3600,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   };
   const dating = await verifyDating(SESSION, { read: fakeUw });
   eq(dating.endDateHonoured, false,
-     "verifyDating REPORTS the vendor ignoring end_date rather than deciding with it — " +
+     "verifyDating REPORTS the feed ignoring end_date rather than deciding with it — " +
      "the 17:17 run printed end_date=true while every card carried 2026-09-22");
   eq(dating.endDateLatest, "2026-09-22", "and says which bar gave it away");
   eq(dating.endDate, true, "and keeps sending the parameter");
@@ -3702,7 +3702,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
      "main() resolves the session, then consults the guard and THROWS on a refusal, before the " +
      "first section runs");
   ok(firstRead !== -1 && firstRead < universe.indexOf("harvestScreener(") && firstRead < universe.indexOf("uw("),
-     "and the first section's first vendor read is the dating probe, before the harvest and the sweep");
+     "and the first section's first feed read is the dating probe, before the harvest and the sweep");
   ok(/allow: process\.env\.FLOWS_ALLOW_INTRADAY === "1"/.test(main),
      "and the override is the FLOWS_ALLOW_INTRADAY=1 the workflow plumbs from allow_intraday");
 
@@ -4355,7 +4355,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const dropped = await sweepScreenerBand([66.5e9, 86.5e9],
     async (lo, hi) => (reads++ === 0 ? whole(lo, hi) : []));
   ok(dropped.rows.length >= SCREENER_PAGE_ROWS,
-     `A SPLIT NEVER SHRINKS THE BAND: children that come back empty (a read the vendor ` +
+     `A SPLIT NEVER SHRINKS THE BAND: children that come back empty (a read the feed ` +
      `refused, caught to []) leave the parent's own ${SCREENER_PAGE_ROWS} rows in the ` +
      `universe (${dropped.rows.length}) rather than fewer than the unsplit read found`);
   eq(new Set(split.rows.map((r) => r.ticker)).size, split.rows.length,
@@ -4372,7 +4372,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(holdersRefusal(prior(refused.reason, "2026-09-25"), "2026-09-28"), null,
      "and after seven days the route is asked again, so a plan change is noticed within a week");
   eq(holdersRefusal(prior("/api/politician-portfolios/holders/B -> HTTP 503", "2026-09-21"), "2026-09-22"), null,
-     "a 5xx is the vendor's weather, not the plan, and is retried every run");
+     "a 5xx is the feed's weather, not the plan, and is retried every run");
   ok(holdersRefusal(prior("/api/politician-portfolios/holders/B -> HTTP 429", "2026-09-21"), "2026-09-22") === null &&
      holdersRefusal(prior("/api/politician-portfolios/holders/B -> HTTP 408", "2026-09-21"), "2026-09-22") === null,
      "and so are a 429 and a 408, the two 4xx answers that describe the moment rather than the plan");
@@ -4469,9 +4469,9 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   try {
     const skipped = await run({});
     eq(skipped.status, 0, `the same-session run exits clean (${skipped.out.slice(-300)})`);
-    ok(new RegExp(`session date: ${SESSION}`).test(skipped.out), `and resolved ${SESSION} from the vendor's SPY bars`);
+    ok(new RegExp(`session date: ${SESSION}`).test(skipped.out), `and resolved ${SESSION} from the feed's SPY bars`);
     ok(/session gate: archived — scores:\S+ is already archived/.test(skipped.out),
-       "it found the session archived and said so before spending a vendor call on the universe");
+       "it found the session archived and said so before spending a feed call on the universe");
     const posted = writes.filter((w) => w.method === "POST").map((w) => w.key).sort();
     assert.deepEqual(posted, ["news", "pulse", "sector:premium"],
       "A SAME-SESSION RUN SKIPS THE RANKED LEG END TO END: it wrote news, pulse and " +
@@ -4518,13 +4518,13 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 {
   const src = nightlySource();
   eq(IV_RANK_PARAMS.timespan, "1y",
-     "the implied-volatility history is asked for by timespan, the parameter the vendor documents, and for a " +
+     "the implied-volatility history is asked for by timespan, the parameter the feed documents, and for a " +
      "year of it: the vol-of-vol and the AR(1) half-life read that year at no extra call");
-  ok(!/pathFor\("iv-rank", \{ ticker \}\),\s*\{\s*limit/.test(src), "and never with the `limit` the vendor ignores");
+  ok(!/pathFor\("iv-rank", \{ ticker \}\),\s*\{\s*limit/.test(src), "and never with the `limit` the feed ignores");
   ok(/pathFor\("iv-rank", \{ ticker \}\), \{ \.\.\.IV_RANK_PARAMS, \.\.\.onSession \}\)/.test(src),
      "the live call reads the fixture's parameter object, with the session date added so no row past the session is asked for");
   eq(fakeIvRank("ABC", 50).length, 5,
-     "the fixture answers an undated, unparameterised call the way the vendor does: five rows");
+     "the fixture answers an undated, unparameterised call the way the feed does: five rows");
   ok(fakeIvRank("ABC", 50, IV_RANK_PARAMS).length >= 250, "and a one-year timespan with a year's sessions, as the live probe returned 251");
   ok(/pathFor\("term-structure", \{ ticker \}\), \{ \.\.\.onSession \}\)/.test(src) &&
      /const onSession = ARCHIVE_DATE_RE\.test\(String\(sessionDate \|\| ""\)\) \? \{ date: sessionDate \} : \{\}/.test(src),
@@ -4555,7 +4555,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const live = vannaProbeSample("AAA", { rows: fakeLadderChain(fakeOiLadder("AAA", 45, 0.3), "2026-09-04"),
     expiry: "2026-09-04", sessionDate: "2026-08-24", expiries: enriched[0].raw.expiries, spot: 45 });
   ok(live && Math.abs(live.vendor / live.model - 1) < 1e-9,
-     `a chain built from the same open-interest ladder reproduces the vendor's call vanna (${live && (live.vendor / live.model)})`);
+     `a chain built from the same open-interest ladder reproduces the feed's call vanna (${live && (live.vendor / live.model)})`);
   eq(live && live.spot, 45, "and the sample carries its spot, which is what tells a share vanna from a dollars-per-1% one");
   const meta = boardVariationMeta({ ...run, vannaScale: { status: "agree", ratio: 1, n: 5 } });
   ok(meta.codes === VARIATION_CODES && meta.kc.n === run.kc.n, "the board's variation block carries the code table and the run's probes");
@@ -4596,7 +4596,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(compute.names > 0 && compute.names <= cardCount, "and with the Oracle registered it computes the carded names the run built");
   ok(cardCount > 0 && /compute: \d+ of \d+ deep name\(s\), 1 job\(s\)/.test(log), "its log line counts the carded names it was offered");
   ok(meta.stages.every((r) => Number.isInteger(r.cpu) && r.cpu >= 0), "every stage record carries whole-number CPU milliseconds");
-  ok(JSON.stringify(meta.stages).length < 4000, `and the records add under 4 KB to meta, the Vol desk and its audit, the funds stage, the positioning stages, the Fire & Forget stage and the three macro stages being the records added since 3 KiB (${JSON.stringify(meta.stages).length} bytes)`);
+  ok(JSON.stringify(meta.stages).length < 4100, `and the records add under 4.1 KB to meta, the Vol desk and its audit, the funds stage, the positioning stages, the Fire & Forget stage, the event-risk stage and the three macro stages being the records added since 3 KiB (${JSON.stringify(meta.stages).length} bytes)`);
   same(meta.health, { failures: 0, warnings: 0, first: [] }, "meta carries the gate's verdict: a clean dry run has none");
   const wrote = [...log.matchAll(/^ {2}\[dry-run\] (\S+): .*, \d+ bytes$/gm)].map((m) => m[1]);
   ok(wrote.length > 400, `the dry run printed ${wrote.length} writes`);
@@ -4689,7 +4689,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   const deepLiquid = { ticker: "DEEP", close: "20", avg30_volume: "5000000" };
   eq(screenerDollarVolume(thin), 2e7, "the pre-check reads the screener's 30-day average volume times the close");
   ok(!gatedWorthEnriching(thin), "a gated name whose $20M average dollar volume is far under the $50M card floor is not enriched: " +
-     "five vendor calls for a card the floor would refuse");
+     "five feed calls for a card the floor would refuse");
   ok(gatedWorthEnriching(deepLiquid), "a gated name that clears it is enriched and carded");
   ok(gatedWorthEnriching({ ticker: "EDGE", close: "10", avg30_volume: "4500000" }),
      `a name within the ${GATED_LIQUIDITY_MARGIN} margin of the floor is still enriched: the candle median decides, not the proxy`);
@@ -5284,7 +5284,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     }
     r.finish();
     ok(r.records().filter((y) => y.why).every((y) => y.why.length <= WHY_CAP && !/\s{2}/.test(y.why)), "a failure reason is one line and capped");
-    ok(JSON.stringify(r.records()).length < 7500, `even with every isolated stage failed the records stay under 7.5 KB, the funds stage, the Vol desk and its audit, the positioning stages, the Fire & Forget stage and the three macro stages being the records added since 6 KB (${JSON.stringify(r.records()).length})`);
+    ok(JSON.stringify(r.records()).length < 7800, `even with every isolated stage failed the records stay under 7.8 KB, the funds stage, the Vol desk and its audit, the positioning stages, the Fire & Forget stage, the event-risk stage and the three macro stages being the records added since 6 KB (${JSON.stringify(r.records()).length})`);
     let n = 0;
     const bigClock = () => (n += 98765);
     const wide = createStageRunner({ clock: bigClock, calls: () => n / 30 });
@@ -5324,7 +5324,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
   const src = nightlySource();
   const mod = slice(src, "@@ source scripts/flows-nightly/sections/compute.mjs @@", "@@ source scripts/flows-nightly/sections/context.mjs @@");
-  ok(!/from "\.\.\/(vendor|store|archive)\.mjs"/.test(mod), "compute: the module imports no vendor client, store or archive, so it can neither call the vendor nor publish");
+  ok(!/from "\.\.\/(vendor|store|archive)\.mjs"/.test(mod), "compute: the module imports no feed client, store or archive, so it can neither call the feed nor publish");
   eq(count(mod, /\buw\(|\bpublish\(|fetch\(/g), 0, "compute: and makes no request");
   const exec = nightlyExecution();
   ok(exec.indexOf('stages.step("card-x")') < exec.indexOf('stages.run("compute"') && exec.indexOf('stages.run("compute"') < exec.indexOf('stages.run("roster"'),
@@ -5619,7 +5619,7 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     process.env.FLOWS_INGEST_URL = "http://127.0.0.1:9/api/flows/ingest";
     same(await refused("card:SYN001", { v: 2 }), [null, 1], "and a loopback ingest takes a fixture, as every stub of this suite relies on");
     ok(typeof targetRefusal({ FLOWS_UW_BASE_URL: "http://127.0.0.1:9", FLOWS_INGEST_URL: "https://anilkaya.org/api/flows/ingest" }) === "string",
-       "a loopback vendor with the production ingest is refused before the first vendor call");
+       "a loopback feed with the production ingest is refused before the first feed call");
     ok(publishRefusal("card:SYN001", "{}", { env: { FLOWS_INGEST_URL: "https://x.test/y" }, taint: null }) === null, "a .test ingest is a test host too");
   } finally {
     console.log = quietLog;
@@ -5640,4 +5640,4 @@ const same = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   ok(leaked && leaked.fixtureLeak === true, "a fixture leak in an isolated stage rethrows and ends the run, where any other failure is recorded and survived");
 }
 
-console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, the truncated-chain probe's three distinct verdicts, the board's memory refusing a prior board that turns out to be this run's own session, a corpus proven to REACH the change layer's branches rather than merely to satisfy assertions written around them, and a market-wide join whose published coverage is checked against the cards it was measured over rather than against itself, the sector OPTIONS lean proven to be a different quantity from the sector momentum beside it — its ratio comparable across baskets three orders of magnitude apart where the dollar difference is not, its measured zero visible in dollars and undefined as a ratio, a blank vendor string refused before it can become a confident zero, and its row vocabulary disjoint from TRIX's — and the news tape's four counts, its own ordering applied before the cap so the rows kept are the newest and not the first, and an undated row published, counted on both sides of the cap, and never given a manufactured timestamp; and the focus-era coverage — gated names carded without a score, focus names built deep whatever their rank, fund dossiers, a roster that is also the retire ledger, and a call model that reproduces the measured nightly`);
+console.log(`✓ flows-pipeline: ${checks} assertions — live publish path, candle-order invariance, issuer collapse, dead-band partitioning, the dated archive key and its bounded prune, the watch board's ranking and vocabulary, multiplicative quality gating, direction monotonicity, packed sparklines, Eastern session resolution, liquidity floor, sector TRIX and the fixed-clamp scaling that keeps a flat day flat, the movers band's zero-call guarantee and its unranked counts, the rate limiter's floor actually being a floor, the truncated-chain probe's three distinct verdicts, the board's memory refusing a prior board that turns out to be this run's own session, a corpus proven to REACH the change layer's branches rather than merely to satisfy assertions written around them, and a market-wide join whose published coverage is checked against the cards it was measured over rather than against itself, the sector OPTIONS lean proven to be a different quantity from the sector momentum beside it — its ratio comparable across baskets three orders of magnitude apart where the dollar difference is not, its measured zero visible in dollars and undefined as a ratio, a blank feed string refused before it can become a confident zero, and its row vocabulary disjoint from TRIX's — and the news tape's four counts, its own ordering applied before the cap so the rows kept are the newest and not the first, and an undated row published, counted on both sides of the cap, and never given a manufactured timestamp; and the focus-era coverage — gated names carded without a score, focus names built deep whatever their rank, fund dossiers, a roster that is also the retire ledger, and a call model that reproduces the measured nightly`);

@@ -134,7 +134,7 @@ const DAYS = { edt: "2026-09-22", est: "2026-11-24", early: "2026-11-20", holida
     const w = world({ day, feed: lagUntil(R) });
     await w.runTo(16 * 60 + 11);
     const ticks = w.trail;
-    const label = R === null ? "a vendor that never recovers" : "a vendor that recovers at " + hhmm(R);
+    const label = R === null ? "a feed that never recovers" : "a feed that recovers at " + hhmm(R);
     const closedAt = ticks.find((t) => t.trading === 0);
     if (closedAt) ok(closedAt.min >= 10 * 60 + 1, `${label}: the day is never closed before two probes fifteen minutes apart (${hhmm(closedAt.min)})`);
     const reopened = ticks.find((t) => t.trading === 1);
@@ -152,12 +152,12 @@ const DAYS = { edt: "2026-09-22", est: "2026-11-24", early: "2026-11-20", holida
       ok(!reopened && ticks.at(-1).trading === 0 && ticks.filter((t) => t.trading === 0 && t.min > closedAt.min && t.wrote).length === 0,
         `${label}: past the last re-probe the closure stands and nothing is written after the tick that closed it`);
       const late = ticks.filter((t) => t.min >= VERDICT.unscheduledUntilMin && t.min <= 16 * 60 + 11).reduce((n, t) => n + t.calls, 0);
-      eq(late, 0, `${label}: and Tier 1 asks the vendor nothing from 15:45 to the close`);
+      eq(late, 0, `${label}: and Tier 1 asks the feed nothing from 15:45 to the close`);
     }
     summary.push([R, ticks.reduce((n, t) => n + t.calls, 0)]);
   }
   const worst = Math.max(...summary.filter(([R]) => R === null || R > lastReprobe).map(([, n]) => n));
-  ok(worst <= 60, `THE COST OF A REAL CLOSURE is bounded: ${worst} vendor calls in a day (the seven ticks that make the verdict, then a probe every quarter hour to 15:45, two calls each)`);
+  ok(worst <= 60, `THE COST OF A REAL CLOSURE is bounded: ${worst} feed calls in a day (the seven ticks that make the verdict, then a probe every quarter hour to 15:45, two calls each)`);
   const reopenedWorst = Math.max(...summary.filter(([R]) => R !== null && R <= lastReprobe).map(([, n]) => n));
   ok(reopenedWorst <= 2 * 82, `and a day that reopens costs no more than an ordinary one, ${reopenedWorst} of at most ${2 * 82}`);
 }
@@ -171,7 +171,7 @@ const DAYS = { edt: "2026-09-22", est: "2026-11-24", early: "2026-11-20", holida
     await w.runTo(16 * 60 + 11);
     const reopened = w.trail.find((t) => t.trading === 1);
     ok(reopened && reopened.min - R <= 15 && w.trail.find((t) => t.min === 16 * 60 + 6).wrote,
-      `under EST the same holds: a vendor back at ${hhmm(R)} reopens the day at ${reopened ? hhmm(reopened.min) : "never"}`);
+      `under EST the same holds: a feed back at ${hhmm(R)} reopens the day at ${reopened ? hhmm(reopened.min) : "never"}`);
   }
 }
 
@@ -183,7 +183,7 @@ const DAYS = { edt: "2026-09-22", est: "2026-11-24", early: "2026-11-20", holida
   const closed = w.trail.find((t) => t.trading === 0);
   ok(closed && closed.min === 9 * 60 + 46, "A CALENDAR HOLIDAY closes at the first probe, with no agreement to wait for");
   const after = w.trail.filter((t) => t.min >= 11 * 60).reduce((n, t) => n + t.calls, 0);
-  eq(after, 0, "and its re-probes end at 11:00: not one vendor call after it");
+  eq(after, 0, "and its re-probes end at 11:00: not one feed call after it");
   eq(w.trail.reduce((n, t) => n + t.calls, 0), 2 * 5, "five probes in all, two calls each, as before");
   ok(w.trail.filter((t) => t.min > 9 * 60 + 46).every((t) => !t.wrote), "and nothing is written after the tick that closed it");
 }
@@ -241,7 +241,7 @@ const DAYS = { edt: "2026-09-22", est: "2026-11-24", early: "2026-11-20", holida
     }
   }
   ok(flaggedRuns > 20 && cleared > 10, `the sweep exercised the rule: ${runs} scenarios, ${flaggedRuns} marked, ${cleared} taken back`);
-  ok(worstCalls <= 2 * 82, `the worst day costs ${worstCalls} vendor calls, two per tick, all day`);
+  ok(worstCalls <= 2 * 82, `the worst day costs ${worstCalls} feed calls, two per tick, all day`);
 }
 
 {
@@ -283,7 +283,7 @@ const DAYS = { edt: "2026-09-22", est: "2026-11-24", early: "2026-11-20", holida
   const at = (m) => easternInstant(day, m);
   const shut = w.trail.find((t) => t.trading === 0);
   const back = w.trail.find((t) => t.trading === 1);
-  ok(shut && back && back.min - R <= 15, `THE LOOP AND TIER 1 TOGETHER, on a vendor that lags to ${hhmm(R)}: closed at ${hhmm(shut.min)}, reopened at ${hhmm(back.min)}`);
+  ok(shut && back && back.min - R <= 15, `THE LOOP AND TIER 1 TOGETHER, on a feed that lags to ${hhmm(R)}: closed at ${hhmm(shut.min)}, reopened at ${hhmm(back.min)}`);
   ok(passes.filter((t) => t >= at(shut.min + 1) && t < back.at).length === 0 && passes.some((t) => t > back.at) && passes.at(-1) === at(16 * 60 + 25) &&
      r.exit === "window-closed" && r.waits > 0,
     `no pass while the day was closed, passes again from the first slot after the reopening, to 16:25 (${passes.length} passes, ${r.waits} waits)`);
@@ -299,7 +299,7 @@ const DAYS = { edt: "2026-09-22", est: "2026-11-24", early: "2026-11-20", holida
     chain: async () => { throw new Error("never chain on a closed day"); } });
   ok(r.exit === "window-closed" && r.why === "not-trading" && w.now() >= easternInstant(day, VERDICT.unscheduledUntilMin - 5) &&
      w.now() < easternInstant(day, VERDICT.unscheduledUntilMin + 5) && passes.every((t) => t < easternInstant(day, 10 * 60 + 1)),
-    `A REAL UNSCHEDULED CLOSURE: the loop waits to ${hhmm(VERDICT.unscheduledUntilMin)} for a vendor that never comes back, then leaves without a pass after the verdict (${r.waits} waits)`);
+    `A REAL UNSCHEDULED CLOSURE: the loop waits to ${hhmm(VERDICT.unscheduledUntilMin)} for a feed that never comes back, then leaves without a pass after the verdict (${r.waits} waits)`);
 }
 
 {
