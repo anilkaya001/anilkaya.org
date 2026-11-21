@@ -794,8 +794,6 @@ button.ft-eng { cursor: pointer; }
   .ftg-card:is([data-fit="3"], [data-fit="4"]) .ftg-sub { display: none; }
   .ftg-card[data-fit="4"] :is(.ftg-cb, .ftg-chips) { display: none; }
 }
-.flows-body:has(#fxOracle:not([hidden])) .ft-glance[data-glance="on"] .ft-dock { padding-inline-end: 64px; }
-@media (max-width: 767.98px) { .flows-body:has(#fxOracle:not([hidden])) .ft-glance[data-glance="on"] { padding-bottom: calc(var(--sp-5) + 64px); } }
 .ftg-live, .ftg-gx { font: var(--t-footnote); font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--label-1); }
 .ftg-gx { font-weight: 600; color: var(--accent-ink); }
 .ftg-gx[data-side="short"] { color: var(--warn); }

@@ -81,7 +81,9 @@ for (const [w, h] of VIEWS) {
   const fails = await audit(t.page, `${w}x${h}`);
   eq(fails, [], `the sheet and the orb behave at ${w}x${h}`);
   const g = await geometry(t.page);
-  ok(g.orb.w === 52 && g.orb.h === 52, `the orb is 52 px at ${w}`);
+  ok(g.orb.w === 44 && g.orb.h === 44, `the orb is 44 px, the size of the bar's controls, at ${w}`);
+  const slot = await t.page.evaluate(() => { const s = document.getElementById("orcSlot").getBoundingClientRect(); return { x: s.x, y: s.y }; });
+  ok(Math.abs(slot.x - g.orb.x) < 1 && Math.abs(slot.y - g.orb.y) < 1, `the orb sits exactly on the slot the bar reserves for it at ${w}`);
   ok(g.orb.r <= g.vw && g.orb.b <= g.vh && g.orb.x >= 0, `the orb is inside the viewport at ${w}`);
   eq(g.scrollW <= g.vw, true, `no sideways scroll at ${w}`);
   const noScrollBefore = await t.page.evaluate(() => document.documentElement.scrollHeight);
@@ -392,7 +394,7 @@ async function probe(mutate) {
   eq(good, [], "the shipped build passes every probe");
   const MUTANTS = [
     ["a sheet taller than the viewport", { "flows-oracle.css": (t) => t.replace("    max-height: 70dvh;\n    padding-bottom", "    height: 140dvh;\n    max-height: none;\n    padding-bottom") }],
-    ["an orb over the tab bar", { "flows-oracle.css": (t) => t.replace("bottom: calc(var(--tab-h) + var(--safe-b) + 12px);", "bottom: 4px;") }],
+    ["an orb over the tab bar", { "flows-oracle.css": (t) => t.replace("  top: calc(var(--safe-t) + (var(--bar-h) - 44px) / 2);\n", "  bottom: 4px;\n") }],
     ["no focus trap", { "flows-oracle.js": (t) => t.replace('if (e.key === "Tab") { trapKeys(e); return; }', "") }],
     ["a colour literal", { "flows-oracle.css": (t) => t + "\n.orc-badge { color: #ff0000; }\n" }],
     ["a spring on height", { "flows-oracle.css": (t) => t.replace("transition: transform 260ms var(--orc-ease), opacity 260ms linear; }", "transition: transform 260ms var(--orc-ease), opacity 260ms linear, height 300ms linear; }") }],
