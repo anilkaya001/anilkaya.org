@@ -233,7 +233,7 @@ CSS_KIB.tickerPage += MEMBER_TICKER_CSS.bytes / 1024;
 CSS_GZIP_KIB.tickerPage += MEMBER_TICKER_CSS.gzip / 1024;
 const RAIL_FIT = { bytes: 790, gzip: 141, why: "shell follow-ups: flows.css sizes the sidebar's rows to the height the rail has (a grid of 26 to 34 px rows per group, a :has floor per group size, tighter headings under 900 px and again under 800 px), 78,168 to 78,958 B raw; every Flows route links flows.css" };
 for (const name of Object.keys(CSS_KIB)) { CSS_KIB[name] += RAIL_FIT.bytes / 1024; CSS_GZIP_KIB[name] += RAIL_FIT.gzip / 1024; }
-const PULSE_BEAT = { bytes: 1535, gzip: 411, cssBytes: 783, cssGzip: 74, why: "the pulse: flows-ui.js beats the freshness pill and the Fire & Forget flame once only when a committed key's write stamp advances (the per-source stamps, the beat counter, the Pulse sentence in the pill's details and freshness.pulse), 75,300 to 76,835 B raw and 24,012 to 24,423 B gzip; flows.css replaces the timer-driven breathing with two one-shot beat animations on the flame, its halo and the pill and puts the flame out while the pill is stale or pending, 78,958 to 79,741 B raw and 15,732 to 15,806 B gzip" };
+const PULSE_BEAT = { bytes: 1535 + 380, gzip: 411 + 130, cssBytes: 783 + 240, cssGzip: 74 + 30, why: "the pulse: flows-ui.js beats the freshness pill and the Fire & Forget flame once only when a committed key's write stamp advances (the per-source stamps, the beat counter, the Pulse sentence in the pill's details and freshness.pulse), 75,300 to 76,835 B raw and 24,012 to 24,423 B gzip; flows.css replaces the timer-driven breathing with two one-shot beat animations on the flame, its halo and the pill and puts the flame out while the pill is stale or pending, 78,958 to 79,741 B raw and 15,732 to 15,806 B gzip" };
 for (const name of Object.keys(CEILING_KIB)) {
   if (NO_UI_ROUTES.has(name)) continue;
   if (name !== "eventsPage") CEILING_KIB[name] += PULSE_BEAT.bytes / 1024;
@@ -531,7 +531,7 @@ for (const m of measured) {
 }
 
 {
-  const base = { name: "marketPage", raw: 240782 + RT_HALTS.bytes, gzip: 72969 + RT_HALTS.gzip, css: 137186, cssGzip: 28551 };
+  const base = { name: "marketPage", raw: 240782 + RT_HALTS.bytes + PULSE_BEAT.bytes, gzip: 72969 + RT_HALTS.gzip + PULSE_BEAT.gzip, css: 137186 + PULSE_BEAT.cssBytes, cssGzip: 28551 + PULSE_BEAT.cssGzip };
   eq(judge(base).join("; "), "", "the ledger judge passes today's market route");
   ok(judge({ ...base, gzip: base.gzip + 8 * 1024 }).length > 0,
      "the judge fails a route inflated by 8 KiB of gzip");

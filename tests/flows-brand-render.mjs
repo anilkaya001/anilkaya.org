@@ -72,6 +72,7 @@ const beats = async (browser, variant, pages, need, opts = {}) => {
     const UI = window.FlowsUI;
     const exp = UI.freshness.market().expected;
     const arg = { source: x.source };
+    if (x.key) arg.key = x.key;
     if (x.updatedAt !== undefined) { arg.sessionDate = exp; arg.updatedAt = x.updatedAt; }
     if (x.ff) arg.ff = UI.freshFrom({ state: x.ff.state, updatedAt: x.ff.updatedAt, staleAt: x.ff.staleAt, readAt: x.ff.readAt }, { serverNow: Date.now() });
     return UI.freshness(arg);
@@ -107,13 +108,30 @@ const beats = async (browser, variant, pages, need, opts = {}) => {
   v = await look();
   need(v.running.length === 0 && v.pulse.beats === 1 && v.beat === "a", "after the beat everything rests and no beat follows" + tag);
 
-  await call({ source: "strips", ff: { state: "fresh", updatedAt: 7000, staleAt: CLOCK0 + 864e5 } });
+  const FF = (updatedAt) => ({ state: "fresh", updatedAt, staleAt: CLOCK0 + 864e5 });
+  await call({ source: "nightly", ff: FF(100) });
+  await call({ source: "nightly", ff: FF(200) });
+  await call({ ff: FF(300) });
+  await call({ ff: FF(400) });
   v = await look();
-  need(v.pulse.beats === 1, "a heartbeat entry's first sight is not a beat" + tag);
-  await call({ source: "strips", ff: { state: "fresh", updatedAt: 8000, staleAt: CLOCK0 + 864e5 } });
+  need(v.pulse.beats === 1, "TWO STORED KEYS READ UNDER ONE HEADER SOURCE, OR UNDER NO SOURCE, ARE NOT ONE KEY ADVANCING: no beat" + tag);
+  for (let i = 1; i <= 4; i++) await call({ source: "rt:px", ff: FF(500 + i) });
   v = await look();
-  need(v.pulse.beats === 2 && v.beat === "b" && v.pulse.source === "strips", "a heartbeat entry whose write advanced beats once" + tag);
-  if (!opts.reduced) need(v.running.includes("ff-beat-b"), "the second beat restarts the flame" + tag);
+  need(v.pulse.beats === 1, "A STREAMED FRAME'S READ TIME IS NOT A WRITE: four polls of the rail fire no beat" + tag);
+  await call({ source: "reload", updatedAt: 6000 });
+  await call({ source: "k1", key: "k1", ff: FF(6100) });
+  await call({ source: "k1", key: "k1", ff: FF(6500) });
+  await call({ source: "reload", updatedAt: 6500 });
+  v = await look();
+  need(v.pulse.beats === 2 && v.pulse.source === "k1", "ONE WRITE IS ONE BEAT: the heartbeat's sight of it and the page's reload of the same write beat once, and name the key" + tag + " (" + v.pulse.beats + ", " + v.pulse.source + ")");
+  await settle();
+  await call({ source: "strips", key: "strips", ff: FF(7000) });
+  v = await look();
+  need(v.pulse.beats === 2, "a heartbeat entry's first sight is not a beat" + tag);
+  await call({ source: "strips", key: "strips", ff: FF(8000) });
+  v = await look();
+  need(v.pulse.beats === 3 && v.beat === "a" && v.pulse.source === "strips", "a heartbeat entry whose write advanced beats once" + tag);
+  if (!opts.reduced) need(v.running.includes("ff-beat-a"), "a later beat restarts the flame" + tag);
   await settle();
   const said = await page.evaluate(() => (window.FlowsUI.freshness.details().facts.find((f) => f[0] === "Pulse") || [])[1] || "");
   need(/^Last beat \d\d:\d\d TRT: a new write of Live prices was read\.$/.test(said), "the details name the last beat in TRT and its key" + tag + " (" + said + ")");
@@ -122,9 +140,13 @@ const beats = async (browser, variant, pages, need, opts = {}) => {
   v = await look();
   need(v.state === "stale", "a stale source turns the pill stale" + tag);
   need(v.core !== ORANGE, "a stale pill puts the flame out" + tag);
+  await page.emulateMedia({ forcedColors: "active" });
+  const fc = await page.evaluate(() => { const p = document.createElement("i"); p.style.color = "GrayText"; document.body.append(p); const want = getComputedStyle(p).color; p.remove(); return [getComputedStyle(document.querySelector(".fx-side .ff-core") || document.querySelector(".ff-core")).fill, want]; });
+  need(fc[0] === fc[1], "under forced colours a stale flame is drawn in the system's grey text colour, not a translucent theme colour" + tag + " (" + fc.join(" vs ") + ")");
+  await page.emulateMedia({ forcedColors: "none" });
   await call({ source: "board", updatedAt: 3000 });
   v = await look();
-  need(v.pulse.beats === 2 && v.beat === "b" && v.running.length === 0, "a new stamp while stale is not a beat" + tag);
+  need(v.pulse.beats === 3 && v.beat === "a" && v.running.length === 0, "a new stamp while stale is not a beat" + tag);
   const why = await page.evaluate(() => (window.FlowsUI.freshness.details().facts.find((f) => f[0] === "Pulse") || [])[1] || "");
   need(/^Not breathing: /.test(why), "a stale pill says why it is not breathing" + tag + " (" + why + ")");
   need(!/\b(?:ET|EST|EDT|UTC|GMT)\b/.test(said + why), "the pulse names TRT only" + tag);
@@ -283,7 +305,10 @@ const run = async (browser, variant = {}) => {
 
 const MUTANTS = {
   "timer-driven beat": { real: true, js: (s, p) => (p.endsWith("/flows-ui.js") ? once(s, "  function pulse(src) {\n", "  setInterval(() => pulse(\"timer\"), 5e3);\n  function pulse(src) {\n") : s) },
-  "beat on first sight": { real: true, js: (s, p) => (p.endsWith("/flows-ui.js") ? once(s, "    return prev !== undefined;\n", "    return true;\n") : s) },
+  "beat on first sight": { real: true, js: (s, p) => (p.endsWith("/flows-ui.js") ? once(s, "    if (prev === undefined || FRESH.beaten.includes(stamp)) return false;\n", "    if (FRESH.beaten.includes(stamp)) return false;\n") : s) },
+  "one write beats twice": { real: true, js: (s, p) => (p.endsWith("/flows-ui.js") ? once(s, "    if (prev === undefined || FRESH.beaten.includes(stamp)) return false;\n", "    if (prev === undefined) return false;\n") : s) },
+  "streamed frames and shared sources beat": { real: true, js: (s, p) => (p.endsWith("/flows-ui.js") ? once(s, 'return !o.ff && typeof o.source === "string" && o.source ? o.source : null;', 'return typeof o.source === "string" && o.source ? o.source : "page";') : s) },
+  "stale flame translucent under forced colours": { real: true, css: (s) => once(s, '  body:has(#fxFresh:is([data-state="stale"], [data-state="pending"])) .ff-core { fill: GrayText; }\n', "") },
   "beat on a re-read": { real: true, js: (s, p) => (p.endsWith("/flows-ui.js") ? once(s, "if (prev !== undefined && stamp <= prev) return false;", "if (prev !== undefined && stamp < prev) return false;") : s) },
   "beat while stale": { real: true, js: (s, p) => (p.endsWith("/flows-ui.js") ? once(s, "    if (!BEATS.has(freshState().state)) return;\n", "") : s) },
   "beat never drawn": { real: true, js: (s, p) => (p.endsWith("/flows-ui.js") ? once(s, '    if (b) b.dataset.beat = FRESH.beats % 2 ? "a" : "b";\n', "") : s) },

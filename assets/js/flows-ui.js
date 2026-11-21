@@ -890,7 +890,7 @@
     return { open, weekday, today: n.date, expected: SRV.day || local, source: SRV.day ? "server" : "local" };
   }
 
-  const FRESH = { sessionDate: null, primary: null, nightly: null, meta: false, generatedAt: null, updatedAt: null, readAt: null, readSkew: 0, readSource: null, transport: null, sources: new Map(), ffs: new Map(), roles: new Map(), explicit: false, settled: false, stamps: new Map(), beats: 0, beatAt: null, beatSource: null };
+  const FRESH = { sessionDate: null, primary: null, nightly: null, meta: false, generatedAt: null, updatedAt: null, readAt: null, readSkew: 0, readSource: null, transport: null, sources: new Map(), ffs: new Map(), roles: new Map(), explicit: false, settled: false, stamps: new Map(), beaten: [], beats: 0, beatAt: null, beatSource: null };
   const NAMES = { strips: "Live prices", news: "Headlines", flowalerts: "Flow alerts", "rt:px": "Streamed prices", "rt:fl": "Streamed flow alerts", "rt:gx": "Streamed gamma", "rt:mk": "Streamed market tide", "rt:nw": "Streamed headlines" };
   const named = (k) => { k = k.replace(/^(?:lk\?k=|live:)|\?.*/g, ""); return NAMES[k] || k[0].toUpperCase() + k.slice(1); };
   function freshAggregate(list, phase) {
@@ -986,12 +986,19 @@
     if (num(o.updatedAt) !== null && o.updatedAt > 0) return o.updatedAt;
     return o.ff && num(o.ff.updatedAt) !== null && o.ff.updatedAt > 0 ? o.ff.updatedAt : null;
   }
+  function writeKey(o) {
+    if (typeof o.key === "string" && o.key) return o.key;
+    return !o.ff && typeof o.source === "string" && o.source ? o.source : null;
+  }
   function advanced(src, stamp) {
-    if (stamp === null) return false;
+    if (src === null || stamp === null) return false;
     const prev = FRESH.stamps.get(src);
     if (prev !== undefined && stamp <= prev) return false;
     FRESH.stamps.set(src, stamp);
-    return prev !== undefined;
+    if (prev === undefined || FRESH.beaten.includes(stamp)) return false;
+    FRESH.beaten.push(stamp);
+    if (FRESH.beaten.length > 32) FRESH.beaten.shift();
+    return true;
   }
   function pulse(src) {
     if (!BEATS.has(freshState().state)) return;
@@ -1050,9 +1057,10 @@
     if (num(o.updatedAt) !== null && o.updatedAt > 0) FRESH.updatedAt = Math.max(FRESH.updatedAt || 0, o.updatedAt);
     if (typeof o.readAt === "string") { FRESH.readAt = o.readAt; FRESH.readSkew = (o.ff && o.ff.skewMs) || 0; FRESH.readSource = o.source || null; }
     FRESH.settled = true;
-    const moved = advanced(o.source || "page", stampOf(o));
+    const wrote = writeKey(o);
+    const moved = advanced(wrote, stampOf(o));
     paintFresh();
-    if (moved) pulse(o.source || "page");
+    if (moved) pulse(wrote);
     return freshState().state;
   }
   freshness.drop = (source) => {

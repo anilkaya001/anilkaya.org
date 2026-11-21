@@ -862,6 +862,8 @@ body:has(#fxFresh:is([data-state="stale"], [data-state="pending"])) .ff-halo { s
   .ff-brand, a.ff-brand:hover { color: CanvasText; }
   .ff-core { fill: CanvasText; }
   .ff-halo { stroke: CanvasText; }
+  body:has(#fxFresh:is([data-state="stale"], [data-state="pending"])) .ff-core { fill: GrayText; }
+  body:has(#fxFresh:is([data-state="stale"], [data-state="pending"])) .ff-halo { stroke: GrayText; }
 }
 .fx-doc-h .ff-brand, .st-title .ff-brand { font-size: 13px; }
 
