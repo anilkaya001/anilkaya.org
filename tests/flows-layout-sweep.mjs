@@ -64,7 +64,8 @@ const SWEEP = () => {
 const STANDARD = ["1440x820", "1024x768", "390x844", "1920x1080"];
 const gate = (e) => e.fatal || (e.one && STANDARD.includes(e.size) && (e.scroll.length || e.inner.length)) || e.canvas.length || (STANDARD.includes(e.size) && (e.clipped.length || e.outside.length)) || (e.errors || []).length > 0;
 
-const browser = await chromium.launch();
+const launchBrowser = async () => chromium.launch();
+let browser = await launchBrowser();
 async function sweepSpec(spec, width, height, patch = null) {
   const out = [];
   const coarse = width < 600;
@@ -89,20 +90,29 @@ async function sweepSpec(spec, width, height, patch = null) {
   } catch (error) {
     out.push({ page: spec.id, size: width + "x" + height, fatal: String(error).slice(0, 200) });
   }
-  await ctx.close();
+  await ctx.close().catch(() => {});
   return out;
 }
 
+const PART = (process.argv.find((a) => a.startsWith("--part=")) || "").slice(7);
+const inPart = (i) => !PART || (PART === "a") === (i % 2 === 0);
 const report = [];
 const mutantsFailed = [];
 try {
-  for (const spec of SPECS) {
+  for (const [i, spec] of SPECS.entries()) {
+    if (!inPart(i)) continue;
     for (const [width, height] of SIZES) {
       if (ONLY && !ONLY.test(`${spec.id}@${width}`)) continue;
-      report.push(...await sweepSpec(spec, width, height));
+      let swept = await sweepSpec(spec, width, height).catch((error) => [{ page: spec.id, size: width + "x" + height, fatal: String(error).slice(0, 200) }]);
+      if (swept.some((r) => r.fatal) && !browser.isConnected()) {
+        await browser.close().catch(() => {});
+        browser = await launchBrowser();
+        swept = await sweepSpec(spec, width, height);
+      }
+      report.push(...swept);
     }
   }
-  if (!ONLY && !process.env.NO_MUTANTS) {
+  if (!ONLY && !process.env.NO_MUTANTS && PART !== "a") {
     const byId = (id) => SPECS.find((x) => x.id === id);
     const MUTANTS = [
       ["the sidebar scrolls inside itself at a short height", "status", 1440, 820, { "/assets/css/flows.css": [["  overflow: hidden;\n  visibility: hidden;", "  overflow-y: auto;\n  visibility: hidden;"], [".fx-side > .flows-rail { flex: 1 1 auto; min-height: 0; overflow-y: auto;", ".fx-side > .flows-rail { flex: 0 0 auto; min-height: 0;"], ["grid-auto-rows: minmax(26px, 34px);", "grid-auto-rows: 44px;"]] }],
@@ -125,5 +135,5 @@ const bad = report.filter(gate);
 if (process.env.JSON) writeFileSync(process.env.JSON, JSON.stringify(report, null, 1));
 for (const e of bad) console.log(e.page, e.size, e.view || "-", JSON.stringify({ fatal: e.fatal, scroll: e.scroll, inner: (e.inner || []).slice(0, 4), clipped: (e.clipped || []).slice(0, 4), outside: (e.outside || []).slice(0, 4), canvas: e.canvas }));
 for (const name of mutantsFailed) console.log("PLANTED WRONG BUILD NOT CAUGHT: " + name);
-console.log(`flows-layout-sweep: ${report.length} views swept, ${bad.length} with findings, ${mutantsFailed.length} planted wrong builds uncaught`);
+console.log(`flows-layout-sweep${PART ? " (part " + PART + ")" : ""}: ${report.length} views swept, ${bad.length} with findings, ${mutantsFailed.length} planted wrong builds uncaught`);
 process.exit(process.env.REPORT_ONLY === "1" || (bad.length === 0 && mutantsFailed.length === 0) ? 0 : 1);
