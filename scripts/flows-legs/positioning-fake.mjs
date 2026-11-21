@@ -59,7 +59,12 @@ export function fakePositioningUw() {
     const entry = fx.ops[hit.id];
     if (!entry) throw new Error(`${path} -> HTTP 404`);
     if (entry.body) return entry.body;
-    if (entry.byName) return Object.hasOwn(entry.byName, hit.params.name) ? entry.byName[hit.params.name] : { data: [] };
+    if (entry.byName) {
+      const listed = fx.ops["inst-list"] && fx.ops["inst-list"].body ? fx.ops["inst-list"].body.data : [];
+      const byCik = (Array.isArray(listed) ? listed : []).find((r) => r && r.cik === hit.params.name);
+      const key = byCik ? byCik.name : hit.params.name;
+      return Object.hasOwn(entry.byName, key) ? entry.byName[key] : { data: [] };
+    }
     if (entry.bySector) return Object.hasOwn(entry.bySector, hit.params.sector) ? entry.bySector[hit.params.sector] : { data: [] };
     if (entry.byId) return pick(entry.byId, hit.params.politician_id);
     if (entry.byTicker) return pick(entry.byTicker, hit.params.ticker || "");

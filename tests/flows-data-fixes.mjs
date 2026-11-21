@@ -91,4 +91,35 @@ eq(shortAgain.length, 0, "a short-history name is not retried for 20 days");
   ok(bytes + 64 * 1024 < 128 * 1024, "and with the regime's own 64 KiB it clears the 128 KiB ingest cap");
 }
 
+{
+  const { buildUniverse, projectUniverse, prevIvOf, IV_PREV_FLOOR } = await import("../shared/flows-cross.js");
+  const { loadMutated } = await import("./truth/mutants.mjs");
+  const sigma = new Map([["SYXA", { s: 0.01321, f2: 15, f3: 6 }], ["SYXB", { s: 0.02268, f2: 13, f3: 4 }], ["SYXC", { s: 0.016, f2: 9, f3: 2 }]]);
+  const ctx = { sigma };
+  const row = (ticker, now, prev) => ({ ticker, marketcap: "5e10", close: "100", prev_close: "102", sector: "Technology", iv30d: String(now), iv30d_1d: String(prev) });
+  eq(IV_PREV_FLOOR, 0.5, "the previous close's IV is doubted below half");
+  eq(prevIvOf(row("SYXA", 0.232, 0.079), ctx), null, "A PREVIOUS-CLOSE IV UNDER HALF OF TODAY'S AND OF THE NAME'S OWN TYPICAL DAY is held out (0.079 against 0.232 and 0.210)");
+  eq(prevIvOf(row("SYXB", 1.1, 0.529), ctx), 0.529, "a real shock keeps it: under half of today's IV but above half the realised level");
+  eq(prevIvOf(row("SYXC", 0.2, 0.12), ctx), 0.12, "a quiet name keeps it: under half the realised level but not of today's IV");
+  eq(prevIvOf(row("SYXZ", 0.232, 0.079), ctx), 0.079, "and a name with no typical day is never judged");
+  eq(prevIvOf({ ticker: "SYXA", iv30d_1d: "0.079" }, ctx), 0.079, "nor one with no IV today");
+  eq(prevIvOf(row("SYXA", 0.232, 0.105), ctx), 0.105, "the realised line is exclusive just above it (0.105 against 0.1049)");
+  const u = buildUniverse([row("SYXA", 0.232, 0.079), row("SYXB", 1.1, 0.529), row("SYXC", 0.2, 0.12)], { sessionDate: "2026-11-20", generatedAt: "t", sigma });
+  assert.deepEqual(u.iv30pHeld, ["SYXA"], "the universe names the held names"); checks++;
+  const at = (k, t) => u.cols[k][u.t.indexOf(t)];
+  eq(at("iv30p", "SYXA"), null, "and publishes no previous-close IV for them, never a zero");
+  eq(at("iv30p", "SYXB"), 529, "while the others keep theirs");
+  assert.deepEqual(projectUniverse(u, ["chg", "iv30p", "t"]).iv30pHeld, ["SYXA"], "a projection that asks for the column carries the list"); checks++;
+  eq(projectUniverse(u, ["chg", "t"]).iv30pHeld, undefined, "and one that does not, does not");
+  for (const [name, from, to] of [
+    ["the gate judged on today's IV alone", "v < IV_PREV_FLOOR * now && v < IV_PREV_FLOOR * s * Math.sqrt(252) ? null : v", "v < IV_PREV_FLOOR * now ? null : v"],
+    ["the gate judged on the realised level alone", "v < IV_PREV_FLOOR * now && v < IV_PREV_FLOOR * s * Math.sqrt(252) ? null : v", "v < IV_PREV_FLOOR * s * Math.sqrt(252) ? null : v"],
+    ["no gate", "v < IV_PREV_FLOOR * now && v < IV_PREV_FLOOR * s * Math.sqrt(252) ? null : v", "v"],
+  ]) {
+    const m = await loadMutated("shared/flows-cross.js", [[from, to]]);
+    const same = m.prevIvOf(row("SYXA", 0.232, 0.079), ctx) === null && m.prevIvOf(row("SYXB", 1.1, 0.529), ctx) === 0.529 && m.prevIvOf(row("SYXC", 0.2, 0.12), ctx) === 0.12;
+    ok(!same, "A PLANTED WRONG BUILD (" + name + ") is caught");
+  }
+}
+
 console.log(`flows-data-fixes: ${checks} checks passed`);

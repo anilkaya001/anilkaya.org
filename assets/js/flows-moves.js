@@ -267,7 +267,7 @@
     if (ci < 0 || ii < 0) return null;
     const pick = (t, k) => (S.known.has(t) ? S.known.get(t)[k] : null);
     const j = S.hz === null ? null : F.elapsed(S.day, S.ahead, s.session);
-    return { session: s.session, j, rows: Object.keys(s.rows).map((t) => { const r = { t, chg: num(s.rows[t][ci]), iv: num(s.rows[t][ii]), ed: pick(t, "ed"), rd: pick(t, "rd"), rdMax: pick(t, "rdMax"), edMax: pick(t, "edMax"), sector: pick(t, "sector"), cap: pick(t, "cap"), sig: pick(t, "sig"), f2: pick(t, "f2"), f3: pick(t, "f3") }; return Object.assign(r, earn(r, S.hz, j)); }) };
+    return { session: s.session, j, rows: Object.keys(s.rows).map((t) => { const r = { t, chg: num(s.rows[t][ci]), iv: (S.held || []).includes(t) ? null : num(s.rows[t][ii]), ed: pick(t, "ed"), rd: pick(t, "rd"), rdMax: pick(t, "rdMax"), edMax: pick(t, "edMax"), sector: pick(t, "sector"), cap: pick(t, "cap"), sig: pick(t, "sig"), f2: pick(t, "f2"), f3: pick(t, "f3") }; return Object.assign(r, earn(r, S.hz, j)); }) };
   }
 
   function points(rows, j) {
@@ -405,6 +405,8 @@
     const clipped = M.plotted.filter((x) => Math.abs(x.z) > xmax || x.a > ymax).length;
     const notes = [];
     if (off > 0) notes.push(plural(off, "name has", "names have") + " no typical day and " + (off === 1 ? "is" : "are") + " listed only.");
+    const held = S.held || [];
+    if (held.length) notes.push(plural(held.length, "name is", "names are") + " left out for a doubtful previous-close IV: " + held.slice(0, 5).join(", ") + (held.length > 5 ? " and " + (held.length - 5) + " more" : "") + ".");
     if (clipped > 0) notes.push(plural(clipped, "name is", "names are") + " beyond the axis, drawn at the edge.");
     if (S.hz === null) notes.push(NO_HORIZON);
     else if (M.j === null) notes.push(STALE_HORIZON);
@@ -924,6 +926,7 @@
     S.rdOn = got.rdOn;
     W = F.horizon(got.hz);
     S.known = new Map(got.rows.map((r) => [r.t, r]));
+    S.held = Array.isArray(u.iv30pHeld) ? u.iv30pHeld.filter((t) => typeof t === "string").slice(0, 40) : [];
     S.day = u.sessionDate || null;
     S.generatedAt = typeof u.generatedAt === "string" ? u.generatedAt : null;
     UI.freshness({ sessionDate: u.sessionDate, generatedAt: u.generatedAt, updatedAt: u.__updatedAt, source: "universe" });

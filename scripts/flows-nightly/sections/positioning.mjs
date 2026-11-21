@@ -53,7 +53,7 @@ export async function runPositioning(ctx) {
     const payload = fitPositioning(buildPositioning({
       sessionDate: date, generatedAt, now, universe, list: read.list, latest: read.latest, sectorsByCik: read.sectorsByCik,
       activityByCik: read.activityByCik, holdingsByCik: read.holdingsByCik, insiderBySector: read.insiderBySector,
-      psByTicker: ps, advByTicker: adv, prior, refused: read.refused, failed: read.failed, calls: read.calls,
+      psByTicker: ps, advByTicker: adv, prior, refused: read.refused, failed: read.failed, calls: read.calls, sectorReads: read.sectorReads,
     }));
     await publish("positioning", payload);
     stages.detail({
@@ -61,6 +61,7 @@ export async function runPositioning(ctx) {
       names: payload.shorts.ftd ? payload.shorts.ftd.names : 0,
       bytes: JSON.stringify(payload).length,
       shed: payload.basis.shed ? payload.basis.shed.length : 0,
+      ...(read.sectorReads ? { books: read.sectorReads.two, oneQ: read.sectorReads.one } : {}),
     });
     console.log(`  positioning: rotation ${payload.rotation.status}, filings ${payload.filings.status}, insiders ${payload.insiders.status}, shorts ${payload.shorts.status}`);
   }, (error) => {
