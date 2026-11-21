@@ -1006,6 +1006,12 @@ body:has(#fxFresh:is([data-state="stale"], [data-state="pending"])) .ff-halo { s
 }
 .fx-bar.has-hero:not(.is-scrolled) .fx-bar-t { opacity: 0; transform: translateY(4px); }
 .fx-bar-sp { flex: 1; min-width: 0; }
+.fx-bar .orc-slot { flex: none; width: 44px; height: 44px; }
+.fx-bar:has(.orc-slot) .fx-bar-t { flex-shrink: 100; }
+.fx-bar.has-hero:has(.orc-slot):not(.is-scrolled) .fx-bar-t { flex-basis: 0; }
+.fx-bar .ui-fresh { flex: 0 1 auto; min-width: 0; }
+.fx-bar .ui-fresh .fx-fresh-l { overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 599.98px) { .flows-body .topbar.fx-bar:has(.orc-slot) { gap: var(--sp-2); } .fx-bar:has(.orc-slot) .ui-fresh { padding: 0 var(--sp-2); } .fx-bar .orc-slot { margin-right: calc(-1 * var(--sp-3)); } }
 .fx-search {
   display: inline-flex;
   align-items: center;

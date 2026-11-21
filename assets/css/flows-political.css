@@ -254,9 +254,6 @@
 @media (max-width: 767.98px) {
   .flows-body[data-flows-page="political"] .flows-main { --pl-pad-b: calc(var(--tab-h) + var(--safe-b) + var(--sp-3)); }
 }
-@media (min-width: 768px) {
-  .flows-body.has-dock-open:has(#fxOracle:not([hidden])) .pl-acts { padding-inline-end: 28px; }
-}
 @media (pointer: coarse) {
   .pl-row, .pl-trow { --rh: 44px; }
   .pl-seg button, .pl-seg.sm button, .pl-seg5 button { min-height: 44px; min-width: 44px; }
@@ -274,8 +271,6 @@
 .pl-rc.ctx .kv small.why { display: none; }
 @container pl (max-width: 899.98px) {
   .pl-rc.ctx .kv small.why { display: inline; }
-  .flows-body:has(#fxOracle:not([hidden])) .pl-acts, .flows-body:has(#fxOracle:not([hidden])) .pl-rc.ev { padding-inline-end: 56px; }
-  .flows-body:has(#fxOracle:not([hidden])) .pl-selbar { width: calc(100% - 72px); }
 }
 
 .pl-bdg { display: inline-flex; align-items: center; margin-left: 6px; padding: 0 6px; height: 16px; border-radius: var(--r-pill); background: var(--warn-fill); color: var(--warn); font: 600 10.5px / 1 var(--font-text); white-space: nowrap; vertical-align: middle; }

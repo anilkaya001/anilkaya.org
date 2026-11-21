@@ -493,10 +493,7 @@
   #bdHero .bd-v-full { display: none; }
   #bdHero .bd-v-short { display: inline; }
 }
-.flows-body:has(> #fxOracle:not([hidden])) .bd-mod > .bd-table { padding-bottom: 56px; }
-.flows-body:has(> #fxOracle:not([hidden])) .bd-mod > .bd-map > .bd-map-foot { padding-inline-end: 64px; }
 .flows-head .bd-meta { min-height: 18px; margin: var(--sp-1) 0 0; color: var(--label-2); font: var(--t-footnote); font-variant-numeric: tabular-nums; }
 @media (max-width: 767.98px) {
   .flows-body:is([data-flows-page="long"], [data-flows-page="short"], [data-flows-page="watch"]) .flows-main { padding-bottom: calc(var(--tab-h) + var(--safe-b) + var(--sp-3)); }
 }
-@media (min-width: 768px) { .flows-body:has(> #fxOracle:not([hidden])) .bd-mod > .bd-map { padding-bottom: 28px; } }
