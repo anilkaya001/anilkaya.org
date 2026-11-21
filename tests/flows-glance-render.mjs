@@ -159,7 +159,7 @@ const Q_FALLBACK = 0.042 * Math.sqrt(Math.PI / 2);
   ok(CAL.length === 60 && CAL[0] === "2026-08-12" && CAL.every((d, i) => i === 0 || d > CAL[i - 1]), "the page carries sixty exchange sessions, from two weeks back, in order");
   ok(!CAL.includes("2026-09-07") && !CAL.includes("2026-08-15") && CAL.includes("2026-09-08") && CAL.includes("2026-10-12"), "Labor Day and a Saturday are not in it, the day after Labor Day is, and Columbus Day, which the exchange keeps open, is");
   ok(HTML.includes('<i hidden id="ftCal" data-sessions="'), "and the ticker page writes the list into its markup");
-  ok(FLOWS_PAGES.tickerPage({ username: "u", now: CAL_NOW }).includes('<i hidden id="ftCal" data-sessions="' + CAL.join(",") + '"></i>'), "from the clock it is given");
+  ok(FLOWS_PAGES.tickerPage({ username: "u", now: CAL_NOW }).includes('<i hidden id="ftCal" data-sessions="' + CAL.join(",") + '" data-past="' + FLOWS_PAGES.pastSessions(CAL_NOW).join(",") + '"></i>'), "from the clock it is given");
   const calPage = await boot({ width: 1440, height: 900 }, { chartW: 868, cal: CAL.join(",") });
   const dates = await calPage.evaluate(({ card, x }) => {
     const G = window.FlowsUI.tickerGlance.model, m = G(card, "1M", { cardX: x });

@@ -7,6 +7,9 @@ import {
 } from "../shared/flows-coverage.js";
 import { GLOBAL_KEYS, NIGHTLY_GLOBAL_KEYS, PANEL_IDS, STATE, contractFor } from "../shared/flows-products.js";
 import { nightlyEmit } from "./lib/nightly-emit.mjs";
+import { loadMutated } from "./truth/mutants.mjs";
+import * as COVERAGE_MODULE from "../shared/flows-coverage.js";
+import { createFlowsStore, NAME_LIST_CHUNK, NAME_LIST_MAX_NAMES } from "../server/store.js";
 import { emitKeys } from "./lib/emit-keys.mjs";
 
 let checks = 0;
@@ -146,7 +149,7 @@ eq([stateName(0), stateName(3), stateName(99)], ["ok", "unfetched", "failed"], "
   eq(rep.predicates.P1.failing + rep.predicates.P2.failing + rep.predicates.P4.failing, 0, "no predicate fails");
   ok(rep.predicates.P7.failing > 0 && rep.predicates.P7.of === universe.n, "P7 reports what the universe row lacks (sig, f2, f3, iv30p exist only for carded names): " + rep.predicates.P7.failing);
   eq(rep.conservation, { ok: true, expected: universe.n, counted: { row: universe.n, card: universe.n, cardX: universe.n, hist: universe.n } }, "every name is in exactly one state of every product");
-  eq(Object.keys(rep.columns), ["t", "depth", ...KEY_PRODUCTS], "the columns are the universe and its four products");
+  eq(Object.keys(rep.columns), ["t", "depth", ...KEY_PRODUCTS, "fresh", "age"], "the columns are the universe, its four products and each name's freshness and age");
   ok(KEY_PRODUCTS.every((p) => rep.columns[p].length === universe.n), "of the universe's length");
   const board = rep.byDepth.board;
   eq([board.n, board.card.ok, board.cardX.ok, board.hist.ok], [50, 50, 50, 50], "fifty board names hold all three keys");
@@ -185,13 +188,152 @@ eq([stateName(0), stateName(3), stateName(99)], ["ok", "unfetched", "failed"], "
   eq(verifyCoverage({}).universe.n, 0, "an empty call is an empty report");
 }
 
+const WEEKDAYS_BACK = (from, to) => {
+  const hol = new Set(["2026-09-07", "2026-11-26", "2026-12-25"]);
+  let n = 0;
+  for (let d = Date.parse(from + "T00:00:00Z"); d < Date.parse(to + "T00:00:00Z"); d += 864e5) {
+    const next = new Date(d + 864e5);
+    const iso = next.toISOString().slice(0, 10);
+    if (next.getUTCDay() !== 0 && next.getUTCDay() !== 6 && !hol.has(iso)) n++;
+  }
+  return n;
+};
+
+function freshBattery(mod) {
+  const bad = [];
+  const check = (cond, name) => { if (!cond) bad.push(name); };
+  const carded = universe.t.filter((t) => keys.has("card:" + t));
+  const bare = universe.t.filter((t) => !keys.has("card:" + t)).slice(0, 3);
+  const small = { ...universe, t: carded.concat(bare), n: carded.length + bare.length };
+  const run = (over = {}, extra = {}) => mod.verifyCoverage({ universe: extra.universe || small, roster: extra.roster || roster, listing: "listing" in extra ? extra.listing : listingOf(over), globals: globalsOf(), expected: extra.expected === undefined ? SESSION : extra.expected });
+  const whole = run({}, { universe });
+  check(whole.freshness.n === universe.n && whole.freshness.counts.fresh === carded.length && whole.freshness.counts.new === universe.n - carded.length, "on the whole emit every carded name is fresh and every other is new");
+  check(whole.freshness.ok === false && whole.freshness.total === universe.n - carded.length, "and the contract is broken by every name with no card");
+  check(whole.columns.fresh.length === universe.n && whole.columns.age.length === universe.n, "a freshness and an age for every name");
+  const allFresh = run({}, { universe: { ...universe, t: carded, n: carded.length } });
+  check(allFresh.freshness.ok === true && allFresh.freshness.total === 0 && allFresh.freshness.maxAge === 0, "a universe whose every name is fresh meets the contract");
+  const t = carded.find((x) => roster.depth[x] === "board");
+  const u = carded.find((x) => x !== t && roster.depth[x] === "board");
+  const old = "2026-08-14";
+  const heldRoster = clone(roster);
+  delete heldRoster.depth[t];
+  heldRoster.held["card:" + t] = old;
+  const held = run({ ["card:" + t]: { sessionDate: old }, ["card-x:" + t]: { sessionDate: old }, ["hist:" + t]: { sessionDate: old } }, { roster: heldRoster });
+  const hi = held.columns.t.indexOf(t);
+  check(mod.FRESH_WHY[held.columns.fresh[hi]] === "held", "a card kept by the run from an earlier session is held, not fresh");
+  check(held.columns.age[hi] === WEEKDAYS_BACK(old, SESSION) && held.columns.age[hi] === 6, "its age is counted in exchange sessions, six from 2026-08-14 to 2026-08-24, not ten calendar days");
+  check(held.freshness.worst.some((w) => w.t === t && w.why === "held" && w.age === 6 && w.session === old), "the held name is listed with its session and age");
+  check(held.freshness.ok === false && held.freshness.maxAge === 6 && held.freshness.ages[6] === 1, "a held card breaks the contract and sets the oldest age");
+  const stale = run({ ["card:" + u]: { sessionDate: "2026-08-21" } });
+  const si = stale.columns.t.indexOf(u);
+  check(mod.FRESH_WHY[stale.columns.fresh[si]] === "stale" && stale.columns.age[si] === 1, "an earlier card nothing holds is stale, one session behind");
+  const split = run({ ["card-x:" + u]: { sessionDate: "2026-08-21" } });
+  check(mod.FRESH_WHY[split.columns.fresh[split.columns.t.indexOf(u)]] === "split", "a fresh card whose card-x is older is split");
+  const splitRow = split.freshness.worst.find((w) => w.t === u);
+  check(!!splitRow && /card-x 2026-08-21/.test(splitRow.note), "and the note names the older part");
+  const gone = run({ ["card:" + u]: null });
+  check(mod.FRESH_WHY[gone.columns.fresh[gone.columns.t.indexOf(u)]] === "absent", "a card the roster lists but the store lacks is absent");
+  const undated = run({ ["card:" + u]: { sessionDate: null } });
+  check(mod.FRESH_WHY[undated.columns.fresh[undated.columns.t.indexOf(u)]] === "undated", "a card with no session date is undated");
+  const cut = run({}, { listing: { ...listingOf({ ["card:" + u]: null }), truncated: true } });
+  check(mod.FRESH_WHY[cut.columns.fresh[cut.columns.t.indexOf(u)]] === "unknown", "a name missing from a cut listing is unknown, never new or absent");
+  const lostRoster = clone(roster);
+  delete lostRoster.depth[u];
+  const lost = run({ ["card:" + u]: { sessionDate: "2026-08-21" } }, { roster: lostRoster });
+  check(mod.FRESH_WHY[lost.columns.fresh[lost.columns.t.indexOf(u)]] === "stale" && lost.complete === false, "A STALE CARD THE ROSTER NO LONGER NAMES (a read that failed tonight) IS NOT A COMPLETE REPORT: complete and the freshness contract never disagree about a broken name");
+  check(run({}, { universe: { ...universe, t: carded, n: carded.length } }).complete === true && whole.complete === true, "while a name with no card yet, which the rotation has not reached, does not break completeness");
+  const ui = small.t.indexOf(u);
+  const within = run({}, { listing: { ...listingOf({ ["card:" + u]: null }), truncated: true, through: ui + 1 } });
+  check(mod.FRESH_WHY[within.columns.fresh[ui]] === "absent", "A NAME THE CUT LISTING DID LOOK UP IS JUDGED: a missing card inside the names read is absent, not unknown");
+  const beyond = run({}, { listing: { ...listingOf({ ["card:" + u]: null }), truncated: true, through: ui } });
+  check(mod.FRESH_WHY[beyond.columns.fresh[ui]] === "unknown", "and one past the names read is unknown");
+  const unread = run({}, { listing: null });
+  check(unread.freshness.counts.unknown === small.n && unread.freshness.ok === false, "an unread listing leaves every name unknown");
+  const blind = run({}, { expected: null });
+  check(blind.freshness.counts.unknown === small.n, "with no expected session every name is unknown");
+  const both = run({ ["card:" + u]: { sessionDate: "2026-08-21" }, ["card:" + t]: { sessionDate: old } });
+  const order = both.freshness.worst.filter((w) => w.why === "stale").map((w) => w.t);
+  check(order[0] === t && order[1] === u, "the oldest card is listed first within its reason");
+  const firstNew = both.freshness.worst.findIndex((w) => w.why === "new");
+  check((firstNew >= 0 && firstNew < both.freshness.worst.findIndex((w) => w.why === "stale")), "a name with no card is listed ahead of an old one");
+  return bad;
+}
+
+{
+  eq(freshBattery(COVERAGE_MODULE), [], "THE PER-NAME FRESHNESS CONTRACT holds on the real build");
+  ok(COVERAGE_MODULE.FRESH_WHY.length === 8 && COVERAGE_MODULE.FRESH_WHY.at(-1) === "fresh", "eight reasons, fresh last");
+  {
+    const keys = { "card:SYX101": { present: true, sessionDate: "2026-08-24" } };
+    const base = { t: "SYX101", keys, roster: null, expected: "2026-08-24" };
+    eq(COVERAGE_MODULE.nameFreshness({ ...base, kinds: [] }).why, "fresh", "A TIER THAT HOLDS A CARD ALONE is fresh with no companion records");
+    eq(COVERAGE_MODULE.nameFreshness(base).why, "split", "while a tier that should hold them is split without them");
+    eq(COVERAGE_MODULE.nameFreshness({ ...base, kinds: ["hist"] }).why, "split", "and a tier is held to each record it should hold");
+  }
+  const PLANTS = [
+    ["held-reads-as-fresh", [["const age = session >= expected ? 0 : behindBy(session, expected);", "const age = 0;"]]],
+    ["age-in-calendar-days", [["const n = sessionsBetween(from, to);", "const n = Math.round((Date.parse(to) - Date.parse(from)) / 864e5);"]]],
+    ["split-unchecked", [["const gaps = kinds.filter(", "const gaps = [].filter("]]],
+    ["cut-listing-reads-as-new", [['    if (truncated) return { t, why: "unknown", age: null, session: null, note: "the listing stopped before this name" };\n', ""]]],
+    ["complete-ignores-freshness", [[" && listed && !truncated && unfresh === 0;", " && listed && !truncated;"]]],
+    ["cut-flag-covers-every-name", [["const cutAt = (i) => truncated && (through === null || i >= through);", "const cutAt = () => truncated;"]]],
+    ["contract-ignores-names", [["ok: names.length > 0 && counts.fresh === names.length,", "ok: counts.stale === 0,"]]],
+    ["roster-never-knows", [["  if (!isObject(roster)) return false;\n", "  return false;\n"]]],
+    ["held-never-distinguished", [["const kept = isObject(roster) && isObject(roster.held) && Object.hasOwn(roster.held, `card:${t}`);", "const kept = false;"]]],
+    ["worst-by-ticker-only", [["FRESH_RANK[a.why] - FRESH_RANK[b.why] || (b.age || 0) - (a.age || 0) || ", ""]]],
+    ["no-expected-passes", [['  if (typeof expected !== "string" || !DAY.test(expected)) return { t, why: "unknown", age: null, session: dayOf(card), note: "the session the store should hold is not known" };\n', ""]]],
+  ];
+  for (const [id, transforms] of PLANTS) {
+    const mod = await loadMutated("shared/flows-coverage.js", transforms);
+    const caught = freshBattery(mod);
+    ok(caught.length > 0, `PLANTED WRONG BUILD ${id} must fail the freshness battery`);
+  }
+}
+
+{
+  const stored = new Map();
+  const many = [];
+  for (let i = 0; i < 900; i++) {
+    const t = "SYX" + String(i).padStart(3, "0");
+    many.push(t);
+    for (const kind of ["card", "card-x", "hist"]) stored.set(kind + ":" + t, { sessionDate: SESSION });
+  }
+  let batches = 0, statements = 0, scans = 0;
+  const DB = {
+    prepare: (sql) => ({
+      bind: (...ids) => ({ sql, ids }),
+      all: async () => { scans++; return { results: [] }; },
+    }),
+    batch: async (list) => {
+      batches++;
+      statements += list.length;
+      return list.map((st) => {
+        if (!/WHERE id IN \(/.test(st.sql) || st.ids.length > NAME_LIST_CHUNK) throw new Error("not a primary-key lookup");
+        return { results: st.ids.filter((id) => stored.has(id)).map((id) => ({ id, updated_at: 1, session: stored.get(id).sessionDate, generated: "x", status: null })) };
+      });
+    },
+  };
+  const store = createFlowsStore({ ensureFlowsTables: async () => {} });
+  const listing = await store.listing({ DB }, ["card", "card-x", "hist"], many);
+  eq([listing.truncated, listing.listed, batches, scans], [false, 2700, 1, 0], "THE COVERAGE LISTING IS EXACT: 900 names, 2,700 keys, one batch of primary-key lookups, never cut at the 2,000-row prefix scan the 2026-11-13 store outgrew");
+  eq(statements, Math.ceil(2700 / NAME_LIST_CHUNK), "in chunks of " + NAME_LIST_CHUNK);
+  ok(Object.values(listing.keys).every((k) => k.sessionDate === SESSION), "every key carries its session");
+  const over = await store.listing({ DB }, ["card"], Array.from({ length: NAME_LIST_MAX_NAMES + 5 }, (_, i) => "SYZ" + String(i % 1000).padStart(3, "0")));
+  eq([over.truncated, over.through], [true, NAME_LIST_MAX_NAMES], "more names than the ceiling is said to be cut, and how many names were looked up");
+  eq(listing.through, 900, "an uncut listing looked every name up");
+  const failing = await store.listing({ DB: { prepare: DB.prepare, batch: async () => { throw new Error("down"); } } }, ["card"], many);
+  eq(failing, null, "a refused batch is an unread listing, never an empty one");
+  const prefix = await store.listing({ DB }, ["card"]);
+  eq(scans, 1, "and the nightly's prefix listing is unchanged when no names are given");
+  ok(prefix && prefix.truncated === false, "it still answers");
+}
+
 const ROUTE_ENV = { DB: {}, FLOWS_COVERAGE: "on" };
 const makeStore = (over = {}) => {
   const calls = [];
   const store = {
     read: async (env, key) => { calls.push(["read", key]); const v = keys.get(key); return v ? { payload: JSON.stringify(v), updatedAt: 1, fresh: {} } : null; },
     metadata: async (env, asked) => { calls.push(["metadata", asked.length]); return globalsOf(); },
-    listing: async (env, kinds) => { calls.push(["listing", kinds.join()]); return listingOf(); },
+    listing: async (env, kinds, names) => { calls.push(["listing", kinds.join(), names]); return listingOf(); },
     ...over,
   };
   return { store, calls };
@@ -237,7 +379,10 @@ const codeOf = (r) => (r.error ? r.error.code : null);
   ok(!("calls" in r.body), "with no feed call meter unless one is wired");
   eq(r.calls.map((c) => c[0]).sort(), ["listing", "metadata", "read", "read"], "four reads: the universe, the roster, the metadata of the globals and one listing");
   eq(r.calls.find((c) => c[0] === "listing")[1], "card,card-x,hist", "the listing asks for the three name kinds");
-  eq(r.calls.find((c) => c[0] === "metadata")[1], NIGHTLY_GLOBAL_KEYS.length, "and the metadata for the registered nightly globals, ids only");
+  eq(r.calls.find((c) => c[0] === "listing")[2], universe.t, "of exactly the universe's names, so a store holding names that left it cannot cut the listing");
+  eq(r.body.freshness.n, universe.n, "and the answer carries the per-name freshness contract");
+  eq(COVERAGE_ROW_CEILING, 2 + NIGHTLY_GLOBAL_KEYS.length + 3 * NAME_LIST_MAX_NAMES, "the row ceiling is three keys a name at the listing's name ceiling");
+  eq(r.calls.find((c) => c[0] === "metadata")[1], NIGHTLY_GLOBAL_KEYS.length, "and the metadata for the registered globals, ids only");
   ok(NIGHTLY_GLOBAL_KEYS.length <= 96, "which is inside the door's metadata limit");
 
   const metered = await drive(ROUTE_ENV, { vendorCalls: () => ({ n: 3 }) });

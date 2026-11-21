@@ -344,13 +344,37 @@
   }
   function quoteOf() { const q = STATE.quote; return q && q.status === "ok" && num(q.price) !== null ? q : null; }
 
+  let calDays = null;
+  function sessionDays() {
+    if (calDays) return calDays;
+    const el = document.getElementById("ftCal");
+    const read = (k) => (el && el.dataset[k] ? el.dataset[k].split(",").filter(isoOk) : []);
+    calDays = [...new Set(read("past").concat(read("sessions")))].sort();
+    return calDays;
+  }
+  function sessionsBehind(from, to) {
+    const days = sessionDays();
+    const j = days.indexOf(to);
+    if (j < 0 || !days.length) return null;
+    if (from < days[0]) return { n: j + 1, more: true };
+    const i = days.indexOf(from);
+    return i < 0 || i > j ? null : { n: j - i, more: false };
+  }
+  function ageWords(card, expected, meta) {
+    const d = card.sessionDate, gap = sessionsBehind(d, expected);
+    const span = gap === null ? "behind" : (gap.more ? "at least " : "") + gap.n + (gap.n === 1 ? " session" : " sessions") + " behind";
+    const known = !!meta && isoOk(meta.sessionDate), landed = known && meta.sessionDate >= expected;
+    const why = !known ? "" : !landed && meta.sessionDate > d ? " The run for " + meta.sessionDate + " did not rebuild this card, and the run for " + expected + " has not published yet."
+      : !landed ? " The run for " + expected + " has not published yet, so this is the newest full read of the name."
+      : card.depth === "deepened" ? " The run for " + expected + " did not land a new read of this name, so the read of " + d + " is kept until one does."
+      : " The run for " + expected + " did not rebuild this card, so the card of " + d + " is kept.";
+    return "Stale: every figure on this page is from the session of " + d + ", " + span + " the last completed session, " + expected + "." + why;
+  }
+
   function staleState(card) {
     const m = UI.freshness.market();
     const out = [];
-    if (isoOk(card.sessionDate) && card.sessionDate < m.expected) {
-      const board = STATE.meta && isoOk(STATE.meta.sessionDate) && STATE.meta.sessionDate > card.sessionDate ? STATE.meta.sessionDate : null;
-      out.push(ST("stale", "Stale: every figure on this page is from the session of " + card.sessionDate + (board ? ", and the board has since published " + board : ", and the last completed session is " + m.expected) + "." + (card.depth === "deepened" ? " Read in full in turn, oldest first: this read is " + dayDiff(card.sessionDate, m.expected) + " days old." : "")));
-    }
+    if (isoOk(card.sessionDate) && card.sessionDate < m.expected) out.push(ST("stale", ageWords(card, m.expected, STATE.meta)));
     const meta = STATE.meta;
     if (meta && meta.sessionDate === card.sessionDate && Date.parse(meta.generatedAt) > Date.parse(card.generatedAt)) {
       out.push(ST("stale", "This card was built by an earlier run of the " + card.sessionDate + " session (" + F.stamp(card.generatedAt) + ") than the boards it sits under (" + F.stamp(meta.generatedAt) + "), so it can describe a board this name is no longer on."));
@@ -379,7 +403,8 @@
     const b = UI.stateButton(st, "Session");
     b.classList.add("ft-stale");
     b.append(h("span", null, "Stale"), h("b", null, day(card.sessionDate)));
-    b.setAttribute("aria-label", "Stale: session " + day(card.sessionDate));
+    const gap = sessionsBehind(card.sessionDate, UI.freshness.market().expected);
+    b.setAttribute("aria-label", "Stale: session " + day(card.sessionDate) + (gap ? ", " + (gap.more ? "at least " : "") + gap.n + (gap.n === 1 ? " session" : " sessions") + " behind" : ""));
     return b;
   }
   function renderFlags(card) {

@@ -1,6 +1,7 @@
 import {
   DEPTHS, DEPTH_OF_CARD, L0_COLUMNS, NAME_KINDS, PANEL_IDS, STATE, STATE_NAMES, UNFETCHED_REASON, contractFor, expectedKinds,
 } from "./flows-products.js";
+import { sessionsBetween } from "./flows-calendar.js";
 
 export const COVERAGE_VERSION = 1;
 
@@ -218,12 +219,15 @@ export function verifyCoverage({ universe, roster = null, listing = null, global
   const n = names.length;
   const keys = listing && isObject(listing.keys) ? listing.keys : {};
   const truncated = !!(listing && listing.truncated);
+  const through = listing && Number.isInteger(listing.through) && listing.through >= 0 ? listing.through : null;
+  const cutAt = (i) => truncated && (through === null || i >= through);
   const listed = listing !== null;
   const columns = Object.fromEntries(KEY_PRODUCTS.map((p) => [p, new Array(n).fill(STATE.unfetched)]));
   const counts = Object.fromEntries(KEY_PRODUCTS.map((p) => [p, zeroCounts()]));
   const byDepth = {};
   const failing = [];
   const depth = new Array(n);
+  const wantedBy = new Array(n);
   const predicates = { P1: { failing: 0, of: 0 }, P2: { failing: 0, of: 0 }, P4: { failing: 0, of: 0 }, P7: { failing: 0, of: n } };
   const rosterSessions = roster && isObject(roster.session) ? roster.session : {};
   for (let i = 0; i < n; i++) {
@@ -233,6 +237,7 @@ export function verifyCoverage({ universe, roster = null, listing = null, global
     const bucket = byDepth[d] || (byDepth[d] = { n: 0, ...Object.fromEntries(KEY_PRODUCTS.map((p) => [p, zeroCounts()])) });
     bucket.n++;
     const wanted = expectedKinds(d);
+    wantedBy[i] = wanted;
     const row = rowState(universe, i);
     const put = (product, entry) => {
       columns[product][i] = entry[0];
@@ -251,7 +256,7 @@ export function verifyCoverage({ universe, roster = null, listing = null, global
       }
       const entry = listed ? keys[`${kind}:${t}`] : null;
       sessions[kind] = entry && typeof entry.sessionDate === "string" ? entry.sessionDate : null;
-      put(product, listed ? entryState(entry, expected, truncated) : [STATE.pending, "the store listing could not be read"]);
+      put(product, listed ? entryState(entry, expected, cutAt(i)) : [STATE.pending, "the store listing could not be read"]);
     }
     if (wanted.includes("card")) {
       predicates.P1.of++;
@@ -269,6 +274,8 @@ export function verifyCoverage({ universe, roster = null, listing = null, global
     }
   }
   failing.sort((a, b) => SEVERITY[a.code] - SEVERITY[b.code] || (a.t < b.t ? -1 : a.t > b.t ? 1 : 0) || (a.p < b.p ? -1 : 1));
+  const fresh = names.map((t, i) => nameFreshness({ t, keys, listed, truncated: cutAt(i), roster, expected, kinds: wantedBy[i].filter((k) => k !== "card") }));
+  const unfresh = fresh.filter((f) => FRESH_BROKEN.has(f.why)).length;
   const conservation = { ok: true, expected: n, counted: {} };
   for (const p of KEY_PRODUCTS) {
     const sum = Object.values(counts[p]).reduce((a, b) => a + b, 0);
@@ -285,7 +292,7 @@ export function verifyCoverage({ universe, roster = null, listing = null, global
     }
   }
   const held = roster && isObject(roster.held) ? Object.keys(roster.held).length : 0;
-  const complete = conservation.ok && globalsOk && failing.length === 0 && predicates.P1.failing === 0 && predicates.P2.failing === 0 && predicates.P4.failing === 0 && listed && !truncated;
+  const complete = conservation.ok && globalsOk && failing.length === 0 && predicates.P1.failing === 0 && predicates.P2.failing === 0 && predicates.P4.failing === 0 && listed && !truncated && unfresh === 0;
   return {
     v: COVERAGE_VERSION,
     expected,
@@ -300,6 +307,76 @@ export function verifyCoverage({ universe, roster = null, listing = null, global
     globals: globalReport,
     conservation,
     complete,
-    columns: { t: names.slice(), depth, ...columns },
+    freshness: freshnessOf(names, fresh),
+    columns: { t: names.slice(), depth, ...columns, fresh: fresh.map((f) => FRESH_RANK[f.why]), age: fresh.map((f) => f.age) },
+  };
+}
+
+export const FRESH_WHY = Object.freeze(["unknown", "absent", "new", "stale", "held", "undated", "split", "fresh"]);
+
+const FRESH_BROKEN = new Set(["absent", "stale", "undated", "split"]);
+const FRESH_RANK = Object.freeze(Object.fromEntries(FRESH_WHY.map((w, i) => [w, i])));
+
+const dayOf = (entry) => (entry && entry.present !== false && typeof entry.sessionDate === "string" && DAY.test(entry.sessionDate) ? entry.sessionDate : null);
+
+const behindBy = (from, to) => {
+  const n = sessionsBetween(from, to);
+  return Number.isInteger(n) ? n : null;
+};
+
+function rosterKnows(roster, t) {
+  if (!isObject(roster)) return false;
+  if (isObject(roster.depth) && Object.hasOwn(roster.depth, t)) return true;
+  const held = isObject(roster.held) ? roster.held : {};
+  return NAME_KINDS.some((kind) => Object.hasOwn(held, `${kind}:${t}`));
+}
+
+export function nameFreshness({ t, keys = {}, listed = true, truncated = false, roster = null, expected = null, kinds = ["card-x", "hist"] } = {}) {
+  const at = (kind) => (isObject(keys) ? keys[`${kind}:${t}`] : null);
+  const card = at("card");
+  if (!listed) return { t, why: "unknown", age: null, session: null, note: "the store listing was not read" };
+  if (typeof expected !== "string" || !DAY.test(expected)) return { t, why: "unknown", age: null, session: dayOf(card), note: "the session the store should hold is not known" };
+  if (!card || card.present === false) {
+    if (truncated) return { t, why: "unknown", age: null, session: null, note: "the listing stopped before this name" };
+    return rosterKnows(roster, t)
+      ? { t, why: "absent", age: null, session: null, note: "no card is stored though the roster names it" }
+      : { t, why: "new", age: null, session: null, note: "no card has been built for this name yet" };
+  }
+  const session = dayOf(card);
+  if (session === null) return { t, why: "undated", age: null, session: null, note: "the card carries no session date" };
+  const age = session >= expected ? 0 : behindBy(session, expected);
+  if (age !== 0) {
+    const kept = isObject(roster) && isObject(roster.held) && Object.hasOwn(roster.held, `card:${t}`);
+    const span = age === null ? "outside the calendar" : `${age} session${age === 1 ? "" : "s"} behind ${expected}`;
+    return kept
+      ? { t, why: "held", age, session, note: `the read of ${session} is kept, ${span}: the last run did not land a new one` }
+      : { t, why: "stale", age, session, note: `the card of ${session} is ${span} and no run holds it` };
+  }
+  const gaps = kinds.filter((kind) => dayOf(at(kind)) !== session);
+  if (gaps.length) return { t, why: "split", age: 0, session, note: gaps.map((kind) => `${kind} ${dayOf(at(kind)) || "missing"}`).join(", ") };
+  return { t, why: "fresh", age: 0, session, note: null };
+}
+
+export function freshnessOf(names, fresh) {
+  const counts = Object.fromEntries(FRESH_WHY.map((w) => [w, 0]));
+  const ages = {};
+  let maxAge = 0;
+  for (const f of fresh) {
+    counts[f.why]++;
+    if (Number.isInteger(f.age) && f.age > 0) {
+      ages[f.age] = (ages[f.age] || 0) + 1;
+      if (f.age > maxAge) maxAge = f.age;
+    }
+  }
+  const off = fresh.filter((f) => f.why !== "fresh");
+  off.sort((a, b) => FRESH_RANK[a.why] - FRESH_RANK[b.why] || (b.age || 0) - (a.age || 0) || (a.t < b.t ? -1 : a.t > b.t ? 1 : 0));
+  return {
+    ok: names.length > 0 && counts.fresh === names.length,
+    n: names.length,
+    counts,
+    maxAge,
+    ages,
+    total: off.length,
+    worst: off.slice(0, FAILING_MAX).map(({ t, why, age, session, note }) => ({ t, why, age, session, note: note === null ? null : clip(note) })),
   };
 }

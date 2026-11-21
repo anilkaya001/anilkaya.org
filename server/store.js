@@ -90,16 +90,34 @@ export function ingestListSql(kinds) {
     kinds.map((k) => `(id >= '${k}:' AND id < '${k};')`).join(" OR ") + ` LIMIT ${INGEST_LIST_MAX + 1}`;
 }
 
-export function ingestListing(rows) {
+export const NAME_LIST_MAX_NAMES = 1000;
+
+export const NAME_LIST_CHUNK = 90;
+
+export const nameListSql = (n) => "SELECT id, updated_at, json_extract(payload, '$.sessionDate') AS session, json_extract(payload, '$.generatedAt') AS generated, " +
+  "json_extract(payload, '$.status') AS status FROM flows_payload WHERE id IN (" + marks(n) + ")";
+
+export function nameListIds(names, kinds) {
+  const seen = new Set();
+  const ids = [];
+  for (const t of Array.isArray(names) ? names.slice(0, NAME_LIST_MAX_NAMES) : []) {
+    if (typeof t !== "string" || !TICKER_RE.test(t) || seen.has(t)) continue;
+    seen.add(t);
+    for (const kind of kinds) ids.push(`${kind}:${t}`);
+  }
+  return { ids, cut: Array.isArray(names) && names.length > NAME_LIST_MAX_NAMES, through: Array.isArray(names) ? Math.min(names.length, NAME_LIST_MAX_NAMES) : 0 };
+}
+
+export function ingestListing(rows, max = INGEST_LIST_MAX) {
   const keys = {};
   let n = 0;
-  for (const r of rows.slice(0, INGEST_LIST_MAX)) {
+  for (const r of rows.slice(0, max)) {
     if (!ingestKeyParts(r.id).valid || r.status === "pending") continue;
     keys[r.id] = { present: true, sessionDate: typeof r.session === "string" ? r.session : null,
       generatedAt: typeof r.generated === "string" ? r.generated : null, updatedAt: Number(r.updated_at) || 0 };
     n++;
   }
-  return { keys, listed: n, truncated: rows.length > INGEST_LIST_MAX };
+  return { keys, listed: n, truncated: rows.length > max };
 }
 
 export function ingestMetadata(asked, rows) {
@@ -145,7 +163,16 @@ export function createFlowsStore({ ensureFlowsTables }) {
       return rows ? ingestMetadata(asked, rows.results) : null;
     },
 
-    async listing(env, kinds) {
+    async listing(env, kinds, names = null) {
+      if (Array.isArray(names)) {
+        const { ids, cut, through } = nameListIds(names, kinds);
+        if (!ids.length) return { keys: {}, listed: 0, truncated: cut, through };
+        const statements = chunks(ids, NAME_LIST_CHUNK).map((g) => env.DB.prepare(nameListSql(g.length)).bind(...g));
+        const results = await env.DB.batch(statements).catch(() => null);
+        if (!results) return null;
+        const listed = ingestListing(results.flatMap((r) => (r && r.results) || []), ids.length);
+        return { ...listed, truncated: cut, through };
+      }
       const rows = await env.DB.prepare(ingestListSql(kinds)).all().catch(() => null);
       return rows ? ingestListing(rows.results || []) : null;
     },

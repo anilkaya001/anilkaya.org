@@ -267,7 +267,7 @@ ok(/skip: deepen \? deepen\.keep/.test(src), "a deep read that is carried is ski
 
 const ticker = readFileSync(path.join(ROOT, "assets/js/flows-ticker.js"), "utf8");
 ok(/card\.depth === "deepened" \|\| !!engineOf\(card\)/.test(ticker), "the ticker page treats a deepened card as a deep one");
-ok(/card\.depth === "deepened" \? " Read in full in turn, oldest first: this read is " \+ dayDiff\(card\.sessionDate, m\.expected\) \+ " days old\."/.test(ticker), "and says how old its deep read is");
+ok(/card\.depth === "deepened" \? " The run for " \+ expected \+ " did not land a new read of this name, so the read of " \+ d \+ " is kept until one does\."/.test(ticker), "and says why its deep read is kept");
 ok(/const DEPTH_G = \{ \.\.\.UI\.depths, deep: \["list", "Deep read"\] \}/.test(ticker), "and the name picker lists the new tier");
 
 {

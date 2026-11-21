@@ -1,0 +1,1 @@
+{"name": "flows-ticker-age-render", "class": "C", "group": "shard", "timing": false, "medianS": 60, "shard": 8, "command": "node flows-ticker-age-render.mjs", "files": ["flows-ticker-age-render.mjs"], "covers": ["scripts/flows-pipeline.mjs","tests/fixtures-calendar.json"]}
