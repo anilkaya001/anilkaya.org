@@ -250,7 +250,8 @@ const SWEEP = () => {
 const STANDARD = ["1440x820", "1024x768", "390x844", "1920x1080"];
 const gate = (e) => e.fatal || (e.one && STANDARD.includes(e.size) && (e.scroll.length || e.inner.length)) || e.canvas.length || (STANDARD.includes(e.size) && (e.clipped.length || e.outside.length)) || (e.errors || []).length > 0;
 
-const browser = await chromium.launch();
+const launchBrowser = async () => chromium.launch();
+let browser = await launchBrowser();
 async function sweepSpec(spec, width, height, patch = null) {
   const out = [];
   const coarse = width < 600;
@@ -275,7 +276,7 @@ async function sweepSpec(spec, width, height, patch = null) {
   } catch (error) {
     out.push({ page: spec.id, size: width + "x" + height, fatal: String(error).slice(0, 200) });
   }
-  await ctx.close();
+  await ctx.close().catch(() => {});
   return out;
 }
 
@@ -285,7 +286,13 @@ try {
   for (const spec of SPECS) {
     for (const [width, height] of SIZES) {
       if (ONLY && !ONLY.test(`${spec.id}@${width}`)) continue;
-      report.push(...await sweepSpec(spec, width, height));
+      let swept = await sweepSpec(spec, width, height).catch((error) => [{ page: spec.id, size: width + "x" + height, fatal: String(error).slice(0, 200) }]);
+      if (swept.some((r) => r.fatal) && !browser.isConnected()) {
+        await browser.close().catch(() => {});
+        browser = await launchBrowser();
+        swept = await sweepSpec(spec, width, height);
+      }
+      report.push(...swept);
     }
   }
   if (!ONLY && !process.env.NO_MUTANTS) {
