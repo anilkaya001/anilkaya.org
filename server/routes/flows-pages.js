@@ -65,7 +65,7 @@ const PAGES = Object.freeze([
   { slug: "status", ownerOnly: true, render: (username) => FLOWS_PAGES.statusPage({ username }) },
   { slug: "fire", ff: "fire", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.firePage({ username, shadow: ffMode(env) === "shadow", feed: eventRiskOpen(env, owner) }) },
   { slug: "inbox", ff: "inbox", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.inboxPage({ username, shadow: ffMode(env) === "shadow" }) },
-  { slug: "digest", ff: "inbox", render: ffPending("digest") },
+  { slug: "digest", ff: "inbox", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.digestPage({ username, shadow: ffMode(env) === "shadow" }) },
   { slug: "wires", ff: "wires", render: ffPending("wires") },
 ]);
 

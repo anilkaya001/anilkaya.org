@@ -142,7 +142,8 @@ const SPECS = [
   { id: "status", fn: "statusPage", url: "/flows/status/" },
   { id: "fire", fn: "firePage", args: { shadow: true }, url: "/flows/fire/" },
   { id: "inbox", fn: "inboxPage", args: { shadow: true }, url: "/flows/inbox/" },
-  { id: "digest", fn: "ffPendingPage", args: { page: "digest", shadow: true }, url: "/flows/digest/" },
+  { id: "digest", fn: "digestPage", args: { shadow: true }, url: "/flows/digest/" },
+  { id: "wires", fn: "ffPendingPage", args: { page: "wires", shadow: true }, url: "/flows/wires/" },
 ];
 
 const pageFunctions = Object.keys(PAGES.FLOWS_PAGES).filter((k) => typeof PAGES.FLOWS_PAGES[k] === "function").sort();
@@ -203,7 +204,7 @@ async function mount(page, html, url, patch = null) {
 
 
 const SIZES = (process.env.SIZES || "1920x1080,1440x820,1024x768,390x844").split(",").map((s) => s.split("x").map(Number));
-const ONE_SCREEN = new Set(["overview", "market", "moves", "unusual", "events", "political", "status", "network", "now", "ledger", "flowlab", "fire", "inbox"]);
+const ONE_SCREEN = new Set(["overview", "market", "moves", "unusual", "events", "political", "status", "network", "now", "ledger", "flowlab", "fire", "inbox", "digest"]);
 
 const SWEEP = () => {
   const vis = (e) => {

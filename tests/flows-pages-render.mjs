@@ -141,7 +141,8 @@ const SPECS = [
   { id: "status", fn: "statusPage", url: "/flows/status/" },
   { id: "fire", fn: "firePage", args: { shadow: true }, url: "/flows/fire/" },
   { id: "inbox", fn: "inboxPage", args: { shadow: true }, url: "/flows/inbox/" },
-  { id: "digest", fn: "ffPendingPage", args: { page: "digest", shadow: true }, url: "/flows/digest/" },
+  { id: "digest", fn: "digestPage", args: { shadow: true }, url: "/flows/digest/" },
+  { id: "wires", fn: "ffPendingPage", args: { page: "wires", shadow: true }, url: "/flows/wires/" },
 ];
 
 const pageFunctions = Object.keys(PAGES.FLOWS_PAGES).filter((k) => typeof PAGES.FLOWS_PAGES[k] === "function").sort();
