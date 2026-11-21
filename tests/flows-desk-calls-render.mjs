@@ -261,7 +261,7 @@ try {
     await ready(page, 48);
     const geo = await page.evaluate(() => {
       const svg = document.querySelector("#dkScatter svg");
-      const ys = [...svg.querySelectorAll("text")].filter((t) => /^[\d,]+%$/.test(t.textContent) && t.getAttribute("text-anchor") === "end").map((t) => [Number(t.textContent.replace(/[,%]/g, "")) / 100, Number(t.getAttribute("y")) - 4]);
+      const ys = [...svg.querySelectorAll("text")].filter((t) => /^[\d.]+%$/.test(t.textContent) && t.getAttribute("text-anchor") === "end").map((t) => [Number(t.textContent.replace(/%/g, "")) / 100, Number(t.getAttribute("y")) - 4]);
       const xs = [...svg.querySelectorAll("text")].filter((t) => /^\.\d\d$/.test(t.textContent) && t.getAttribute("text-anchor") === "middle").map((t) => [Number(t.textContent), Number(t.getAttribute("x"))]);
       const pts = [...svg.querySelectorAll("g > [data-bind]")].map((n) => ({ bind: n.getAttribute("data-bind"), shape: n.tagName, pos: n.tagName === "circle" ? [Number(n.getAttribute("cx")), Number(n.getAttribute("cy"))] : n.tagName === "rect" ? [Number(n.getAttribute("x")) + Number(n.getAttribute("width")) / 2, Number(n.getAttribute("y")) + Number(n.getAttribute("height")) / 2] : null }));
       const rings = [...svg.querySelectorAll("g > circle:not([data-bind])")].map((n) => [Number(n.getAttribute("cx")), Number(n.getAttribute("cy"))]);
@@ -270,11 +270,11 @@ try {
     });
     ok(geo.ys.length >= 3 && geo.xs.length >= 3, "the axes carry labelled ticks");
     const [[y1, p1], [y2, p2]] = [geo.ys[1], geo.ys[geo.ys.length - 1]];
-    const yPix = (v) => p1 + (Math.sqrt(v) - Math.sqrt(y1)) * (p2 - p1) / (Math.sqrt(y2) - Math.sqrt(y1));
+    const yPix = (v) => p1 + (v - y1) * (p2 - p1) / (y2 - y1);
     const [[x1, q1], [x2, q2]] = [geo.xs[0], geo.xs[geo.xs.length - 1]];
     const xPix = (v) => q1 + (v - x1) * (q2 - q1) / (x2 - x1);
     const want = expectedOf(payloads, SYMS, TERMS());
-    const wantPts = [...want.values()].filter((w) => w.line.ok && w.e).map((w) => ({ x: w.delta, y: w.line.annRatio, bind: w.line.binding }));
+    const wantPts = [...want.values()].filter((w) => w.line.ok && w.e).map((w) => ({ x: w.delta, y: w.line.ratio, bind: w.line.binding, expiry: w.r.expiry }));
     let misses = 0;
     const capped = geo.pts.filter((p) => p.shape === "path").length;
     for (const w of wantPts) {
@@ -282,10 +282,10 @@ try {
       const hit = geo.pts.some((p) => p.pos && Math.abs(p.pos[0] - px) < 1.2 && (Math.abs(p.pos[1] - yPix(w.y)) < 1.2 || w.y > y2 * 1.5));
       if (!hit) misses++;
     }
-    ok(misses <= capped, `every point sits at the pixel its (|net delta|, annualised ratio) maps to, within 1 px (${misses} off, ${capped} pinned)`);
-    const brute = wantPts.filter((p) => !wantPts.some((q) => q !== p && q.x <= p.x && q.y >= p.y && (q.x < p.x || q.y > p.y)));
-    const uniq = new Set(brute.map((p) => p.x + "|" + p.y));
-    eq(geo.rings.length, uniq.size, `the ringed efficient set equals the brute-force Pareto set (${uniq.size})`);
+    ok(misses <= capped, `every point sits at the pixel its (|net delta|, return on cash, not annualised) maps to, within 1 px (${misses} off, ${capped} pinned)`);
+    const brute = wantPts.filter((p) => !wantPts.some((q) => q !== p && q.expiry === p.expiry && q.x <= p.x && q.y >= p.y && (q.x < p.x || q.y > p.y)));
+    const uniq = new Set(brute.map((p) => p.expiry + "|" + p.x + "|" + p.y));
+    eq(geo.rings.length, uniq.size, `the ringed efficient set equals the brute-force Pareto set of each expiry (${uniq.size})`);
     ok(Math.abs(geo.guide - xPix(0.1 / 0.3)) < 1, `the floor guide sits at floor over haircut (${geo.guide} vs ${xPix(0.1 / 0.3).toFixed(1)})`);
     const floorN = geo.pts.filter((p) => p.bind === "floor").length;
     eq(geo.pts.filter((p) => p.shape === "rect").length >= floorN - 0, true, "the floor-bound lines are diamonds");

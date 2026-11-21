@@ -47,6 +47,21 @@ ok(D && Object.isFrozen(D), "the desk's pure functions are exposed to a Node con
   same(D.frontierOf([{ x: 0.8, y: 0.5 }, { x: 0.8, y: 1 }], true), [{ x: 0.8, y: 1 }], "in either input order");
   same(D.frontierOf([{ x: 0.3, y: 0.5 }, { x: 0.3, y: 1 }], false), [{ x: 0.3, y: 1 }], "and the same on the delta axis");
   same(D.frontierOf([], false), [], "an empty desk has an empty frontier");
+  {
+    const mk = (expiry, x, y) => ({ r: { expiry }, x, y });
+    const pts = [mk("2026-09-18", 0.2, 0.004), mk("2026-09-18", 0.3, 0.006), mk("2026-09-18", 0.25, 0.003), mk("2026-12-18", 0.2, 0.02), mk("2026-12-18", 0.3, 0.03), mk("2026-12-18", 0.35, 0.01)];
+    const got = D.frontiersOf(pts, false);
+    same(got.map((f) => f.map((p) => p.r.expiry + "@" + p.x)), [["2026-09-18@0.2", "2026-09-18@0.3"], ["2026-12-18@0.2", "2026-12-18@0.3"]], "ONE FRONTIER PER EXPIRY: a short expiry keeps its own efficient lines beside a longer one that pays more for tying the cash up longer");
+    same(D.frontierOf(pts, false).map((p) => p.r.expiry), ["2026-12-18", "2026-12-18"], "where one frontier over every expiry would hold the long expiry alone");
+    const ax = D.returnAxis([0.001, 0.004, 0.008, 0.012, 0.021]);
+    ok(ax.lo === 0 && ax.ticks[0].v === 0 && ax.ticks[0].text === "0.0%", `THE RETURN AXIS STARTS AT ZERO (${ax.ticks.map((t) => t.text).join(" ")})`);
+    ok(ax.ticks.every((t, i) => i === 0 || Math.abs(t.v - ax.ticks[i - 1].v - ax.step) < 1e-12), "its ticks are evenly spaced, a linear scale");
+    ok(ax.ticks.every((t) => Math.abs(parseFloat(t.text) / 100 - t.v) < 1e-12), "and every tick's text is its value, with the decimals the step needs");
+    const neg = D.returnAxis([-0.004, 0.002, 0.01]);
+    ok(neg.lo < 0 && neg.ticks.some((t) => t.v < 0 && t.text.startsWith("\u2212")) && neg.ticks.some((t) => t.v === 0), "a bid under the in-the-money value is drawn below zero, with a true minus sign");
+    const wide = D.returnAxis([0.001, ...Array(38).fill(0.002), 0.5]);
+    ok(wide.cap < 0.01, `one outlier does not squash the rest: the axis is capped (${wide.cap})`);
+  }
 }
 
 {
@@ -177,15 +192,16 @@ try {
       const marks = [...svg.querySelectorAll(":scope > g > circle:not([fill='none']), :scope > g > rect, :scope > g > path")].map((n) => { const b = n.getBoundingClientRect(); return { x: b.x - box.x + b.width / 2, y: b.y - box.y + b.height / 2 }; });
       return { texts, y0: +svg.querySelector("line.base").getAttribute("y1"), marks, aria: svg.getAttribute("aria-label") };
     });
-    ok(geo.texts.some((t) => t.t === "Ann. yield, square-root scale"), "the yield axis is labelled as a square-root scale on the chart itself");
-    ok(/square-root scale/.test(geo.aria), `and so is its text alternative (${geo.aria})`);
-    const yTicks = geo.texts.filter((t) => t.a === "end" && /^\d+%$/.test(t.t)).map((t) => ({ v: parseInt(t.t, 10) / 100, y: t.y - 4 }));
+    ok(geo.texts.some((t) => t.t === "Return on cash: time value ÷ collateral, not annualised"), "THE Y AXIS IS RETURN ON CASH, NOT ANNUALISED, and says so on the chart itself");
+    ok(/Return on cash, time value over collateral, not annualised/.test(geo.aria) && !/square-root|Annualised/.test(geo.aria), `and so does its text alternative (${geo.aria})`);
+    ok(!geo.texts.some((t) => /square-root|Ann\./.test(t.t)), "no label on the chart names a square-root scale or an annualised yield");
+    const yTicks = geo.texts.filter((t) => t.a === "end" && /^[\d.]+%$/.test(t.t)).map((t) => ({ v: parseFloat(t.t) / 100, y: t.y - 4 }));
     ok(yTicks.some((t) => t.v === 0), "zero has a tick, so the axis starts from something");
     ok(yTicks.length >= 4, `and there are ticks to read (${yTicks.map((t) => t.v * 100 + "%").join(" ")})`);
     for (const a of yTicks.filter((t) => t.v > 0)) {
       for (const b of yTicks.filter((t) => t.v > 0 && t.v > a.v)) {
-        const ratio = (geo.y0 - a.y) / (geo.y0 - b.y), want = Math.sqrt(a.v / b.v);
-        ok(Math.abs(ratio - want) < 0.02, `the ${a.v * 100}% and ${b.v * 100}% ticks sit where a square-root scale puts them (${ratio.toFixed(3)} against ${want.toFixed(3)})`);
+        const ratio = (geo.y0 - a.y) / (geo.y0 - b.y), want = a.v / b.v;
+        ok(Math.abs(ratio - want) < 0.02, `the ${a.v * 100}% and ${b.v * 100}% ticks sit where a linear scale puts them (${ratio.toFixed(3)} against ${want.toFixed(3)})`);
       }
     }
     const xTicks = geo.texts.filter((t) => t.a === "middle" && /^\.?\d/.test(t.t)).map((t) => ({ v: parseFloat("0" + t.t.replace(/^0/, "")), x: t.x }));
@@ -193,7 +209,7 @@ try {
     const xa = xTicks[0], xb = xTicks[xTicks.length - 1];
     const px = (v) => xa.x + (v - xa.v) * (xb.x - xa.x) / (xb.v - xa.v);
     const ya = yTicks.find((t) => t.v > 0);
-    const py = (v) => geo.y0 - (geo.y0 - ya.y) * Math.sqrt(v / ya.v);
+    const py = (v) => geo.y0 - (geo.y0 - ya.y) * (v / ya.v);
     ok(geo.texts.some((t) => t.t === "Net delta"), "the risk axis is named for what it plots");
     eq(geo.marks.length, 9, "one mark per line");
 
@@ -208,9 +224,9 @@ try {
       const st = NODE_Q.priceStructure(setup, { family: r.type === "C" ? "covered-call" : "short-put", expiry: r.expiry, legs, basis: "natural" });
       const leg = st.legs.find((l) => l.type !== "S");
       const net = r.type === "C" ? 1 - leg.delta : Math.abs(leg.delta);
-      const at = { x: px(net), y: py(r.annualized) };
+      const at = { x: px(net), y: py(r.yieldOnCollateral) };
       const near = geo.marks.filter((m) => Math.hypot(m.x - at.x, m.y - at.y) < 2).length;
-      ok(near >= 1, `${r.type === "C" ? "call" : "put"} ${r.strike} ${r.expiry} is plotted at net delta ${net.toFixed(3)} (${r.type === "C" ? "one minus the call's delta " + leg.delta.toFixed(3) : "the put's delta"}), yield ${(r.annualized * 100).toFixed(0)}%`);
+      ok(near >= 1, `${r.type === "C" ? "call" : "put"} ${r.strike} ${r.expiry} is plotted at net delta ${net.toFixed(3)} (${r.type === "C" ? "one minus the call's delta " + leg.delta.toFixed(3) : "the put's delta"}), return on cash ${(r.yieldOnCollateral * 100).toFixed(2)}%`);
       checked++;
       if (r.type === "C") calls++; else puts++;
     }
@@ -218,7 +234,7 @@ try {
 
     same(await page.locator("#dkFrontierM .ui-seg-i").allTextContents(), ["Net delta", "Win % (implied)"], "the toggle names the second axis for what it is: the implied win chance, not a bare 'Chance'");
     const frontier = await openInfo(page, page.locator('#dkFrontierM [aria-label="About frontier"]'));
-    ok(/square-root scale/.test(frontier) && /zero included/.test(frontier), "the frontier's disclosure states the scale and that its ticks sit on it");
+    ok(/linear from zero/.test(frontier) && /not annualised/.test(frontier) && /Each expiry has its own frontier/.test(frontier) && !/square-root/.test(frontier), "the frontier's disclosure states the linear scale, that the return is not annualised and that each expiry has its own frontier");
     ok(/one minus the call/.test(frontier) && /shares add one/.test(frontier), "and says a covered call is plotted at one minus its delta, because the shares add one");
     ok(/Win % \(implied\) is the risk-neutral chance/.test(frontier), "and what the implied win chance is");
     await closeInfo(page);
@@ -228,7 +244,7 @@ try {
     await page.waitForFunction(() => /implied chance of profit/.test(document.querySelector("#dkScatter svg")?.getAttribute("aria-label") || ""), null, { timeout: 5000 });
     const chanceTexts = await page.$$eval("#dkScatter svg text", (ts) => ts.map((t) => t.textContent));
     ok(chanceTexts.includes("Win % (implied)"), "the second axis is titled the same way on the chart");
-    ok(chanceTexts.includes("Ann. yield, square-root scale"), "and the yield axis keeps its scale label");
+    ok(chanceTexts.includes("Return on cash: time value ÷ collateral, not annualised"), "and the return axis keeps its label");
     await page.close();
   }
 
@@ -631,7 +647,7 @@ try {
 }
 
 console.log(`✓ flows-desk-client: ${checks} assertions — the frontier's Pareto set against a brute force over 8,000 random sets with ties, ` +
-  `a square-root axis that says so and whose ticks are placed on it, covered calls plotted at one minus their delta beside puts at theirs, ` +
+  `a return-on-cash axis, not annualised, linear from zero, with one frontier per expiry, covered calls plotted at one minus their delta beside puts at theirs, ` +
   `the two chances named for what they are, a tooltip on every dash and on the EV, a bid under intrinsic value called impossible, ` +
   `one capital basis per line, a rebased or mismatched chain announced and never ranked, the plan computed over the tenor window, ` +
   `a balance that refuses 25,5k and round-trips its cents, tenor buckets pinned by label at the day, and the smile's volatility basis stated, and a quote origin that follows the Eastern clock, half days included, and never the future, ` +
