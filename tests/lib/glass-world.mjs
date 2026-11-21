@@ -17,11 +17,11 @@ const READ = {
   version: 1, status: "fallback", ticker: "NVDA", generated: false, label: "Deterministic reading", model: null, modelName: null, neurons: null, tokens: null,
   provenance: "Deterministic reading: assembled from templates over the dossier's facts.", note: null, why: "cooldown",
   fingerprint: "d1.abc", asOf: new Date(NOW).toISOString(), session: "2026-08-24", generatedAt: null, coverage: { ok: 8, partial: 2, withheld: 2, pending: 0 },
-  tags: [{ code: "dealer-pinned", label: "Dealers pinning", sentence: "The implied dealer state is pinned on the vendor's convention (dealers long calls, short puts).", evidence: ["options.state"] }],
+  tags: [{ code: "dealer-pinned", label: "Dealers pinning", sentence: "The implied dealer state is pinned on the feed's convention (dealers long calls, short puts).", evidence: ["options.state"] }],
   sections: {
     identity: { text: "NVIDIA designs graphics processors and data-centre accelerators.", cites: [{ id: "identity.description", label: "Company description", display: "profile", asOf: new Date(NOW).toISOString(), kind: "identity", grade: 2 }] },
     now: { text: "The last price is $127.40, +1.27% from the previous close.", cites: [{ id: "price.last", label: "Last price", display: "$127.40", asOf: new Date(NOW).toISOString(), kind: "price", grade: 3 }] },
-    drivers: [{ text: "The implied dealer state is pinned on the vendor's convention (dealers long calls, short puts).", cites: [{ id: "options.state", label: "Implied dealer state", display: "pinned", asOf: new Date(NOW).toISOString(), kind: "options", grade: 2 }] }],
+    drivers: [{ text: "The implied dealer state is pinned on the feed's convention (dealers long calls, short puts).", cites: [{ id: "options.state", label: "Implied dealer state", display: "pinned", asOf: new Date(NOW).toISOString(), kind: "options", grade: 2 }] }],
     tensions: [], watch: [], unknown: [{ text: "Fundamentals are withheld, so nothing is claimed about revenue.", missing: ["fundamentals"] }],
   },
   refused: [],

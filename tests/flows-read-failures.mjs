@@ -54,8 +54,8 @@ const BASE = {
   applyReadFailures(card, [{ route: "spot-exposures-expiry-strike", status: 500 }, { route: "darkpool", status: 404 }]);
   eq(card.panels.surface.status, "ok", "an ok panel is never overwritten by a failure record");
   eq(card.panels.darkpool.code, "failed", "a quiet panel whose read failed is failed");
-  eq(failedRead({ route: "x", status: 404 }), "the vendor's x read answered HTTP 404 on this run, so this is a failed read and not an empty one", "the sentence");
-  eq(failedRead({ route: "x" }), "the vendor's x read could not be reached on this run, so this is a failed read and not an empty one", "and for a read that never landed");
+  eq(failedRead({ route: "x", status: 404 }), "the feed's x read answered HTTP 404 on this run, so this is a failed read and not an empty one", "the sentence");
+  eq(failedRead({ route: "x" }), "the feed's x read could not be reached on this run, so this is a failed read and not an empty one", "and for a read that never landed");
   const many = { panels: {} };
   applyReadFailures(many, Array.from({ length: 40 }, (_, i) => ({ route: "r" + i, status: 500 })));
   eq(many.readFailures.length, READ_FAILURES_MAX, "the list is capped");
@@ -71,7 +71,9 @@ const BASE = {
   eq(opIdOf("/api/market/XLK/sector-tide"), "sector-tide", "a template in the middle");
   eq(opIdOf("/api/nothing"), OTHER_OP, "an unknown path is other");
   eq(opIdOf(null), OTHER_OP, "and so is no path");
-  for (const op of OPS) eq(opIdOf(op.path.replace(/\{[a-z_]+\}/g, "X1")), op.id === "darkpool" ? "darkpool" : op.id, `${op.id} maps to itself`);
+  const firstOfPath = (op) => OPS.find((e) => e.path === op.path).id;
+  for (const op of OPS) eq(opIdOf(op.path.replace(/\{[a-z_]+\}/g, "X1")), firstOfPath(op), `${op.id} maps to itself, or to the first entry of its path when two reads share one`);
+  eq(OPS.filter((op) => firstOfPath(op) !== op.id).map((op) => op.id), ["listings-delisted"], "the delisted listings read is the one entry metered under another's id: it differs from the active read by its query alone, which the meter does not keep");
   eq([classOf(200), classOf(204), classOf(301), classOf(404), classOf(429), classOf(503), classOf(0), classOf(undefined, "timeout"), classOf(500, "network")],
     ["2xx", "2xx", "3xx", "4xx", "429", "5xx", "network", "timeout", "network"], "classes");
 
@@ -164,7 +166,7 @@ const BASE = {
     "the card section's per-name reads swallow nothing: every one records its failure");
   ok((src.match(/\.catch\(soft\("/g) || []).length >= 14, "the card, dossier and enrichment reads all record theirs");
   ok(/readFailures: lost,/.test(src) && /readFailures: reads\.readFailures/.test(src), "and hand them to buildCard");
-  ok(/\.\.\.\(stats\.calls > 0 \? \{ vendor: summarize\(wire\.snapshot\(\)\) \} : \{\}\)/.test(src), "meta carries the wire summary only when the run called the vendor");
+  ok(/\.\.\.\(stats\.calls > 0 \? \{ vendor: summarize\(wire\.snapshot\(\)\) \} : \{\}\)/.test(src), "meta carries the wire summary only when the run called the feed");
 }
 
 const write = (body) => {
@@ -223,7 +225,7 @@ const write = (body) => {
   eq(r.snapshot.ops.darkpool.classes, { timeout: 2 }, "the two timed-out tries");
   eq(r.snapshot.ops["oi-change"].classes, { "5xx": 5 }, "the five refused tries");
   eq(r.snapshot.ops["ohlc-1d"].classes, { "2xx": 1 }, "and the healthy read");
-  eq(r.snapshot.ops["ohlc-1d"].bytes, 14, "with the length the vendor declared");
+  eq(r.snapshot.ops["ohlc-1d"].bytes, 14, "with the length the feed declared");
   eq(r.limit, [300, 300, 300, 300], "an override applies to the nightly too");
   eq(JSON.parse(await run({ LIMITS: "1", FLOWS_UW_TIMEOUT_MS: "" })).limit, [30000, 45000, 45000, 30000],
     "the default is 30 s, 45 s for a chain page and the two-year bars");

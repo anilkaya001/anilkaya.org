@@ -92,13 +92,13 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(p.oiChange, 200, "open interest change comes from prev_oi, not inferred");
 
   ok(p.ivMid > 0.1 && p.ivMid < 0.6, `the volatility the cushion is measured in is inverted from the mid (${p.ivMid})`);
-  near(p.iv, 0.28, 1e-12, "while the vendor's own figure ships beside it, unchanged");
+  near(p.iv, 0.28, 1e-12, "while the feed's own figure ships beside it, unchanged");
   const sigma = p.ivMid * Math.sqrt(24 / 365);
   near(p.cushionSigmas, Math.log(180 / 167.5) / sigma, 1e-9,
        "cushion is the move to breakeven in the QUOTE's implied sigmas, the same volatility that delta and the chance of profit use");
   const rival = priceSale({ ...base, implied_volatility: "0.90" }, { spot: 180, asOf: "2026-08-25" });
   eq(rival.cushionSigmas, p.cushionSigmas,
-     "and the vendor's last-trade volatility does not enter it: a stale 90% print beside a 28% market moves nothing");
+     "and the feed's last-trade volatility does not enter it: a stale 90% print beside a 28% market moves nothing");
 
   ok(priceSale({ ...base, nbbo_bid: "0" }, { spot: 180, asOf: "2026-08-25" }) === null,
      "a zero bid is unsellable, not free money");
@@ -187,7 +187,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
                  open_interest: "500" };
   const measured = rankChain([...rows, noIv], { spot, asOf, rankBy: "cushionSigmas" });
   ok(measured.rows.every((r) => r.cushionSigmas !== null),
-     "a line the vendor quoted no volatility for still has a cushion: it is measured in the volatility of its own mid");
+     "a line the feed quoted no volatility for still has a cushion: it is measured in the volatility of its own mid");
 
   const belowFloor = { option_symbol: "XYZ260918P00105000", nbbo_bid: "4.40", nbbo_ask: "4.99",
                        implied_volatility: "0.40", open_interest: "500" };
@@ -234,7 +234,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(c("2026-09-18", "2026-09-18", "unknown"), null,
      "same day with the timing unknown is NULL, not false");
   eq(c("2026-09-18", "2026-09-18", "at_some_point"), null,
-     "an unrecognised token is null — the vendor's vocabulary is not pinned");
+     "an unrecognised token is null — the feed's vocabulary is not pinned");
   eq(c("2026-09-18", "2026-09-18", ""), null, "and an empty token is null");
   eq(c("2026-09-18", "2026-09-18", null), null, "and a missing one");
 
@@ -549,7 +549,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
 
     const raw = ivSurface(chain);
     eq(raw.status, "empty",
-       "raw vendor rows build no surface at all — the module reads the divided field and no raw one");
+       "raw feed rows build no surface at all — the module reads the divided field and no raw one");
     eq(raw.placed, 0, "so there is no way to draw an undivided surface by accident");
   }
 
@@ -559,7 +559,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
                     open_interest: "300", volume: "50" };
     const r = rankChain([...chain, noVol], { spot, asOf, ticker: "CCC" });
     ok(!r.ivSurface.grid.flat().some((c) => c && c.strike === 82),
-       "a contract the vendor quoted no implied volatility for is ABSENT from the surface");
+       "a contract the feed quoted no implied volatility for is ABSENT from the surface");
     eq(r.ivSurface.placed, s.placed,
        "rather than drawn as a zero-volatility cell, which would be the palest cell on the chart and a lie");
   }
@@ -790,7 +790,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   eq(forward.length, 4, "four equal-premium lines are ranked");
   const slots = rankChain(equal, { spot: 100, asOf: "2026-08-25", rankBy: "premium" }).rows;
   ok(slots[0].annualized >= slots[1].annualized && slots[1].annualized >= slots[2].annualized,
-     "a tie on the ranking key falls to the annualized figure, then to expiry, then to strike, not to the vendor's row order");
+     "a tie on the ranking key falls to the annualized figure, then to expiry, then to strike, not to the feed's row order");
   assert.deepEqual(forward, ["XYZ260918C00104000", "XYZ260918C00105000", "XYZ260918C00106000", "XYZ261016C00105000"]); checks++;
 }
 
@@ -945,7 +945,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   for (const x of parity.rows) near(x.ivMid, sigma, 1e-6, `${x.type} ${x.strike}: every line of the paired chain reads the one volatility that priced it`);
 
   const flipped = rank([...paired].reverse());
-  near(row(flipped, "P", 90).ivMid, sigma, 1e-6, "and the order the vendor sends the rows in does not matter");
+  near(row(flipped, "P", 90).ivMid, sigma, 1e-6, "and the order the feed sends the rows in does not matter");
   eq(rank(paired, { carry: 0.05 }).forwards[0].method, "parity", "a carry handed in is only a fallback: parity wins over it");
   near(row(rank(paired, { carry: 0.05 }), "P", 90).ivMid, sigma, 1e-6, "and does not move the volatility");
 
@@ -1207,6 +1207,6 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   deep([few.forwards[0].method, few.forwards[0].F], ["rate-only", null], "with too few pairs the forward is the rate alone and no figure is named");
 }
 
-console.log(`✓ flows-premium: ${checks} assertions — the strike divisor from the vendor's own ` +
+console.log(`✓ flows-premium: ${checks} assertions — the strike divisor from the feed's own ` +
   `example, per-chain IV units, sale priced at the bid, covered-call caps, gates that are reported, ` +
   `and an implied volatility surface whose smile survives the units, the gates and the stale prints`);

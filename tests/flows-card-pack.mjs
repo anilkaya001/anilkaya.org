@@ -21,8 +21,9 @@ const same = (a, b, m) => { assert.deepEqual(a, b, m); checks++; };
 
 const WP4_PS = { od: "WP4", bytes: 2200, why: "the ps section (ftd, svx, ibs, ins) is the next field the headroom was held for: it adds 2.2 KB to a deep card, sheds before any other section and never costs one its room" };
 const HEADROOM_BYTES = Math.floor(0.95 * CARD_X_SOFT_BYTES) + WP4_PS.bytes;
-const WIRE_CEILING = 57500 + WP4_PS.bytes;
-const SERVED_CEILING = 63600 + WP4_PS.bytes;
+const WP6_ER = { od: "WP6", bytes: 900, why: "the er section (eps and fin) rides on the card-x of every name the event-risk nightly reads: it adds about 0.8 KB to the largest card, is the first section shed after the audit block and never costs another section its room" };
+const WIRE_CEILING = 57500 + WP4_PS.bytes + WP6_ER.bytes;
+const SERVED_CEILING = 63600 + WP4_PS.bytes + WP6_ER.bytes;
 const DAY = 86400000;
 const iso = (n) => new Date(n * DAY).toISOString().slice(0, 10);
 const dayN = (s) => Date.parse(s + "T00:00:00Z") / DAY;
@@ -268,10 +269,10 @@ for (const c of wireCards) {
 }
 eq(wireCards.length, cards.length, "the same cards are built with the switch on");
 ok(wireMax <= HEADROOM_BYTES, `WITH THE SWITCH ON THE LARGEST CARD-X IS ${wireMax} BYTES ON THE WIRE (${wireMaxName}), AT MOST 95% OF THE SOFT LIMIT: ${HEADROOM_BYTES} of ${CARD_X_SOFT_BYTES}`);
-ok(wireMax <= WIRE_CEILING, `held at ${WIRE_CEILING}, a ratchet that falls and is not raised without a named decision`);
+ok(wireMax <= WIRE_CEILING, `${wireMax} bytes, held at ${WIRE_CEILING}, a ratchet that falls and is not raised without a named decision`);
 eq(wireShed, 0, "and no card sheds its extras to the soft limit: every part of every card stays whole");
 ok(wireRawMax > CARD_X_SOFT_BYTES, `while the document the Worker serves is larger than the soft limit for the largest (${wireRawMax} bytes), which is why this is a decision and not a default`);
-ok(wireRawMax <= SERVED_CEILING, `it has its own ratchet at ${SERVED_CEILING} bytes so growth the packing hides is seen`);
+ok(wireRawMax <= SERVED_CEILING, `${wireRawMax} bytes: it has its own ratchet at ${SERVED_CEILING} bytes so growth the packing hides is seen`);
 ok(wireRawMax <= CARD_X_SERVED_BYTES, `and stays inside the served ceiling of ${CARD_X_SERVED_BYTES} bytes, 90% of the ${CARD_X_BUDGET_BYTES}-byte budget, which the pipeline enforces on every card-x`);
 console.log(`  card-x: ${cards.length} cards; as posted today the largest is ${rawMax} bytes (${rawMaxName}) and ${softShed} shed their extras; with FLOWS_CARDX_WIRE=pack the largest is ${wireMax} bytes on the wire (${wireMaxName}), ${(100 * wireMax / CARD_X_SOFT_BYTES).toFixed(1)}% of the soft limit, and ${wireRawMax} bytes served`);
 rmSync(wireDir, { recursive: true, force: true });
@@ -315,11 +316,37 @@ rmSync(wireDir, { recursive: true, force: true });
   eq(withWire(true, () => cardXBytes(heavy)), P.wireBytes(heavy), "cardXBytes is the wire size while the switch is on");
   eq(withWire(false, () => cardXBytes(heavy)), P.servedBytes(heavy), "and the served size while it is off");
 
+  const sweep = (m, wire) => withWire(wire, () => {
+    const small = trail("2024-01-02", Array.from({ length: 40 }, () => 1));
+    const zero = m.cardXPayload("SYX101", parts(small, 0), stamp);
+    const room = CARD_X_SOFT_BYTES - m.cardXBytes(zero);
+    const bad = [];
+    for (let step = -90; step <= 90; step++) {
+      const own = parts(small, room + step);
+      const on = m.cardXPayload("SYX101", { ...own, va: { rows: "z".repeat(400) } }, stamp);
+      const off = m.cardXPayload("SYX101", own, stamp);
+      const strip = (c) => { const o = JSON.parse(JSON.stringify(c)); delete o.va; delete o.bytes; o.shed = o.shed.filter((x) => x !== "va.soft"); return JSON.stringify(o); };
+      if (strip(on) !== strip(off)) bad.push(step + ":differs");
+      if (m.cardXBytes(on) + 16 > CARD_X_SOFT_BYTES && !(on.dx.parts.financials.shed === 1 && on.dx.parts.info.shed === 1)) bad.push(step + ":over");
+    }
+    return bad;
+  });
+  eq(sweep(await import("../scripts/flows-legs/card-x.mjs"), false).join(" "), "", "A CARD AT ITS LIMIT SHEDS THE SAME PARTS WITH THE VOL DESK SECTION AS WITHOUT IT: over 181 one-byte steps across the soft limit the two cards are equal apart from va, and the one with va is inside the limit, because the shed marks have a fixed reserve and never cause a further shed");
+  eq(sweep(await import("../scripts/flows-legs/card-x.mjs"), true).join(" "), "", "and the same on the wire with the switch on");
+  for (const [name, transforms] of [
+    ["the shed marks counted against the soft limit", [["const body = unmarked(payload);", "const body = payload;"]]],
+    ["no reserve for the shed marks", [["const SHED_RESERVE = JSON.stringify([\"pm.soft\", \"va.soft\", \"extras.soft\"]).length;", "const SHED_RESERVE = 0;"]]],
+  ]) {
+    const badBuild = await loadMutated("scripts/flows-legs/card-x.mjs", transforms, { salt: 880 + planted });
+    ok(sweep(badBuild, false).length > 0, `PLANTED WRONG BUILD, ${name}: the sweep across the limit fails it`);
+    planted++;
+  }
+
   const WIRE_ON = ["export const cardXBytes = (payload) => (cardXWire() ? wireBytes(payload) : servedBytes(payload));", "export const cardXBytes = (payload) => servedBytes(payload);"];
   const builds = [
     ["the soft limit counted on the document with the switch on", [WIRE_ON]],
     ["the soft limit counted on the wire with the switch off", [["export const cardXBytes = (payload) => (cardXWire() ? wireBytes(payload) : servedBytes(payload));", "export const cardXBytes = (payload) => wireBytes(payload);"]]],
-    ["the served ceiling dropped", [["const overSoft = (payload) => cardXBytes(payload) + BYTES_FIELD > CARD_X_SOFT_BYTES || servedBytes(payload) + BYTES_FIELD > CARD_X_SERVED_BYTES;", "const overSoft = (payload) => cardXBytes(payload) + BYTES_FIELD > CARD_X_SOFT_BYTES;"]]],
+    ["the served ceiling dropped", [[" || servedBytes(body) + BYTES_FIELD + SHED_RESERVE > CARD_X_SERVED_BYTES;", ";"]]],
     ["the served ceiling at the whole budget", [["export const CARD_X_SERVED_BYTES = Math.floor(0.9 * CARD_X_BUDGET_BYTES);", "export const CARD_X_SERVED_BYTES = CARD_X_BUDGET_BYTES * 2;"]]],
     ["any value of the switch packs", [["export const cardXWire = () => process.env.FLOWS_CARDX_WIRE === \"pack\";", "export const cardXWire = () => Boolean(process.env.FLOWS_CARDX_WIRE);"]]],
     ["the soft limit not enforced", [["while (overSoft(payload)) {", "while (false) {"]]],
@@ -461,8 +488,8 @@ const rowOf = (d, id) => d.db.prepare("SELECT payload FROM flows_payload WHERE i
   for (const mode of ["off", "warn", undefined]) {
     const env = mode === undefined ? {} : { FLOWS_DOOR_V2: mode };
     const dWhole = H.fakeD1(), dPacked = H.fakeD1();
-    const whole = await rig({ DB: dWhole.D1, FLOWS_INGEST_TOKEN: NIGHTLY, FLOWS_POSITIONING: "on", ...env }, "https://anilkaya.test");
-    const wired = await rig({ DB: dPacked.D1, FLOWS_INGEST_TOKEN: NIGHTLY, FLOWS_POSITIONING: "on", ...env }, "https://anilkaya.test");
+    const whole = await rig({ DB: dWhole.D1, FLOWS_INGEST_TOKEN: NIGHTLY, FLOWS_POSITIONING: "on", FLOWS_EVENTRISK: "on", ...env }, "https://anilkaya.test");
+    const wired = await rig({ DB: dPacked.D1, FLOWS_INGEST_TOKEN: NIGHTLY, FLOWS_POSITIONING: "on", FLOWS_EVENTRISK: "on", ...env }, "https://anilkaya.test");
     const w1 = await post(whole, key, text);
     const w2 = await post(wired, key, packed);
     same([w1.res.status, w2.res.status], [200, 200], `the ingest door takes the largest card-x whole and packed (door ${mode === undefined ? "unset" : mode}): ${w2.text.slice(0, 100)}`);
@@ -533,4 +560,4 @@ const rowOf = (d, id) => d.db.prepare("SELECT payload FROM flows_payload WHERE i
   restoreCache.restore();
 }
 
-console.log(`✓ flows-card-pack: ${checks} assertions, no server, no vendor call: with FLOWS_CARDX_WIRE=pack the pipeline posts card-x with its day lists as gaps (a marker, the first day and the gaps), the Worker's door decodes them and stores the document, so no reader changes and the largest of ${cards.length} emitted cards is ${wireMax} bytes on the wire (${(100 * wireMax / CARD_X_SOFT_BYTES).toFixed(1)}% of the soft limit); posted whole, as it is by default, nothing changes; 600 random documents and ${cards.length} real ones round-trip exactly in six time zones; a packer with a bug posts the document whole; and ${planted} planted wrong builds fail`);
+console.log(`✓ flows-card-pack: ${checks} assertions, no server, no feed call: with FLOWS_CARDX_WIRE=pack the pipeline posts card-x with its day lists as gaps (a marker, the first day and the gaps), the Worker's door decodes them and stores the document, so no reader changes and the largest of ${cards.length} emitted cards is ${wireMax} bytes on the wire (${(100 * wireMax / CARD_X_SOFT_BYTES).toFixed(1)}% of the soft limit); posted whole, as it is by default, nothing changes; 600 random documents and ${cards.length} real ones round-trip exactly in six time zones; a packer with a bug posts the document whole; and ${planted} planted wrong builds fail`);

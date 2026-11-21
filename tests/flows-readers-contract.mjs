@@ -107,12 +107,12 @@ async function viewTape(f, ticker, now, calls) {
   eq(first.state, "stale", "and that first view is still labelled stale, because it is");
   eq(first.reason, "missed-close", "with the reason the classifier gives");
   deep(calls.map((c) => c.path.replace(/^\/api\//, "")), ["stock/GLD/net-prem-ticks", "option-trades/flow-alerts"],
-    "the first view refreshes the OLDER leg, the premium one: two vendor calls, as one leg per refresh has always cost");
+    "the first view refreshes the OLDER leg, the premium one: two feed calls, as one leg per refresh has always cost");
   const second = await viewTape(f, "GLD", evening + 30000, calls);
   eq(second.how, "stale-refreshing", "the second view still finds the row short of the close, because the other leg is the older now");
   deep(calls.slice(2).map((c) => c.path.replace(/^\/api\//, "")), ["stock/GLD/spot-exposures"], "and refreshes that one: one call");
   const again = await viewTape(f, "GLD", evening + 60000, calls);
-  eq(again.how, "fresh", "the third view is served without a vendor call");
+  eq(again.how, "fresh", "the third view is served without a feed call");
   eq(again.state, "closed", "as a closed row");
   eq(again.reason, "session-final", "that covers the session's close");
   eq(calls.length, 3, "THREE VENDOR CALLS IN ALL, ONE LEG PER VIEW: the tape is final and no further call is spent on it");
@@ -121,7 +121,7 @@ async function viewTape(f, ticker, now, calls) {
     "the stored row is complete, of the closed session, and read after its close");
   const overnight = await viewTape(f, "GLD", ET(TUE, 3, 30), calls);
   eq(overnight.how, "fresh", "and it stays final through the night");
-  eq(calls.length, 3, "at no vendor cost");
+  eq(calls.length, 3, "at no feed cost");
 }
 
 {
@@ -153,7 +153,7 @@ async function viewTape(f, ticker, now, calls) {
   eq(view.how, "stale-refreshing", "a premium-only tape of a session FIVE DAYS back is refreshed on an evening view");
   deep(calls.map((c) => c.path.replace(/^\/api\//, "")), ["stock/ORLY/net-prem-ticks", "option-trades/flow-alerts"],
     "WITH THE PREMIUM LEG FIRST: it dates the new session, where the gamma leg (read for the OLD session, as the row held it) " +
-    "spent a vendor call on a session nobody will look at and left the drawn premium path untouched");
+    "spent a feed call on a session nobody will look at and left the drawn premium path untouched");
   const row = f.db.prepare("SELECT legs, read_at, session FROM flows_tape WHERE ticker = 'ORLY'").get();
   eq(row.session, TUE, "the row now holds the closed session");
   ok(row.read_at >= sessionClose(TUE, null), "read after its close");
@@ -162,7 +162,7 @@ async function viewTape(f, ticker, now, calls) {
   deep(calls.slice(2).map((c) => c.path.replace(/^\/api\//, "")), ["stock/ORLY/spot-exposures"], "one call");
   const done = await viewTape(f, "ORLY", evening + 120000, calls);
   eq(done.how, "fresh", "after which the tape is final");
-  eq(calls.length, 3, "for three vendor calls in all, over two views");
+  eq(calls.length, 3, "for three feed calls in all, over two views");
 }
 
 {
@@ -279,7 +279,7 @@ const screenerRow = (ticker, seed, dated = false) => {
   const first = await get("/api/flows/card?t=TLT");
   eq(first.res.status, 200, "an out-of-universe name opens as a quote card");
   eq(first.body.depth, "quote", "of depth quote");
-  eq(seen.screener, 1, "read once from the vendor's screener");
+  eq(seen.screener, 1, "read once from the feed's screener");
   eq(first.body.generatedAt, new Date(ET(TUE, 9, 35)).toISOString(), "stamped with the moment the row was read");
   eq(first.body.sessionDate, TUE, "and dated by that moment, not by a later one");
   eq(first.res.headers.get("X-Fresh-Class"), "breadth", "IT NOW CARRIES ITS OWN FRESHNESS: the row is a screener read, the breadth class's age rules");
@@ -289,7 +289,7 @@ const screenerRow = (ticker, seed, dated = false) => {
 
   at(ET(TUE, 9, 45));
   const second = await get("/api/flows/card?t=TLT");
-  eq(seen.screener, 1, "ten minutes later the cached row is served without a vendor call");
+  eq(seen.screener, 1, "ten minutes later the cached row is served without a feed call");
   eq(second.body.generatedAt, first.body.generatedAt,
     "AND KEEPS ITS OWN READ TIME: the card was rebuilt with 'generated now' on every view before, so a 09:35 row read as built at 09:45");
   eq(second.res.headers.get("X-Fresh-State"), "live", "still live at ten minutes");
@@ -316,7 +316,7 @@ const screenerRow = (ticker, seed, dated = false) => {
     headers: [["content-type", "application/json"]], exp: ET(TUE, 22, 0) });
   at(ET(TUE, 11, 0));
   const held = await get("/api/flows/card?t=HYG");
-  eq(seen.screener, 0, "with the on-demand limiter refusing, no vendor call is made");
+  eq(seen.screener, 0, "with the on-demand limiter refusing, no feed call is made");
   eq(held.body.depth, "quote", "and the held row is still served rather than an empty page");
   eq(held.body.generatedAt, new Date(ET(TUE, 10, 0)).toISOString(), "under its TRUE read time, an hour old");
   eq(held.res.headers.get("X-Fresh-State"), "stale", "which the header calls stale, not live");
@@ -372,7 +372,7 @@ const screenerRow = (ticker, seed, dated = false) => {
   eq(behind.body.generatedAt, new Date(ET(TUE, 21, 0)).toISOString(), "and is dated by that read");
   eq(behind.res.headers.get("X-Fresh-State"), "closed", "final from then on");
   const again = await get("/api/flows/card?t=SOXX");
-  eq(seen.screener, 1, "with no further vendor call");
+  eq(seen.screener, 1, "with no further feed call");
   ok(again.body.generatedAt === behind.body.generatedAt, "and the same stamp");
 
   caches_.set("https://flows-class.internal/EWZ", { text: JSON.stringify({ known: true, row: screenerRow("EWZ", "c") }),
@@ -389,7 +389,7 @@ const screenerRow = (ticker, seed, dated = false) => {
   caches_.clear();
   at(ET(TUE, 9, 40));
   const unknown = await get("/api/flows/card?t=ZZZQ");
-  eq(unknown.body.status, "absent", "a name the vendor does not know stays absent");
+  eq(unknown.body.status, "absent", "a name the feed does not know stays absent");
   at(ET(TUE, 15, 40));
   await get("/api/flows/card?t=ZZZQ");
   eq(seen.screener, 1, "and that verdict keeps its twelve hours: only a row's numbers age, not the fact that a name is unknown");

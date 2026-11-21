@@ -45,7 +45,7 @@
 
   const capFromText = (l) => (l.capFrom || "plan") + (l.capSource && l.capSource !== l.source ? " from " + l.capSource : "");
   const VIA_SAID = { page: "read from the published page", snippet: "read from a quoted snippet", recall: "recalled, not re-read", unverified: "not verified", inferred: "inferred", observed: "observed on the key", repo: "set in this repository" };
-  const SOURCE_SAID = { "uw.dashboard": "the vendor's dashboard", "uw.working": "the working budget", cf: "Cloudflare's documentation", uw: "the vendor's specification", gh: "GitHub's documentation", repo: "this repository", owner: "the owner's record", programme: "the working budget" };
+  const SOURCE_SAID = { "uw.dashboard": "the feed's dashboard", "uw.working": "the working budget", cf: "Cloudflare's documentation", uw: "the feed's specification", gh: "GitHub's documentation", repo: "this repository", owner: "the owner's record", programme: "the working budget" };
   const FROM_SAID = { plan: "the plan's figure", advisory: "the working line until the plan is known", owner: "the owner's own line" };
   const sourceSaid = (id) => { const s = String(id || ""); return SOURCE_SAID[s] || SOURCE_SAID[s.split(".")[0]] || (/^[A-Z][A-Z0-9_]+$/.test(s) ? "the owner's setting " + s : "the plan table"); };
   const planSaid = (p) => (p === "unknown" ? "plan not recorded" : p + " plan");
@@ -61,17 +61,17 @@
     const cards = [];
     const reading = vendorReading(now);
     const uw = lines["uw.day"];
-    cards.push(meter("Vendor calls today, whole key", reading && reading.today ? reading.daily : null, uw ? uw.cap : null, {
+    cards.push(meter("Feed calls today, whole key", reading && reading.today ? reading.daily : null, uw ? uw.cap : null, {
       format: whole, unit: "calls",
-      unread: reading ? "the last counter was read " + trt(reading.at, now) + ", before today" : "no Tier 1 or focus tick has recorded the vendor's counter header yet",
-      source: "The vendor's own count of every call on the key, MCP sessions and probes included" + (reading ? ", read " + trt(reading.at, now, true) : "") + ". Cap: " + lineText(uw, true) +
+      unread: reading ? "the last counter was read " + trt(reading.at, now) + ", before today" : "no Tier 1 or focus tick has recorded the feed's counter header yet",
+      source: "The feed's own count of every call on the key, MCP sessions and probes included" + (reading ? ", read " + trt(reading.at, now, true) : "") + ". Cap: " + lineText(uw, true) +
         ". " + vendorTurn(now).replace(/^the/, "The") + ".",
     }));
     const rail = okBody("rail");
     const calls = rail && rail.calls ? rail.calls : null;
-    cards.push(meter("Vendor calls, rail, last minute", calls ? calls.minuteTotal : null, calls ? calls.perMinute : null, {
+    cards.push(meter("Feed calls, rail, last minute", calls ? calls.minuteTotal : null, calls ? calls.perMinute : null, {
       format: whole, unit: "calls a minute", unread: "the rail was not read: " + whyOf("rail"),
-      source: "The rail's own enforced ceiling; past it a topic is degraded with reason budget. Key-wide per minute: " + DASH + " not measured, the vendor's per-minute header never decrements. Vendor ceiling: " + lineText(lines["uw.min"], true) + ".",
+      source: "The rail's own enforced ceiling; past it a topic is degraded with reason budget. Key-wide per minute: " + DASH + " not measured, the feed's per-minute header never decrements. Feed ceiling: " + lineText(lines["uw.min"], true) + ".",
     }));
     const cap = capOf();
     const aiBody = okBody("ai");
@@ -135,8 +135,8 @@
     const elsewhere = !!own && own.current === false;
     const residual = total !== null && complete && !elsewhere ? total - known : null;
     rows.push(["Everything else on the key", residual, residual === null
-      ? (total === null ? "the vendor's count was not read today" : elsewhere ? "the engines' counts are for the vendor day before this one, so the remainder is not worked" : "an engine's count is missing, so the remainder is not worked")
-      : "on-demand reads, pre-market news, MCP sessions and probes; valid only inside one vendor day" + (residual < 0 ? "; negative means a count above is wrong or the day boundary moved" : "")]);
+      ? (total === null ? "the feed's count was not read today" : elsewhere ? "the engines' counts are for the feed day before this one, so the remainder is not worked" : "an engine's count is missing, so the remainder is not worked")
+      : "on-demand reads, pre-market news, MCP sessions and probes; valid only inside one feed day" + (residual < 0 ? "; negative means a count above is wrong or the day boundary moved" : "")]);
     return { rows, total, reading, railHour };
   }
 
@@ -152,9 +152,9 @@
       h("span", { class: "lt-bars-t", "aria-hidden": "true" }, num(r[1]) === null ? null : h("span", { class: "lt-bars-f", style: { "--w": Math.max(0, r[1]) / max * 100 + "%" } })),
       h("b", null, num(r[1]) === null ? DASH : whole(r[1])))));
     fill(host, list,
-      table("Vendor calls by consumer", ["Consumer", "Calls today", "Basis"], rows.map((r) => [r[0], num(r[1]) === null ? DASH : whole(r[1]), r[2]]), true),
+      table("Feed calls by consumer", ["Consumer", "Calls today", "Basis"], rows.map((r) => [r[0], num(r[1]) === null ? DASH : whole(r[1]), r[2]]), true),
       h("p", { class: "st-foot" }, "The rail made " + (railHour === null ? DASH : whole(railHour)) + " calls in the last hour; it keeps no day total, so it is not in the sum. " +
-        (total === null ? "The vendor's own count was not read, so there is no remainder." : "The vendor's count was " + whole(total) + ", read " + trt(reading.at, now, true) + ".")));
+        (total === null ? "The feed's own count was not read, so there is no remainder." : "The feed's count was " + whole(total) + ", read " + trt(reading.at, now, true) + ".")));
   }
 
   function paintLimits() {
@@ -164,7 +164,7 @@
     const per = (s) => (s === null ? DASH : s === 60 ? "minute" : s === 86400 ? "day" : s + " s");
     fill(host,
       table("Limits enforced today", ["Limit", "Scope", "Value", "Per", "What happens past it"], ops.limits.map((l) => [l.name, l.scope, l.limit === null ? DASH + " set by the platform" : whole(l.limit), per(l.periodS), l.effect]), true),
-      h("p", { class: "st-foot" }, "Not enforced yet: a daily vendor line and a daily D1 line. Nothing here sheds work at 80 or 85%; those marks on the meters are the owner's band, not a governor."));
+      h("p", { class: "st-foot" }, "Not enforced yet: a daily feed line and a daily D1 line. Nothing here sheds work at 80 or 85%; those marks on the meters are the owner's band, not a governor."));
   }
 
   function paintOutcomes() {
@@ -196,7 +196,7 @@
     const rows = Object.entries(ops.lines).map(([id, l]) => [id, l.unit, l.cap === null ? DASH : whole(l.cap), l.per, l.plan, l.via, l.source, capFromText(l)]);
     const plan = ops.plan || {};
     fill(host,
-      facts([["Workers plan", (plan.workers || DASH) + (plan.workersExplicit ? "" : " (default; no plan is recorded)")], ["Vendor plan", (plan.uw || DASH) + (plan.uwExplicit ? "" : " (not recorded; the working line is advisory)")]]),
+      facts([["Workers plan", (plan.workers || DASH) + (plan.workersExplicit ? "" : " (default; no plan is recorded)")], ["Feed plan", (plan.uw || DASH) + (plan.uwExplicit ? "" : " (not recorded; the working line is advisory)")]]),
       h("details", { class: "lt-details" }, h("summary", null, "Every line, with the page it was read from"),
         table("Plan lines", ["Line", "Unit", "Cap", "Per", "Plan", "How it is known", "Source", "Cap from"], rows, true)));
   }
@@ -218,7 +218,7 @@
   function mixLine(meta) {
     if (!meta || !meta.generatedAt) return "Nightly call mix: " + DASH + " the nightly record was not read";
     const mix = mixOf(meta);
-    if (!mix) return "Nightly call mix: " + DASH + " the last run recorded none (" + (meta.vendor ? "its record predates the mix" : "it made no vendor call") + ")";
+    if (!mix) return "Nightly call mix: " + DASH + " the last run recorded none (" + (meta.vendor ? "its record predates the mix" : "it made no feed call") + ")";
     return "Nightly call mix: " + mix.slice(0, 3).map((m) => m.op + " " + whole(m.n)).join(" · ") + " of " + whole(meta.vendor.n) + " attempts";
   }
 
@@ -227,7 +227,7 @@
     const meta = okBody("meta");
     if (!meta) { unread(host, "The nightly record", whyOf("meta")); return; }
     const mix = mixOf(meta);
-    if (!mix) { unread(host, "The call mix", meta.generatedAt ? "the last run recorded none: " + (meta.vendor ? "its record predates the mix" : "it made no vendor call") : "no run has been published yet"); return; }
+    if (!mix) { unread(host, "The call mix", meta.generatedAt ? "the last run recorded none: " + (meta.vendor ? "its record predates the mix" : "it made no feed call") : "no run has been published yet"); return; }
     const total = num(meta.vendor.n);
     fill(host,
       table("Nightly calls by operation", ["Operation", "Attempts", "Share", "Not 2xx"], mix.map((m) => [m.op, whole(m.n), total ? pctText(m.n / total) : DASH, whole(m.bad)]), true),
@@ -250,10 +250,10 @@
     fill(host,
       bar("Whole key today", reading && reading.today ? reading.daily : null, uw ? uw.cap : null, {
         format: whole, unit: "calls",
-        unread: reading ? "last counter read " + trt(reading.at, now) + ", before today" : "no Tier 1 or focus tick has recorded the vendor's counter yet",
+        unread: reading ? "last counter read " + trt(reading.at, now) + ", before today" : "no Tier 1 or focus tick has recorded the feed's counter yet",
       }),
       bar("Rail, this minute", calls ? calls.minuteTotal : null, calls ? calls.perMinute : null, { format: whole, unit: "calls", unread: "the rail was not read: " + whyOf("rail") }),
-      rows.length ? mini("Vendor calls today by caller", ["Caller", "Calls today"], rows, "callers") : line(DASH + " no ledger day, so the engines' own counts are not read"),
+      rows.length ? mini("Feed calls today by caller", ["Caller", "Calls today"], rows, "callers") : line(DASH + " no ledger day, so the engines' own counts are not read"),
       line(mixLine(okBody("meta"))),
       line("Cap: " + (!uw ? DASH + " the plan table has no line" : (uw.cap === null ? "no cap listed" : whole(uw.cap)) + " per " + uw.per + (uw.capFrom === "advisory" ? ", the working line" : "") + "; sources in Details")));
   }
@@ -305,7 +305,7 @@
     const per = (x) => (x === null ? "" : x === 60 ? " / min" : x === 86400 ? " / day" : " / " + x + " s");
     fill(host,
       mini("Limits enforced", ["Limit", "Value", "Scope"], ops.limits.map((l) => [l.name, l.limit === null ? DASH + " platform" : whole(l.limit) + per(l.periodS), l.scope]), "limits"),
-      line("No daily vendor line or D1 line sheds work yet; the 80 to 85% band on the meters is a target."));
+      line("No daily feed line or D1 line sheds work yet; the 80 to 85% band on the meters is a target."));
   }
 
   function capacity(now) {

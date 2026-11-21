@@ -112,7 +112,7 @@ export function stripModel(m) {
   if (verdict.state === "stale" && m.hub && Number.isFinite(m.hub.readAtMs)) value += ` · figures to ${trtClock(m.hub.readAtMs, { seconds: true })}`;
   if (m.holdText && ["live", "delayed", "stale"].includes(verdict.state)) value += ` · ${m.holdText}`;
   chips.push(chip("feed", verdict.tone, verdict.word, value, title));
-  chips.push(chip("newest", m.newestEndMs ? "ok" : "idle", "Newest window", m.newestEndMs ? trtClock(m.newestEndMs, { seconds: true }) : "—", "Window end, as the vendor stamps it, to the second."));
+  chips.push(chip("newest", m.newestEndMs ? "ok" : "idle", "Newest window", m.newestEndMs ? trtClock(m.newestEndMs, { seconds: true }) : "—", "Window end, as the feed stamps it, to the second."));
   const lag = m.lag || { n: 0, p50: null, p95: null };
   const tr = m.transit || { n: 0, p50: null, p95: null };
   let lagValue;
@@ -120,7 +120,7 @@ export function stripModel(m) {
   else if (!lag.n) lagValue = "— no new windows yet";
   else if (lag.n < SPREAD_MIN) lagValue = `${lagText(lag.p50)} p50 · n ${lag.n}`;
   else lagValue = `${lagText(lag.p50)} p50 · ${lagText(lag.p95)} p95 · n ${lag.n}`;
-  chips.push(chip("lag", lag.n ? "ok" : "idle", "Vendor to hub", lagValue, "Hub read time minus the window's own stamp. Both are server clocks; the vendor stamps whole seconds."));
+  chips.push(chip("lag", lag.n ? "ok" : "idle", "Feed to hub", lagValue, "Hub read time minus the window's own stamp. Both are server clocks; the feed stamps whole seconds."));
   let transitValue;
   if (m.mode !== "socket") transitValue = m.mode === "poll" ? "— not measured while polling" : "—";
   else if (!tr.n) transitValue = "— too few frames";

@@ -46,7 +46,7 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
      "while a missing close on an existing exit date is attrition");
   const breaks = new Map([["T", ["2026-08-10"]]]);
   eq(forwardClose(closes, cal, idx(cal), "T", "2026-08-07", 1, breaks).state, "lost",
-     "a vendor history break between entry and exit is attrition too: the entry price and the exit close are not the same series");
+     "a feed history break between entry and exit is attrition too: the entry price and the exit close are not the same series");
   eq(forwardClose(closes, cal, idx(cal), "T", "2026-08-10", 0, breaks).state, "ok",
      "a break on the entry date itself does not sit between entry and exit");
   eq(forwardClose(closes, cal, idx(cal), "U", "2026-08-07", 1, new Map([["U", ["2026-08-10"]]])).state, "lost",
@@ -623,7 +623,7 @@ const one0 = (v) => (v === null || v === undefined ? NaN : v);
   close(entryVol({ t: "THIN", hr: 0.02 * Math.sqrt(10) }, closes, cal, idxs, cal[14], { hrSessions: 10 }),
     0.02, "a published hr is preferred, converted from its horizon back to one session", 1e-12);
   ok(entryVol({ t: "WILD" }, closes, cal, idxs, cal[14], { breaks: new Map([["WILD", cal.slice(4, 14)]]) }) === null,
-    "and a step across a vendor price break is not a return");
+    "and a step across a feed price break is not a return");
 }
 
 {

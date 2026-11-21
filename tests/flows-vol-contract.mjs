@@ -153,7 +153,7 @@ const S = FX.session;
   eq(cone.silent.richCheap, "input-absent", "and names the silence");
   eq(cone.sameSession, true, "the row is dated on the session");
   const behind = buildConePanel({ data: [{ ...p["iv-dist:SYA101"].row, date: "2026-09-21" }] }, { sessionDate: S });
-  eq(behind.sameSession, false, "a vendor feed a session behind is not same-session (the stale ring)");
+  eq(behind.sameSession, false, "a feed feed a session behind is not same-session (the stale ring)");
   eq(behind.asOf, "2026-09-21", "and its date says which session it is");
   const nv = buildConePanel({ data: [p["iv-dist:SYB202"].row] }, { sessionDate: S });
   eq(nv.tenors[0].pct, 0.0612, "SYB202's 7-day percentile reads as published");
@@ -164,7 +164,7 @@ const S = FX.session;
   eq(term.expiries[0].dte, 1, "days to expiry counted from the session");
   eq(term.expiries[0].samples, 11, "a weekly listed two weeks ago carries eleven samples");
   eq(term.expiries[0].pct, null, `and under the ${TERM_MIN_SAMPLES}-sample floor its percentile is withheld`);
-  eq(term.expiries[0].pctRaw, 0.6818, "while the raw vendor value stays on the row for the disclosure");
+  eq(term.expiries[0].pctRaw, 0.6818, "while the raw feed value stays on the row for the disclosure");
   eq(term.silent["expiry.2026-09-23.pct"], "few-samples", "with its silence named");
   const odd = buildTermPanel({ data: [{ ...p["term-structure-dist:SYA101"].row, expiry: "2026-10-16", samples: 120, percentile: "72.7" }] },
     { sessionDate: S });
@@ -204,7 +204,7 @@ const S = FX.session;
   eq(dyn.vendorRank, 0.2174, "iv_rank_1y is 0-100 on this route and is published as a fraction");
   const two = buildIvDynamics({ data: [{ ...p["iv-rank:SYA101"].row, date: S, iv_rank_1y: "73.5" }, p["iv-rank:SYA101"].row] },
     { sessionDate: S });
-  eq(two.vendorRank, 0.735, "the vendor rank published is the session's row, not the oldest");
+  eq(two.vendorRank, 0.735, "the feed rank published is the session's row, not the oldest");
   eq(two.asOf, S, "with the panel dated by that row");
   eq(dyn.halfLife, null, "one row is no AR(1)");
 
@@ -213,7 +213,7 @@ const S = FX.session;
   const an = buildAnomalyPanel(anomalyBody, { sessionDate: S, ours: "rich" });
   eq(an.status, "ok", "the {data:{history,latest}} envelope is read");
   eq(an.direction, "short_vol", "direction read");
-  eq(an.view, "rich", "short_vol is the vendor calling vol rich");
+  eq(an.view, "rich", "short_vol is the feed calling vol rich");
   eq(an.vote, 1, "and agrees with a rich cone");
   eq(an.components.vrpZ.std, 0.4354, "component objects are carried with their own fields");
   eq(an.components.regime.crashProbability, 0.4, "including the regime's crash probability");
@@ -250,7 +250,7 @@ const S = FX.session;
     { sessionDate: S, lean: -1 });
   const prior = zAgainst(40, hist.map((h) => Number(h.score)), { min: 20 });
   near(sz.z, prior.z, 1e-3, "the sentiment z is taken against the history BEFORE today, never with today's own score in it");
-  eq(sz.vote, -1, "a bullish vendor against a short board side is a disagreement");
+  eq(sz.vote, -1, "a bullish feed against a short board side is a disagreement");
 
   const ch = buildCharacterPanel({ data: { history: [p["vol-character:SYA101"].row],
     latest: { ...p["vol-character:SYA101"].row, ticker: "AAPL", ar1_b: "0.97", entropy_negative: "0.4",
@@ -259,7 +259,7 @@ const S = FX.session;
   eq(ch.character, "moderate", "the character label is read");
   eq(ch.halfLifeDays, 31.25, "half_life_days is a decimal string");
   eq(ch.hurst, 0.5834, "hurst_rv read");
-  eq(ch.vote, 0, "a moderate vendor class is a neutral vote");
+  eq(ch.vote, 0, "a moderate feed class is a neutral vote");
 
   const radar = buildVolRadar({
     rich: { data: [p["vol-anomaly-top"].row], date: S, direction: "short_vol" },
@@ -269,15 +269,15 @@ const S = FX.session;
   }, { sessionDate: S, carded: ["SYX505"] });
   eq(radar.status, "ok", "the radar reads the {data, date, direction} and {data, date} envelopes");
   eq(radar.rich.rows[0].t, "SYX505", "rich names come from short_vol");
-  eq(radar.rich.rows[0].score, 48.263, "with the vendor score");
+  eq(radar.rich.rows[0].score, 48.263, "with the feed score");
   eq(radar.rich.rows[0].vrpZ, 0.8229, "and its components");
   eq(radar.rich.rows[0].carded, true, "joined to the carded names");
   eq(radar.cheap.status, "quiet", "an empty side is quiet");
   eq(radar.bearish.status, "unavailable", "a failed side is unavailable");
   eq(radar.bullish.rows[0].vwks, 0.1727, "sentiment rows carry vwks");
-  eq(radar.asOf, S, "the radar is dated by the vendor's envelope");
+  eq(radar.asOf, S, "the radar is dated by the feed's envelope");
   deepEq(radar.carded, ["SYX505"]);
-  eq(radar.vendorAt, p["vol-sentiment-top"].row.updated_at, "the radar's vendor stamp is the newest updated_at among its rows");
+  eq(radar.vendorAt, p["vol-sentiment-top"].row.updated_at, "the radar's feed stamp is the newest updated_at among its rows");
   const later = { ...p["vol-anomaly-top"].row, ticker: "LATE", date: "2026-09-23", score: "99" };
   const mixed = buildVolRadar({ rich: { data: [later, p["vol-anomaly-top"].row], date: "2026-09-23", direction: "short_vol" } },
     { sessionDate: S, carded: [] });
@@ -607,7 +607,7 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
   eq(viewOfRichCheap(-0.2), "cheap", "below -0.15 cheap");
   eq(viewOfRichCheap(null), null, "no score, no view");
   const panel = { status: "ok", view: "mean-reverting", silent: {} };
-  eq(characterVote(panel, 5).vote, 1, "a fast iv half-life agrees with a mean-reverting vendor class");
+  eq(characterVote(panel, 5).vote, 1, "a fast iv half-life agrees with a mean-reverting feed class");
   eq(characterVote(panel, 80).vote, -1, "a slow one disagrees");
   eq(characterVote(panel, null).silent.vote, "no-counterpart", "no iv half-life is no counterpart");
   const x = crossSectionPercentiles(Array.from({ length: 12 }, (_, i) => ({ v: i })), { v: (e) => e.v });
@@ -627,7 +627,7 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
   eq(errorCode(new Error("/api/x -> HTTP 403")).http, 403, "with its status");
   eq(errorCode(new Error("/api/x -> HTTP 500")).code, "read-failed", "a 5xx after retries is a failed read");
   eq(errorCode(new Error("socket hang up")).code, "read-failed", "as is a network error");
-  eq(errorCode(new Error("/api/x -> HTTP 429")).code, "read-failed", "and a 429 is not the vendor refusing the route");
+  eq(errorCode(new Error("/api/x -> HTTP 429")).code, "read-failed", "and a 429 is not the feed refusing the route");
 }
 
 {
@@ -726,7 +726,7 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
   ok(e("BBB").panels.ivDyn.view !== null, `the attached rows classify the IV half-life (${e("BBB").panels.ivDyn.view})`);
   eq(e("BBB").panels.character.ours, e("BBB").panels.ivDyn.view, "the character vote is re-cast with that class");
   eq(e("BBB").panels.character.vote, volVote(e("BBB").panels.ivDyn.view, e("BBB").panels.character.view),
-    "against the vendor's class");
+    "against the feed's class");
   eq(card.x.vol.votes.character, e("BBB").panels.character.vote, "and the card summary carries the re-cast vote");
   const cardNull = { panels: {} };
   attachVol(cardNull, leg, "CCC", { ivRank: null });
@@ -757,7 +757,7 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
   eq(merged.body.why.shed, "another leg's legend", "another leg's legend survives beside this leg's codes");
   ok(Object.keys(out.body.why).every((c) => merged.body.why[c] === VOL_WHY[c]), "and this leg's codes are all still explained");
   eq(merged.body.fresh.readAt, "2026-09-22T21:30:00.000Z", "the merged read instant is the older of the two writers'");
-  eq(merged.body.fresh.vendorAt, "2026-09-22T23:59:00.000Z", "and the vendor stamp the newer");
+  eq(merged.body.fresh.vendorAt, "2026-09-22T23:59:00.000Z", "and the feed stamp the newer");
   eq(merged.body.scope, "deep", "while the vol panels and scope are this leg's");
   eq(merged.bytes, Buffer.byteLength(JSON.stringify(merged.body), "utf8"),
     "the cap is measured in UTF-8 bytes, as the ingest's bounded reader counts them, not in UTF-16 characters");
@@ -783,7 +783,7 @@ function deepEq(a, b) { assert.deepStrictEqual(a, b); n++; }
 
   const rg = regimePayload(leg, { sessionDate: session, generatedAt: "g" });
   eq(rg.volRadar.status, "ok", "the regime carries the vol radar");
-  ok(typeof rg.fresh.vendorAt === "string", "and its freshness envelope carries the vendor's newest stamp");
+  ok(typeof rg.fresh.vendorAt === "string", "and its freshness envelope carries the feed's newest stamp");
   const spyRow = rg.volRadar.bullish.rows.find((r) => r.t === "SPY");
   ok(spyRow && spyRow.carded === false,
     "an index name has a dossier but no card, so a radar row for it is not marked carded (it would link to an empty ticker page)");
@@ -1000,4 +1000,4 @@ console.log(`✓ flows-vol: ${n} assertions — every quant-spec known answer fo
   "Parkinson, the gap share, forward vol, the AR(1) half-life and the maturity-adjusted skew z against an mpmath " +
   "reference, every live probe row parsed with its string numbers and 0-1 percentiles, each silence carried as a named " +
   "code rather than a zero, no row at or after the session read into a history, and the leg's reads, its failure arms, " +
-  "the card summary, the dossier's cap and the regime radar exercised against the fake vendor");
+  "the card summary, the dossier's cap and the regime radar exercised against the fake feed");

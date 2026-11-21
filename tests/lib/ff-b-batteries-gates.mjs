@@ -184,15 +184,15 @@ export async function noVendorCalls(c, build) {
     live.world.core.setSession("2026-10-27");
     const lv = await live.call("POST", "/api/ff/preview", { body: { ast: { v: 1, cadence: "live", scope: { kind: "names", symbols: ["SYA101"] }, all: [{ m: "contract.dte", op: "<=", x: 21 }, { m: "contract.premium", op: ">=", x: 1000000 }], persist: 1 } }, user: alice });
     text.push(lv.text);
-    c.eq(seen, [], "vendor: no route makes a network call");
-    c.ok(!text.join("\n").includes("SENTINEL-vendor-key-9c1"), "vendor: the vendor key appears in no reply");
+    c.eq(seen, [], "feed: no route makes a network call");
+    c.ok(!text.join("\n").includes("SENTINEL-vendor-key-9c1"), "feed: the feed key appears in no reply");
   } finally {
     globalThis.fetch = realFetch;
   }
   const files = ["server/ff-store.js", "server/ff-health.js", "server/ff-preview.js", "server/ff-records.js", "server/ff-digest.js", "server/ff-export.js", "server/routes/flows-ff.js"];
   for (const f of files) {
     const src = readFileSync(new URL("../../" + f, import.meta.url), "utf8");
-    c.ok(!/\bfetch\s*\(|uwFetch|UW_API_KEY|UW_BASE|unusualwhales|\bAI\b\s*[.\[]|env\.AI/.test(src), "vendor: " + f + " reaches for neither the network, the vendor key nor a model");
+    c.ok(!/\bfetch\s*\(|uwFetch|UW_API_KEY|UW_BASE|unusualwhales|\bAI\b\s*[.\[]|env\.AI/.test(src), "feed: " + f + " reaches for neither the network, the feed key nor a model");
   }
 }
 
@@ -203,7 +203,7 @@ export async function ringLimiter(c, build) {
   const { id } = await seedOne(api);
   const codes = [];
   for (const path of ["/api/ff/receipts?wire=" + id, "/api/ff/records?wire=" + id, "/api/ff/symbol?t=SYA101", "/api/ff/digest", "/api/ff/export?from=2026-10-20&to=2026-10-27"]) codes.push((await api.call("GET", path, { user: alice })).status);
-  c.eq(codes, [200, 200, 429, 429, 429], "limiter: the heavy reads share one budget per member");
+  c.eq(codes, [200, 200, 200, 429, 429], "limiter: the heavy reads share one budget per member, and the name panel's read on every ticker page does not spend it");
   const refused = await api.call("GET", "/api/ff/digest", { user: alice });
   c.eq([refused.error.code, refused.headers["retry-after"], refused.trips], ["rate_limited", "60", 0], "limiter: a refusal carries Retry-After and reads nothing");
   c.ok(seen.every((k) => k === "alice.one"), "limiter: keyed by the session member", [...new Set(seen)]);

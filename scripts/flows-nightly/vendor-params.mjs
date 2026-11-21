@@ -56,6 +56,8 @@ export const CALL_COST = Object.freeze({
   macro: 152,
   privateMarkets: 150,
   misc: 67,
+  eventrisk: 40,
+  eventriskNames: 100,
 });
 
 export const NOMINAL_SHAPE = Object.freeze({ enriched: 180, deep: 72, cross: 110, dossiers: 12, earnings: 95 });
@@ -106,7 +108,7 @@ export const MARKET_CROSS_LIMIT = 100;
 export const DEEP_RULE =
   "The " + 50 + " names furthest from neutral across both boards carry a chain " +
   "and a detail card. Every other row is scored and ranked from the same five " +
-  "sources, and has no card: the card costs vendor calls the run cannot spend " +
+  "sources, and has no card: the card costs feed calls the run cannot spend " +
   "on a hundred names.";
 
 export function deepNames(published, limit = DEEP_NAMES) {

@@ -88,6 +88,11 @@ name = "FF_HEALTH"
 namespace_id = "1133"
 simple = { limit = 4, period = 60 }
 
+[[ratelimits]]
+name = "FF_PREVIEW"
+namespace_id = "1134"
+simple = { limit = 30, period = 60 }
+
 [[durable_objects.bindings]]
 name = "PULSE"
 class_name = "Pulse"
@@ -128,6 +133,8 @@ FLOWS_METER = "off"
 FLOWS_OPS = "on"
 FLOWS_MEMBER_STATE = "on"
 FLOWS_EXPORTS = "on"
+FLOWS_EVENTRISK = "on"
+FLOWS_EVENTRISK_HALTS = "off"
 FLOWS_PREMARKET_NEWS = "on"
 FLOWS_HOME_NET = "on"
 FLOWS_LIVE_MODE = "actions"

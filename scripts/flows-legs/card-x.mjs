@@ -15,7 +15,14 @@ export const cardXBytes = (payload) => (cardXWire() ? wireBytes(payload) : serve
 
 const BYTES_FIELD = 16;
 
-const overSoft = (payload) => cardXBytes(payload) + BYTES_FIELD > CARD_X_SOFT_BYTES || servedBytes(payload) + BYTES_FIELD > CARD_X_SERVED_BYTES;
+const SHED_RESERVE = JSON.stringify(["pm.soft", "va.soft", "extras.soft"]).length;
+
+const unmarked = (payload) => (payload.shed && payload.shed.length ? { ...payload, shed: [] } : payload);
+
+const overSoft = (payload) => {
+  const body = unmarked(payload);
+  return cardXBytes(body) + BYTES_FIELD + SHED_RESERVE > CARD_X_SOFT_BYTES || servedBytes(body) + BYTES_FIELD + SHED_RESERVE > CARD_X_SERVED_BYTES;
+};
 
 function fitSoft(payload) {
   if (payload.pm && overSoft(payload)) {
@@ -33,6 +40,7 @@ function fitSoft(payload) {
 export const CARD_X_SHED = Object.freeze([
   ["pm", (p) => { if (!p.pm) return false; delete p.pm; return true; }],
   ["va", (p) => { if (!p.va) return false; delete p.va; return true; }],
+  ["er.parts", (p) => { if (!hasLiveParts(p.er)) return false; p.er = stubSection(p.er, "er"); return true; }],
   ["dx.parts", (p) => { if (!hasLiveParts(p.dx)) return false; p.dx = stubSection(p.dx, "dx"); return true; }],
   ["vx.parts", (p) => { if (!hasLiveParts(p.vx)) return false; p.vx = stubSection(p.vx, "vx"); return true; }],
   ["ps.parts", (p) => { if (!hasLiveParts(p.ps)) return false; p.ps = stubSection(p.ps, "ps"); return true; }],

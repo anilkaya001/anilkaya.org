@@ -78,7 +78,7 @@ const REAL = { long: LONG, short: SHORT, watch: WATCH, events: EVENTS, alerts: A
 
 {
   eq(num(0), 0, "a measured zero survives the helper — it is a score, a premium and a count");
-  eq(num("1234.5"), 1234.5, "and a quoted number is read, because the vendor sends several that way");
+  eq(num("1234.5"), 1234.5, "and a quoted number is read, because the feed sends several that way");
   eq(num(null), null, "while null is absent, not zero: Number(null) is 0 and that is the house defect");
   eq(num(""), null, "an empty string likewise");
   eq(num(" "), null, "and a blank one — Number(' ') is 0 too, one space past the guard that catches ''");

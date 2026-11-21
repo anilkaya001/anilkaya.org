@@ -46,18 +46,18 @@ export const HAR_Z80 = 1.2815515655446004;
 export const HAR_LABEL = "daily-range HAR";
 
 export const VOL_WHY = Object.freeze({
-  "read-failed": "the vendor call failed after its retries",
-  refused: "the vendor refused the call",
-  "unreadable-body": "the vendor answered with a body that could not be read as rows",
-  "no-rows": "the vendor answered with no rows",
-  "after-session": "every row the vendor sent is dated after this session and was cut",
+  "read-failed": "the feed call failed after its retries",
+  refused: "the feed refused the call",
+  "unreadable-body": "the feed answered with a body that could not be read as rows",
+  "no-rows": "the feed answered with no rows",
+  "after-session": "every row the feed sent is dated after this session and was cut",
   "not-read": "this read is not made for names at this depth",
   deadline: "the run passed its deadline before this name was read",
   "short-history": "fewer observations than this statistic needs",
   "input-absent": "an input this value is computed from is absent",
   degenerate: "the inputs have no spread, so the ratio is undefined",
   "non-positive-forecast": "the fitted regression forecasts a variance that is not positive, so no volatility is published",
-  "few-samples": "the vendor's own sample count is under the trust floor",
+  "few-samples": "the feed's own sample count is under the trust floor",
   "no-event": "no upcoming earnings date falls inside the listed expiries",
   "no-premium": "the event expiry is not elevated over the one after it, so there is no event variance",
   "calendar-arbitrage": "total variance falls from one expiry to the next",
@@ -65,7 +65,7 @@ export const VOL_WHY = Object.freeze({
   "not-mean-reverting": "the AR(1) coefficient is at or above one",
   oscillating: "the AR(1) coefficient is at or below zero",
   "sign-mismatch": "the 25-delta risk reversal is not positive, so the 10/25 ratio has no crash reading",
-  "no-counterpart": "this side has no reading to compare the vendor's with",
+  "no-counterpart": "this side has no reading to compare the feed's with",
   implausible: "the value is outside the plausible range and was dropped",
   "no-monthly": "no standard monthly expiry at least ten days out was found",
   "garch-unfit": "the GARCH fit is unavailable or did not settle",
@@ -601,7 +601,7 @@ export function buildConePanel(body, { sessionDate = null, rolling = null } = {}
     ...(cutAfter ? { cutAfter } : {}),
     ...(outOfRange ? { pctOutOfRange: outOfRange } : {}),
     ...(dropped ? { dropped } : {}),
-    units: { iv: "annualised decimal", pct: "fraction 0-1 of the vendor's 1y daily values at or below today",
+    units: { iv: "annualised decimal", pct: "fraction 0-1 of the feed's 1y daily values at or below today",
       iqrPos: "(iv-q1)/(q3-q1), may leave 0-1", richCheap: "weighted mean of (pct-0.5), -0.5..0.5",
       slope: "ratio minus one" },
     silent,
@@ -1117,7 +1117,7 @@ export function buildAnomalyPanel(body, { sessionDate = null, ours = null } = {}
     ours,
     vote,
     history: { d: hist.map((h) => h.d), s: hist.map((h) => round(h.s, 2)) },
-    units: { score: "vendor composite, positive with short_vol (rich), negative with long_vol (cheap)",
+    units: { score: "feed composite, positive with short_vol (rich), negative with long_vol (cheap)",
       vote: "+1 agree, 0 either side neutral, -1 disagree, null either side absent" },
     silent: vote === null ? { vote: ours ? "input-absent" : "no-counterpart" } : {},
   };
@@ -1165,8 +1165,8 @@ export function buildSentimentPanel(body, { sessionDate = null, lean = null } = 
     ours: ourLean,
     vote,
     history: { d: keep.map((h) => h.d), s: keep.map((h) => round(h.s, 2)) },
-    units: { score: "vendor blend, positive bullish", vwks: "volume-weighted (K-S)/S", avar: "call vs put iv asymmetry",
-      z: "sd against the vendor's own returned history", vote: "+1 agree with the board side, 0 vendor neutral, -1 disagree" },
+    units: { score: "feed blend, positive bullish", vwks: "volume-weighted (K-S)/S", avar: "call vs put iv asymmetry",
+      z: "sd against the feed's own returned history", vote: "+1 agree with the board side, 0 feed neutral, -1 disagree" },
     silent,
   };
 }
@@ -1201,7 +1201,7 @@ export function buildCharacterPanel(body, { sessionDate = null, ivHalfLife = nul
     ours: null,
     vote: null,
     history: { d: hist.map((x) => x.d), hl: hist.map((x) => round(x.hl, 2)), h: hist.map((x) => round(x.h, 4)) },
-    units: { halfLifeDays: "vendor, days", hurst: "vendor Hurst exponent of realized vol",
+    units: { halfLifeDays: "feed, days", hurst: "feed Hurst exponent of realized vol",
       vote: "+1 same class as our iv half-life class, 0 either moderate, -1 opposite" },
     silent: {},
   };
@@ -1276,7 +1276,7 @@ export function buildVolRadar(bodies, { sessionDate = null, carded = [] } = {}) 
     rich, cheap, bullish, bearish,
     carded: [...overlap].sort(),
     keep: RADAR_KEEP,
-    units: { score: "vendor composite; rich = short_vol, cheap = long_vol", iv: "vendor component value", vwks: "volume-weighted (K-S)/S" },
+    units: { score: "feed composite; rich = short_vol, cheap = long_vol", iv: "feed component value", vwks: "volume-weighted (K-S)/S" },
   };
 }
 

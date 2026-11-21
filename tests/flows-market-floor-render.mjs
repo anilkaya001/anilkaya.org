@@ -231,7 +231,7 @@ function verify(f, EXP, measure, { phone = false, orbit = false } = {}) {
   }
   need(f.read.startsWith("Most premium: " + GROUP_LABEL[best.g]), "the readout at rest does not lead with " + GROUP_LABEL[best.g] + ": " + f.read);
   need(/by convention/.test(f.legend) && /Bullish/.test(f.legend) && /Bearish/.test(f.legend) && /Mixed/.test(f.legend), "the legend does not state the convention");
-  need(!/\bat ask\b|\bat the ask\b|\bat bid\b|\bat the bid\b/i.test(f.legend + f.read + f.label), "vendor wording");
+  need(!/\bat ask\b|\bat the ask\b|\bat bid\b|\bat the bid\b/i.test(f.legend + f.read + f.label), "feed wording");
   need(f.page.sh <= f.page.ih + 1 && f.page.sw <= f.page.iw, "the page scrolls " + JSON.stringify(f.page));
   need(f.canvas.top + f.canvas.h <= f.mod.bottom + 1 && f.canvas.left + f.canvas.w <= f.mod.right + 1, "the canvas leaves its module");
   for (const s of SC.tiles) need(s.box[0] >= -1 && s.box[2] <= f.canvas.w + 1 && s.box[3] <= f.canvas.h + 1, "tile " + s.id + " leaves the canvas " + s.box.map(Math.round));

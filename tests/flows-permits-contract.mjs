@@ -199,7 +199,7 @@ function fakeClock() {
 
   eq(saved, (CALLS - 1) * NET + DELAY,
      `the saving is every overlappable round trip plus the delay the first call never serves: ` +
-     `${saved}ms here. Against the modelled 1076-call budget and a 300ms vendor that is about ` +
+     `${saved}ms here. Against the modelled 1076-call budget and a 300ms feed that is about ` +
      `${Math.round((1075 * 300 + 750) / 1000)}s, off a run whose floor alone already costs ~807s`);
   ok(saved > (CALLS - 1) * NET * 0.95,
      "and the dominant term is the network time, which is the whole claim");

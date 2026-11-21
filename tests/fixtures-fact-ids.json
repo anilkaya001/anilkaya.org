@@ -48,7 +48,7 @@
   "retired": false
  },
  "gex.book": {
-  "meaning": "Dealers' book gamma in dollars per 1% move of the underlying, on the vendor's convention (dealers long calls, short puts)",
+  "meaning": "Dealers' book gamma in dollars per 1% move of the underlying, on the feed's convention (dealers long calls, short puts)",
   "unit": "usdPer1pct",
   "tenor": null,
   "since": "2026-09-23",
@@ -56,7 +56,7 @@
   "retired": false
  },
  "gex.flow": {
-  "meaning": "Net gamma of today's option flow in dollars per 1% move of the underlying, on the vendor's convention",
+  "meaning": "Net gamma of today's option flow in dollars per 1% move of the underlying, on the feed's convention",
   "unit": "usdPer1pct",
   "tenor": "today's flow",
   "since": "2026-09-23",
@@ -124,7 +124,7 @@
   "retired": false
  },
  "level.callWall": {
-  "meaning": "Strike at or above spot with the largest call gamma open interest in the vendor's strike book",
+  "meaning": "Strike at or above spot with the largest call gamma open interest in the feed's strike book",
   "unit": "px",
   "tenor": null,
   "since": "2026-09-23",
@@ -132,7 +132,7 @@
   "retired": false
  },
  "level.flip": {
-  "meaning": "Price at which the dealer gamma profile recomputed from the chain crosses zero, on the vendor's convention (dealers long calls, short puts)",
+  "meaning": "Price at which the dealer gamma profile recomputed from the chain crosses zero, on the feed's convention (dealers long calls, short puts)",
   "unit": "px",
   "tenor": null,
   "since": "2026-09-23",
@@ -164,7 +164,7 @@
   "retired": false
  },
  "level.magnet": {
-  "meaning": "Strike with the largest absolute dealer-book gamma, calls plus signed puts, on the vendor's convention (dealers long calls, short puts)",
+  "meaning": "Strike with the largest absolute dealer-book gamma, calls plus signed puts, on the feed's convention (dealers long calls, short puts)",
   "unit": "px",
   "tenor": null,
   "since": "2026-09-23",
@@ -180,7 +180,7 @@
   "retired": false
  },
  "level.putWall": {
-  "meaning": "Strike at or below spot with the largest absolute put gamma open interest in the vendor's strike book",
+  "meaning": "Strike at or below spot with the largest absolute put gamma open interest in the feed's strike book",
   "unit": "px",
   "tenor": null,
   "since": "2026-09-23",
