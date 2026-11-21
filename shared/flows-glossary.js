@@ -93,8 +93,8 @@ export const GLOSSARY = Object.freeze([
     "Distinct people. Breadth tells you more than the size of one account.",
     "The feed has no party field, no current positions and no per-filer split by stock, so none is shown or inferred.",
   ] },
-  { key: "flagged-premium", term: "Flagged premium", ...UNUSUAL, lines: [
-    "The feed's total premium across every flagged window in the record.",
+  { key: "alert-premium", term: "Alert premium", ...UNUSUAL, lines: [
+    "An alert is a window of activity in one contract that the feed's unusual-activity rules picked out. Their premium, not the market's.",
   ] },
   { key: "how-often", term: "How often", ...MOVES, lines: [
     "How often counts days in the last year beyond that many typical days. It is never a model probability.",
@@ -140,8 +140,8 @@ export const GLOSSARY = Object.freeze([
   { key: "earnings-bars", term: "Earnings bars", ...EVENTS, lines: [
     "The blue bar is the move the option market prices for the report; the gray bar is the median absolute one-day move over the name's past reports. A blue bar longer than the gray one is a report priced richer than this name usually moves.",
   ] },
-  { key: "flagged-windows", term: "Flagged windows", ...HOME, lines: [
-    "Option windows the feed's own rules flagged in this read.",
+  { key: "alerts", term: "Unusual-activity alerts", ...HOME, lines: [
+    "An alert is a window of activity in one contract that the feed's unusual-activity rules picked out. This counts the alerts in this read; it is not the market's volume.",
   ] },
   { key: "implied-move", term: "Implied move", ...EVENTS, lines: [
     "The feed's expected earnings move where its calendar states one, otherwise the feed's implied move to its next expiry, which is a different horizon.",

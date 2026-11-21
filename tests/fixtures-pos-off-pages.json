@@ -1,15 +1,15 @@
 {
  "provenance": {
   "nature": "sha256 of every page render of origin/main at a pinned clock, version tokens and the declared renames normalised",
-  "base": "desk return on cash"
+  "base": "7259efe"
  },
  "pages": {
   "loginPage:member": "cca2f1f4bd622f8737c3130d5464234ec7d9c5a3747a6ae55774a9d1d72e01cf",
   "loginPage:owner": "cca2f1f4bd622f8737c3130d5464234ec7d9c5a3747a6ae55774a9d1d72e01cf",
   "aboutPage:member": "a7f034cee4c8232bf093dbd1871e09a215fb7b831970c83d8238ff46b31c8824",
   "aboutPage:owner": "a7f034cee4c8232bf093dbd1871e09a215fb7b831970c83d8238ff46b31c8824",
-  "glossaryPage:member": "5236859ab328217b600d684dda80e22c41f3fa56e57172304de19df8640cb991",
-  "glossaryPage:owner": "5236859ab328217b600d684dda80e22c41f3fa56e57172304de19df8640cb991",
+  "glossaryPage:member": "109dc103e8587de042a91baa831cd4de07ba745d7bb71ff0530f3dbcd2a364b2",
+  "glossaryPage:owner": "109dc103e8587de042a91baa831cd4de07ba745d7bb71ff0530f3dbcd2a364b2",
   "overviewPage:member": "b1cfee78bcbfa1c379efe59327cfd55937d75d2356b6e882f2dd6ef873a25bba",
   "overviewPage:owner": "b1cfee78bcbfa1c379efe59327cfd55937d75d2356b6e882f2dd6ef873a25bba",
   "sidePage:member": "e4de14858663c6c985b519b4c62ed4e7e6b7f7d5f8e867d1b2478cf58c03aab2",

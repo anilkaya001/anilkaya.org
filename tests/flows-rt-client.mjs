@@ -1103,7 +1103,7 @@ try {
     await R.pump(80);
     const meta1 = await page.evaluate(() => ({ meta: document.getElementById("uaMeta").textContent, chips: document.getElementById("uaChips").textContent }));
     ok(/3 held back by the stream/.test(meta1.meta), `the dropped counter is on the page (${meta1.meta})`);
-    ok(/3\s*Windows|Windows\s*3/.test(meta1.chips), `the alert already on the page is not counted twice: three windows, not four (${meta1.chips})`);
+    ok(/3\s*Alert windows|Alert windows\s*3/.test(meta1.chips), `the alert already on the page is not counted twice: three windows, not four (${meta1.chips})`);
     const look = (sel) => { const svg = document.querySelector(sel); const host = svg && svg.parentElement;
       const was = !!(svg && svg.__rtMark); if (svg) svg.__rtMark = true;
       const run = host ? host.getAnimations({ subtree: true }).filter((a) => { const t = a.effect && a.effect.getComputedTiming(); return t && Number.isFinite(t.endTime); }).length : -1;
@@ -1113,7 +1113,7 @@ try {
     R.send(c1, R.delta("fl", [wire(alert("AAPL", 700000, T0 - 1000), "a4", T0 - 1000), wire(base[0], "a1", T0 - 3600000)], { meta: { cursor: iso(R.now), read: 2, unusable: 0, dropped: 5, truncated: true } }));
     await R.pump(80);
     const meta2 = await page.evaluate(() => ({ meta: document.getElementById("uaMeta").textContent, chips: document.getElementById("uaChips").textContent }));
-    ok(/4\s*Windows|Windows\s*4/.test(meta2.chips), `a new alert appends (four) and the repeated id does not (${meta2.chips})`);
+    ok(/4\s*Alert windows|Alert windows\s*4/.test(meta2.chips), `a new alert appends (four) and the repeated id does not (${meta2.chips})`);
     const u1 = await page.evaluate(look, "#uaTimeline .fu-chart > svg");
     ok(u0.svg && u1.svg && u1.was && u1.svgs === 1, `IN PLACE: a streamed alert keeps the same timeline svg node (${JSON.stringify(u1)})`);
     ok(u1.still && u1.run === 0, `and no bubble replays its entrance (${JSON.stringify(u1)})`);
@@ -1155,11 +1155,11 @@ try {
     await R.pump(80);
     const chips = () => page.evaluate(() => document.getElementById("uaChips").textContent);
     const c0 = await chips();
-    ok(/(?:^|[^\d,])51\s*Windows|Windows\s*≥?51(?!\d)/.test(c0), `THE RAIL'S BACKLOG IS NOT COUNTED TWICE: a window stamped before the stored record's cursor was already in its count of 50, so one later window makes 51, not 52 (${c0})`);
+    ok(/(?:^|[^\d,])51\s*Alert windows|Alert windows\s*≥?51(?!\d)/.test(c0), `THE RAIL'S BACKLOG IS NOT COUNTED TWICE: a window stamped before the stored record's cursor was already in its count of 50, so one later window makes 51, not 52 (${c0})`);
     R.send(c1, R.delta("fl", [wire(alert("AAPL", 700000, T0 - 1000), "b4", T0 - 1000), wire(base[0], "b1", T0 - 3600000)], { meta: { cursor: iso(R.now), read: 2, unusable: 0, dropped: 0, truncated: false } }));
     await R.pump(80);
     const c2 = await chips();
-    ok(/(?:^|[^\d,])52\s*Windows|Windows\s*≥?52(?!\d)/.test(c2), `and a new window after the cursor adds one, a repeated id none (${c2})`);
+    ok(/(?:^|[^\d,])52\s*Alert windows|Alert windows\s*≥?52(?!\d)/.test(c2), `and a new window after the cursor adds one, a repeated id none (${c2})`);
     deep(page.errors, [], "nothing threw");
     await ctx.close();
   }

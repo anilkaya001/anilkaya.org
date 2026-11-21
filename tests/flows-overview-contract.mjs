@@ -397,8 +397,8 @@ try {
     const tiles = await chipsOf(page);
     const keys = Object.keys(tiles);
     eq(keys.length, 5, "the hero states five session readings");
-    deep(keys, ["Flow bias", "Breadth", "Cleared", "Put/call", "Flagged"],
-      "flow bias, breadth, the cleared pool, put/call and the flagged count");
+    deep(keys, ["Flow bias", "Breadth", "Cleared", "Put/call", "Alerts"],
+      "flow bias, breadth, the cleared pool, put/call and the alerts count");
     ok(!("Session" in tiles) && !("Screened" in tiles),
        "the session and the screened population are the page's CAPTION, not two of " +
        "its readings — a date and a count that cannot be compared to a lean");
@@ -476,7 +476,7 @@ try {
     ok(/bullish/.test(tiles.Cleared?.spoken) && /bearish/.test(tiles.Cleared?.spoken),
        `each side named in words (${tiles.Cleared?.spoken})`);
     ok(!("Both sides" in tiles), "and the old row-count tile is gone rather than kept beside it");
-    eq(tiles.Flagged?.v, "7", "the feed's flagged-window count");
+    eq(tiles.Alerts?.v, "7", "the feed's alert count");
     eq(tiles["Put/call"]?.v, "0.53",
        "put contracts per call off the pulse's own daily totals, when no history has published a z");
 
@@ -1180,19 +1180,19 @@ try {
     eq(capSub, "8 of 44",
        "and the count states the read's whole population beside the eight rows it drew");
     ok(/^nightly read /.test(await readOf(page)), "with its cadence and instant one tap away");
-    eq((await chipsOf(page)).Flagged?.v, "44",
-       "which is the same number the Flagged chip prints in the hero");
+    eq((await chipsOf(page)).Alerts?.v, "44",
+       "which is the same number the Alerts chip prints in the hero");
 
     await post("flowalerts", { ...alerts, seen: 44, rows: alertMany,
       vendorLimit: 44, vendorTruncated: true });
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccAlerts .hm-arow", { timeout: 15000 });
-    const ceiling = { chip: (await chipsOf(page)).Flagged,
+    const ceiling = { chip: (await chipsOf(page)).Alerts,
       sub: (await page.locator("#ccAlertsSub").textContent()).trim(),
       label: await page.locator("#ccAlertsSub").getAttribute("aria-label") };
     eq(ceiling.chip.v, "≥44",
        "a read that hit the feed's ceiling prints the count as a floor, never as a census");
-    const floorWhy = await chipWhy(page, "Flagged");
+    const floorWhy = await chipWhy(page, "Alerts");
     ok(/floor and never a census/.test(floorWhy.lead),
        `and the chip carries the floor's sentence behind its disclosure, not under the value (${floorWhy.lead})`);
     await shut(page);
@@ -1205,7 +1205,7 @@ try {
       vendorLimit: 44, vendorTruncated: false });
     await page.goto(url("/flows/"), { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#ccAlerts .hm-arow", { timeout: 15000 });
-    eq((await chipsOf(page)).Flagged?.v, "44", "a read published as NOT truncated prints the bare count");
+    eq((await chipsOf(page)).Alerts?.v, "44", "a read published as NOT truncated prints the bare count");
     eq((await page.locator("#ccAlertsSub").textContent()).trim(), "8 of 44",
        "on the chip and in the module count alike");
 

@@ -260,7 +260,7 @@ function content(c, spec, label, { rich, net }) {
   if (rich && fit !== "s") {
     const want = dock ? [2, 2, 2, 2] : w === 1920 && h === 1080 ? [5, 5, 5, 6] : w === 1920 && h === 969 ? [4, 4, 4, 5] : [2, 2, 2, 2];
     const got = [c.flag, c.bull, c.bear, c.lead];
-    ["Flagged", "Bullish", "Bearish", "Leaders"].forEach((n, i) => { if (got[i] < want[i]) bad.push(`${label}: ${n} shows ${got[i]} rows, at least ${want[i]}`); });
+    ["Alerts", "Bullish", "Bearish", "Leaders"].forEach((n, i) => { if (got[i] < want[i]) bad.push(`${label}: ${n} shows ${got[i]} rows, at least ${want[i]}`); });
   }
   if (rich && fit === "xl" && net && c.canvas && c.stage3d < 300) bad.push(`${label}: the 3D stage is ${c.stage3d} px tall, under 300`);
   if (rich && fit === "xl" && net && !c.canvas) bad.push(`${label}: the 3D scene did not mount at xl`);
