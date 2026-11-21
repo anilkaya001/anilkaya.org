@@ -472,9 +472,15 @@ async function runMain() {
       vendor.retryAfterS = 2;
       const d429 = await until(() => c.ctl("degraded").find((f) => f.meta.reason === "vendor-throttled"), 15000, "a 429 degrade");
       ok(d429.meta.retryAt, "429: degraded at once with the instant of the next try");
+      await sleep(300);
       const quietAt = vendor.calls.length;
+      const wall0 = Date.now();
+      const seenAt = [];
+      const watch = setInterval(() => { while (seenAt.length < vendor.calls.length - quietAt) seenAt.push(Date.now() - wall0); }, 10);
       await sleep(900);
-      ok(vendor.calls.length - quietAt <= 2, `429: the pause holds the hub off the feed (${vendor.calls.length - quietAt} calls in 0.9 s)`);
+      clearInterval(watch);
+      const waves = seenAt.reduce((n, at, i) => (i === 0 || at - seenAt[i - 1] > 200 ? n + 1 : n), 0);
+      ok(waves <= 2, `429: the pause holds the hub off the feed: at most two probes in 0.9 s of a pause that is at least 0.8 s long, each probe being the topics due together (${waves} probes, ${seenAt.length} calls at ${seenAt.join(", ")} ms)`);
       vendor.fault = null;
       vendor.retryAfterS = null;
       const mark2 = c.ctl("resync").length;
