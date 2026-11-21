@@ -227,6 +227,7 @@ export function verifyCoverage({ universe, roster = null, listing = null, global
   const byDepth = {};
   const failing = [];
   const depth = new Array(n);
+  const wantedBy = new Array(n);
   const predicates = { P1: { failing: 0, of: 0 }, P2: { failing: 0, of: 0 }, P4: { failing: 0, of: 0 }, P7: { failing: 0, of: n } };
   const rosterSessions = roster && isObject(roster.session) ? roster.session : {};
   for (let i = 0; i < n; i++) {
@@ -236,6 +237,7 @@ export function verifyCoverage({ universe, roster = null, listing = null, global
     const bucket = byDepth[d] || (byDepth[d] = { n: 0, ...Object.fromEntries(KEY_PRODUCTS.map((p) => [p, zeroCounts()])) });
     bucket.n++;
     const wanted = expectedKinds(d);
+    wantedBy[i] = wanted;
     const row = rowState(universe, i);
     const put = (product, entry) => {
       columns[product][i] = entry[0];
@@ -272,7 +274,7 @@ export function verifyCoverage({ universe, roster = null, listing = null, global
     }
   }
   failing.sort((a, b) => SEVERITY[a.code] - SEVERITY[b.code] || (a.t < b.t ? -1 : a.t > b.t ? 1 : 0) || (a.p < b.p ? -1 : 1));
-  const fresh = names.map((t, i) => nameFreshness({ t, keys, listed, truncated: cutAt(i), roster, expected }));
+  const fresh = names.map((t, i) => nameFreshness({ t, keys, listed, truncated: cutAt(i), roster, expected, kinds: wantedBy[i].filter((k) => k !== "card") }));
   const unfresh = fresh.filter((f) => FRESH_BROKEN.has(f.why)).length;
   const conservation = { ok: true, expected: n, counted: {} };
   for (const p of KEY_PRODUCTS) {
@@ -329,7 +331,7 @@ function rosterKnows(roster, t) {
   return NAME_KINDS.some((kind) => Object.hasOwn(held, `${kind}:${t}`));
 }
 
-export function nameFreshness({ t, keys = {}, listed = true, truncated = false, roster = null, expected = null } = {}) {
+export function nameFreshness({ t, keys = {}, listed = true, truncated = false, roster = null, expected = null, kinds = ["card-x", "hist"] } = {}) {
   const at = (kind) => (isObject(keys) ? keys[`${kind}:${t}`] : null);
   const card = at("card");
   if (!listed) return { t, why: "unknown", age: null, session: null, note: "the store listing was not read" };
@@ -350,7 +352,7 @@ export function nameFreshness({ t, keys = {}, listed = true, truncated = false, 
       ? { t, why: "held", age, session, note: `the read of ${session} is kept, ${span}: the last run did not land a new one` }
       : { t, why: "stale", age, session, note: `the card of ${session} is ${span} and no run holds it` };
   }
-  const gaps = ["card-x", "hist"].filter((kind) => dayOf(at(kind)) !== session);
+  const gaps = kinds.filter((kind) => dayOf(at(kind)) !== session);
   if (gaps.length) return { t, why: "split", age: 0, session, note: gaps.map((kind) => `${kind} ${dayOf(at(kind)) || "missing"}`).join(", ") };
   return { t, why: "fresh", age: 0, session, note: null };
 }

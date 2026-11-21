@@ -57,7 +57,7 @@ plant("card-timeout-reads-as-unreachable", "the failure sentence calls a timeout
 plant("coverage-stale-comparison-reversed", "a card from a later session than expected is stale and an older one is current", COVERAGE,
   [["if (session < expected) return [STATE.stale", "if (session > expected) return [STATE.stale"]], "coverageDetector");
 plant("coverage-complete-ignores-failures", "the report is complete while a name is missing a key", COVERAGE,
-  [["const complete = conservation.ok && globalsOk && failing.length === 0 && ", "const complete = conservation.ok && globalsOk && "]], "coverageDetector");
+  [["const complete = conservation.ok && globalsOk && failing.length === 0 && ", "const complete = conservation.ok && globalsOk && "], [" && listed && !truncated && unfresh === 0;", " && listed && !truncated;"]], "coverageDetector");
 plant("coverage-cut-listing-reads-as-failed", "a key missing from a truncated listing is a failure instead of unknown", COVERAGE,
   [['return truncated ? [STATE.pending, "the listing was cut before this key"] : [STATE.failed, "not stored"];', 'return [STATE.failed, "not stored"];']], "coverageDetector");
 plant("coverage-hist-not-counted", "the hist column's states are left out of the counts", COVERAGE,
