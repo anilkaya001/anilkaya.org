@@ -1,6 +1,6 @@
 # Shipment tracker
 
-Last updated: 2026-11-21, 12:20 TRT. Live site version: 436.
+Last updated: 2026-11-21, 12:35 TRT. Live site version: 436.
 
 How to read this: **Live** means merged and deployed. **In CI** means pushed and waiting for the checks. **Built** means a pull request exists and its checks passed once, but it still has to be merged with the current main branch. **Not started** means no code yet.
 
@@ -11,6 +11,8 @@ If the session stops (usage limit, restart), nothing here is lost: every item be
 | Item | Pull request | State | What is left |
 |---|---|---|---|
 | Fire & Forget: Digest page | #324 | In CI | Merge when the checks pass |
+
+- **Premium desk frontier: Return on cash** (asked 21 Nov). Y axis is now time value ÷ collateral for the contract's life, not annualised, linear from zero, one frontier per expiry. Both charts (puts/covered calls and short calls). Branch `claude/desk-return-on-cash`, worktree roc. Built, local suites running; next: PR, CI, merge.
 
 ## 2. Built, waiting their turn to merge (one at a time, in this order)
 
@@ -28,6 +30,25 @@ If the session stops (usage limit, restart), nothing here is lost: every item be
 | 10 | Third math audit: forty displayed-figure defects on Home, Events, Desk, Strategy, Glance, Macro | #336 | Each defect must be reproduced before it is fixed |
 
 For each of these I merge the current main branch in, fix what breaks, wait for the checks, merge, and confirm the live site.
+
+## 2b. Review findings recorded but not yet fixed
+
+Before the usage limit hit on 15 November, two reviewers read each pull request and recorded 94 candidate defects in all. Only some were fixed. Each must be reproduced before it is fixed; I work through a pull request's findings before merging it.
+
+| Pull request | Findings on record | State |
+|---|---|---|
+| #324 Digest | 17 over two rounds | Fixed (the second round on 21 November) |
+| #325 Inbox (already live) | 6 from the second round | Not fixed; needs a follow-up pull request |
+| #326 Wires, mark, name panel | 16 | Not fixed |
+| #327 Floor funds | 5 | Not fixed |
+| #328 Pulse | 5 | Not fixed |
+| #329 Orb | 6 | Not fixed |
+| #330 Always-fresh | 6 | Not fixed |
+| #331 Reliable reading | 7 | Not fixed |
+| #332 Endpoint coverage | 5 | Not fixed |
+| #333 Real time stage 1 | 4 | Not fixed |
+| #334 Safari Home | 5 | Not fixed |
+| #336 Math audit | not reviewed | The reviewers never ran |
 
 ## 3. Shipped (live)
 

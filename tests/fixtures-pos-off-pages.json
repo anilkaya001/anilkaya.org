@@ -1,7 +1,7 @@
 {
  "provenance": {
   "nature": "sha256 of every page render of origin/main at a pinned clock, version tokens and the declared renames normalised",
-  "base": "the feed copy scrub (#295): every page's wording moved, so the baseline is this tree's render"
+  "base": "desk return on cash"
  },
  "pages": {
   "loginPage:member": "cca2f1f4bd622f8737c3130d5464234ec7d9c5a3747a6ae55774a9d1d72e01cf",
@@ -22,8 +22,8 @@
   "networkPage:owner": "b15c1ad23f850254ea27c4cdd03d920aa8b85c9ca4fcf01bb03d63b0e5ea602b",
   "nowPage:member": "f530e673155939d239b307b4284323053eecd5c64aa508e64ff36112d7979666",
   "nowPage:owner": "f530e673155939d239b307b4284323053eecd5c64aa508e64ff36112d7979666",
-  "deskPage:member": "53fffbeeb9cd86f8602db2446e32b7ae27cae78f50b61d9f9a977cc6e2dcab6f",
-  "deskPage:owner": "53fffbeeb9cd86f8602db2446e32b7ae27cae78f50b61d9f9a977cc6e2dcab6f",
+  "deskPage:member": "a0246ab1780dc343e7a1941accb49eff64ef3109176484db9d5589bf11b677db",
+  "deskPage:owner": "a0246ab1780dc343e7a1941accb49eff64ef3109176484db9d5589bf11b677db",
   "politicalPage:member": "83ba220c63cff4716f141acd5c30f9ee9624a0c567a4fc869c3877847b209721",
   "politicalPage:owner": "83ba220c63cff4716f141acd5c30f9ee9624a0c567a4fc869c3877847b209721",
   "tickerPage:member": "ded5ebb2850699669aa1f6b4b934ef29c78c2f899a462e436319e6fb57efa016",
