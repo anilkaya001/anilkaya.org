@@ -56,10 +56,11 @@ Edits are in the files `SHARED_EDITS` lists. Outside that list, and why:
 
 ## Deferred, and why
 
-- **Inbox, Digest, Wires pages, the sidebar mark, the name panel** (lanes E, F,
-  H). Their page rows exist and answer an honest not-released page with a link
-  to Fire. The `mark` and `name-panel` slots are not inserted, because nothing
-  fills them.
+- **Inbox and Digest pages** (lane E). Their page rows exist and answer an
+  honest not-released page with a link to Fire. The Wires page, the sidebar
+  mark and the name panel have since landed: `ffSlots` in
+  `shared/flows-pages.js` inserts the `mark` slot when `FF_ROUTE_WIRES` is on
+  and the `name-panel` slot on the ticker page when `FF_ROUTE_INBOX` is on too.
 - **`ff-calibration`** is not registered: `scripts/flows-legs/ff-calibrate.mjs`
   does not exist. `ff_record`, confirmations and `ff_arch` are never written.
 - **Tier 1 evaluation.** Only a landed `live:alerts` write starts a live look.
@@ -74,10 +75,12 @@ Edits are in the files `SHARED_EDITS` lists. Outside that list, and why:
   every wire armed that day. It also re-reads every armed wire on each firing
   while a run is missing.
 - Lane C `EVAL_SQL.firstLooks` scans every evaluated receipt on each live look.
-- Lane B: preview shares `FF_HEAVY` (6 a minute) with export, so an editor who
-  changes a wire quickly can see 429s. The preview route hands the engine no
-  flagged windows, so a nightly window wire without `oi_confirm` previews as
-  `unavailable: source_missing`.
+- Lane B: preview shared `FF_HEAVY` (6 a minute) with export, so an editor who
+  changed a wire quickly could see 429s. It now has its own binding,
+  `FF_PREVIEW` (30 a minute). The preview route hands the engine no flagged
+  windows, so a nightly window wire without `oi_confirm` previews as
+  `unavailable: source_missing` with the detail `windows_unread`, whose
+  reason text says why and that open interest confirmed would let it preview.
 - Lane B: `/api/ff/run` answers 401, not 503, when the OIDC keys cannot be
   fetched.
 - Lane A: nightly and live effective sessions are equal at every instant

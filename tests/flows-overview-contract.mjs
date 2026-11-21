@@ -476,7 +476,7 @@ try {
     ok(/bullish/.test(tiles.Cleared?.spoken) && /bearish/.test(tiles.Cleared?.spoken),
        `each side named in words (${tiles.Cleared?.spoken})`);
     ok(!("Both sides" in tiles), "and the old row-count tile is gone rather than kept beside it");
-    eq(tiles.Flagged?.v, "7", "the vendor's flagged-window count");
+    eq(tiles.Flagged?.v, "7", "the feed's flagged-window count");
     eq(tiles["Put/call"]?.v, "0.53",
        "put contracts per call off the pulse's own daily totals, when no history has published a z");
 
@@ -742,7 +742,7 @@ try {
        "and it makes no claim about what the calendar holds, because it has not seen it");
 
     eq(await page.locator("#ccAlerts .hm-arow").count(), 3,
-       "the flagged-window module draws the vendor's rows");
+       "the flagged-window module draws the feed's rows");
     const al = await moduleWhy(page, "hmAlerts");
     eq(al.rows.length, 3, "and its disclosure tabulates the same three");
 
@@ -759,11 +759,11 @@ try {
     }));
     deep(sides.map((x) => x && x[0]), ["ask", "bid", null],
          "the meters take their class from FlowsUI.F.askShare: ORCL at 75% is coloured as the ask, PFE at 24% as the bid");
-    ok(sides[0][1] === "Ask-side share of the premium the vendor sided: 75% ask side \u00b7 100% sided" && sides[0][2] !== sides[1][2],
+    ok(sides[0][1] === "Ask-side share of the premium the feed sided: 75% ask side \u00b7 100% sided" && sides[0][2] !== sides[1][2],
        `with the label and the coverage in the meter's title and the two classes in two colours (${JSON.stringify(sides)})`);
 
     deep([al.rows[2][0], al.rows[2][4]], ["\u2014", "\u2014"],
-      "a window the vendor timed and split for neither prints the em dash in both, " +
+      "a window the feed timed and split for neither prints the em dash in both, " +
       "rather than a zero o'clock and an even split nobody measured");
     const quietMeter = await page.evaluate(() => {
       const row = document.querySelectorAll("#ccAlerts .hm-arow")[2];
@@ -1191,7 +1191,7 @@ try {
       sub: (await page.locator("#ccAlertsSub").textContent()).trim(),
       label: await page.locator("#ccAlertsSub").getAttribute("aria-label") };
     eq(ceiling.chip.v, "≥44",
-       "a read that hit the vendor's ceiling prints the count as a floor, never as a census");
+       "a read that hit the feed's ceiling prints the count as a floor, never as a census");
     const floorWhy = await chipWhy(page, "Flagged");
     ok(/floor and never a census/.test(floorWhy.lead),
        `and the chip carries the floor's sentence behind its disclosure, not under the value (${floorWhy.lead})`);
@@ -1234,7 +1234,7 @@ try {
     }));
     const zr = zeroSided.find((r) => r.t === "ZRO"), kla = zeroSided.find((r) => r.t === "KLA");
     ok(zr && !zr.meter && !zr.dash && zr.none && zr.none.text === "none sided" &&
-       zr.none.title === "Ask-side share of the premium the vendor sided: none sided" && /none sided$/.test(zr.label),
+       zr.none.title === "Ask-side share of the premium the feed sided: none sided" && /none sided$/.test(zr.label),
        `A WINDOW THE VENDOR SIDED AS ZERO IS NOT DRAWN AS ONE WITH NO SIDE STATED, NOR AS A ZERO-WIDTH METER that reads as a measured zero: ` +
        `it prints none sided, as the Unusual page's Names cell does, matching its disclosure row and its spoken label (${JSON.stringify(zr)})`);
     ok(kla && kla.dash && !kla.meter && !kla.none, `while a window that states neither side keeps the dash (${JSON.stringify(kla)})`);
@@ -2646,7 +2646,7 @@ try {
     const quietLeg = await silenceOf(page, "#ccLean [data-empty]");
     const quietRows = await page.locator("#ccLean .hm-cell").count();
     eq(quietRows, 0,
-       "a leg the vendor answered with nothing draws no cells at all, rather than eleven " +
+       "a leg the feed answered with nothing draws no cells at all, rather than eleven " +
        "identical unreadable ones that would read as eleven findings");
     eq(quietLeg.kind, "empty", "and it is the measured silence: the feed was read");
     ok(/returned no rows/.test(quietLeg.text),
@@ -2688,7 +2688,7 @@ try {
       createdAt: new Date(now - (7 * H)).toISOString(), createdAtMs: now - (7 * H),
       major: false, sentiment: null, tickers: [], tags: [] },
 
-    { headline: "An item the vendor sent with no timestamp", source: null,
+    { headline: "An item the feed sent with no timestamp", source: null,
       createdAt: null, createdAtMs: null, major: null, sentiment: null,
       tickers: [], tags: [] },
   ];
@@ -2791,28 +2791,28 @@ try {
     await shut(page);
 
     ok(/^6h \d+m ago$/.test(rows[0].age),
-       `the newest headline states its own age from the vendor's stamp (${rows[0].age})`);
+       `the newest headline states its own age from the feed's stamp (${rows[0].age})`);
     ok(/^2h \d+m ago$/.test(rows[1].age), `and so does the next (${rows[1].age})`);
     ok(/^\d+ min ago$/.test(rows[2].age),
        `an item under the hour is stated in minutes rather than "0h" (${rows[2].age})`);
     ok(/1 stored row carries no timestamp/.test(note),
        `and the note counts the rows that cannot be aged at all (${note.slice(-140)})`);
-    ok(/The vendor's own stamp, verbatim: /.test(rows[0].ageTitle),
-       `with the vendor's own stamp behind it, carried rather than reformatted ` +
+    ok(/The feed's own stamp, verbatim: /.test(rows[0].ageTitle),
+       `with the feed's own stamp behind it, carried rather than reformatted ` +
        `(${rows[0].ageTitle.slice(0, 50)}…)`);
 
     const undated = rows.find((r) => /no timestamp/.test(r.ageTitle));
-    ok(undated, "the row the vendor sent with no timestamp is on the page");
+    ok(undated, "the row the feed sent with no timestamp is on the page");
     eq(undated.age, "undated",
        "and it says so rather than being dated to now, which would be the confident zero in " +
        "the one dimension where it is invisible");
 
     const marked = rows.find((r) => /Sirius/.test(r.headline));
     eq(marked.headline, "Sirius XM <b>surges</b> on <script>alert(1)</script> upgrade",
-       "a headline carrying markup is printed as the characters the vendor sent");
+       "a headline carrying markup is printed as the characters the feed sent");
     deep(marked.tags, [],
        "and none of it became an element: the renderer builds nodes and sets textContent, " +
-       "which is how every vendor string enters a page in this section");
+       "which is how every feed string enters a page in this section");
     ok(!/<b>/.test(marked.html) && /&lt;b&gt;/.test(marked.html),
        `the angle brackets are escaped in the DOM rather than parsed (${marked.html.slice(0, 40)}…)`);
 
@@ -2833,16 +2833,16 @@ try {
        "and a headline naming more tickers than the row shows says how many, because a list " +
        "that truncates in silence reads as a population");
 
-    eq(marked.sent.text, "positive", "the vendor's sentiment word is carried verbatim");
+    eq(marked.sent.text, "positive", "the feed's sentiment word is carried verbatim");
     ok(!/is-pos|is-neg|data-tone/.test(marked.sent.cls),
        `and is NOT tinted with this page's own polarity classes (${marked.sent.cls}) — green ` +
-       "and red here mean the direction of OUR readings, and adding a vendor's label to them " +
+       "and red here mean the direction of OUR readings, and adding a feed's label to them " +
        "would invite a reader to add two different claims together");
 
-    ok(rows[0].major, "a row the vendor flagged major carries the mark");
+    ok(rows[0].major, "a row the feed flagged major carries the mark");
     const unflagged = rows.find((r) => /Oil steadies/.test(r.headline));
     ok(!unflagged.major,
-       "a row the vendor sent no flag on carries none — absence is not `false`");
+       "a row the feed sent no flag on carries none — absence is not `false`");
     ok(/2 of the stored rows carried no major\/minor flag at all/.test(note),
        `and their number is stated once in the note instead (${note.slice(-120)})`);
   }
@@ -2855,8 +2855,8 @@ try {
     const bothRead = await newsWhy();
     await shut(page);
     const both = bothRead.note.trim();
-    ok(/vendor returned 100 rows against the 100 asked for, which is its documented ceiling/
-      .test(both), `the vendor ceiling is named with the number that was hit (${both})`);
+    ok(/feed returned 100 rows against the 100 asked for, which is its documented ceiling/
+      .test(both), `the feed ceiling is named with the number that was hit (${both})`);
     ok(/true population is UNKNOWN and at least that large/.test(both),
        "and says the population is unknown, which is the whole content of that fact");
     ok(/60-row cap then shed 38 rows/.test(both),
@@ -3439,7 +3439,7 @@ try {
     deep(night.metals.map((m) => [m.flow, m.net]), [["Bearish", "−$7.8M"], ["Bearish", "−$8.9M"], ["Even", "−$168K"]],
       "and its options-flow lean as one word beside the net premium; a near-balanced book reads Even");
     deep(night.metals[0].rel, [["GDX", "−1.36%", "−$2.6M"], ["NEM", "−1.83%", "+$1.4M"], ["AEM", "—", "—"]],
-      "the related names follow as compact rows, and a name the vendor did not return shows em dashes, never zero");
+      "the related names follow as compact rows, and a name the feed did not return shows em dashes, never zero");
     deep(night.metals[1].rel.map((r) => r[0]), ["SIL", "PAAS", "WPM"], "silver's related names in payload order");
     ok(night.metals[0].line && /last 5 closes/.test(night.metals[0].spark || ""),
       `outside a live session the lead's sparkline draws the nightly closes (${night.metals[0].spark})`);
@@ -3481,7 +3481,7 @@ try {
     await fp.waitForFunction(() => document.querySelector("#ccLeaders a.hm-qrow")?.dataset.ticker === "NVDA");
     const ndx = await fp.evaluate(FOCUS_READ);
     deep(ndx.leaders.map((r) => r[0]), GROUPS[4].tickers, "NDX 10 swaps in the ten Nasdaq leaders the payload names");
-    deep(ndx.leaders.find((r) => r[0] === "NFLX"), ["NFLX", "—", "—", "—", "—"], "a leader the vendor skipped is em dashes");
+    deep(ndx.leaders.find((r) => r[0] === "NFLX"), ["NFLX", "—", "—", "—", "—"], "a leader the feed skipped is em dashes");
     ok(/[?&]lead=ndx10\b/.test(fp.url()), `the choice is kept in the address (${fp.url()})`);
     const home = await focusNow("/flows/");
     deep(home.seg.map((s) => s[1]), ["true", "false"],
@@ -3715,7 +3715,7 @@ try {
 
     await fp.setViewportSize({ width: 1920, height: 1080 });
     await fp.route("**/api/flows/focus", (route) => route.fulfill({ status: 200, contentType: "application/json",
-      body: JSON.stringify({ v: 1, status: "unavailable", reason: "the vendor read failed", sessionDate: SESSION, groups: GROUPS }) }));
+      body: JSON.stringify({ v: 1, status: "unavailable", reason: "the feed read failed", sessionDate: SESSION, groups: GROUPS }) }));
     const down = await focusNow();
     deep(down.hush.map((x) => x && x[0]), ["unavailable", "unavailable"], "a failed nightly read with no live rows is one unavailable state per module");
     deep(down.pills, [null, null], "with no pill");
@@ -3841,7 +3841,7 @@ try {
     `joined onto the ranked names in the events payload's own unit and the score joined back ` +
     `onto the calendar, both weightings of the tilt rather than a silent choice, four silences ` +
     `in four glyphs with four sentences behind them, one bearish population printed as one ` +
-    `number in the rail, the chip, the status line and the pole count, a vendor ceiling printed ` +
+    `number in the rail, the chip, the status line and the pole count, a feed ceiling printed ` +
     `as a floor and never a census, a residual signed in U+2212 with its unit named on the row, ` +
     `a spine at one viewBox unit per CSS pixel that trails only the crossings both payloads ` +
     `agree are this session's, the staleness guard that is flows-ui.js's one test, two halves ` +
@@ -3850,13 +3850,13 @@ try {
     `read instant on a 24-hour clock that names its zone, eleven sector baskets on a heat strip ` +
     `ranked on the publisher's ratio with a quiet basket at 0/0 and an unreadable one at an em ` +
     `dash, caveats kept apart from method, a headline tape whose fetch age leads its ` +
-    `disclosure and whose vendor strings stay characters, gold, silver and copper each led by ` +
+    `disclosure and whose feed strings stay characters, gold, silver and copper each led by ` +
     `its fund with its related names beneath, the Mag 7 and the NDX 10 on one switch the address ` +
     `and the viewer remember, a live read (the Actions strip or the Worker's live:focus, whichever read each name ` +
     `last) taking a module only when it is the newer read of every ` +
     `name in it so no Live pill sits over a nightly row, date chips that keep keyboard focus through ` +
     `every heartbeat, a focus key that arrives in an open page, every figure a ` +
-    `link to its dossier and an em dash where the vendor said nothing, and no visible run of prose longer ` +
+    `link to its dossier and an em dash where the feed said nothing, and no visible run of prose longer ` +
     `than six words anywhere on the surface`);
 } finally {
   await browser.close();

@@ -115,13 +115,12 @@
 
   const K = window.FlowsUI && window.FlowsUI.deskKit;
   if (!K) return;
-  const { UI, h, s, F, glyph, DASH, MINUS, C, T, Q, isNum, fmt2, fmtPct, fmtInt, fmtSd, kf, colorOf, frontierOf, netDelta, mods, WIN_Q, WIN_P, EV_P, ratioText, centsText, ratioFraction } = K;
+  const { UI, h, s, F, glyph, DASH, MINUS, C, T, Q, isNum, fmt2, fmtPct, fmtInt, fmtSd, kf, colorOf, frontierOf, frontiersOf, returnAxis, netDelta, mods, WIN_Q, WIN_P, EV_P, ratioText, centsText, ratioFraction } = K;
 
   const SIGNS = { "-1": MINUS, "0": "", "1": "+" };
   const pcOf = (sc) => (sc && sc.ok ? ratioText(sc.bidC, sc.m1C) : null) || DASH;
   const TONES = { "-1": "down", "0": null, "1": "up" };
   const CONV_LABEL = { delta: "Delta-adjusted", regt: "Reg-T style", shares: "Shares held (covered)" };
-  const TICKS = [0, 0.05, 0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024];
   const BIND_WORD = { delta: "delta", floor: "floor", "regt-otm": "20% rule", shares: "shares held" };
   const WHY_KEY = { "no-delta": "sc-no-delta", "no-spot": "sc-why-no-spot", "bad-delta": "sc-why-bad-delta", "no-collateral": "sc-why-no-collateral", "bad-terms": "sc-why-bad-terms", "no-bid": "sc-why-no-bid", "fwd-dash": "sc-why-fwd" };
 
@@ -251,7 +250,7 @@
     return sc && sc.netDelta !== null ? Math.abs(sc.netDelta) : null;
   };
   const xOf = (axis) => (axis === 0 ? xNet : (r) => (r.__sc ? r.__sc.popQ : null));
-  const yOf = (r) => (r.__sc && r.__sc.ok ? r.__sc.annRatio : null);
+  const yOf = (r) => (r.__sc && r.__sc.ok ? r.__sc.ratio : null);
 
   const collateralSub = (sc) => {
     if (!sc.ok) return "";
@@ -442,25 +441,24 @@
       return;
     }
     const ys = pts.map((p) => p.y).sort((a, b) => a - b);
-    const p95 = ys[Math.min(ys.length - 1, Math.floor(ys.length * 0.95))];
-    const cap = Math.max(0.05, Math.min(ys[ys.length - 1], p95 * 8) * 1.04);
+    const ax = returnAxis(ys), cap = ax.cap;
     const left = 54, right = 16, top = 24, bottom = 26;
     const x0 = axis === 0 ? 0 : Math.max(0, Math.min(...pts.map((p) => p.x)) - 0.03);
     const x1 = axis === 0 ? Math.min(1, Math.max(0.1, Math.max(...pts.map((p) => p.x)) * 1.08)) : 1;
-    const x = C.lin(x0, x1, left, w - right), yl = C.lin(0, Math.sqrt(cap), H - bottom, top);
-    const y = (v) => yl(Math.sqrt(Math.max(0, v)));
+    const x = C.lin(x0, x1, left, w - right), yl = C.lin(ax.lo, cap, H - bottom, top);
+    const y = (v) => yl(Math.max(ax.lo, v));
     const quick = !!st.quick;
     const box = h("div", { class: "tl-scrub" });
     host.append(box);
     const svg = C.svgRoot(box, w, H, animate && !quick, T("sc-fr-aria", { x: axis === 0 ? "net delta, short call magnitude" : "the implied chance of profit", n: pts.length, conv: CONV_LABEL[terms.cv] }));
-    s("line", { x1: left, x2: w - right, y1: H - bottom, y2: H - bottom, class: "base" }, svg);
+    s("line", { x1: left, x2: w - right, y1: y(0), y2: y(0), class: "base" }, svg);
     let lastY = Infinity;
-    for (const t of TICKS) {
-      if (t > cap || lastY - y(t) < 40) continue;
-      lastY = y(t);
-      s("text", { x: left - 8, y: y(t) + 4, text: groupN(t * 100) + "%", "text-anchor": "end" }, svg);
+    for (const t of ax.ticks) {
+      if (lastY - y(t.v) < 24) continue;
+      lastY = y(t.v);
+      s("text", { x: left - 8, y: y(t.v) + 4, text: t.text, "text-anchor": "end", "data-v": String(t.v) }, svg);
     }
-    s("text", { x: 2, y: 11, text: "Ann. premium ÷ collateral, square-root scale", class: "tx-3" }, svg);
+    s("text", { x: 2, y: 11, text: phone ? "Return on cash, not annualised" : "Return on cash: time value ÷ collateral, not annualised", class: "tx-3" }, svg);
     for (const t of C.niceTicks(x0, x1, phone ? 4 : 6)) {
       if (x(t) < left + 8 || x(t) > w - right - 8) continue;
       s("text", { x: x(t), y: H - 7, text: axis === 0 ? t.toFixed(2).replace(/^0/, "") : Math.round(t * 100) + "%", "text-anchor": "middle" }, svg);
@@ -471,14 +469,15 @@
       s("line", { x1: x(guide), x2: x(guide), y1: top, y2: H - bottom, class: "dk-floor", "data-at": String(guide) }, svg);
       s("text", { x: x(guide) + 4, y: top + 10, text: "Floor ends", class: "tx-3 dk-floor-l" }, svg);
     }
-    const fr = frontierOf(pts, axis === 1);
-    const frSet = new Set(fr);
-    if (fr.length > 1) {
+    const frs = frontiersOf(pts, axis === 1);
+    const frSet = new Set(frs.flat());
+    for (const fr of frs) {
+      if (fr.length < 2) continue;
       const P = fr.map((p) => [x(p.x), y(Math.min(p.y, cap))]);
       const inScale = fr.findIndex((p) => p.y > cap);
       const cut = inScale < 0 ? P.length : Math.max(1, inScale);
-      s("path", { d: C.pathOf(P.slice(0, cut)), class: "ln dk-front" + (animate && !quick ? " draw" : ""), pathLength: 1 }, svg);
-      if (cut < P.length) s("path", { d: C.pathOf(P.slice(cut - 1)), class: "ln dk-front is-off" }, svg);
+      s("path", { d: C.pathOf(P.slice(0, cut)), class: "ln dk-front" + (animate && !quick ? " draw" : ""), pathLength: 1, "data-expiry": fr[0].r.expiry }, svg);
+      if (cut < P.length) s("path", { d: C.pathOf(P.slice(cut - 1)), class: "ln dk-front is-off", "data-expiry": fr[0].r.expiry }, svg);
     }
     const syms = [...new Set(pts.map((p) => p.r.__sym))];
     const g = s("g", { class: animate && !quick ? "fade" : null }, svg);
@@ -502,9 +501,9 @@
       onMove: (i) => {
         const p = order[i], r = p.r, sc = r.__sc;
         return {
-          noLine: true, top: Math.max(0, y(Math.min(p.y, cap)) - 40), say: r.ticker + " " + kf(r.strike) + ", " + fmtAnn(sc.annRatio) + " annualised time value over collateral, premium over collateral " + pcOf(sc),
+          noLine: true, top: Math.max(0, y(Math.min(p.y, cap)) - 40), say: r.ticker + " " + kf(r.strike) + ", " + fmtRatio(sc.ratio) + " return on cash over " + r.days + " days, time value over collateral, not annualised, premium over collateral " + pcOf(sc),
           parts: [C.part(r.ticker + " " + kf(r.strike) + " call", null), C.part(F.day(r.expiry), "k"), C.part(pcOf(sc) + " of collateral", "k"),
-            h("b", null, fmtAnn(sc.annRatio)), C.part(axis === 0 ? "Net Δ " + signedD(sc.netDelta) : "Win " + fmtPct(p.x, 0), "k")],
+            h("b", null, fmtRatio(sc.ratio)), C.part("over " + r.days + "d", "k"), C.part(axis === 0 ? "Net Δ " + signedD(sc.netDelta) : "Win " + fmtPct(p.x, 0), "k")],
         };
       },
     });
@@ -513,7 +512,7 @@
       : terms.cv === "shares" ? [] : [["--label-2", "dot", "Delta sets collateral"], ["--label-2", "dia", "Floor sets collateral"]];
     const unplotted = rows.length - pts.length;
     mods.legend.replaceChildren(
-      UI.legend([...syms.map((sym) => [colorOf(sym), "dot", sym]), ...floorKeys, ["--label-1", "ln", "Frontier"]]),
+      UI.legend([...syms.map((sym) => [colorOf(sym), "dot", sym]), ...floorKeys, ["--label-1", "ln", "Frontier, one per expiry"]]),
       h("p", { class: "dk-assume" }, groupN(terms.n) + " contracts · collateral: " + convText() + " · premium = the bid"),
       ...(noDelta ? [h("p", { class: "dk-hint" }, T("sc-no-delta-all"))] : []),
       ...(unplotted > 0 ? [h("p", { class: "dk-hint" }, T("unplotted", { n: unplotted }))] : []));

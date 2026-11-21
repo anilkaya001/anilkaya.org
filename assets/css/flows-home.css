@@ -11,7 +11,6 @@
 .hm-pill .ui-g { font-size: 13px; }
 .hm-pill:hover { background: var(--fill-2); color: var(--label-1); }
 .hm-pill[data-state="live"] { color: var(--up); background: var(--up-fill); }
-.hm-pill[data-state="live"] .ui-g { animation: ui-breathe 2.4s var(--ease-out) infinite; }
 .hm-pill[data-state="stale"] { color: var(--warn); background: var(--warn-fill); }
 .hm-pill[data-state="pending"] .ui-g { animation: ui-spin 6s linear infinite; }
 

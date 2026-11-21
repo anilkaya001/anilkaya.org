@@ -342,7 +342,8 @@ export async function symbolPanel(c, build) {
   await api.call("PATCH", "/api/ff/wires", { body: { id: made[2], status: "retired" }, user: alice });
   const panel = await api.call("GET", "/api/ff/symbol?t=SYA101", { user: alice });
   c.eq(panel.body.panel.wires.length, 3, "panel: at most three wires are listed");
-  c.eq(panel.body.panel.armed, panel.body.panel.wires.filter((w) => w.status === "armed").length, "panel: armed counts the armed ones listed");
+  c.eq([panel.body.panel.armed, panel.body.panel.paused, panel.body.panel.total], [3, 1, 4], "panel: armed, paused and total count every wire on the name, not only the three listed");
+  c.eq(panel.body.panel.wires.map((w) => w.status), ["armed", "armed", "armed"], "panel: armed wires are listed before paused ones, so an older armed wire is never hidden behind newer paused ones");
   c.ok(!panel.body.panel.wires.some((w) => w.id === made[2]), "panel: a retired wire is not listed");
   c.ok(panel.body.panel.wires.some((w) => w.state === "paused") || panel.body.panel.wires.length === 3, "panel: a paused wire reads paused");
   api.world.f.db.prepare("INSERT INTO ff_state (wire_id, subject, version, phase, cnt, last_session, cool_until) VALUES (?, 'n:SYA101', 1, 'cooling', 0, ?, ?)").run(made[0], PREV_SESSION, "2026-10-29");

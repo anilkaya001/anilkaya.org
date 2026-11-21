@@ -25,7 +25,7 @@ try {
     await page.waitForSelector(".dk-suggest", { timeout: 8000 });
     eq((await page.textContent(".dk-suggest")).trim(), "Try NVDA", "A DESK OPENED WITH NO SYMBOL OFFERS THE TOP BULLISH NAME as a button instead of a blank Quiet frontier");
     await page.waitForTimeout(600);
-    eq(asked.length, 0, "and the vendor chain is not read until the reader presses it: an empty visit costs no call");
+    eq(asked.length, 0, "and the feed chain is not read until the reader presses it: an empty visit costs no call");
     await page.click(".dk-suggest");
     await page.waitForFunction(() => document.querySelectorAll("#dkChips .desk-chip, .desk-chip").length > 0, null, { timeout: 8000 });
     eq(asked.join(","), "NVDA", "pressing it makes exactly one chain read, for the board's first row");

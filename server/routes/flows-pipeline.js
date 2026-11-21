@@ -1,6 +1,6 @@
 import { HttpError, internalKey, edgeCache } from "../http.js";
 import { expectedNightlySession } from "../../shared/flows-freshness.js";
-import { GLOBAL_KEYS, NAME_KINDS } from "../../shared/flows-products.js";
+import { NIGHTLY_GLOBAL_KEYS, NAME_KINDS } from "../../shared/flows-products.js";
 import { verifyCoverage } from "../../shared/flows-coverage.js";
 import { NAME_LIST_MAX_NAMES } from "../store.js";
 
@@ -8,7 +8,7 @@ const on = (value) => typeof value === "string" && value.trim().toLowerCase() ==
 
 export const COVERAGE_TTL_S = 60;
 
-export const COVERAGE_ROW_CEILING = 2 + GLOBAL_KEYS.length + NAME_KINDS.length * NAME_LIST_MAX_NAMES;
+export const COVERAGE_ROW_CEILING = 2 + NIGHTLY_GLOBAL_KEYS.length + NAME_KINDS.length * NAME_LIST_MAX_NAMES;
 
 const parse = (stored) => {
   if (stored === null || typeof stored.payload !== "string") return null;
@@ -39,7 +39,7 @@ export function flowsPipelineRows(deps) {
       Promise.resolve(readClock(env.DB)).catch(() => null),
       store.read(env, "universe"),
       store.read(env, "roster"),
-      store.metadata(env, GLOBAL_KEYS.slice()),
+      store.metadata(env, NIGHTLY_GLOBAL_KEYS.slice()),
     ]);
     const universeBody = parse(universe);
     if (universeBody === null) throw HttpError.of("store_unreadable");

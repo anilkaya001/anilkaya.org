@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "432";
+export const ASSET_VERSION = "443";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -10,7 +10,10 @@ import { HORIZON_SESSIONS } from "./flows-horizon.js";
 import { macroBody, MACRO_DESCRIPTION, MACRO_STYLES, MACRO_SCRIPTS, MACRO_DEFER } from "./flows-page-macro.js";
 import { COPY as VD_COPY } from "./flows-voldesk-copy.js";
 import { flowlabBody, FLOWLAB_DESCRIPTION, FLOWLAB_STYLES, FLOWLAB_SCRIPTS } from "./flows-page-flowlab.js";
-import { FIRE_DESCRIPTION, FIRE_SCRIPTS, FIRE_STYLES, fireBody } from "./ff-pages-fire.js";
+import { FIRE_DESCRIPTION, FIRE_SCRIPTS, FIRE_STYLES, dataBlock as fireDataBlock, fireBody } from "./ff-pages-fire.js";
+import { INBOX_DESCRIPTION, INBOX_SCRIPTS, INBOX_STYLES, inboxBody } from "./ff-pages-inbox.js";
+import { DIGEST_DESCRIPTION, DIGEST_SCRIPTS, DIGEST_STYLES, digestBody } from "./ff-pages-inbox.js";
+import { WIRES_DESCRIPTION, WIRES_SCRIPTS, WIRES_STYLES, wiresBody } from "./ff-pages-inbox.js";
 
 export const CALENDAR_BACK_DAYS = 14;
 export const CALENDAR_SESSIONS = 60;
@@ -475,11 +478,11 @@ export function aboutPage({ positioning = false } = {}) {
   <section aria-labelledby="aWhat">
     <h2 id="aWhat">What it does</h2>
     <ul>
-      <li><strong>Home.</strong> The session on one screen: the tide, the leaders on each side, what the vendor flagged, what changed and who reports next.</li>
+      <li><strong>Home.</strong> The session on one screen: the tide, the leaders on each side, what the feed flagged, what changed and who reports next.</li>
       <li><strong>Boards.</strong> The names whose option flow leans bullish or bearish for the session, and the names that nearly qualified (the Watchlist).</li>
       <li><strong>Market.</strong> The session tide, breadth, sectors, index ETFs, expiries and volatility, with the market-wide feeds.</li>
       <li><strong>Moves.</strong> Every name's move today against its own typical day and against the day its options implied, with how often a move that size has happened in the last year, and each sector&#39;s median move beside the list of names.</li>
-      <li><strong>Unusual.</strong> The option windows the vendor flagged, drawn as a flow network from sector through the side of the quote and name to lean, and the contracts trading far above their open interest.</li>
+      <li><strong>Unusual.</strong> The option windows the feed flagged, drawn as a flow network from sector through the side of the quote and name to lean, and the contracts trading far above their open interest.</li>
       <li><strong>Flow Lab.</strong> The contracts behind a name's flow: a screener ranked by the site's own ratios, strike and Greek flow, price ladders, routing, lit prints and group flow, each with its unit or a dash and the reason.</li>
       <li><strong>Ledger.</strong> The flagged option premium booked as a closed ledger: takers on one side, liquidity providers on the other, so every row and column sums to zero. It sets each sector's share against its market-cap share, with the bounds it can prove.</li>
       <li><strong>Macro.</strong> Rates, currencies, commodities, crypto and futures on one screen, with prediction-market odds beside each scheduled release and seasonality shown with its intervals. A figure the feed does not carry is a dash with its reason.</li>
@@ -510,14 +513,14 @@ export function aboutPage({ positioning = false } = {}) {
   <section aria-labelledby="aFire">
     <h2 id="aFire">Fire &amp; Forget&#8482;</h2>
     <p>Fire &amp; Forget is the name for the part of Flows that runs without anyone choosing tickers. A nightly run reads the options market for the whole universe, a rotation gives each name a full card within a bounded number of nights, and a live pass keeps the session's prices and alerts current.</p>
-    <p>It promises that the work is scheduled, bounded and checked, and that a name it could not read is shown as withheld with the reason. It does not promise that every name is fresh at every moment, that the vendor is never late, or that any figure is right.</p>
+    <p>It promises that the work is scheduled, bounded and checked, and that a name it could not read is shown as withheld with the reason. It does not promise that every name is fresh at every moment, that the feed is never late, or that any figure is right.</p>
   </section>
   <section aria-labelledby="aNot">
     <h2 id="aNot">What it is not</h2>
     <ul>
       <li>Not investment advice, a recommendation or an offer, and not a broker. It does not know your circumstances.</li>
       <li>Not a forecast. Options can lose their whole value, and a reading of past flow does not say what happens next.</li>
-      <li>Not real time unless a page says so. Vendor data can be late, revised or wrong.</li>
+      <li>Not real time unless a page says so. Feed data can be late, revised or wrong.</li>
     </ul>
   </section>
   <section aria-labelledby="aAccess">
@@ -734,9 +737,9 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="bp">Cash. Puts are sized cash-secured, the whole strike reserved, so this under-counts what a margin account could write. Covered calls are sized as a buy-write: 100 shares bought at the spot price for every contract, so shares you already hold are not counted. Write 25000, 25,000 or 25k; a comma marks thousands only and cents stop at two decimals. Held in this page&#39;s address so a reload keeps it, which means a link you share carries it too.</p>
       <p data-k="bp-bad">That is not a balance this desk can read. Write 25000, 25,000 or 25k; a comma marks thousands only, so 25,5k is refused rather than guessed, and cents stop at two decimals, so 1.005 is refused rather than rounded.</p>
       <p data-k="cc-size">Sized as a buy-write: 100 shares bought at the spot price for every contract, so shares you already hold are not counted.</p>
-      <p data-k="frontier">Every line on the list that has an engine reading, as a point: annualised time-value yield up, risk across. The frontier joins the lines no other line beats on both, so a point below it pays less for the same risk. It follows the tenor window above, and annualising a line of one to three days mostly ranks shortness.</p>
+      <p data-k="frontier">Every line on the list that has an engine reading, as a point: return on cash up, risk across. Return on cash is the time value the bid pays over the collateral, for the life of the contract, not annualised. Each expiry has its own frontier, which joins the lines of that expiry no other line of it beats on both, so a point below it pays less for the same risk. A longer expiry pays more because it ties the cash up for longer. It follows the tenor window above.</p>
       <p data-k="unplotted">Not plotted, for want of an engine reading: {n}.</p>
-      <p data-k="frontier-x">The yield axis is a square-root scale: equal steps up are equal steps in the square root of the yield, which spreads the crowded low yields, and its ticks sit on that scale, zero included. The yield is the time value the bid pays, annualised. Net delta is the position&#39;s exposure to the stock, from the short option&#39;s forward delta on its own implied volatility: the put&#39;s delta, and for a covered call one minus the call&#39;s delta, because the shares add one. Win % (implied) is the risk-neutral chance the position ends in profit, on the card&#39;s smile shape levelled to the same volatility; it is not a forecast. A point pinned to the top edge pays more than the axis shows.</p>
+      <p data-k="frontier-x">The return axis is linear from zero: twice as high is twice the return. In-the-money value is not counted, because it is handed back on assignment; a bid under the in-the-money value plots below zero. Net delta is the position&#39;s exposure to the stock, from the short option&#39;s forward delta on its own implied volatility: the put&#39;s delta, and for a covered call one minus the call&#39;s delta, because the shares add one. Win % (implied) is the risk-neutral chance the position ends in profit, on the card&#39;s smile shape levelled to the same volatility; it is not a forecast. A point pinned to the top edge pays more than the axis shows.</p>
       <p data-k="engine">Each line is priced by the same engine as the strategy lab, on the nightly card&#39;s smile shape re-levelled to this contract&#39;s own implied volatility, inverted from its mid (for an in-the-money strike, from the out-of-the-money quote at the same strike), or on a flat slice at that volatility where the card lists no smile near the expiry. The rate and dividend yield are the card&#39;s, the constant 4% where it measured no rate. The real-world figures use the GARCH law the name&#39;s card publishes, and are an em dash where no card carries one, or where an earnings report falls inside the expiry and the card holds no report move to weigh it.</p>
       <p data-k="premium">Premium is what the bid pays today; the mid is not a price anyone must trade at. Where a strike is in the money, part of the premium is intrinsic value that assignment returns rather than keeps, and the annualised figure counts only the time value.</p>
       <p data-k="annualized">Time value over the collateral, scaled by 365 over the days to expiry: a convention for comparing tenors, not a return anyone earns. A premium grows with the square root of time, not in proportion to it, so annualising a line of one to three days mostly ranks shortness. The per-week figure in a line&#39;s disclosure is the same yield scaled to seven days. Every line assumes the option is held to expiry: an in-the-money call whose time value is below a dividend paid before expiry, or a deep in-the-money put whose time value is below the interest on its strike, is likely to be assigned early, and its annualised figure then overstates what is earned.</p>
@@ -779,11 +782,11 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="int-in">Includes {i} of intrinsic value, which assignment returns rather than keeps; the time value is {t}.</p>
       <p data-k="basis-rebased">{sym} priced against {spot}, the underlying the quotes imply; last regular print {print}{note}.</p>
       <p data-k="basis-mismatch">{sym}: these quotes do not agree with the price ({print}), so nothing is ranked.</p>
-      <p data-k="sm-aria">Implied volatility surface for {t}: {e} expiries by {r} moneyness bands. At-the-money implied volatility by expiry — {l}. Shade is each contract&#39;s implied volatility against its own expiry&#39;s at-the-money quote. Every volatility here is the vendor&#39;s last-transaction figure.</p>
+      <p data-k="sm-aria">Implied volatility surface for {t}: {e} expiries by {r} moneyness bands. At-the-money implied volatility by expiry — {l}. Shade is each contract&#39;s implied volatility against its own expiry&#39;s at-the-money quote. Every volatility here is the feed&#39;s last-transaction figure.</p>
       <p data-k="sm-rows">Rows are log-moneyness, ln(strike ÷ spot), in bands {w}% wide; columns are expiries, nearest first.</p>
-      <p data-k="sm-atm">At the money, on the vendor&#39;s last-transaction volatility: {l}.</p>
+      <p data-k="sm-atm">At the money, on the feed&#39;s last-transaction volatility: {l}.</p>
       <p data-k="sm-units">Volatility units resolved once for the whole chain: {b}.</p>
-      <p data-k="fr-aria">Annualised yield, square-root scale, against {x} for {n} lines</p>
+      <p data-k="fr-aria">Return on cash, time value over collateral, not annualised, against {x} for {n} lines</p>
       <p data-k="fr-key">Frontier. Use the arrow keys to step through the lines.</p>
       <p data-k="fr-none">No line carries both a risk reading and a yield.</p>
       <p data-k="rank-bp">Enter a buying power to rank by time value collectible.</p>
@@ -794,13 +797,13 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="f-week">of time value, scaled to seven days</p>
       <p data-k="f-vol">inverted from the mid, for delta, win % and EV</p>
       <p data-k="f-vol-c">on the row, for the cushion</p>
-      <p data-k="smile">Each cell is one quoted contract&#39;s implied volatility, the vendor&#39;s last-transaction figure, shaded by how far it sits above or below its own expiry&#39;s at-the-money level, so a seller can see where the smile pays for the risk.</p>
+      <p data-k="smile">Each cell is one quoted contract&#39;s implied volatility, the feed&#39;s last-transaction figure, shaded by how far it sits above or below its own expiry&#39;s at-the-money level, so a seller can see where the smile pays for the risk.</p>
       <p data-k="sm-shade">The shade is that volatility against its own expiry&#39;s at-the-money quote — hatched below it, plain above — so the smile is readable without the term structure swamping it. The strip beneath the grid, read left to right, is the term structure.</p>
-      <p data-k="sm-num">The number in a cell is the vendor&#39;s implied volatility for that contract&#39;s last transaction. It is not the volatility the lines above use for delta, win % and EV, which is inverted from each contract&#39;s mid, so a cell and the same contract&#39;s line need not agree.</p>
-      <p data-k="sm-narrow">The columns are too narrow at this width to print a volatility inside each cell, so every cell carries its own in a tooltip instead. It is the vendor&#39;s last-transaction volatility, not the one inverted from the mid that the lines above use.</p>
+      <p data-k="sm-num">The number in a cell is the feed&#39;s implied volatility for that contract&#39;s last transaction. It is not the volatility the lines above use for delta, win % and EV, which is inverted from each contract&#39;s mid, so a cell and the same contract&#39;s line need not agree.</p>
+      <p data-k="sm-narrow">The columns are too narrow at this width to print a volatility inside each cell, so every cell carries its own in a tooltip instead. It is the feed&#39;s last-transaction volatility, not the one inverted from the mid that the lines above use.</p>
       <p data-k="sm-nolevel">Those columns carry their quoted volatilities and no shade, and the term-structure line does not bridge them.</p>
-      <p data-k="sc-frontier">Every call on the list that has an engine reading, as a point: annualised time value over collateral up, delta across. The time value is the bid less any in-the-money value; collateral is what the stated convention asks for one contract. The frontier joins the calls no other call beats on both, so a point below it pays less for the same risk. Contracts sold and buying power change the dollars in the list, never the points.</p>
-      <p data-k="sc-frontier-x">Net delta is the position&#39;s exposure to the stock: minus the call&#39;s forward delta for an uncovered call, drawn as a magnitude, or one minus it under Shares held, where the shares add one. Win % (implied) is the risk-neutral chance the call expires worth less than the strike plus the bid collected; it is not a forecast. The yield axis is a square-root scale: equal steps up are equal steps in the square root of the ratio, and its ticks sit on that scale, zero included. A point pinned to the top edge pays more than the axis shows.</p>
+      <p data-k="sc-frontier">Every call on the list that has an engine reading, as a point: return on cash up, delta across. Return on cash is the time value over the collateral for the life of the contract, not annualised. The time value is the bid less any in-the-money value; collateral is what the stated convention asks for one contract. Each expiry has its own frontier, which joins the calls of that expiry no other call of it beats on both, so a point below it pays less for the same risk. Contracts sold and buying power change the dollars in the list, never the points.</p>
+      <p data-k="sc-frontier-x">Net delta is the position&#39;s exposure to the stock: minus the call&#39;s forward delta for an uncovered call, drawn as a magnitude, or one minus it under Shares held, where the shares add one. Win % (implied) is the risk-neutral chance the call expires worth less than the strike plus the bid collected; it is not a forecast. The return axis is linear from zero: twice as high is twice the return. A point pinned to the top edge pays more than the axis shows.</p>
       <p data-k="sc-premium">Premium is what the bid pays on the contracts sold: a call sold into the bid, 100 shares a contract. The mid is not used for any figure here. Where a strike is in the money, part of the premium is intrinsic value that assignment takes back. The Premium ÷ collateral figure counts the whole bid, intrinsic value included; the annualised ratio counts only the time value.</p>
       <p data-k="sc-contracts">100 options sold is read as 100 contracts of 100 shares, 10,000 shares in all. To mean 100 option-shares, enter 1.</p>
       <p data-k="sc-delta">Delta-adjusted collateral = 100 shares × spot × the larger of {h} × the call&#39;s delta (read as 0.05 where it is smaller) and {f}. The first term is the delta-equivalent stock position times a stress rate; the second is a floor so a call with almost no delta still ties up capital. It is a convention, not your broker&#39;s number.</p>
@@ -822,7 +825,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="sc-why-bad-delta">The engine returned a delta outside zero to one, so delta-adjusted collateral is withheld.</p>
       <p data-k="sc-why-no-collateral">The convention asks for no collateral here, so no ratio is formed.</p>
       <p data-k="sc-why-bad-terms">The haircut or floor is outside its allowed range.</p>
-      <p data-k="sc-fr-aria">Annualised premium over collateral, square-root scale, against {x} for {n} calls. Collateral convention: {conv}.</p>
+      <p data-k="sc-fr-aria">Return on cash, time value over collateral, not annualised, against {x} for {n} calls. Collateral convention: {conv}.</p>
       <p data-k="sc-plan">{bp} buying power · {a} of {m} lines affordable · best single deployment: {n}× {t} {k} call expiring {e} earns {c} of time value, ties up {d} of collateral under {conv} and leaves {i} idle. Best means the line that earns the most time value within your buying power — not annualised and not risk-adjusted — and counts at most {N} contracts.</p>
       <p data-k="t-ratio">Premium ÷ collateral: one contract's bid over the collateral the stated convention asks for it, in-the-money value included. Not a return anyone earns until the call expires out of the money; the annualised figure counts only time value.</p>
       <p data-k="t-pc">Premium ÷ collateral: what one contract's bid pays over the collateral it ties up, gross. A put reserves its strike × 100 in cash; a covered call holds 100 shares at the price shown. In-the-money value is counted and the premium is not netted off the collateral. The annualised figure counts only time value.</p>
@@ -839,7 +842,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="sc-conv-regt">the Reg-T style collateral is the requirement net of the premium received, so this ratio reads higher than a gross one</p>
       <p data-k="sc-conv-shares">the collateral is 100 shares at the price shown, assumed held</p>
       <p data-k="t-collat">What the stated convention asks for the contracts shown. See the information button for the formula.</p>
-      <p data-k="sm-last">This vendor&#39;s implied volatility is the LAST TRANSACTION&#39;s, not a quote.</p>
+      <p data-k="sm-last">This feed&#39;s implied volatility is the LAST TRANSACTION&#39;s, not a quote.</p>
       <p data-k="sm-fresh">every cell on this surface is a print from today.</p>
       <p data-k="sm-aged">so their volatility is of unknown age. Those cells are drawn with a broken border and NONE of them set an expiry&#39;s level — a stale cell is one marked number, but a stale level would tilt a whole column&#39;s smile with no marker on any cell it moved.</p>
       <p data-k="sm-built">Built from every contract with a two-sided quote, before the liquidity gates that decide the lines above and regardless of the Sell toggle — those gates fall hardest on the wings, and a smile with its tails cut off is a different smile.</p>
@@ -847,7 +850,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="sm-quoted">Quoted volatilities, and differences between quoted volatilities on the same expiry. Nothing here is fitted, interpolated or repriced.</p>
       <p data-k="sm-crowd">contracts fall in this row of this column; the one shown is the print this surface prefers — today&#39;s first, then nearest the row&#39;s centre. The cell is never an average of quotes.</p>
       <p data-k="sm-untraded">This contract has NOT traded today, so its implied volatility is the last transaction&#39;s — of unknown age. It is drawn but it did not set this expiry&#39;s level.</p>
-      <p data-k="sm-novol">The vendor reported no volume for this contract, so the age of its implied volatility is unknown. It did not set this expiry&#39;s level.</p>
+      <p data-k="sm-novol">The feed reported no volume for this contract, so the age of its implied volatility is unknown. It did not set this expiry&#39;s level.</p>
       <p data-k="f-uni">{p} of {least}{s} quoted contracts are sellable</p>
       <p data-k="f-gate">The rest fail a gate: {list} — each counted once, under the first gate it failed.</p>
       <p data-k="f-unc">{who} {is} outside those two numbers: {that} did not say how many contracts were screened or how many are sellable, and a count this page never received is not a count of nought.</p>
@@ -914,7 +917,7 @@ export function deskPage({ username = "" } = {}) {
       <p data-k="sm-ex0">No earnings report falls before this expiry.</p>
       <p data-k="sm-exu">Whether this expiry outlives the next earnings report is not determined: no contract on it survived the sale gates, so nothing on this column was dated.</p>
       <p data-k="sm-lv0">{e} has no at-the-money level: {r}.</p>
-      <p data-k="sm-lv">{e} at the money: {v}% vendor volatility, from the {k} {w} — {m} from spot and traded today.</p>
+      <p data-k="sm-lv">{e} at the money: {v}% feed volatility, from the {k} {w} — {m} from spot and traded today.</p>
       <p data-k="sm-past">Past the shade cap of {c} vol points, so the shade understates it. Marked with a slash.</p>
       <p data-k="sm-c1">One contract shares a row with another; the cell shows one quoted contract and is never an average of two.</p>
       <p data-k="sm-cn">{n} contracts share a row with another; each cell shows one quoted contract and is never an average of two.</p>
@@ -1097,15 +1100,21 @@ const feedModule = (id, title, body, { span = "", seg = "", tab = "", free = fal
 const feedTabs = (tabs) => `
   <div class="fd-tabs" role="tablist" aria-label="Views" id="fdTabs">${tabs.map(([k, t, id], i) => `<button type="button" role="tab" id="fdT-${k}" aria-controls="${id}" aria-selected="${i === 0}" tabindex="${i === 0 ? 0 : -1}" data-tab="${k}">${t}</button>`).join("")}</div>`;
 
-const feedHead = (key, title) => `
+const feedHead = (key, title, meta = "") => `
   <header class="flows-head fd-head" data-fx-hero>
     <div class="fd-head-t"><h1 id="fxTitle">${title}</h1><span class="fd-about-slot" id="${key}AboutSlot"></span></div>
-    <p class="fd-meta" id="${key}Meta"></p>
+    <p class="fd-meta" id="${key}Meta">${meta}</p>
   </header>`;
 
-export function eventsPage({ username = "", odds = false } = {}) {
+const ER_CHIP = `<span class="er-chip" title="The Risk, New issues, Policy and Halts views"><svg class="ui-g er-vg" aria-hidden="true" focusable="false"><use href="#g-live"/></svg>Event risk</span>`;
+
+const ER_TABS = Object.freeze([["week", "Week", "evWeekCard"], ["earn", "Earnings", "evEarnCard"], ["risk", "Risk", "erRiskCard"], ["macro", "Macro", "evMacroCard"], ["fda", "FDA", "evFdaCard"], ["issues", "New issues", "erIssuesCard"], ["policy", "Policy", "erPolicyCard"], ["halts", "Halts", "erHaltsCard"], ["react", "Reaction", "evReactCard"]]);
+
+const erSkeleton = (n, what) => `<p class="er-load" data-er-load>${what}</p>${Array.from({ length: n }, () => `<div class="er-sk" aria-hidden="true"><i></i><i></i><i></i></div>`).join("")}`;
+
+export function eventsPage({ username = "", eventrisk = false, halts = false, odds = false } = {}) {
   return `${head("Flows — Events", "What reports next, what is priced into it, and what else is on the calendar.", FEEDS_CSS)}
-${shell("Events", "events", username, `${feedHead("ev", "Events")}
+${shell("Events", "events", username, `${feedHead("ev", "Events", eventrisk ? ER_CHIP : "")}
   <p class="visually-hidden" id="evStatus" role="status">Loading the calendar…</p>
   <div class="fd-about" id="evAbout" hidden>
     <p>What the screened universe reports next, what the option market is charging for it,
@@ -1116,15 +1125,21 @@ ${shell("Events", "events", username, `${feedHead("ev", "Events")}
     completed session&#39;s close. Nothing here is a forecast.</p>
   </div>
   <div class="fd-chips" id="evChips"></div>
-${feedTabs([["week", "Week", "evWeekCard"], ["earn", "Earnings", "evEarnCard"], ["macro", "Macro", "evMacroCard"], ["fda", "FDA", "evFdaCard"], ["react", "Reaction", "evReactCard"]])}
+${feedTabs(eventrisk ? ER_TABS : [["week", "Week", "evWeekCard"], ["earn", "Earnings", "evEarnCard"], ["macro", "Macro", "evMacroCard"], ["fda", "FDA", "evFdaCard"], ["react", "Reaction", "evReactCard"]])}
   <div class="fd-stage" id="fdStage" data-view="week">
 ${feedModule("evWeekCard", "Week ahead", `<div class="fd-body" id="evWeek"></div>`, { tab: "week" })}
-${feedModule("evEarnCard", "Earnings", `<div class="fd-body" id="evEarn"></div>`, { tab: "earn" })}
+${feedModule("evEarnCard", "Earnings", `<div class="fd-body" id="evEarn"></div>`, { tab: "earn" })}${eventrisk ? feedModule("erRiskCard", "Report risk", `<div class="fd-body er-body" id="erRisk">${erSkeleton(1, "Loading the event-risk read.")}</div>`, { tab: "risk" }) : ""}
 ${feedModule("evMacroCard", "Macro", `<div class="fd-body" id="evMacro"></div>`, { tab: "macro" }).replace('id="evMacroCard"', odds ? 'id="evMacroCard" data-odds="on"' : 'id="evMacroCard"')}
-${feedModule("evFdaCard", "FDA", `<div class="fd-body" id="evFda"></div>`, { tab: "fda" })}
+${feedModule("evFdaCard", "FDA", `<div class="fd-body" id="evFda"></div>`, { tab: "fda" })}${eventrisk ? `
+${feedModule("erIssuesCard", "New issues", `<div class="fd-body er-body" id="erIssues">${erSkeleton(1, "Loading the event-risk read.")}</div>`, { tab: "issues" })}
+${feedModule("erPolicyCard", "Policy calendar", `<div class="fd-body er-body" id="erPolicy">${erSkeleton(1, "Loading the event-risk read.")}</div>`, { tab: "policy" })}
+${feedModule("erHaltsCard", "Halts", `<div class="fd-body er-body" id="erHalts">${erSkeleton(1, "Loading the event-risk read.")}</div>`, { tab: "halts" })}` : ""}
 ${feedModule("evReactCard", "Reaction", `<div class="fd-body" id="evReact"></div>`, { tab: "react" })}
   </div>
-`, { chrome: false })}
+`, { chrome: false })}${eventrisk ? `
+<dialog class="er-sheet" id="erDrill" aria-labelledby="erDrillT"><div class="er-sheet-in"><header><h2 id="erDrillT">Detail</h2><button type="button" class="er-x" data-er-close>Close</button></header><div class="er-sheet-b" id="erDrillB"></div></div></dialog>
+${halts ? `<i hidden data-defer="er" data-src="${v("/assets/js/flows-rt.js")}"></i>
+` : ""}<i hidden data-defer="er" data-src="${v("/assets/js/flows-er.js")}" data-css="${v("/assets/css/flows-er.css")}" id="erDefer" data-halts="${halts ? "on" : "off"}"></i>` : ""}
 ${UI_SCRIPT}
 <script src="${v("/assets/js/flows-feed-os.js")}" defer></script>
 <script src="${v("/assets/js/flows-events.js")}" defer></script>
@@ -1251,19 +1266,19 @@ export function positioningPage({ username = "", now = Date.now() } = {}) {
 }
 
 export function unusualPage({ username = "", owner = false } = {}) {
-  return `${head("Flows — Unusual activity", "Windows of option activity the vendor flagged, and contracts carrying volume far above their own open interest.", [...FEEDS_CSS, "/assets/css/flows-net.css"])}
+  return `${head("Flows — Unusual activity", "Windows of option activity the feed flagged, and contracts carrying volume far above their own open interest.", [...FEEDS_CSS, "/assets/css/flows-net.css"])}
 ${shell("Unusual", "unusual", username, `${feedHead("ua", "Unusual")}
   <p class="visually-hidden" id="uaStatus" role="status">Loading the feed…</p>
   <div class="fd-about" id="uaAbout" hidden>
-    <p class="flows-lede">The timeline is the vendor&#39;s own flow alerts: windows of activity the
-    vendor&#39;s rules flagged, each carrying a stated span, a size, a premium and the vendor&#39;s
-    sweep flag. A window aggregates its executions and the selection is the vendor&#39;s, not the
+    <p class="flows-lede">The timeline is the feed&#39;s own flow alerts: windows of activity the
+    feed&#39;s rules flagged, each carrying a stated span, a size, a premium and the feed&#39;s
+    sweep flag. A window aggregates its executions and the selection is the feed&#39;s, not the
     market&#39;s, so a window is not a trade. Beneath it sit contracts whose volume counter stands
-    far above the open interest beside it. A counter, not a trade: the vendor reports a total for
+    far above the open interest beside it. A counter, not a trade: the feed reports a total for
     each strike with no size, no time and no execution price, and this endpoint carries no as-of
     date, so the counter is stamped with when it was read and nothing more. Nothing here says who
     traded, or why.</p>
-    <p>A dash where a vendor flag belongs means the vendor did not carry that flag on the window,
+    <p>A dash where a feed flag belongs means the feed did not carry that flag on the window,
     which is not the same fact as the flag being off.</p>
   </div>
   <div class="fd-chips" id="uaChips"></div>
@@ -1337,21 +1352,21 @@ export function tickerPage({ username = "", scenes = false, xcheck = false, priv
   <section class="ft-picker" id="ftPicker" aria-labelledby="ftPickerT" hidden></section>
   <div id="ftCopy" hidden>
     <p data-k="fc-unread">The run did not request this read for the name.</p>
-    <p data-k="fc-failed">The vendor call failed, so nothing was measured.</p>
-    <p data-k="fc-refused">The vendor refused the call for this plan.</p>
-    <p data-k="fc-malformed">The vendor answered with a body that is not the confirmed shape.</p>
-    <p data-k="fc-empty">The vendor answered with no rows: measured and empty.</p>
-    <p data-k="fc-not-session">The vendor dated these rows to a different session.</p>
+    <p data-k="fc-failed">The feed call failed, so nothing was measured.</p>
+    <p data-k="fc-refused">The feed refused the call for this plan.</p>
+    <p data-k="fc-malformed">The feed answered with a body that is not the confirmed shape.</p>
+    <p data-k="fc-empty">The feed answered with no rows: measured and empty.</p>
+    <p data-k="fc-not-session">The feed dated these rows to a different session.</p>
     <p data-k="fc-short-history">Fewer sessions of history than the statistic needs.</p>
     <p data-k="fc-deadline">The run passed its deadline before reaching this name.</p>
     <p data-k="fc-shed">Dropped to keep the payload under its byte cap.</p>
     <p data-k="fc-outside-band">No level fell inside the band around spot.</p>
     <p data-k="fc-no-contracts">No contract gained open interest to follow.</p>
-    <p data-k="fc-truncated">The read hit the vendor&#39;s row ceiling before reaching the session open.</p>
+    <p data-k="fc-truncated">The read hit the feed&#39;s row ceiling before reaching the session open.</p>
     <p data-k="fc-not_read">This run did not spend the call for this name.</p>
-    <p data-k="fc-absent">The vendor row did not carry this field.</p>
+    <p data-k="fc-absent">The feed row did not carry this field.</p>
     <p data-k="fc-too_few">Not enough observations for the statistic.</p>
-    <p data-k="fc-plan_gated">The vendor refused the route for this plan.</p>
+    <p data-k="fc-plan_gated">The feed refused the route for this plan.</p>
     <p data-k="fc-unreadable">The read failed or came back malformed.</p>
     <p data-k="fc-stale">The value is older than its freshness limit.</p>
     <p data-k="wh-unknown" data-w="Unknown">No listed security answers to this symbol.</p>
@@ -1466,7 +1481,7 @@ export function strategyPage({ username = "" } = {}) {
       <dt>Buying power reduction</dt>
       <dd>Refused. It is a broker&#39;s number, not the market&#39;s: the same short put reduces buying power by
         different amounts at two brokers on the same afternoon, and by different amounts again in a
-        portfolio-margin account. Nothing in the vendor&#39;s specification mentions buying power, margin or
+        portfolio-margin account. Nothing in the feed&#39;s specification mentions buying power, margin or
         collateral anywhere in its 28,755 lines. The capital shown here is the maximum loss of a defined-risk
         position, or the exchange&#39;s Reg-T minimum formula for an uncovered one, and it is labelled as such.</dd>
       <dt>Conditional value at risk</dt>
@@ -1496,7 +1511,7 @@ export function strategyPage({ username = "" } = {}) {
       calculator, not advice.</p>
   </section>
   <div id="sgCopy" hidden>
-      <p data-k="ctx-dash">An em dash for beta means the vendor has none, never a beta of zero.</p>
+      <p data-k="ctx-dash">An em dash for beta means the feed has none, never a beta of zero.</p>
       <p data-k="ctx-earn">A contract that outlives an earnings report is a different trade at the same premium.</p>
       <p data-k="about">Pick a name and a structure; the engine chooses each strike by delta on this expiry&#39;s fitted smile and prices the position exactly as the server does. Drag a strike and everything re-prices in the page.</p>
       <p data-k="struct">Twenty-two structures from the engine&#39;s catalogue. Each chooses its expiry inside its own window of days to expiry and its strikes by forward delta on the fitted smile, snapped to a listed, two-sided strike.</p>
@@ -1527,7 +1542,7 @@ export function strategyPage({ username = "" } = {}) {
       <p data-k="no-legs">No listed strikes on {d} reach the deltas a {s} is built from.</p>
       <p data-k="why-jade">These strikes no longer make a jade lizard: the credit does not cover the call spread&#39;s width, so the position carries upside risk the structure exists to remove.</p>
       <p data-k="why-quote">A leg has no two-sided quote on the book the engine read, so the position has no mid to price from.</p>
-      <p data-k="ctx">every reading on this page is measured from. Re-loading the symbol re-reads it; picking another expiry does not, because a second read per pick would spend a shared vendor quota to re-learn a number the page already holds and can date.</p>
+      <p data-k="ctx">every reading on this page is measured from. Re-loading the symbol re-reads it; picking another expiry does not, because a second read per pick would spend a shared feed quota to re-learn a number the page already holds and can date.</p>
       <p data-k="exp-q">{n} of {m} contracts read at {d} carry a two-sided quote. Strike handles snap only to those.</p>
       <p data-k="exp-cut">{w} of this expiry is CUT OFF: the provider caps a page at {n} contracts and this page reads {p} of them per side, so strikes beyond those are not listed here at all.</p>
       <p data-k="exp-off">the provider returned belonged to a different expiry or option type and were dropped, so treat the strike list as incomplete.</p>
@@ -1590,7 +1605,7 @@ export function statusPage({ username = "" } = {}) {
   </header>
   <div class="st-ready"><p id="stReady" role="status">Reading readiness…</p><button type="button" class="st-more" id="stWhy" data-dlg="stReadyDlg" aria-haspopup="dialog" hidden>Blockers</button></div>
   <dialog class="st-dlg" id="stReadyDlg" aria-labelledby="stReadyDT"><header class="st-dh"><h2 id="stReadyDT">Readiness blockers</h2><button type="button" class="st-x" data-close>Close</button></header><div class="st-db" id="stReadyBody"></div></dialog>
-  <div class="st-tiles" id="stTiles" role="group" aria-label="Headline figures">${tile("stTilePx", "Prices")}${tile("stTileFl", "Flagged alerts")}${tile("stTileUw", "Vendor calls today")}${tile("stTileAi", "Model neurons today")}
+  <div class="st-tiles" id="stTiles" role="group" aria-label="Headline figures">${tile("stTilePx", "Prices")}${tile("stTileFl", "Flagged alerts")}${tile("stTileUw", "Feed calls today")}${tile("stTileAi", "Model neurons today")}
   </div>
   <div class="st-tabs" id="stTabs"></div>
   <div class="st-sub" id="stSub"></div>
@@ -1599,7 +1614,7 @@ ${card("hEng", "Engines", "Engines", wait, [["stEng", "Engine detail"]])}
 ${card("hRail", "Real-time rail", "Rail", wait, [["stRail", "Rail detail"]])}
 ${card("hNight", "Nightly run", "Nightly", wait, [["stNight", "Nightly stage ledger"]])}
 ${card("hSw", "Switches", "Switches", wait, [["stSw", "All switches"]])}`)}${panel("capacity", true, `
-${card("cVendor", "Vendor API", "Vendor", later, [["stConsumers", "Vendor calls by consumer"], ["stMix", "Nightly calls by operation"]])}
+${card("cVendor", "Feed API", "Feed", later, [["stConsumers", "Feed calls by consumer"], ["stMix", "Nightly calls by operation"]])}
 ${card("cAi", "Model day", "Model", later, [["stAi", "Model spend by model"], ["stOutcomes", "Model outcomes"]])}
 ${card("cPlat", "Platform meters", "Platform", later, [["stMeters", "All meters"]])}
 ${card("cLimits", "Limits enforced", "Limits", later, [["stLimits", "Limits enforced today"], ["stPlan", "Plan lines and sources"]])}`)}${panel("latency", true, `
@@ -1643,14 +1658,20 @@ export function sideShell(html, cookie) {
 }
 
 export function oracleShell(html, mode, slug) {
-  if (typeof html !== "string" || !ORACLE_MODES.includes(mode)) return html;
+  if (typeof html !== "string" || !ORACLE_MODES.includes(mode) || !html.includes('id="fxBar"')) return html;
   const page = escapeHTML(String(slug || "overview"));
-  const slot = `<div id="fxOracle" class="orc" hidden data-state="calm" data-page="${page}" data-oracle="${mode}"></div>
-<i hidden data-defer="oracle" data-src="${v("/assets/js/flows-oracle-core.js")}" data-css="${v("/assets/css/flows-oracle.css")} ${v("/assets/css/flows-nn.css")}"></i>${html.includes('data-defer="nn-orb"') ? "" : `
+  const hostEl = `<div id="fxOracle" class="orc" hidden data-state="calm" data-page="${page}" data-oracle="${mode}"></div>`;
+  const slot = `<i hidden data-defer="oracle" data-src="${v("/assets/js/flows-oracle-core.js")}" data-css="${v("/assets/css/flows-oracle.css")} ${v("/assets/css/flows-nn.css")}"></i>${html.includes('data-defer="nn-orb"') ? "" : `
 <i hidden data-defer="nn-orb" data-src="${v("/assets/js/flows-nn-orb.js")}"></i>`}
 <i hidden data-defer="oracle" data-src="${v("/assets/js/flows-oracle.js")}"></i>
 <script src="${v("/assets/js/flows-oracle-boot.js")}" defer></script>`;
-  let out = html.replace("</body>", () => slot + "\n</body>");
+  const close = "\n</header>";
+  const barEnd = html.indexOf(close, html.indexOf('id="fxBar"'));
+  let out = barEnd === -1
+    ? html.replace("</body>", () => hostEl + "\n" + slot + "\n</body>")
+    : (html.slice(0, barEnd + close.length) + "\n" + hostEl + html.slice(barEnd + close.length)).replace("</body>", () => slot + "\n</body>");
+  const end = out.indexOf(close, out.indexOf('id="fxBar"'));
+  if (end !== -1 && !out.includes('id="orcSlot"')) out = out.slice(0, end) + '\n  <span class="orc-slot" id="orcSlot" aria-hidden="true"></span>' + out.slice(end);
   if (page === "overview") {
     out = out.replace('<p class="visually-hidden" id="flowsStatus"', () => '<div class="orc-strip" id="orcHome" data-state="idle" style="min-height:40px"></div>\n  <p class="visually-hidden" id="flowsStatus"');
   }
@@ -1664,11 +1685,25 @@ const FIRE_BANNER = '<p class="ffx-banner" id="ffxBanner" hidden></p>';
 
 export const FIRE_SHADOW_LINE = "Running in shadow: wires are evaluated, hits are not delivered yet.";
 
-export function firePage({ username = "", shadow = false } = {}) {
-  const body = fireBody(glyph);
+export function firePage({ username = "", shadow = false, feed = false } = {}) {
+  const body = fireBody(glyph, undefined, feed ? { feed: true, feedSrc: v("/assets/js/flows-er-fire.js") } : {});
   return flowsDocument({
     title: "Fire", description: FIRE_DESCRIPTION, active: "fire", username, chrome: false, styles: FIRE_STYLES, scripts: FIRE_SCRIPTS,
     body: shadow ? body.replace(FIRE_BANNER, () => `<p class="ffx-banner" id="ffxBanner" data-ff-mode="shadow">${FIRE_SHADOW_LINE}</p>`) : body,
+  });
+}
+
+export function inboxPage({ username = "", shadow = false } = {}) {
+  return flowsDocument({
+    title: "Inbox", description: INBOX_DESCRIPTION, active: "inbox", username, chrome: false, styles: INBOX_STYLES, scripts: INBOX_SCRIPTS,
+    body: inboxBody(glyph, { shadow: shadow === true }),
+  });
+}
+
+export function digestPage({ username = "", shadow = false } = {}) {
+  return flowsDocument({
+    title: "Digest", description: DIGEST_DESCRIPTION, active: "digest", username, chrome: false, styles: DIGEST_STYLES, scripts: DIGEST_SCRIPTS,
+    body: digestBody(glyph, { shadow }),
   });
 }
 
@@ -1695,6 +1730,39 @@ export function ffPendingPage({ username = "", page = "inbox", shadow = false } 
   });
 }
 
+export function wiresPage({ username = "", shadow = false } = {}) {
+  return flowsDocument({
+    title: "Wires", description: WIRES_DESCRIPTION, active: "wires", username, chrome: false, styles: WIRES_STYLES, scripts: WIRES_SCRIPTS,
+    body: wiresBody(glyph, { shadow: shadow === true, v, data: fireDataBlock() }),
+  });
+}
+
+const FF_MARK_ANCHOR = '\n    <div class="fx-who">';
+const FF_PANEL_ANCHOR = '<span class="ft-flags" id="ftHeroFlags"></span>';
+const FF_KIT = ["/assets/js/flows-ff-kernel.js", "/assets/js/flows-ff-client.js"];
+
+const ffOnce = (html, anchor) => {
+  const i = html.indexOf(anchor);
+  return i !== -1 && i === html.lastIndexOf(anchor);
+};
+
+export function ffSlots(html, { mark = false, panel = false, slug = "" } = {}) {
+  if (typeof html !== "string" || html.includes('data-ff-slot="mark"') || html.includes('data-ff-slot="name-panel"')) return html;
+  const wantMark = mark === true && ffOnce(html, FF_MARK_ANCHOR) && ffOnce(html, "</body>");
+  const wantPanel = wantMark && panel === true && slug === "ticker" && ffOnce(html, FF_PANEL_ANCHOR);
+  if (!wantMark) return html;
+  let out = html.replace(FF_MARK_ANCHOR, () => '\n    <div class="ffx-mark-slot" data-ff-slot="mark" style="min-height:36px"></div>' + FF_MARK_ANCHOR);
+  if (wantPanel) out = out.replace(FF_PANEL_ANCHOR, (m) => m + '<span class="ffx-np-slot" data-ff-slot="name-panel"></span>');
+  const kit = FF_KIT.filter((f) => !out.includes(f + "?v=")).map((f) => `<i hidden data-defer="ff-kit" data-src="${v(f)}"></i>`);
+  const tail = [
+    ...kit,
+    `<i hidden data-defer="ff-mark" data-css="${v("/assets/css/flows-ff-mark.css")}"></i>`,
+    `<script src="${v("/assets/js/flows-ff-mark.js")}" defer></script>`,
+    ...(wantPanel ? [`<script src="${v("/assets/js/flows-ff-name-panel.js")}" defer></script>`] : []),
+  ].join("\n");
+  return out.replace("</body>", () => tail + "\n</body>");
+}
+
 const FIRE_NAV_ANCHOR = '<a href="/flows/strategy/"';
 const FIRE_NAV_ITEM = `<a href="/flows/fire/" data-ff-nav>${glyph("fire")}<span class="rail-label">Fire</span></a>`;
 
@@ -1716,6 +1784,6 @@ export function positioningNav(html, on, slug) {
 export const FLOWS_PAGES = {
   loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, networkPage, nowPage, deskPage,
   politicalPage, positioningPage,
-  tickerPage, unusualPage, movesPage, flowlabPage, ledgerPage, macroPage, statusPage, eventsPage, strategyPage, firePage, ffPendingPage, ASSET_VERSION,
+  tickerPage, unusualPage, movesPage, flowlabPage, ledgerPage, macroPage, statusPage, eventsPage, strategyPage, firePage, inboxPage, digestPage, wiresPage, ffPendingPage, ASSET_VERSION,
 };
 

@@ -6,7 +6,7 @@
   const { F, h, s } = UI;
   const G = UI.tickerGlance;
   const MID = " " + UI.MID + " ";
-  const CLAUSE = "on the vendor's convention (dealers long calls, short puts)";
+  const CLAUSE = "on the feed's convention (dealers long calls, short puts)";
   const SESSION_MIN = 390, GAP_MS = 150000, SAMPLE_MS = 10000, KEEP = 720, GX_MS = 15 * 60000, LAG_MAX_S = 600;
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
@@ -64,7 +64,7 @@
     if (!fr || !q || num(q.price) === null || !(q.price > 0)) return { why: "no streamed quote for " + S.t + " has arrived" };
     const ff = typeof UI.freshFrom === "function" ? UI.freshFrom(fr, { serverNow: Date.now() + S.skew }) : null;
     const st = ff ? ff.stateAt() : fr.state;
-    if (st !== "live") return { ff, why: st === "stale" ? "the streamed quote is stale" : "the streamed quote is not live" + (fr.reason === "vendor-lag" ? ", it is behind the vendor" : "") };
+    if (st !== "live") return { ff, why: st === "stale" ? "the streamed quote is stale" : "the streamed quote is not live" + (fr.reason === "vendor-lag" ? ", it is behind the feed" : "") };
     const at = ms(q.tapeTime) ?? ms(q.readAt);
     return { ff, q, fr, live: { px: q.price, prev: num(q.prevClose), at, session: typeof fr.session === "string" ? fr.session.slice(0, 10) : F.etDay(at) } };
   }
@@ -102,7 +102,7 @@
       if (n) n.remove();
       return;
     }
-    const text = MID + (S.lag < 10 ? S.lag.toFixed(1) : String(Math.round(S.lag))) + " s behind the vendor";
+    const text = MID + (S.lag < 10 ? S.lag.toFixed(1) : String(Math.round(S.lag))) + " s behind the feed";
     if (!n) { n = h("span", { class: "fx-fresh-lag" }); b.append(n); }
     say(n, text);
   }
@@ -131,7 +131,7 @@
     if (g.hidden !== !gx) g.hidden = !gx;
     say(g, gx ? "Dealer γ now " + F.money(gx.gOi, true) + " per 1%" : "");
     put(g, "data-side", gx ? (gx.gOi < 0 ? "short" : gx.gOi > 0 ? "long" : "flat") : "flat");
-    put(g, "title", gx ? "Dealer gamma now, the open-interest book " + CLAUSE + (gx.lagS === null ? "" : ", read " + f1(gx.lagS) + " s after the vendor stamped it") + ". The gamma drawn on the chart is the nightly book." : "");
+    put(g, "title", gx ? "Dealer gamma now, the open-interest book " + CLAUSE + (gx.lagS === null ? "" : ", read " + f1(gx.lagS) + " s after the feed stamped it") + ". The gamma drawn on the chart is the nightly book." : "");
   }
 
   function describeNow(kit) {

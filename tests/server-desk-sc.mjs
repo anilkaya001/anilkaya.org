@@ -62,7 +62,7 @@ const R = (...a) => run(real, ...a);
   eq(out.truncated, true, "and is reported as truncated");
   eq(out.rows.length, SC_MAX_PAGES * FULL, "with exactly the ceiling's rows");
   eq(Math.max(...out.asked), SC_MAX_PAGES, "no page past the ceiling was asked for");
-  eq(out.asked.length, SC_MAX_PAGES - 1, "one vendor call for each page after the first");
+  eq(out.asked.length, SC_MAX_PAGES - 1, "one feed call for each page after the first");
 }
 
 {

@@ -32,7 +32,7 @@
   });
   var SILENCE = Object.freeze({
     cap: "Break-even needs a priced quote.", quote: "No two-sided quote.", ev: "The engine could not price this position.", "thin-norm": "Too little history for this name.",
-    unit: "The vendor states no unit.", failed: "The read failed.", absent: "Not written yet.", pending: "Still being read.", expired: "Too old to show.", off: "Switched off."
+    unit: "The feed states no unit.", failed: "The read failed.", absent: "Not written yet.", pending: "Still being read.", expired: "Too old to show.", off: "Switched off."
   });
   var CLEAR_TEXT = "Nothing stands out. Options are priced about where the model would price them.";
   var INFO_TEXT = "Cheap means the market charges less than the model's fair price; rich, more. The model's price comes from the engine's fitted smile and its own model of returns, not from a quote.";
@@ -189,7 +189,7 @@
     pill = h("span", { class: "orc-pill", "aria-hidden": "true" }, pillGlyph, pillText);
     badge = h("span", { class: "orc-badge", "aria-hidden": "true", hidden: "" });
     orb = h("button", { type: "button", class: "orc-orb", "aria-haspopup": "dialog", "aria-expanded": "false", "aria-controls": SHEET_ID },
-      pill, h("span", { class: "orc-disc nn-orb nn-mirror is-52" }, h("i"), h("i"), h("i"), h("span", { class: "orc-rim", "aria-hidden": "true" }), spark()), badge);
+      pill, h("span", { class: "orc-disc nn-orb nn-mirror is-44" }, h("i"), h("i"), h("i"), h("span", { class: "orc-rim", "aria-hidden": "true" }), spark()), badge);
     restoreTxt = h("span", { class: "orc-restore-t" }, "Neuron hidden");
     restoreUndo = h("span", { class: "orc-restore-u" }, "Undo");
     restore = h("button", { type: "button", class: "orc-restore", hidden: "", title: "Show the Neuron (Alt+Shift+N)" }, spark(), restoreTxt, restoreUndo);
@@ -378,7 +378,8 @@
     host.setAttribute("data-pref", S.pref);
     host.classList.toggle("has-pill", !!showPill);
     if (hl) { pillGlyph.textContent = hl.glyph; pillText.textContent = hl.text; }
-    pill.style.setProperty("--pw", Math.min(300, 100 + (hl ? hl.text.length * 7.4 : 0)) + "px");
+    pill.style.setProperty("--pw", Math.min(300, 60 + (hl ? hl.text.length * 7.4 : 0)) + "px");
+    placeSay();
     badge.hidden = n < 1;
     badge.textContent = String(n);
     var name = nameOf(state, n);
@@ -713,6 +714,20 @@
     paint();
   }
 
+  function placeSay() {
+    var sp = document.querySelector("#fxBar .fx-bar-sp");
+    var r = sp ? sp.getBoundingClientRect() : null;
+    var w = r ? Math.floor(r.width) - 8 : 0;
+    var need = 96;
+    if (restore && restore.classList.contains("is-undo") && !restore.hidden) {
+      host.setAttribute("data-room", "1");
+      need = Math.max(96, restore.scrollWidth + 2);
+    }
+    host.setAttribute("data-room", r && w >= need ? "1" : "0");
+    host.style.setProperty("--say-r", (r ? Math.floor(r.right) : 0) + "px");
+    host.style.setProperty("--say-w", Math.max(0, w) + "px");
+  }
+
   function dropToast() {
     clearTimeout(S.toastTimer);
     toast.hidden = true;
@@ -721,6 +736,7 @@
 
   function showToast(text) {
     toast.textContent = text;
+    placeSay();
     toast.hidden = false;
     toast.classList.remove("is-on");
     void toast.offsetWidth;
@@ -766,6 +782,9 @@
     build();
     document.addEventListener("keydown", onKey);
     document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("resize", placeSay);
+    var sp = document.querySelector("#fxBar .fx-bar-sp");
+    if (sp && typeof ResizeObserver === "function") { S.ro = new ResizeObserver(placeSay); S.ro.observe(sp); }
     document.addEventListener("pointerdown", function () { S.gesture = true; }, { once: true });
     if (U.rt && typeof U.rt.on === "function") S.unsub = U.rt.on("fl", onFlow);
     var tick = setInterval(function () { if (!document.hidden) paintOrb(); }, 60000);
@@ -784,6 +803,8 @@
     clearTimeout(S.undoTimer);
     document.removeEventListener("keydown", onKey);
     document.removeEventListener("visibilitychange", onVis);
+    window.removeEventListener("resize", placeSay);
+    if (S.ro) { S.ro.disconnect(); S.ro = null; }
     setInert(false);
     host.replaceChildren();
     host.hidden = true;

@@ -3,7 +3,8 @@
   var UI = window.FlowsUI;
   if (!UI || UI.rt) return;
 
-  var TOPICS = ["px", "fl", "gx", "mk", "nw"];
+  var TOPICS = ["px", "fl", "gx", "mk", "nw", "ht"];
+  var DEFAULTS = ["px", "fl", "gx", "mk", "nw"];
   var FIELDS = ["px", "prev", "chg", "ncp", "npp", "net", "bull", "bear", "lean", "cv", "pv", "cvAsk", "pvAsk", "iv30", "ivRank", "im",
     "gOi", "gVol", "gDir", "pcr", "rvol", "vol", "qa"];
   var TICKER = /^[A-Z][A-Z0-9.-]{0,9}$/;
@@ -21,9 +22,9 @@
   var RS_TRIES = 5;
   var REG_MS = 1000;
   var ROWS_MAX = 2000;
-  var RING = { fl: 200, nw: 60 };
+  var RING = { fl: 200, nw: 60, ht: 200 };
   var SEEN_MAX = 1000;
-  var GRACE = { px: 20000, fl: 20000, gx: 30000, mk: 40000, nw: 120000 };
+  var GRACE = { px: 20000, fl: 20000, gx: 30000, mk: 40000, nw: 120000, ht: 120000 };
   var FINAL = { 400: 1, 401: 1, 403: 1, 404: 1 };
   var KEEP_OFF = { 4001: 1, 4003: 1, 4009: 1, 4011: 1, 4012: 1 };
   var LABEL = { socket: "Socket", heartbeat: "Heartbeat" };
@@ -168,6 +169,7 @@
     var fr = f.fresh;
     if (!fr || fr.state === "pending" || !UI.freshness) return;
     var T = S.topics[k];
+    if (fr.state === "unavailable") { if (typeof UI.freshness.drop === "function") UI.freshness.drop("rt:" + k); T.regAt = 0; return; }
     var now = Date.now();
     if (now - T.regAt < REG_MS) return;
     T.regAt = now;
@@ -418,7 +420,11 @@
       var T = S.topics[k];
       if (!h || !T.synced || T.resync || S.refs[k] <= 0) return;
       if (typeof h.sq === "number" && h.sq > T.sq) { T.resync = true; stats.gaps++; ask(k); return; }
-      if (h.fresh && h.fresh.state !== "pending") { T.fresh = h.fresh; T.at = f.at; T.perf = performance.now(); register(k, { fresh: h.fresh, at: f.at }); }
+      if (h.fresh && h.fresh.state !== "pending") {
+        var was = T.fresh && T.fresh.state;
+        T.fresh = h.fresh; T.at = f.at; T.perf = performance.now(); register(k, { fresh: h.fresh, at: f.at });
+        if (was !== h.fresh.state && k === "ht") queue(k, [], [], false, false);
+      }
     });
   }
 
@@ -807,14 +813,14 @@
 
   function connect(opts) {
     var o = opts || {};
-    var asked = Array.isArray(o.topics) && o.topics.length ? o.topics : TOPICS;
+    var asked = Array.isArray(o.topics) && o.topics.length ? o.topics : DEFAULTS;
     var topics = TOPICS.filter(function (k) { return asked.indexOf(k) >= 0; });
     if (!topics.length) return null;
     var focus = typeof o.focus === "string" && TICKER.test(o.focus.trim().toUpperCase()) ? o.focus.trim().toUpperCase() : null;
     var key = topics.join(",") + "|" + (focus || "");
     for (var i = 0; i < S.handles.length; i++) if (S.handles[i].key === key) return S.handles[i].api;
     var lead = Array.isArray(o.primary) ? topics.filter(function (k) { return o.primary.indexOf(k) >= 0; }) : [];
-    var hd = { key: key, topics: topics, focus: focus, offs: [], api: null, primary: lead.length ? lead : topics.indexOf("px") >= 0 ? ["px"] : topics };
+    var hd = { key: key, topics: topics, focus: focus, offs: [], api: null, primary: Array.isArray(o.primary) ? lead : topics.indexOf("px") >= 0 ? ["px"] : topics };
     hd.api = {
       close: function () {
         var at = S.handles.indexOf(hd);
@@ -954,6 +960,14 @@
 
   function news() { return S.topics.nw.ring.slice(); }
 
+  function halts() {
+    var T = S.topics.ht, fr = T.fresh;
+    if (S.refs.ht <= 0 || !T.synced || T.resync || !fr || fr.state === "pending" || fr.state === "unavailable" || (S.mode !== "socket" && S.mode !== "poll")) return null;
+    var out = T.ring.map(function (r) { return { id: String(r.id), ts: r.ts, at: iso(r.ts), t: r.t, state: r.state || null, reason: r.reason || null }; }).sort(function (a, b) { return b.ts - a.ts; });
+    out.since = (T.meta && T.meta.since) || null;
+    return out;
+  }
+
   function fresh(k) { return S.topics[k] ? S.topics[k].fresh : null; }
 
   function status() {
@@ -971,7 +985,7 @@
 
   var api = {
     connect: connect, on: on, transport: transport, feeds: feeds, strips: strips, quote: quote, gex: gex, market: market,
-    alerts: alerts, news: news, fresh: fresh, status: status, measure: measure,
+    alerts: alerts, news: news, halts: halts, fresh: fresh, status: status, measure: measure,
   };
   window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { rt: Object.freeze(api) }));
 })();

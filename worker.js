@@ -44,6 +44,8 @@ import { flowsAiRows } from "./server/routes/flows-ai.js";
 import { flowsReadyRows } from "./server/routes/flows-ready.js";
 import { flowsPositioningRows } from "./server/routes/flows-positioning.js";
 import { positioningMode } from "./shared/flows-pos-switch.js";
+import { flowsEventRiskRows } from "./server/routes/flows-eventrisk.js";
+import { eventRiskOpen } from "./shared/flows-er-switch.js";
 import { flowsOracleRows } from "./server/routes/flows-oracle.js";
 import { flowsLedgerRows } from "./server/routes/flows-ledger.js";
 import { flowsMacroRows } from "./server/routes/flows-macro.js";
@@ -1050,7 +1052,7 @@ const FF_CORE = Object.freeze({
     try {
       const wire = compileWire({ id: "w-preview", layer: "member", memberId: "preview", version: 1, body: JSON.parse(version.ast_json), sentence: version.sentence });
       if (nightly && wire.subjectKind === "c" && !wire.clauses.some((c) => c.m === "contract.oi_confirm")) {
-        return { status: "unavailable", reason: "source_missing", subjects: [] };
+        return { status: "unavailable", reason: "source_missing", detail: "windows_unread", subjects: [] };
       }
       const metrics = snapshot.metrics;
       const row = nightly ? null : (snapshot.live || []).find((r) => r && r.id === "live:alerts");
@@ -1190,7 +1192,7 @@ const LAST_GOOD_REFRESH_MS = 10 * 60 * 1000;
 const LAST_GOOD_MAX_KEYS = 256;
 const LAST_GOOD_PATHS = new Set(["board", "market", "events", "scoretrack", "calib", "dispersion", "meta", "flowalerts", "pulse", "political", "unusual",
   "movers", "sectors", "sector-premium", "universe", "regime", "ideas", "focus", "roster", "news", "record", "card", "card-x",
-  "macro", "hist", "voldesk"].map((name) => "/api/flows/" + name));
+  "macro", "hist", "voldesk", "eventrisk"].map((name) => "/api/flows/" + name));
 
 function lastGoodKey(request, url) {
   if (request.method !== "GET" || !LAST_GOOD_PATHS.has(url.pathname)) return null;
@@ -1202,6 +1204,15 @@ function lastGoodKey(request, url) {
     const ticker = tickerParam(url);
     if (!TICKER_RE.test(ticker)) return null;
     tail = "?t=" + ticker;
+  } else if (url.pathname === "/api/flows/eventrisk") {
+    const part = url.searchParams.get("part");
+    if (part === "sectors") tail = "?part=sectors";
+    else if (part !== null) return null;
+    else if (url.searchParams.has("t")) {
+      const ticker = tickerParam(url);
+      if (!TICKER_RE.test(ticker)) return null;
+      tail = "?t=" + ticker;
+    } else return null;
   } else if (url.pathname === "/api/flows/macro") {
     const part = url.searchParams.get("part") || "all";
     const sector = url.searchParams.get("sector") || "";
@@ -1994,7 +2005,7 @@ async function generateNeuron(env, ticker, ctx, fingerprint, startedAt) {
 }
 
 const SCREEN_TTL_S = 300;
-const SCREEN_PROVENANCE = "Read from the screener row alone by fixed rules: no model was asked and no vendor call was made for it.";
+const SCREEN_PROVENANCE = "Read from the screener row alone by fixed rules: no model was asked and no feed call was made for it.";
 const EXPIRED_PROVENANCE = "Deterministic: no model was asked about a card this old.";
 const NONE_WHY = "This name is not in the nightly universe, so no dealer positioning or option chain is held for it; the ticker page can read a quote for it on demand and nothing more.";
 
@@ -3479,7 +3490,8 @@ async function buildMacroNow(env, vf, { part, pair, symbols }) {
 
 const ROUTER = createRouter(flowsReadRows({ readServed, readFlowsPayload, readWithOverlay, passthrough, recallLastGood, storeGone,
   absentKey, cardWithEngine, briefWithLive, briefFeedsAhead, nightlyFreshHeaders, splitEngineMark: SPLIT_ENGINE_MARK,
-  positioningOpen: (env, session) => positioningMode(env, Boolean(session) && rtIsOwner(rtSwitches(env), session.username)) }),
+  positioningOpen: (env, session) => positioningMode(env, Boolean(session) && rtIsOwner(rtSwitches(env), session.username)),
+  erClosed: (env, session) => !eventRiskOpen(env, rtIsOwner(rtSwitches(env), session.username)) }),
 flowsDeskRows({ scRefreshAllowed, vendorGate, serveCachedVendorRead, buildChainPayload, buildStrategyContext, buildStrategyExpiry, quoteResponse }),
 flowsFfRows({ store: FF_STORE, flowsStore: FLOWS_STORE, core: FF_CORE, readClock: (db) => FLOWS_LIVE.cachedClock({ DB: db }), readLiveRows: FLOWS_LIVE.readLiveRows,
   cache: state.ffCache, runAuth: ffRunAuth, evaluate: ffEvaluate, firstCheck: ffFirstCheckAt }),
@@ -3491,6 +3503,8 @@ flowsIngestRows({ store: FLOWS_STORE, ensureFlowsTables, storeGone, passthrough 
 flowsReadyRows({ store: FLOWS_STORE, ensureFlowsTables, readClock: FLOWS_LIVE.readClock, railReadiness,
   isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsPositioningRows({ readServed, passthrough, storeGone, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
+flowsEventRiskRows({ readFlowsPayload, recallLastGood, passthrough, storeGone, vendorGate, serveCachedVendorRead, quotePath: (ticker) => pathFor("stock-quote", { ticker }),
+  isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsDispatchRows({ ensureFlowsTables, check: FLOWS_LIVE.checkDispatchCredential, record: FLOWS_LIVE.recordDispatchWhy,
   isOwner: (env, username) => rtIsOwner(rtSwitches(env), username),
   claim: (at) => {

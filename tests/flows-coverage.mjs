@@ -5,7 +5,7 @@ import { ERRORS } from "../server/errors.js";
 import {
   FAILING_MAX, KEY_PRODUCTS, MIN_CANDLES, cardProducts, coverageLedger, screenProducts, stateName, stateOfPanel, verifyCoverage,
 } from "../shared/flows-coverage.js";
-import { GLOBAL_KEYS, PANEL_IDS, STATE, contractFor } from "../shared/flows-products.js";
+import { GLOBAL_KEYS, NIGHTLY_GLOBAL_KEYS, PANEL_IDS, STATE, contractFor } from "../shared/flows-products.js";
 import { nightlyEmit } from "./lib/nightly-emit.mjs";
 import { loadMutated } from "./truth/mutants.mjs";
 import * as COVERAGE_MODULE from "../shared/flows-coverage.js";
@@ -38,7 +38,10 @@ const listingOf = (over = {}) => {
 };
 const globalsOf = (over = {}) => {
   const out = {};
-  for (const k of GLOBAL_KEYS) out[k] = { present: true, sessionDate: keys.get(k).sessionDate, generatedAt: keys.get(k).generatedAt, updatedAt: 1, bytes: 10 };
+  for (const k of NIGHTLY_GLOBAL_KEYS) {
+    const src = keys.get(k) || { sessionDate: SESSION, generatedAt: universe.generatedAt };
+    out[k] = { present: true, sessionDate: src.sessionDate, generatedAt: src.generatedAt, updatedAt: 1, bytes: 10 };
+  }
   for (const [k, v] of Object.entries(over)) out[k] = v;
   return out;
 };
@@ -47,7 +50,7 @@ const nameOf = (depth) => universe.t.find((t) => roster.depth[t] === depth);
 eq([stateOfPanel({ status: "ok" })[0], stateOfPanel({ status: "quiet", reason: "none" })[0], stateOfPanel({ status: "pending" })[0], stateOfPanel({ status: "stale" })[0]],
   [STATE.ok, STATE.quiet, STATE.pending, STATE.stale], "a panel's status is a state");
 eq(stateOfPanel({ status: "unavailable", reason: "no strike ladder" }), [STATE.failed, "no strike ladder"], "an unavailable panel that gives no sign it was never asked for is a failure");
-eq(stateOfPanel({ status: "unavailable", code: "failed", reason: "the vendor's darkpool read answered HTTP 503" })[0], STATE.failed, "a read that failed says so with its code");
+eq(stateOfPanel({ status: "unavailable", code: "failed", reason: "the feed's darkpool read answered HTTP 503" })[0], STATE.failed, "a read that failed says so with its code");
 eq(stateOfPanel({ status: "unavailable", reason: "it was never requested, rather than requested and refused" })[0], STATE.unfetched, "and one that was never requested is unfetched");
 eq(stateOfPanel(undefined)[0], STATE.unfetched, "a panel the card does not carry is unfetched");
 eq(stateOfPanel({ status: "mystery" })[0], STATE.failed, "an unknown status is a failure, never a pass");
@@ -69,7 +72,7 @@ eq([stateName(0), stateName(3), stateName(99)], ["ok", "unfetched", "failed"], "
   ok(/never requested/.test(cross.why.surface), "and says so in the panel's own words");
 
   const hole = clone(keys.get("card:" + t));
-  hole.panels.ivSurface = { status: "unavailable", code: "failed", reason: "the vendor's spot-exposures-expiry-strike read answered HTTP 503" };
+  hole.panels.ivSurface = { status: "unavailable", code: "failed", reason: "the feed's spot-exposures-expiry-strike read answered HTTP 503" };
   eq(cardProducts(hole, keys.get("card-x:" + t), null, { depth: "board" }).codes.surface, STATE.failed, "A PLANTED HOLE IS FOUND: a failed surface read is state 2");
   const thin = clone(keys.get("card:" + t));
   thin.panels.context.candles = thin.panels.context.candles.slice(0, MIN_CANDLES - 1);
@@ -178,7 +181,10 @@ eq([stateName(0), stateName(3), stateName(99)], ["ok", "unfetched", "failed"], "
   eq(noExpected.complete, false, "with no expected session nothing can be complete");
   const lateGlobals = verifyCoverage({ universe, roster, listing: listingOf(), globals: globalsOf({ regime: { present: true, sessionDate: "2026-08-21" }, events: { present: false } }), expected: SESSION });
   eq([lateGlobals.globals.regime.state, lateGlobals.globals.events.state, lateGlobals.complete], ["stale", "failed", false], "a stale or missing global key breaks completeness and is named");
-  eq(Object.keys(rep.globals).sort(), GLOBAL_KEYS.slice().sort(), "every registered global is judged");
+  eq(Object.keys(rep.globals).sort(), NIGHTLY_GLOBAL_KEYS.slice().sort(), "every registered global the nightly writes each night is judged");
+  eq(GLOBAL_KEYS.filter((k) => !NIGHTLY_GLOBAL_KEYS.includes(k)), ["er-sectors"], "the weekly sector list is the one global left out: it is written once a week and carries no session date");
+  const weekly = verifyCoverage({ universe, roster, listing: listingOf(), globals: globalsOf({ "er-sectors": { present: true, sessionDate: null, updatedAt: 1, bytes: 10 } }), expected: SESSION });
+  eq([weekly.complete, weekly.globals["er-sectors"].state], [false, "failed"], "A REPORT THAT JUDGED THE WEEKLY KEY BY THE NIGHT WOULD NEVER BE COMPLETE, which is why the route does not ask for it");
   eq(verifyCoverage({}).universe.n, 0, "an empty call is an empty report");
 }
 
@@ -350,14 +356,14 @@ const codeOf = (r) => (r.error ? r.error.code : null);
   eq(r.body.expected, SESSION, "for the session the clock expects");
   eq(r.body.complete, true, "and the emit is complete");
   eq(r.body.rows.ceiling, COVERAGE_ROW_CEILING, "the declared row ceiling travels with the answer");
-  ok(!("calls" in r.body), "with no vendor call meter unless one is wired");
+  ok(!("calls" in r.body), "with no feed call meter unless one is wired");
   eq(r.calls.map((c) => c[0]).sort(), ["listing", "metadata", "read", "read"], "four reads: the universe, the roster, the metadata of the globals and one listing");
   eq(r.calls.find((c) => c[0] === "listing")[1], "card,card-x,hist", "the listing asks for the three name kinds");
   eq(r.calls.find((c) => c[0] === "listing")[2], universe.t, "of exactly the universe's names, so a store holding names that left it cannot cut the listing");
   eq(r.body.freshness.n, universe.n, "and the answer carries the per-name freshness contract");
-  eq(COVERAGE_ROW_CEILING, 2 + GLOBAL_KEYS.length + 3 * NAME_LIST_MAX_NAMES, "the row ceiling is three keys a name at the listing's name ceiling");
-  eq(r.calls.find((c) => c[0] === "metadata")[1], GLOBAL_KEYS.length, "and the metadata for the registered globals, ids only");
-  ok(GLOBAL_KEYS.length <= 96, "which is inside the door's metadata limit");
+  eq(COVERAGE_ROW_CEILING, 2 + NIGHTLY_GLOBAL_KEYS.length + 3 * NAME_LIST_MAX_NAMES, "the row ceiling is three keys a name at the listing's name ceiling");
+  eq(r.calls.find((c) => c[0] === "metadata")[1], NIGHTLY_GLOBAL_KEYS.length, "and the metadata for the registered globals, ids only");
+  ok(NIGHTLY_GLOBAL_KEYS.length <= 96, "which is inside the door's metadata limit");
 
   const metered = await drive(ROUTE_ENV, { vendorCalls: () => ({ n: 3 }) });
   eq(metered.body.calls, { n: 3 }, "a wired call meter is reported");

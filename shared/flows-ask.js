@@ -266,7 +266,7 @@ function unusualFacts(p, at) {
   if (all(seen, truncated)) {
     out.push(f("unusual/reach", ["unusual", "chains", "truncated", "ceiling", "coverage"],
       "Chains were read for " + seen + " names and " + truncated +
-      " of them came back at the vendor's row ceiling, so those contract counts are " +
+      " of them came back at the feed's row ceiling, so those contract counts are " +
       "lower bounds rather than totals.",
       { namesRead: seen, namesTruncated: truncated }));
   }
@@ -281,7 +281,7 @@ function newsFacts(p, at) {
   if (all(kept, returned, requested, cap)) {
     out.push(f("news/coverage", ["news", "headlines", "feed", "coverage"],
       "The headline feed holds " + kept + " headlines of the " + returned +
-      " rows the vendor returned against a request for " + requested +
+      " rows the feed returned against a request for " + requested +
       ", under a cap of " + cap + " rows.",
       { keptHeadlines: kept, returnedRows: returned,
         requestedRows: requested, rowCap: cap }));
@@ -289,7 +289,7 @@ function newsFacts(p, at) {
 
   if (p.atVendorLimit === true && all(returned, requested) && returned >= requested) {
     out.push(f("news/ceiling", ["news", "ceiling", "limit", "truncated", "population"],
-      "That response came back at the vendor's own limit of " + requested +
+      "That response came back at the feed's own limit of " + requested +
       " rows, so the population above it is unknown and at least " + returned + ".",
       { requestedRows: requested, returnedRows: returned }));
   }
@@ -299,7 +299,7 @@ function newsFacts(p, at) {
   if (newest !== null && oldest !== null) {
     out.push(f("news/window", ["news", "window", "age", "span", "stamps"],
       "The stored headlines span " + oldest + " to " + newest +
-      " by the vendor's own stamps.",
+      " by the feed's own stamps.",
       { oldest, newest }));
   }
   return out;
@@ -317,7 +317,7 @@ function alertFacts(p, at) {
       "The flow-alert page holds " + rows + " of the " + seen + " alerts read, with " +
       shed + " removed by a cap of " + cap + " rows" +
       (unusable === null ? "" : ", beside " + unusable +
-        " rows the vendor sent that this page could not read") + ".",
+        " rows the feed sent that this page could not read") + ".",
       Object.assign({ keptAlerts: rows, seenAlerts: seen, shedAlerts: shed, rowCap: cap },
         unusable === null ? {} : { unusableRows: unusable })));
   }
@@ -325,7 +325,7 @@ function alertFacts(p, at) {
   const limit = num(p.vendorLimit);
   if (p.vendorTruncated === true && limit !== null) {
     out.push(f("flowalerts/ceiling", ["alerts", "ceiling", "limit", "truncated", "population"],
-      "The alert read came back at the vendor's maximum of " + limit +
+      "The alert read came back at the feed's maximum of " + limit +
       " rows, so today's count is a ceiling rather than a measurement and the true " +
       "population is unknown and at least that large.",
       { vendorLimitRows: limit }));
@@ -451,7 +451,7 @@ function metaFacts(p, at) {
   const calls = num(p.apiCalls);
   if (calls !== null) {
     out.push(f("meta/calls", ["run", "calls", "vendor", "api", "budget"],
-      "The run spent " + calls + " vendor calls.", { apiCalls: calls }));
+      "The run spent " + calls + " feed calls.", { apiCalls: calls }));
   }
   return out;
 }
@@ -1342,7 +1342,7 @@ export function promptFor(picked, question, meta) {
     "4. UNITS TRAVEL WITH NUMBERS. A ratio and a dollar sum are not interchangeable; " +
       "quote the unit the fact itself uses, in the fact's own words.",
     "5. A capped list is not a population. If a fact says a count was capped or came " +
-      "back at a vendor's limit, keep that qualification in your answer.",
+      "back at a feed's limit, keep that qualification in your answer.",
     "6. If the supplied facts do not answer the question, say so plainly and say what " +
       "they do cover. A short honest answer is the goal.",
     "7. If a COVERAGE line says a name in the question has no reading among the facts, " +
@@ -1404,7 +1404,7 @@ export function promptForSummary(picked, meta, options) {
     "4. UNITS TRAVEL WITH NUMBERS. A ratio and a dollar sum are not interchangeable; " +
       "quote the unit the fact itself uses, in the fact's own words.",
     "5. A capped list is not a population. If a fact says a count was capped or came " +
-      "back at a vendor's limit, keep that qualification.",
+      "back at a feed's limit, keep that qualification.",
     "6. YOU ARE CHOOSING WHAT TO LEAD WITH, AND THAT IS THE ONE THING THIS TASK ASKS " +
       "OF YOU THAT THE FACTS DO NOT DECIDE. Lead with what a reader would want first. " +
       "But never call a reading the largest, the biggest, the most unusual or a record " +

@@ -149,7 +149,7 @@
           Object.keys(body.keys || {}).forEach(function (k) {
             var e = body.keys[k];
             fresh[k] = api.freshFrom(e, { serverNow: body.serverNow, phase: body.phase });
-            if (fresh[k] && UI.freshness) UI.freshness({ ff: fresh[k], source: k });
+            if (fresh[k] && UI.freshness) UI.freshness({ ff: fresh[k], source: k, key: k });
             if (!first && seen[k] !== e.updatedAt) changed.push(k);
             seen[k] = e.updatedAt;
           });

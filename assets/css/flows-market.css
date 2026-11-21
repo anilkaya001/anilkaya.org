@@ -445,10 +445,6 @@
 :where(.mk-hc.is-cw) .mk-hc-v { font-size: 22px; }
 .mk-hc-s { grid-column: 1 / -1; margin-top: 2px; color: var(--label-2); font: 400 12px / 1.25 var(--font-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .mk-panel > .mk-mod > .mk-body[id]:empty::before { content: "Loading\2026"; display: block; padding: var(--sp-2) 0; color: var(--label-3); font: var(--t-footnote); }
-.flows-body[data-flows-page="market"]:has(#fxOracle:not([hidden])) .mk-stage { margin-right: max(0px, calc(84px - max(var(--gutter), var(--safe-r)))); }
-@media (max-width: 767.98px) {
-  .flows-body[data-flows-page="market"]:has(#fxOracle:not([hidden])) .mk-stage { margin-right: 0; margin-bottom: 64px; }
-}
 .mk-hc-p { position: absolute; top: 8px; right: 10px; width: 46px; height: 38px; pointer-events: none; }
 .mk-hc:first-child .mk-hc-p { width: 84px; }
 .mk-hc-p .ui-spark { display: block; width: 100%; height: 38px; }

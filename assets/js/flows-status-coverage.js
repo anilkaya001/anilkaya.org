@@ -33,14 +33,14 @@
     const usedShare = num(x.dailySeen) !== null && num(x.dayLine) ? x.dailySeen / x.dayLine : null;
     const written = num(x.writtenAt);
     const runToday = written !== null && sameDay(new Date(written), new Date(now));
-    const keyLabel = runToday ? "Vendor calls, the key today" : "Vendor calls, the key on the run's day";
+    const keyLabel = runToday ? "Feed calls, the key today" : "Feed calls, the key on the run's day";
     const keyRead = written === null ? ", " + DASH + " when it was read is not recorded" : ", read " + trt(written, now);
     const rows = [
       ["Names with a deep read", num(x.carded) === null ? DASH : whole(x.carded) + (num(x.universe) ? " of " + whole(x.universe) + " (" + pctOf(share) + ")" : " (" + DASH + " universe size not recorded)")],
       ["Oldest deep read", x.oldest || DASH + " no read on record"],
       ["Tonight, planned and read", num(x.planned) === null ? DASH + " not recorded" : whole(x.planned) + " planned, " + (num(x.read) === null ? DASH + " not recorded" : whole(x.read)) + " read"],
-      ["Vendor calls, this run", num(x.calls) === null ? DASH + " not recorded" : whole(x.calls)],
-      [keyLabel, num(x.dailySeen) === null ? DASH + " the vendor's counter was not read" : whole(x.dailySeen) + (num(x.dayLine) ? " of " + whole(x.dayLine) + " (" + pctOf(usedShare) + ")" : "") + keyRead],
+      ["Feed calls, this run", num(x.calls) === null ? DASH + " not recorded" : whole(x.calls)],
+      [keyLabel, num(x.dailySeen) === null ? DASH + " the feed's counter was not read" : whole(x.dailySeen) + (num(x.dayLine) ? " of " + whole(x.dayLine) + " (" + pctOf(usedShare) + ")" : "") + keyRead],
       ["Ledger session", x.session || DASH + " unstamped"],
     ];
     fill(short, mini("Deepening rotation", ["Measure", "Reading"], rows, "figures"),

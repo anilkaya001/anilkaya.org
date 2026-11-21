@@ -261,7 +261,7 @@ try {
     await ready(page, 48);
     const geo = await page.evaluate(() => {
       const svg = document.querySelector("#dkScatter svg");
-      const ys = [...svg.querySelectorAll("text")].filter((t) => /^[\d,]+%$/.test(t.textContent) && t.getAttribute("text-anchor") === "end").map((t) => [Number(t.textContent.replace(/[,%]/g, "")) / 100, Number(t.getAttribute("y")) - 4]);
+      const ys = [...svg.querySelectorAll("text")].filter((t) => /^[\d.]+%$/.test(t.textContent) && t.getAttribute("text-anchor") === "end").map((t) => [Number(t.textContent.replace(/%/g, "")) / 100, Number(t.getAttribute("y")) - 4]);
       const xs = [...svg.querySelectorAll("text")].filter((t) => /^\.\d\d$/.test(t.textContent) && t.getAttribute("text-anchor") === "middle").map((t) => [Number(t.textContent), Number(t.getAttribute("x"))]);
       const pts = [...svg.querySelectorAll("g > [data-bind]")].map((n) => ({ bind: n.getAttribute("data-bind"), shape: n.tagName, pos: n.tagName === "circle" ? [Number(n.getAttribute("cx")), Number(n.getAttribute("cy"))] : n.tagName === "rect" ? [Number(n.getAttribute("x")) + Number(n.getAttribute("width")) / 2, Number(n.getAttribute("y")) + Number(n.getAttribute("height")) / 2] : null }));
       const rings = [...svg.querySelectorAll("g > circle:not([data-bind])")].map((n) => [Number(n.getAttribute("cx")), Number(n.getAttribute("cy"))]);
@@ -270,11 +270,11 @@ try {
     });
     ok(geo.ys.length >= 3 && geo.xs.length >= 3, "the axes carry labelled ticks");
     const [[y1, p1], [y2, p2]] = [geo.ys[1], geo.ys[geo.ys.length - 1]];
-    const yPix = (v) => p1 + (Math.sqrt(v) - Math.sqrt(y1)) * (p2 - p1) / (Math.sqrt(y2) - Math.sqrt(y1));
+    const yPix = (v) => p1 + (v - y1) * (p2 - p1) / (y2 - y1);
     const [[x1, q1], [x2, q2]] = [geo.xs[0], geo.xs[geo.xs.length - 1]];
     const xPix = (v) => q1 + (v - x1) * (q2 - q1) / (x2 - x1);
     const want = expectedOf(payloads, SYMS, TERMS());
-    const wantPts = [...want.values()].filter((w) => w.line.ok && w.e).map((w) => ({ x: w.delta, y: w.line.annRatio, bind: w.line.binding }));
+    const wantPts = [...want.values()].filter((w) => w.line.ok && w.e).map((w) => ({ x: w.delta, y: w.line.ratio, bind: w.line.binding, expiry: w.r.expiry }));
     let misses = 0;
     const capped = geo.pts.filter((p) => p.shape === "path").length;
     for (const w of wantPts) {
@@ -282,10 +282,10 @@ try {
       const hit = geo.pts.some((p) => p.pos && Math.abs(p.pos[0] - px) < 1.2 && (Math.abs(p.pos[1] - yPix(w.y)) < 1.2 || w.y > y2 * 1.5));
       if (!hit) misses++;
     }
-    ok(misses <= capped, `every point sits at the pixel its (|net delta|, annualised ratio) maps to, within 1 px (${misses} off, ${capped} pinned)`);
-    const brute = wantPts.filter((p) => !wantPts.some((q) => q !== p && q.x <= p.x && q.y >= p.y && (q.x < p.x || q.y > p.y)));
-    const uniq = new Set(brute.map((p) => p.x + "|" + p.y));
-    eq(geo.rings.length, uniq.size, `the ringed efficient set equals the brute-force Pareto set (${uniq.size})`);
+    ok(misses <= capped, `every point sits at the pixel its (|net delta|, return on cash, not annualised) maps to, within 1 px (${misses} off, ${capped} pinned)`);
+    const brute = wantPts.filter((p) => !wantPts.some((q) => q !== p && q.expiry === p.expiry && q.x <= p.x && q.y >= p.y && (q.x < p.x || q.y > p.y)));
+    const uniq = new Set(brute.map((p) => p.expiry + "|" + p.x + "|" + p.y));
+    eq(geo.rings.length, uniq.size, `the ringed efficient set equals the brute-force Pareto set of each expiry (${uniq.size})`);
     ok(Math.abs(geo.guide - xPix(0.1 / 0.3)) < 1, `the floor guide sits at floor over haircut (${geo.guide} vs ${xPix(0.1 / 0.3).toFixed(1)})`);
     const floorN = geo.pts.filter((p) => p.bind === "floor").length;
     eq(geo.pts.filter((p) => p.shape === "rect").length >= floorN - 0, true, "the floor-bound lines are diamonds");
@@ -438,7 +438,7 @@ try {
     const [dl] = await Promise.all([page.waitForEvent("download"), page.locator(".ui-exp-i", { hasText: /^CSV$/ }).click()]);
     const grid = parseCsv(fs.readFileSync(await dl.path(), "utf8").slice(1));
     same(grid[0], ["Ticker", "Structure", "Expiry", "Chain session", "Days to expiry", "Strike (USD)", "Contracts used (contracts)", "Collateral per contract (USD)", "Collateral on contracts used (USD)", "Collateral convention", "Haircut (fraction)", "Floor (fraction)", "Premium ÷ collateral (fraction)", "Time value ÷ collateral (fraction)", "Annualised time value ÷ collateral (fraction)", "Net delta (delta)", "Net delta band (delta)", "Win probability (implied) (fraction)", "Win probability (real-world) (fraction)", "Expected value (real-world) on contracts used (USD)", "Reg-T style collateral per contract (USD)"], "the export has exactly the stated columns and units");
-    ok(!grid[0].some((c) => /^(bid|ask|spot)\b|quoted|^Premium \(/i.test(c)) && !grid[0].some((c) => /premium \(usd\)/i.test(c)), "no bid, ask, premium or spot column: the vendor's quoted figures are not exported");
+    ok(!grid[0].some((c) => /^(bid|ask|spot)\b|quoted|^Premium \(/i.test(c)) && !grid[0].some((c) => /premium \(usd\)/i.test(c)), "no bid, ask, premium or spot column: the feed's quoted figures are not exported");
     const body = grid.slice(1, -2);
     ok(body.length === 48 && body.every((r) => r[1] === "short call, uncovered" && r[9] === "Delta-adjusted"), "every line is a row, named as uncovered, with its convention");
     ok(body.every((r) => r.every((c) => !/−/.test(c))), "no U+2212 in a CSV number");
@@ -545,7 +545,7 @@ try {
       const page = await openDesk(browser, { payloads: one, query: "?t=SYX101&strategy=sc", errors });
       await ready(page, 24);
       const st = await statusOf(page);
-      ok(st.text.includes("Partial chain: the site's market-data budget ran out after 7 contracts; ranking covers these only and is not exact."), `a chain the vendor budget cut short says so and names the contracts read (${st.text.slice(0, 160)})`);
+      ok(st.text.includes("Partial chain: the site's market-data budget ran out after 7 contracts; ranking covers these only and is not exact."), `a chain the feed budget cut short says so and names the contracts read (${st.text.slice(0, 160)})`);
       ok(!/SYX101: /.test(st.text.replace(/^\d+ symbols? priced.*?(?=Partial)/, "")), "one name carries no symbol prefix");
       await page.close();
     }
