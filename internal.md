@@ -1,6 +1,6 @@
 # Shipment tracker
 
-Last updated: 2026-11-21, 12:35 TRT. Live site version: 436.
+Last updated: 2026-11-21, 23:55 TRT. Live site version: 445.
 
 How to read this: **Live** means merged and deployed. **In CI** means pushed and waiting for the checks. **Built** means a pull request exists and its checks passed once, but it still has to be merged with the current main branch. **Not started** means no code yet.
 
@@ -10,23 +10,34 @@ If the session stops (usage limit, restart), nothing here is lost: every item be
 
 | Item | Pull request | State | What is left |
 |---|---|---|---|
-| Fire & Forget: Wires page | #326 | All 16 review findings fixed; in CI | Merge when the checks pass |
-| Market Floor fund pillars | #327 | 4 review findings fixed and tested locally | Push after #326 merges, CI, merge |
-| Pulse | #328 | 4 review findings fixed and tested locally | Push after #327 merges, CI, merge |
-| Neuron orb docked in the top bar | #329 | 5 review findings fixed and tested locally | Push after #328 merges, CI, merge |
+| Flows 2, Design: interactive preview, new Neuron identity | none yet | One designer and one supervisor at work | Publish the preview as an Artifact, then the system, coverage, analyst and plan documents |
+| Flows 2, Build slice 0: a generated catalog of every feed operation and channel | none yet | One builder and one supervisor at work | Review, then ship |
+| Home and Flow state the whole session beside the alerts | branch `claude/session-coverage` | Built, suites pass locally | Push, CI, merge |
 
-- **Premium desk frontier: Return on cash** (asked 21 Nov). Y axis is now time value ÷ collateral for the contract's life, not annualised, linear from zero, one frontier per expiry. Both charts (puts/covered calls and short calls). Branch `claude/desk-return-on-cash`, worktree roc. PR #337.
+## Flows 2 programme (asked 21 November, 23:30 TRT)
+
+What the owner asked for: a truly competitive Flows 2, designed and built at the same time, shown first as an Artifact preview. Always on instead of a nightly build. Every operation the feed offers put to use (today 79 of 218 are read). A frontier model built in as a working analyst, not a summary. A new icon and brand for Neuron. Commercial-grade front end and back end. At most ten members; not sold.
+
+How it runs: three workflows, each with one worker and one supervisor who reviews it.
+- **Design**: the preview (`docs/flows2/preview/`), the Neuron identity (`docs/flows2/brand/`), then `design.md`, `system.md`, `coverage.json`, `neuron.md`, `plan.md`.
+- **Build**: slices from `plan.md`, each on its own branch with tests and planted wrong builds. Slice 0 is the feed catalog.
+- **Shipping**: each approved branch to a merged pull request, then a signed-in check of the live site.
+
+Four commitments every decision is held to: always on; the whole feed; the whole market (every optionable name, whole-session figures, print-level flow); an analyst, not a summary.
+
+Decisions taken so far:
+- The always-on engine runs in Durable Objects declared in the repository. No new outside resource.
+- The frontier model is reached through the Worker's existing `AI` binding and paid from prepaid AI Gateway credits. No provider key is stored. Every call still passes the one spend meter, with a daily cap in dollars and the deterministic reading as the fallback.
+- The committed copy of the feed's OpenAPI document is from 30 August and about twenty operations behind. Slice 0 adds a dispatch-only workflow that refreshes it from a GitHub runner.
+- The finishing pass below and the older queue (#332 endpoint coverage, #333 real time stage 1) are folded into the Flows 2 slices instead of shipping separately.
+
+Waiting on the owner for Flows 2:
+- **Load AI Gateway credits** in the Cloudflare dashboard (AI, AI Gateway, Credits Available, Manage, Top-up). Without them Neuron keeps today's small model and the deterministic reading.
 
 ## 2. Built, waiting their turn to merge (one at a time, in this order)
 
 | # | Item | Pull request | Notes |
 |---|---|---|---|
-| 1 | Fire & Forget: Wires page, sidebar mark, name panel on the ticker | #326 | Reviewed once: 5 defects found, not yet fixed |
-| 2 | Market Floor: fund pillars never blank, each names its session | #327 | Not reviewed yet |
-| 3 | Pulse: the mark beats only when data really advanced | #328 | Not reviewed yet |
-| 4 | Neuron orb docked in the top bar so it never covers content | #329 | Not reviewed yet |
-| 5 | Always-fresh data: say how old a kept card is and why | #330 | Not reviewed yet |
-| 6 | Reading and Neuron never stuck: every wait ends with a reason and a retry time | #331 | Not reviewed yet |
 | 7 | Endpoint coverage: IPO calendar on Events, the census of feed operations | #332 | Not reviewed yet |
 | 8 | Real time, stage 1: the pulse topic on the live rail | #333 | Not reviewed yet |
 | 9 | Safari Home fix: all tiles show even if Safari mishandles the layout; lighter glass on large windows | #334 | Not reproduced on real Safari; needs your check after it ships |
@@ -57,6 +68,13 @@ Before the usage limit hit on 15 November, two reviewers read each pull request 
 
 | Item | Pull request |
 |---|---|
+| Live check fixes: positioning books are read by filer id, a doubtful previous-close IV is held out of Moves | #338 |
+| Reading and Neuron never stuck: every wait ends with a reason and a retry time | #331 |
+| Always-fresh data: how old a kept card is and why | #330 |
+| Neuron orb docked in the top bar | #329 |
+| Pulse: the mark beats only when data really advanced | #328 |
+| Market Floor: fund pillars never blank | #327 |
+| Fire & Forget: Wires page, sidebar mark, name panel on the ticker | #326 |
 | Landing page: market board centred, redundant title removed, depth-rendered 3D field | #306 and follow-ups |
 | Market Tide on the full universe with market-cap weights | #316 |
 | Premium desk frontier: Return on cash (time value over collateral, not annualised, linear, one frontier per expiry) | #337 (21 Nov) |
@@ -108,7 +126,7 @@ To do these I need to be signed in to the site. The saved sign-in is from 14 Nov
 
 ## 7. Working rules in force
 
-- No sub-agents; I do each step myself.
+- Agents (changed 21 November): Flows 2 runs as three workflows, Design, Build and Shipping, each with one worker and one supervisor who reviews it. No other sub-agents.
 - Advisor: Opus 5.5 at max effort through your API key, used for design and correctness questions only. The key is kept outside the repository.
 - Merge as soon as the checks are green; no waiting on review.
 - Times in TRT; missing values are a dash with a reason, never a zero; one screen with no scroll at the four standard sizes.
