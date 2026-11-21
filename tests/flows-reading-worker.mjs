@@ -1212,5 +1212,19 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   eq(expect(workerSource(), /const claim = FLOWS_READING\.claimState\(age\);/, { min: 1, max: 1 }), 1, "the Neuron reads its claim through the reading's one claimState rule");
 }
 
+{
+  const AI = await import("../shared/flows-ai.js");
+  const unread = AI.askFailure(new Error(AI.AI_BUDGET_MARK + ": " + AI.budgetVerdict({}, undefined).reason));
+  ok(unread.why === "budget" && unread.unread === true, "A SPEND THAT COULD NOT BE READ is still refused as budget, and marked unread");
+  eq(AI.askFailure(new Error(AI.AI_BUDGET_MARK + ": 30000 of 30000 neurons")).unread, false, "while a cap really reached is not");
+  const at = Date.parse("2026-10-02T00:05:00Z");
+  eq(RW.cooldownMs("unreachable:spend", at), 5 * 60 * 1000, "an unread spend waits five minutes, not until the day turns");
+  ok(RW.cooldownMs("unreachable:budget", at) > 23 * 3600 * 1000, "a spent budget still waits for 00:00 UTC");
+  ok(/could not be read/.test(RW.READ_REASONS["unreachable:spend"]) && !/spent|renews/.test(RW.READ_REASONS["unreachable:spend"]), "and its reason does not say the budget is spent: " + RW.READ_REASONS["unreachable:spend"]);
+  const src = readFileSync(new URL("../shared/flows-reading-worker.js", import.meta.url), "utf8");
+  eq(src.split('said.failure && said.failure.unread === true ? "unreachable:spend" : said.guard').length - 1, 1, "the reading records an unread spend under its own guard");
+  eq(src.split('sessionsBehind(from, expectedNightlySession(now)) > 0').length - 1, 1, "a reading of an earlier session served by an unchanged fingerprint carries a note");
+}
+
 ok(assertAiGuarded({ minAllowed: 1 }) >= 1, "EVERY SCRIPTED MODEL CALL CAME THROUGH shared/flows-ai.js: the binding handed to worker.js throws on any other caller (" + aiGuardStats().allowed + " calls)");
 console.log("flows-reading-worker: " + checks + " checks");

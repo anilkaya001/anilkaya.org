@@ -3244,10 +3244,11 @@
       const again = s === "ok" ? refreshing(nr) : s === "pending" && retryOf(nr) === null;
       NN.strip = again ? 1 : 0;
       NN.spoke = s === "ok" && !again && !!nr.llm;
-      if (s === "ok") { STATE.neuron = nr; renderVerdict(card, nr); buildWorlds(card); if (refreshing(nr)) awaitNeuron(t, card, i + 1); else if (readPending(nr)) awaitReading(t, card); }
-      else if (s === "pending" && !again) { STATE.neuron = nr; renderVerdict(card, nr); if (readPending(nr)) awaitReading(t, card); }
+      if (!nr) { awaitNeuron(t, card, i + 1, round); return; }
+      if (s === "ok") { STATE.neuron = nr; renderVerdict(card, nr); buildWorlds(card); if (refreshing(nr)) awaitNeuron(t, card, i + 1, round); else follow(t, card, round); }
+      else if (s === "pending" && !again) { STATE.neuron = nr; renderVerdict(card, nr); follow(t, card, round); }
       else if (s !== "pending") settle(typeof s === "string" && s);
-      else { const had = (STATE.neuron.context || {}).state; if (nr.context) STATE.neuron = nr; if (!had && (nr.context || {}).state) renderVerdict(card, nr); awaitNeuron(t, card, i + 1); }
+      else { const had = (STATE.neuron.context || {}).state; if (nr.context) STATE.neuron = nr; if (!had && (nr.context || {}).state) renderVerdict(card, nr); awaitNeuron(t, card, i + 1, round); }
       NN.spoke = false;
     }), 5000 + i * 3500);
   }
@@ -3278,15 +3279,50 @@
     setTimeout(() => soft(getJSON(api("summary", t))).then((nr) => {
       if (STATE.card !== card) return;
       const read = nr && nr.read;
-      if (!readIs(read, "ready", "generating", "fallback", "absent", "unavailable")) { NN.rail = 0; STATE.readWait = null; nnSync(); return; }
+      if (!readIs(read, "ready", "generating", "fallback", "absent", "unavailable")) { awaitReading(t, card, i + 1, round); return; }
       const again = read.status === "generating" || refreshing(read);
       NN.rail = again ? 1 : 0;
       NN.spokeRail = !again && read.status === "ready" && read.generated === true;
       STATE.neuron = { ...STATE.neuron, read };
       paintReading(read);
       NN.spokeRail = false;
-      if (again) awaitReading(t, card, i + 1, round); else STATE.readWait = null;
+      if (again) awaitReading(t, card, i + 1, round); else { STATE.readWait = null; follow(t, card, round); }
     }), 4000 + i * 2500);
+  }
+
+  const retryDue = (n) => {
+    if (!n || typeof n !== "object") return null;
+    const a = n.status === "pending" ? retryOf(n) : null, b = readPending(n) ? null : retryOf(n.read);
+    return a === null ? b : b === null ? a : Math.min(a, b);
+  };
+  const ended = (n) => {
+    const tell = (x) => ({ ...x, retryAfterS: null, waited: true, note: ((x.note || "") + " " + WAITED_LAST).trim() });
+    const out = n.status === "pending" && retryOf(n) !== null ? tell(n) : { ...n };
+    if (retryOf(n.read) !== null) out.read = tell(n.read);
+    return out;
+  };
+  function follow(t, card, round = 0) {
+    if (STATE.card !== card) return;
+    const n = STATE.neuron;
+    if (neuronPending(n)) { awaitNeuron(t, card, 0, round); return; }
+    if (readPending(n)) awaitReading(t, card, 0, round);
+    const sec = retryDue(n);
+    if (sec === null || STATE.retry === card) return;
+    STATE.retry = card;
+    setTimeout(() => {
+      if (STATE.retry === card) STATE.retry = null;
+      if (STATE.card !== card) return;
+      soft(getJSON(api("summary", t))).then((nr) => {
+        if (STATE.card !== card) return;
+        const last = round + 1 >= WAIT_ROUNDS;
+        let next = nr && typeof nr.status === "string" ? nr : STATE.neuron;
+        if (last && retryDue(next) !== null) next = ended(next);
+        STATE.neuron = next;
+        renderVerdict(card, next);
+        if (next.status === "ok") buildWorlds(card);
+        if (!last) follow(t, card, round + 1);
+      });
+    }, (sec + 2) * 1000);
   }
 
   function jumpToHash() {
@@ -3361,8 +3397,7 @@
             if (!card || !card.panels) return;
             STATE.card = card; STATE.neuron = neuron || (STATE.neuron && STATE.neuron.loading ? { status: "unavailable" } : STATE.neuron); STATE.cardX = joined(cx, card); STATE.hist = joined(hist, card); if (SURF.api && SURF.api.setCardX) SURF.api.setCardX(STATE.cardX);
             paintAll();
-            if (neuronPending(STATE.neuron)) awaitNeuron(t, card);
-            else if (readPending(STATE.neuron)) awaitReading(t, card);
+            follow(t, card);
           });
       },
     });
@@ -3422,7 +3457,8 @@
     jumpToHash();
     const watch = (neuron) => {
       if (card.lite) return;
-      if (neuronPending(neuron)) awaitNeuron(ticker, card);
+      if (STATE.neuron === neuron) follow(ticker, card);
+      else if (neuronPending(neuron)) awaitNeuron(ticker, card);
       else if (readPending(neuron)) awaitReading(ticker, card);
     };
     if (had("summary")) watch(STATE.neuron);

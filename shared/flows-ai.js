@@ -49,7 +49,7 @@ export function aiText(out) {
 export function askFailure(error) {
   const text = error && error.message ? String(error.message) : "";
   if (text.startsWith(AI_BUDGET_MARK)) {
-    return { why: "budget",
+    return { why: "budget", unread: text.endsWith(AI_SPEND_UNREAD),
       say: "The model budget this site allows itself for one day is spent. It resets at " +
         RESET_SAID + ". The readings below were measured by the pipeline and are unaffected." };
   }
@@ -110,6 +110,7 @@ export function primaryRates(env) {
 export const AI_DAILY_NEURONS = 10000;
 
 export const AI_BUDGET_MARK = "FLOWS_AI_BUDGET_SPENT";
+export const AI_SPEND_UNREAD = "the day's spend could not be read";
 export const AI_CAP_DEFAULT_NEURONS = 30000;
 export const AI_CAP_DEFAULT_CALLS = 2500;
 export const AI_WORST_RATES = Object.freeze({ inPerM: 26668, outPerM: 204805 });
@@ -138,7 +139,7 @@ export function budgetVerdict(env, spend) {
     return { spent: true, reason: "the daily budget is set to zero", neurons: null, calls: null, neuronCap, callCap };
   }
   if (spend === undefined) {
-    return { spent: true, reason: "the day's spend could not be read", neurons: null, calls: null, neuronCap, callCap };
+    return { spent: true, reason: AI_SPEND_UNREAD, neurons: null, calls: null, neuronCap, callCap };
   }
   if (spend === null) return { spent: false, reason: null, neurons: null, calls: null, neuronCap, callCap };
   const neurons = neuronsSpent(spend);

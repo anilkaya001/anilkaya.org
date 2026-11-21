@@ -42,6 +42,7 @@ export const READ_COOLDOWN_MS = Object.freeze({
   "read:overlong": 20 * 60 * 1000,
   "unreachable:budget": 30 * 60 * 1000,
   "unreachable:allowance": 30 * 60 * 1000,
+  "unreachable:spend": 5 * 60 * 1000,
   "unreachable:capacity": 5 * 60 * 1000,
   "unreachable:unreachable": 5 * 60 * 1000,
   "unreachable:plan": 60 * 60 * 1000,
@@ -74,6 +75,7 @@ export const READ_REASONS = Object.freeze({
   "read:overlong": "The model's last reply was longer than the limit.",
   "unreachable:budget": "The site's daily model budget for readings is spent; it renews at 03:00 TRT.",
   "unreachable:allowance": "The day's model allowance is spent; it renews at 03:00 TRT.",
+  "unreachable:spend": "The day's model spend could not be read, so no wording was asked for.",
   "unreachable:capacity": "The model was busy and did not take the request.",
   "unreachable:unreachable": "The model could not be reached.",
   "unreachable:plan": "The model is not available on this site's plan.",
@@ -142,6 +144,7 @@ function fallbackProvenance(why, describe, guard) {
     case "cooldown": {
       if (guard === "read:refused") return "Deterministic reading: a model's wording for this dossier was refused by the checks against its facts, and the next attempt waits a short while.";
       if (guard === "read:unparsable") return "Deterministic reading: a model's reply could not be read as the required shape, and the next attempt waits a short while.";
+      if (guard === "unreachable:spend") return "Deterministic reading: the day's model spend could not be read, so no model wording was asked for, and the next attempt waits a short while.";
       if (guard === "read:overlong") return "Deterministic reading: a model's reply was longer than the limit, and the next attempt waits a short while.";
       return typeof describe === "function" ? describe(guard) : "Deterministic reading: no model wording is available.";
     }
@@ -187,8 +190,9 @@ async function generate({ env, deps, ticker, dossier, tags, fingerprint, started
       if (typeof deps.recordSpend === "function") await deps.recordSpend(model, usage);
     } });
   if (!said.text) {
-    await store("", null, false, said.model, said.guard || "unreachable:empty", []);
-    return { stored: "failed", guard: said.guard || "unreachable:empty" };
+    const guard = said.failure && said.failure.unread === true ? "unreachable:spend" : said.guard || "unreachable:empty";
+    await store("", null, false, said.model, guard, []);
+    return { stored: "failed", guard };
   }
   if (said.text.length > SECTION_CAPS.reply) {
     await said.call.settle({ llm: false, guard: "read:overlong" });
@@ -392,7 +396,12 @@ export async function readingFor(env, ctx, ticker, deps, opts = {}) {
   if (!canModel) return fb("fallback", "no-model");
   if (storeDown) return fb("fallback", "store", { note: reasonFor("store"), retryAfterS: READ_STORE_RETRY_S });
 
-  if (good(stored) && stored.fingerprint === fingerprint) return readyFrom(stored, { held: "fingerprint" });
+  if (good(stored) && stored.fingerprint === fingerprint) {
+    const from = stored.shape.session || null;
+    return sessionsBehind(from, expectedNightlySession(now)) > 0
+      ? readyFrom(stored, { held: "previous", refreshing: false, note: "Written for the session of " + from + ". The dossier has not changed since, so no newer wording was asked for." })
+      : readyFrom(stored, { held: "fingerprint" });
+  }
 
   const kept = good(stored) && stored.fingerprint.endsWith("|r" + READING_VERSION)
     ? heldReading(stored, dossier, result.neuron ? result.neuron.tier : null, ticker, tags) : null;
