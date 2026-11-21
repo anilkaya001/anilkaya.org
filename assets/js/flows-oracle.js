@@ -718,7 +718,12 @@
     var sp = document.querySelector("#fxBar .fx-bar-sp");
     var r = sp ? sp.getBoundingClientRect() : null;
     var w = r ? Math.floor(r.width) - 8 : 0;
-    host.setAttribute("data-room", r && w >= 96 ? "1" : "0");
+    var need = 96;
+    if (restore && restore.classList.contains("is-undo") && !restore.hidden) {
+      host.setAttribute("data-room", "1");
+      need = Math.max(96, restore.scrollWidth + 2);
+    }
+    host.setAttribute("data-room", r && w >= need ? "1" : "0");
     host.style.setProperty("--say-r", (r ? Math.floor(r.right) : 0) + "px");
     host.style.setProperty("--say-w", Math.max(0, w) + "px");
   }

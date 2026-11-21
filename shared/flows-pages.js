@@ -1650,13 +1650,17 @@ export function sideShell(html, cookie) {
 export function oracleShell(html, mode, slug) {
   if (typeof html !== "string" || !ORACLE_MODES.includes(mode) || !html.includes('id="fxBar"')) return html;
   const page = escapeHTML(String(slug || "overview"));
-  const slot = `<div id="fxOracle" class="orc" hidden data-state="calm" data-page="${page}" data-oracle="${mode}"></div>
-<i hidden data-defer="oracle" data-src="${v("/assets/js/flows-oracle-core.js")}" data-css="${v("/assets/css/flows-oracle.css")} ${v("/assets/css/flows-nn.css")}"></i>${html.includes('data-defer="nn-orb"') ? "" : `
+  const hostEl = `<div id="fxOracle" class="orc" hidden data-state="calm" data-page="${page}" data-oracle="${mode}"></div>`;
+  const slot = `<i hidden data-defer="oracle" data-src="${v("/assets/js/flows-oracle-core.js")}" data-css="${v("/assets/css/flows-oracle.css")} ${v("/assets/css/flows-nn.css")}"></i>${html.includes('data-defer="nn-orb"') ? "" : `
 <i hidden data-defer="nn-orb" data-src="${v("/assets/js/flows-nn-orb.js")}"></i>`}
 <i hidden data-defer="oracle" data-src="${v("/assets/js/flows-oracle.js")}"></i>
 <script src="${v("/assets/js/flows-oracle-boot.js")}" defer></script>`;
-  let out = html.replace("</body>", () => slot + "\n</body>");
-  const end = out.indexOf("\n</header>", out.indexOf('id="fxBar"'));
+  const close = "\n</header>";
+  const barEnd = html.indexOf(close, html.indexOf('id="fxBar"'));
+  let out = barEnd === -1
+    ? html.replace("</body>", () => hostEl + "\n" + slot + "\n</body>")
+    : (html.slice(0, barEnd + close.length) + "\n" + hostEl + html.slice(barEnd + close.length)).replace("</body>", () => slot + "\n</body>");
+  const end = out.indexOf(close, out.indexOf('id="fxBar"'));
   if (end !== -1 && !out.includes('id="orcSlot"')) out = out.slice(0, end) + '\n  <span class="orc-slot" id="orcSlot" aria-hidden="true"></span>' + out.slice(end);
   if (page === "overview") {
     out = out.replace('<p class="visually-hidden" id="flowsStatus"', () => '<div class="orc-strip" id="orcHome" data-state="idle" style="min-height:40px"></div>\n  <p class="visually-hidden" id="flowsStatus"');

@@ -96,6 +96,8 @@ const CLEAR = () => {
       if (!out.slot || s.x < out.slot.x - 6 || s.r > out.slot.r + 6 || s.y < out.slot.y - 6 || s.b > out.slot.b + 6) out.sayOutside.push(s.name + " outside its slot");
     } else if (!out.room || s.x < out.room.x - 0.5 || s.r > out.room.r + 0.5) out.sayOutside.push(s.name + " outside the free span of the bar");
   }
+  const ru = host.querySelector(".orc-restore.is-undo");
+  if (ru && !ru.hidden && host.dataset.room === "1" && ru.scrollWidth > ru.clientWidth + 1) out.sayOutside.push("the Undo label is cut (" + ru.scrollWidth + " in " + ru.clientWidth + ")");
   return out;
 };
 
@@ -247,6 +249,33 @@ try {
     }
   }
 
+  if (!ONLY && mine(0)) {
+    const spec = SPECS.find((x) => x.id === "long");
+    const raw = String(PAGES[spec.fn]({ username: "anilkaya", ...(spec.args || {}) }));
+    const html = memberShell(PAGES.oracleShell(raw, "on", slugOf(spec)), { slug: slugOf(spec), on: true });
+    ok(/<\/header>\n<div id="fxOracle"/.test(html), "the orb's host follows the top bar in the page, so keyboard order reaches it straight after the bar's controls");
+    for (const touch of [false, true]) {
+      const ctx = await browser.newContext({ viewport: { width: 1024, height: 768 }, hasTouch: touch, isMobile: false, reducedMotion: "reduce" });
+      const page = await ctx.newPage();
+      await mount(page, html, spec.url, null);
+      await page.waitForFunction(() => { const o = document.getElementById("fxOracle"); return o && !o.hidden && o.querySelector(".orc-orb"); }, null, { timeout: 20000 });
+      await page.waitForTimeout(300);
+      if (touch) {
+        await page.evaluate(STATES.say);
+        await page.waitForTimeout(80);
+        const hgt = await page.evaluate(() => { const p = document.querySelector("#fxOracle .orc-pill"); return matchMedia("(pointer: coarse)").matches ? Math.round(p.getBoundingClientRect().height) : -1; });
+        ok(hgt === -1 || hgt >= 44, `on a touch tablet the signal pill, which opens the sheet when tapped, is 44 px tall (${hgt})`);
+        ok(hgt !== -1, "the touch context reports a coarse pointer");
+      } else {
+        const where = await page.evaluate(() => { const f = [...document.querySelectorAll("#fxBar button, #fxBar a[href], #fxBar [tabindex='0']")].filter((n) => n.getClientRects().length && !n.disabled); f[f.length - 1].focus(); return f.length; });
+        await page.keyboard.press("Tab");
+        const at = await page.evaluate(() => { const a = document.activeElement; return a && a.closest("#fxOracle") ? "orb" : (a && (a.id || a.className || a.tagName)); });
+        ok(where > 0 && at === "orb", `Tab from the bar's last control lands on the orb, which is drawn in the bar (${at})`);
+      }
+      await ctx.close();
+    }
+  }
+
   if (!ONLY && !process.env.NO_MUTANTS) {
     const byId = (id) => SPECS.find((x) => x.id === id);
     const MUTANTS = [
@@ -255,9 +284,10 @@ try {
       ["the bar reserves no slot for the orb", "overview", 1440, 820, { "/assets/css/flows.css": [[".fx-bar .orc-slot { flex: none; width: 44px; height: 44px; }", ".fx-bar .orc-slot { flex: none; width: 0; height: 44px; }"]] }],
       ["the pill is laid against the bar's right edge, over its controls", "ticker", 1440, 820, { "/assets/js/flows-oracle.js": [["host.style.setProperty(\"--say-r\", (r ? Math.floor(r.right) : 0) + \"px\");", "host.style.setProperty(\"--say-r\", (innerWidth - 60) + \"px\");"]] }],
       ["the toast is not held to the free span", "events", 1440, 820, { "/assets/css/flows-oracle.css": [["  max-width: var(--say-w, 0px);\n", "  max-width: none;\n"]] }],
-      ["the room check lets a message into a span too narrow for it", "events", 390, 844, { "/assets/js/flows-oracle.js": [["host.setAttribute(\"data-room\", r && w >= 96 ? \"1\" : \"0\");", "host.setAttribute(\"data-room\", \"1\");"], ["host.style.setProperty(\"--say-w\", Math.max(0, w) + \"px\");", "host.style.setProperty(\"--say-w\", Math.max(160, w) + \"px\");"]] }],
+      ["the room check lets a message into a span too narrow for it", "events", 390, 844, { "/assets/js/flows-oracle.js": [["host.setAttribute(\"data-room\", r && w >= need ? \"1\" : \"0\");", "host.setAttribute(\"data-room\", \"1\");"], ["host.style.setProperty(\"--say-w\", Math.max(0, w) + \"px\");", "host.style.setProperty(\"--say-w\", Math.max(160, w) + \"px\");"]] }],
       ["the Undo control spreads left from the slot over the bar", "watch", 1024, 768, { "/assets/css/flows-oracle.css": [[".orc-pill, .orc-toast, .orc[data-room=\"1\"] .orc-restore.is-undo {", ".orc-pill, .orc-toast {"]] }],
       ["the hidden bar title keeps its width and the freshness label is cut", "overview", 390, 844, { "/assets/css/flows.css": [[".fx-bar.has-hero:has(.orc-slot):not(.is-scrolled) .fx-bar-t { flex-basis: 0; }", ""]] }],
+      ["the Undo label is cut when the bar is narrower than the control", "fire", 390, 844, { "/assets/js/flows-oracle.js": [["      need = Math.max(96, restore.scrollWidth + 2);\n", ""]] }],
       ["the orb stays on top of an open Ask dock on a phone", "overview", 390, 844, { "/assets/css/flows-oracle.css": [["  .has-dock-open .orc:not(.is-open) { visibility: hidden; }\n", "  .has-dock-open .orc:not(.is-open) { top: auto; bottom: 120px; }\n"]] }],
     ];
     for (const [name, id, w, h, patch] of MUTANTS.filter((m, i) => mine(i))) {
