@@ -43,11 +43,11 @@ Before the usage limit hit on 15 November, two reviewers read each pull request 
 | #324 Digest | 17 over two rounds | Fixed (the second round on 21 November) |
 | #325 Inbox (already live) | 6 from the second round | Not fixed; needs a follow-up pull request |
 | #326 Wires, mark, name panel | 16 | Fixed and merged 21 November |
-| #327 Floor funds | 5 (4 distinct) | Fixed 21 November |
-| #328 Pulse | 5 (4 distinct) | Fixed 21 November |
-| #329 Orb | 6 (5 distinct) | Fixed 21 November |
-| #330 Always-fresh | 6 | Fixed locally (worktree w330, commit 95ebac6), waits for #329 to merge |
-| #331 Reliable reading | 7 | Fixed locally 21 November (worktree w331), waits for #330 to merge |
+| #327 Floor funds | 5 (4 distinct) | Fixed and merged 21 November |
+| #328 Pulse | 5 (4 distinct) | Fixed and merged 21 November |
+| #329 Orb | 6 (5 distinct) | Fixed and merged 21 November |
+| #330 Always-fresh | 6 | Fixed and merged 21 November |
+| #331 Reliable reading | 7 | Fixed and merged 21 November |
 | #332 Endpoint coverage | 5 | Not fixed |
 | #333 Real time stage 1 | 4 | Not fixed |
 | #334 Safari Home | 5 | Not fixed |
@@ -148,3 +148,21 @@ Order of work (one pull request each, after the open chain #327 to #331 and the 
 6. Per-page audit, in sidebar order: recompute every number from the API payload, check every empty state has a reason, every time is TRT, nothing is cut, nothing overlaps (orb included), and write the result here page by page.
 7. Stored wording: after Monday night's run, re-check that no stored note says "vendor".
 8. Known data gaps to close or state on the page: positioning rotation (fix waits for Monday night's run), sector breakdown reducer (18% refused), old macro quotes (Copper Sep 1).
+
+## Competitor review, 21 November (signed in with the owner's account, 12 pages, screenshots in scratchpad/rival)
+
+What they have that we lack:
+- Breadth: 12,276 tickers against our 822 screened names.
+- Whole-session figures per name on the first screen (NVDA: 8.99M contracts, $4.26B premium, net premium, calls against puts by 5 minutes). We lead with alerts.
+- A live print-by-print flow list with deep filters (side, ask share, type, expiry, size) and saved filters.
+- A workspace of movable windows with templates and saved layouts.
+- Dealer exposure as a strike by expiry heat map with walls, flip and implied-move marks, per-minute.
+- Charting, a trading journal, predictions, a stock screener, dark-pool prints, earnings, an AI assistant on every page.
+Where we are already ahead or different:
+- One screen per page, no scroll; they are dense tables that scroll and three of twelve pages returned an error.
+- Stated coverage, reasons for every absent figure, TRT, a closed premium ledger, calibrated wires, the Neuron's cited reading.
+- Their figures and ours agree where both show them (NVDA 125.53, -14.01%, after-hours 130.01).
+What this changes in the finishing pass:
+- Step 1 grows: per-name whole-session volume and premium on the ticker page and Home, not only alerts.
+- New step: universe breadth (how far past 822 the nightly can go inside its call budget).
+- New step: a filterable live flow list as a first-class page.
