@@ -262,10 +262,17 @@ function freshBattery(mod) {
 {
   eq(freshBattery(COVERAGE_MODULE), [], "THE PER-NAME FRESHNESS CONTRACT holds on the real build");
   ok(COVERAGE_MODULE.FRESH_WHY.length === 8 && COVERAGE_MODULE.FRESH_WHY.at(-1) === "fresh", "eight reasons, fresh last");
+  {
+    const keys = { "card:SYX101": { present: true, sessionDate: "2026-08-24" } };
+    const base = { t: "SYX101", keys, roster: null, expected: "2026-08-24" };
+    eq(COVERAGE_MODULE.nameFreshness({ ...base, kinds: [] }).why, "fresh", "A TIER THAT HOLDS A CARD ALONE is fresh with no companion records");
+    eq(COVERAGE_MODULE.nameFreshness(base).why, "split", "while a tier that should hold them is split without them");
+    eq(COVERAGE_MODULE.nameFreshness({ ...base, kinds: ["hist"] }).why, "split", "and a tier is held to each record it should hold");
+  }
   const PLANTS = [
     ["held-reads-as-fresh", [["const age = session >= expected ? 0 : behindBy(session, expected);", "const age = 0;"]]],
     ["age-in-calendar-days", [["const n = sessionsBetween(from, to);", "const n = Math.round((Date.parse(to) - Date.parse(from)) / 864e5);"]]],
-    ["split-unchecked", [['const gaps = ["card-x", "hist"].filter(', "const gaps = [].filter("]]],
+    ["split-unchecked", [["const gaps = kinds.filter(", "const gaps = [].filter("]]],
     ["cut-listing-reads-as-new", [['    if (truncated) return { t, why: "unknown", age: null, session: null, note: "the listing stopped before this name" };\n', ""]]],
     ["complete-ignores-freshness", [[" && listed && !truncated && unfresh === 0;", " && listed && !truncated;"]]],
     ["cut-flag-covers-every-name", [["const cutAt = (i) => truncated && (through === null || i >= through);", "const cutAt = () => truncated;"]]],

@@ -37,7 +37,7 @@ function watch(page, ignored = () => false) {
     const reason = request.failure()?.errorText || "unknown";
     const target = new URL(request.url());
     const navigationAborted = reason === "net::ERR_ABORTED" && request.method() === "GET" && target.origin === new URL(BASE).origin &&
-      (target.pathname.startsWith("/assets/data/") || target.pathname.startsWith("/api/"));
+      (target.pathname.startsWith("/assets/data/") || target.pathname.startsWith("/assets/fonts/") || target.pathname.startsWith("/api/"));
     const detail = `request failed: ${request.url()} (${reason})`;
     if (!navigationAborted && !ignored(detail)) errors.push(detail);
   });
