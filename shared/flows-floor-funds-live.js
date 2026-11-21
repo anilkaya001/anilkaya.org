@@ -4,7 +4,7 @@ import { pathFor } from "./flows-vendor-ops.js";
 
 export const FUNDS_KEY = "live:funds";
 
-export const FUNDS_WRITERS = Object.freeze({ tick: "worker@funds", fill: "worker@fill" });
+export const FUNDS_WRITERS = Object.freeze({ tick: "worker@funds", fill: "worker@fill", market: "worker@market" });
 
 export const FUNDS_READ = Object.freeze({ path: pathFor("screener-stocks"), sectorPath: pathFor("sector-etfs"), limit: 500 });
 
@@ -39,9 +39,10 @@ export function needsSectorRead(raw, session, sectorEtfs = null) {
   return missingAfter({ session, screener, sectorEtfs, tickers: [...FLOOR_FUNDS.funds, ...FLOOR_FUNDS.etf] }).length > 0;
 }
 
-export function shapeFunds(raw, { at, session, writer, sectorEtfs = null } = {}) {
+export function shapeFunds(raw, { at, session, writer, sectorEtfs = null, reason = null } = {}) {
   const screener = answered(raw) ? { rows: rowsOf(raw), date: session } : null;
-  const { rows, counts } = fundRows(candidatesOf({ screener, sectorEtfs, volume: new Map() }), session);
+  const reasons = new Map(reason ? readList().map((t) => [t, reason]) : []);
+  const { rows, counts } = fundRows(candidatesOf({ screener, sectorEtfs, volume: new Map() }), session, reasons);
   const spec = LIVE_KEYS[FUNDS_KEY];
   return {
     v: 1, key: FUNDS_KEY, session,
@@ -51,6 +52,24 @@ export function shapeFunds(raw, { at, session, writer, sectorEtfs = null } = {})
     basis: "whole-session options activity per fund, as the feed reports it",
     counts, rows,
   };
+}
+
+const UNTRIED = new Set(["no-key", "no-session", "no-db"]);
+
+export const fallbackReason = (why) => (why === "throttled" ? "limited" : UNTRIED.has(why) ? "not_read" : "failed");
+
+export function fundsFromMarket(row, why) {
+  if (!row || typeof row.session !== "string" || !DAY_RE.test(row.session)) return null;
+  const sectorEtfs = marketSectors(row, row.session);
+  if (!sectorEtfs) return null;
+  const readAt = Number(row.read_at);
+  if (!Number.isFinite(readAt) || readAt <= 0) return null;
+  const payload = shapeFunds(null, { at: readAt, session: row.session, writer: FUNDS_WRITERS.market, sectorEtfs, reason: fallbackReason(why) });
+  if (payload.status === "unavailable") return null;
+  const text = JSON.stringify({ ...payload, fallback: { from: "live:market", why: String(why || "failed").slice(0, 40) } });
+  const spec = LIVE_KEYS[FUNDS_KEY];
+  if (text.length > spec.maxBytes) return null;
+  return { payload: text, readAt, session: row.session, cadenceS: spec.cadenceS, source: "worker", writer: FUNDS_WRITERS.market, updatedAt: readAt };
 }
 
 export function fundsNote(stored) {
