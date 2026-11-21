@@ -624,6 +624,7 @@ const heroDom = (page) => page.evaluate(() => {
   const changed = next.filter(([t], i) => t !== first[i]).length;
   ok(changed > 0 && changed < next.length, "a bigger window changes some of the ledger's figures: " + changed);
   eq(next.filter(([, f]) => f).length, changed, "and the cells that flash are exactly the cells whose text changed");
+  await m.page.waitForFunction(() => [...document.querySelectorAll(".sf-lt td.chg")].every((e) => getComputedStyle(e).animationName === "sf-chg"), null, { timeout: 5000 }).catch(() => {});
   eq(await m.page.$$eval(".sf-lt td.chg", (a) => [...new Set(a.map((e) => getComputedStyle(e).animationName))]), ["sf-chg"], "by a paint-only background flash on the cell itself");
   eq(await m.page.$$eval(".sf-lt td.chg", (a) => [...new Set(a.map((e) => getComputedStyle(e, "::before").content + "|" + getComputedStyle(e).position + "|" + getComputedStyle(e).zIndex))]), ["none|static|auto"], "which adds no pseudo-element, no positioning and no stacking context, so a focus ring is never covered by the next cell");
   await m.page.waitForTimeout(2300);

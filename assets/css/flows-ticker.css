@@ -653,7 +653,7 @@ button.ft-eng { cursor: pointer; }
 .ft-rail-state { display: flex; align-items: center; gap: var(--sp-3); margin: 0; color: var(--label-2); font: var(--t-footnote); }
 .ft-rail-held { align-items: flex-start; font: var(--t-caption); }
 .ft-rail-held > .ui-pill { flex: none; }
-.ft-rail-held > span:last-child { display: -webkit-box; min-width: 0; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
+.ft-rail-held > span:last-child { min-width: 0; overflow-wrap: anywhere; }
 .ft-claims { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin: 0; padding: 0; list-style: none; }
 .ft-claims > li { min-width: 0; list-style: none; }
 .ft-claim { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: start; gap: 10px; width: 100%; min-width: 0; padding: 5px 8px; border: 0; border-radius: var(--r-sm); background: none; color: var(--label-1); font: var(--t-footnote); line-height: 1.45; text-align: left; cursor: pointer; transition: opacity var(--dur-fade) linear, background var(--dur-fade) linear; }

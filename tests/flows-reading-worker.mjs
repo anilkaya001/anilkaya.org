@@ -61,6 +61,7 @@ function rig(script) {
       if (log.gate) await log.gate;
       const out = typeof script === "function" ? await script(log.reads.length, input) : script;
       if (out && out.throw) throw new Error(out.throw);
+      if (out && typeof out.cut === "string") return { response: out.cut, finish_reason: out.finish || "length", usage: USAGE };
       return { response: typeof out === "string" ? out : JSON.stringify(out === undefined ? GOOD : out), usage: USAGE };
     },
   };
@@ -533,7 +534,9 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   eq(next.body.read.generated, false, "not generated");
   ok(/model budget for this site is spent/.test(next.body.read.provenance), "and the reader is told the site's own budget is spent: " + next.body.read.provenance);
   ok(next.body.read.sections.now && next.body.read.sections.drivers.length > 0 && next.body.read.tags.length > 0, "with all of its sections");
-  ok(next.body.read.retryAfterS > 1500 && next.body.read.retryAfterS <= 1800, "and a thirty-minute cooldown (" + next.body.read.retryAfterS + " s)");
+  const tillDay = Math.ceil(RW.untilUtcDay(Date.parse(row.generated_at)) / 1000);
+  ok(next.body.read.retryAfterS > tillDay - 60 && next.body.read.retryAfterS <= tillDay, "and the budget refusal waits until the day's budget renews at 00:00 UTC, not a fixed half hour (" + next.body.read.retryAfterS + " s of " + tillDay + ")");
+  ok(/renews at 03:00 TRT/.test(next.body.read.note), "and the note says so in TRT: " + next.body.read.note);
 }
 
 {
@@ -600,8 +603,40 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   eq(live.body.read.status, "generating", "ANOTHER ISOLATE'S MARKER younger than ninety seconds: generating, not taken over");
   eq(ai.log.reads.length, 0, "no call");
   f.db.prepare("UPDATE flows_neuron SET generated_at = ? WHERE scope = 'gen:read:EXMP'").run(new Date(Date.now() - 200000).toISOString());
+  const dead = await summary(get);
+  eq(ai.log.reads.length, 0, "A DEAD GENERATOR'S MARKER (200 s old) is not taken over at once: no model call");
+  ok(dead.body.read.status === "fallback" && dead.body.read.why === "stalled", "the reader gets a terminal state, fallback, why stalled (" + dead.body.read.status + ", " + dead.body.read.why + ")");
+  ok(dead.body.read.retryAfterS > 180 && dead.body.read.retryAfterS <= (RW.READ_GENERATING_MS + RW.READ_STALL_MS - 200000) / 1000 + 1,
+    "with the time of the next attempt, when the stall window ends (" + dead.body.read.retryAfterS + " s)");
+  eq(dead.body.read.note, RW.reasonFor("stalled"), "and the plain reason: " + dead.body.read.note);
+  ok(dead.body.read.sections.now && dead.body.read.sections.drivers.length > 0, "over the whole deterministic reading");
+  f.db.prepare("UPDATE flows_neuron SET generated_at = ? WHERE scope = 'gen:read:EXMP'").run(new Date(Date.now() - RW.READ_GENERATING_MS - RW.READ_STALL_MS - 1000).toISOString());
   await summary(get);
-  eq(ai.log.reads.length, 1, "a marker older than ninety seconds is a dead generator's and is taken over");
+  eq(ai.log.reads.length, 1, "past the stall window the dead marker is taken over and the model asked once");
+}
+
+{
+  const f = world();
+  const ai = rig();
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  await get("/api/flows/dossier?t=" + T);
+  f.fail(/INSERT INTO flows_neuron[\s\S]*VALUES \(\?, \?, \?, \?, \?, \?, \?, \?, \?\)/);
+  const first = await summary(get);
+  f.fail(null);
+  eq(ai.log.reads.length, 1, "STORE FAULT ON THE RESULT: (setup) the model was asked once and its vetted reading could not be written");
+  eq(genRow(f).guard, "generating", "(setup) so the claim is left generating, as a dead generator's would be");
+  eq(readRow(f), undefined, "(setup) and no reading is stored");
+  eq(first.body.read.status, "generating", "the first call is generating");
+  for (const s of [30, 60, 120, 240]) {
+    setNow(new Date(Date.parse(genRow(f).generated_at) + s * 1000).toISOString());
+    dropHot();
+    const r = await summary(await client(f.D1, { ...AI_ENV, AI: ai }));
+    const want = s * 1000 < RW.READ_GENERATING_MS ? "generating" : "fallback";
+    eq(r.body.read.status, want, "at " + s + " s the reader sees " + want + (want === "fallback" ? " (" + r.body.read.why + ", next attempt in " + r.body.read.retryAfterS + " s)" : ""));
+  }
+  eq(ai.log.reads.length, 1, "and a store that loses the result costs one model call per stall window, not one per poll");
+  restoreClock();
+  restoreClock = shiftClock();
 }
 
 {
@@ -1096,6 +1131,99 @@ const isReadTrip = (t) => t.sqls.some((s) => /FROM flows_neuron WHERE scope = \?
   eq(none.read.held, undefined, "nothing held");
   ok(/still being assembled/.test(none.read.note), "and the note says the dossier is still being assembled: " + none.read.note);
   eq(none.trips.filter(isReadTrip).length, 1, "with the one read of read:EXMP it always made");
+}
+
+{
+  const whole = JSON.stringify(GOOD);
+  const at = whole.indexOf(GOOD.drivers[2].text) + 12;
+  const cut = whole.slice(0, at);
+  ok(R.parseReading(cut) === null, "A LENGTH-CUT REPLY: (setup) the reply cut inside the third driver does not parse whole");
+  const f = world();
+  const ai = rig({ cut });
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  await summary(get);
+  eq(ai.log.reads.length, 1, "the model is asked once");
+  const row = readRow(f);
+  ok(row && row.llm === 1 && /^read:salvaged:\d+$/.test(row.guard), "what closed before the cut is kept: stored as a vetted reading, guard " + (row && row.guard));
+  const r = (await summary(get)).body.read;
+  eq(r.status, "ready", "the reader is served it, status ready, not a cooldown");
+  eq(r.generated, true, "model wording");
+  eq(r.sections.now.text, GOOD.now.text, "with the closed now section unchanged");
+  same(r.sections.drivers.map((d) => d.text), GOOD.drivers.slice(0, 2).map((d) => d.text), "and the two drivers that closed before the cut, not the cut one");
+  ok(r.sections.unknown.length > 0 && r.sections.unknown.every((u) => Array.isArray(u.missing)), "the list of what is not known is the site's own");
+  ok(r.provenance.includes(RW.SALVAGED_SENTENCE), "and the provenance says the reply was cut off: " + r.provenance);
+  eq(ai.log.reads.length, 1, "no second model call: salvage adds none");
+  same(counted(f).filter((c) => c.surface === "read").map((c) => c.outcome), ["trimmed"], "counted as trimmed, a reply that reached the model and was kept in part");
+
+  const g = world();
+  const ai2 = rig({ cut, finish: "stop" });
+  const get2 = await client(g.D1, { ...AI_ENV, AI: ai2 });
+  await summary(get2);
+  eq(genRow(g).guard, "read:unparsable", "THE SAME CUT TEXT WITH A STOP FINISH is not salvaged: unparsable, as before");
+  eq(readRow(g), undefined, "and nothing is stored as a reading");
+
+  const h = world();
+  const early = whole.slice(0, whole.indexOf(GOOD.now.text) + 20);
+  const ai3 = rig({ cut: early });
+  const get3 = await client(h.D1, { ...AI_ENV, AI: ai3 });
+  await summary(get3);
+  eq(genRow(h).guard, "read:unparsable", "A REPLY CUT INSIDE ITS NOW SECTION keeps too little to stand: unparsable, with its cooldown");
+  const r3 = (await summary(get3)).body.read;
+  ok(r3.status === "fallback" && r3.why === "cooldown" && r3.retryAfterS > 0 && r3.note === RW.reasonFor("read:unparsable"),
+    "and the reader gets a terminal fallback with a plain reason and a retry time (" + r3.status + ", " + r3.why + ", " + r3.retryAfterS + " s, " + r3.note + ")");
+}
+
+{
+  const f = world();
+  const ai = rig();
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  await summary(get);
+  eq(ai.log.reads.length, 1, "THE FLOOR ACROSS A SESSION: (setup) a vetted reading is stored");
+  const hit = (await summary(get)).body.read;
+  eq(hit.held, "floor", "(setup) a second call inside the floor is the floor hit");
+  const row = readRow(f);
+  const body = JSON.parse(row.ideas);
+  f.db.prepare("UPDATE flows_neuron SET ideas = ? WHERE scope = 'read:' || ?").run(JSON.stringify({ ...body, shape: { ...body.shape, session: "2026-09-01" } }), T);
+  dropHot();
+  const later2 = (await summary(get)).body.read;
+  ok(later2.held !== "floor", "A STORED READING OF AN EARLIER SESSION is not served as a floor hit with no note (" + later2.status + ", " + later2.held + ")");
+}
+
+{
+  const f = world();
+  const ai = rig();
+  const get = await client(f.D1, { ...AI_ENV, AI: ai });
+  await summary(get);
+  const rows = f.db.prepare("SELECT scope, fingerprint FROM flows_neuron WHERE scope IN ('ticker:' || ?, 'gen:ticker:' || ?)").all(T, T);
+  ok(rows.length > 0, "THE NEURON'S DEAD CLAIM: (setup) the Neuron wrote its row (" + rows.map((x) => x.scope).join(", ") + ")");
+  const fp = rows[0].fingerprint;
+  f.db.prepare("DELETE FROM flows_neuron WHERE scope IN ('ticker:' || ?, 'gen:ticker:' || ?)").run(T, T);
+  f.db.prepare("INSERT INTO flows_neuron (scope, version, fingerprint, summary, ideas, llm, model, guard, generated_at) SELECT 'gen:ticker:' || ?, version, ?, '', '[]', 0, NULL, 'generating', ? FROM flows_neuron WHERE scope = 'read:' || ?")
+    .run(T, fp, new Date(Date.now() - 200000).toISOString(), T);
+  const before = ai.log.other.length;
+  const n = (await summary(get)).body;
+  eq(ai.log.other.length, before, "a Neuron claim 200 s old is not taken over at once: no Neuron model call");
+  ok(n.status === "pending" && n.refreshing === false && n.retryAfterS > 180 && n.retryAfterS <= 191,
+    "the Neuron answers a terminal pending with a retry time (" + n.status + ", refreshing " + n.refreshing + ", " + n.retryAfterS + " s)");
+  ok(/did not finish/.test(n.note), "and the plain reason: " + n.note);
+  f.db.prepare("UPDATE flows_neuron SET generated_at = ? WHERE scope = 'gen:ticker:' || ?").run(new Date(Date.now() - 400000).toISOString(), T);
+  await summary(get);
+  eq(ai.log.other.length, before + 1, "past the stall window the Neuron's dead claim is taken over and the model asked once");
+  eq(expect(workerSource(), /const claim = FLOWS_READING\.claimState\(age\);/, { min: 1, max: 1 }), 1, "the Neuron reads its claim through the reading's one claimState rule");
+}
+
+{
+  const AI = await import("../shared/flows-ai.js");
+  const unread = AI.askFailure(new Error(AI.AI_BUDGET_MARK + ": " + AI.budgetVerdict({}, undefined).reason));
+  ok(unread.why === "budget" && unread.unread === true, "A SPEND THAT COULD NOT BE READ is still refused as budget, and marked unread");
+  eq(AI.askFailure(new Error(AI.AI_BUDGET_MARK + ": 30000 of 30000 neurons")).unread, false, "while a cap really reached is not");
+  const at = Date.parse("2026-10-02T00:05:00Z");
+  eq(RW.cooldownMs("unreachable:spend", at), 5 * 60 * 1000, "an unread spend waits five minutes, not until the day turns");
+  ok(RW.cooldownMs("unreachable:budget", at) > 23 * 3600 * 1000, "a spent budget still waits for 00:00 UTC");
+  ok(/could not be read/.test(RW.READ_REASONS["unreachable:spend"]) && !/spent|renews/.test(RW.READ_REASONS["unreachable:spend"]), "and its reason does not say the budget is spent: " + RW.READ_REASONS["unreachable:spend"]);
+  const src = readFileSync(new URL("../shared/flows-reading-worker.js", import.meta.url), "utf8");
+  eq(src.split('said.failure && said.failure.unread === true ? "unreachable:spend" : said.guard').length - 1, 1, "the reading records an unread spend under its own guard");
+  eq(src.split('sessionsBehind(from, expectedNightlySession(now)) > 0').length - 1, 1, "a reading of an earlier session served by an unchanged fingerprint carries a note");
 }
 
 ok(assertAiGuarded({ minAllowed: 1 }) >= 1, "EVERY SCRIPTED MODEL CALL CAME THROUGH shared/flows-ai.js: the binding handed to worker.js throws on any other caller (" + aiGuardStats().allowed + " calls)");

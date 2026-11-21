@@ -71,6 +71,8 @@ async function mount(page, read_, o = {}) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
   await page.route("**/*", async (route) => {
     const u = new URL(route.request().url());
+    if (u.pathname === "/assets/js/flows-ticker.js" && typeof o.src === "string") return route.fulfill({ contentType: "text/javascript", body: o.src });
+    if (u.pathname === "/assets/css/flows-ticker.css" && typeof o.css === "string") return route.fulfill({ contentType: "text/css", body: o.css });
     if (u.pathname.startsWith("/assets/")) {
       const f = path.join(ROOT, u.pathname);
       if (!fs.existsSync(f)) return route.fulfill({ status: 404, body: "" });
@@ -80,6 +82,7 @@ async function mount(page, read_, o = {}) {
       const key = u.pathname.slice("/api/flows/".length);
       if (key === "summary") {
         stubs.calls.push(Date.now());
+        if (Number.isInteger(o.failAfter) && stubs.calls.length > o.failAfter) return route.fulfill({ status: 503, contentType: "application/json", body: "{}" });
         const next = stubs.queue.length ? stubs.queue.shift() : null;
         const nextNeuron = stubs.neurons.length ? stubs.neurons.shift() : null;
         const base = nextNeuron ? { ...neuron, ...nextNeuron } : neuron;
@@ -92,6 +95,7 @@ async function mount(page, read_, o = {}) {
     return route.fulfill({ status: 404, body: "" });
   });
   await page.routeWebSocket(/\/api\/rt\/ws/, (ws) => ws.close({ code: 4011, reason: "off" }));
+  if (o.clock) await page.clock.install({ time: Date.parse("2026-10-02T16:00:00Z") });
   await page.goto("https://example.test/flows/ticker/?t=" + encodeURIComponent(T));
   await page.waitForFunction(() => { const s = document.getElementById("ftStatus"); return s && s.textContent !== "Loading the name\u2026"; }, null, { timeout: 15000 });
   await page.waitForTimeout(150);
@@ -212,6 +216,126 @@ try {
     b = await block(page);
     ok(b && !b.overflow, "no horizontal scroll at " + w + " px " + JSON.stringify(b && b.wide));
   }
+
+  const step = async (p, ms) => { for (let t = 0; t < ms; t += 10000) { await p.clock.runFor(10000); await p.waitForTimeout(150); } };
+  const neverDone = async (fixture, src) => {
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 820 } });
+    const p = await ctx.newPage();
+    try {
+      await mount(p, fixture, { queue: Array.from({ length: 60 }, () => clone(fixture)), clock: true, src });
+      await step(p, 240000);
+      const after = await block(p);
+      const n = stubs.calls.length;
+      await step(p, 60000);
+      const quiet = stubs.calls.length === n;
+      await step(p, 260000);
+      return { after, quiet, again: stubs.calls.length > n, calls: stubs.calls.length };
+    } finally {
+      await ctx.close();
+    }
+  };
+
+  const stuck = await neverDone(GENERATING);
+  ok(stuck.after.status === "fallback" && /did not arrive while this page waited/.test(stuck.after.text) && /next attempt is in about 5 minutes/.test(stuck.after.text),
+    "A READING THAT STAYS GENERATING PAST THE POLLING SCHEDULE ends in a terminal state with a plain reason and a retry time: " + stuck.after.status + ", " + stuck.after.text.slice(0, 220));
+  eq(stuck.after.claims.length, 4, "over the deterministic reading's claims");
+  ok(stuck.quiet, "and the page stops polling once the schedule is spent");
+  ok(stuck.again, "then asks once more when the retry time comes (" + stuck.calls + " summary requests in all)");
+
+  const box = await neverDone(BOXED);
+  ok(box.after.status === "fallback" && /still being assembled when this page stopped waiting/.test(box.after.text) && /next attempt is in about 5 minutes/.test(box.after.text),
+    "A DOSSIER THAT STAYS IN ASSEMBLY PAST THE SCHEDULE ends with its own plain reason and a retry time: " + box.after.text.slice(0, 200));
+
+  const STALLED = { ...clone(FALLBACK), why: "stalled", note: "The last request for model wording did not finish.", retryAfterS: 240 };
+  const SAID = /Model wording: The last request for model wording did not finish\. The next attempt is in about 4 minutes\./;
+  await mount(page, STALLED);
+  await page.waitForTimeout(5000);
+  b = await block(page);
+  ok(SAID.test(b.text), "A SERVER TERMINAL FALLBACK (a stalled claim) prints its reason and its retry time in the rail: " + b.text.slice(0, 200));
+  eq(stubs.calls.length, 1, "and is not polled");
+
+  const neuronStall = { status: "pending", tier: "family", summary: null, refreshing: false, retryAfterS: 200,
+    note: "The Neuron's last request for model wording did not finish, so the next one waits a short while rather than ask again at once." };
+  const stallMount = (src) => mount(page, READ, { neuron: neuronStall, neurons: [neuronStall, neuronStall, neuronStall], src });
+  await stallMount();
+  await page.waitForTimeout(9000);
+  eq(stubs.calls.length, 1, "A NEURON STALL (pending with a retry time) is terminal: the page does not poll it (" + stubs.calls.length + " summary requests in nine seconds)");
+
+  const timed = async (fixture, o, steps) => {
+    await page.goto("about:blank");
+    const ctx = await browser.newContext({ viewport: { width: 1440, height: 820 } });
+    const p = await ctx.newPage();
+    try {
+      await mount(p, fixture, { ...o, clock: true });
+      const out = [];
+      for (const ms of steps) {
+        await step(p, ms);
+        out.push({ calls: stubs.calls.length, rail: await block(p), reload: await p.evaluate(() => document.body.textContent.includes("Reload the page to ask again.")) });
+      }
+      return out;
+    } finally {
+      await ctx.close();
+    }
+  };
+  const retried = (src) => timed(STALLED, { queue: [clone(STALLED), clone(READ)], src }, [200000, 60000]);
+  const lands = await retried();
+  eq(lands[0].calls, 1, "A SERVER FALLBACK WITH A RETRY TIME is left alone until that time");
+  ok(lands[1].calls === 2 && lands[1].rail.status === "ready", "and is asked again once when the time comes, the new reading drawn: " + lands[1].calls + " requests, " + lands[1].rail.status);
+
+  const stallsOn = (src) => timed(STALLED, { queue: Array.from({ length: 30 }, () => clone(STALLED)), src }, [800000, 900000]);
+  const never = await stallsOn();
+  eq(never[0].calls, 1 + 3, "A FALLBACK THAT NEVER CLEARS is asked again three times and no more");
+  ok(never[0].reload && !/next attempt is in/.test(never[0].rail.text), "and then says to reload, with no attempt promised: " + never[0].rail.text.slice(0, 200));
+  eq(never[1].calls, never[0].calls, "and nothing is asked in the fifteen minutes after");
+
+  const pendingForever = { status: "pending", tier: "family", summary: null };
+  const neuronOn = (src) => timed(READ, { neuron: pendingForever, src }, [1100000, 900000]);
+  const nn = await neuronOn();
+  ok(nn[0].reload, "A NEURON THAT STAYS PENDING ends after three rounds and says to reload (" + nn[0].calls + " summary requests)");
+  eq(nn[1].calls, nn[0].calls, "and the page asks nothing in the fifteen minutes after");
+
+  const deaf = (src) => timed(GENERATING, { failAfter: 2, queue: Array.from({ length: 4 }, () => clone(GENERATING)), src }, [240000]);
+  const lost = await deaf();
+  ok(lost[0].rail.status === "fallback" && /did not arrive while this page waited/.test(lost[0].rail.text),
+    "A POLL THAT FAILS keeps the schedule and ends with a reason and a retry time: " + lost[0].rail.status + ", " + lost[0].rail.text.slice(0, 160));
+
+  const BUDGET = { ...clone(FALLBACK), why: "cooldown", note: "The site's daily model budget for readings is spent; it renews at 03:00 TRT.", retryAfterS: 36000 };
+  const TICKER_CSS = fs.readFileSync(path.join(ROOT, "assets/css/flows-ticker.css"), "utf8");
+  const whole = async (css) => {
+    const cut = [];
+    for (const [w, hh] of [[1920, 1080], [1440, 820], [1024, 768], [390, 844]]) {
+      await page.setViewportSize({ width: w, height: hh });
+      await mount(page, BUDGET, { css });
+      const m = await page.evaluate(() => { const e = document.querySelector(".ft-rail-held > span:last-child"); return e ? { s: e.scrollHeight, c: e.clientHeight, t: e.textContent } : null; });
+      if (!m || m.s > m.c + 1 || !/next attempt is in about 600 minutes\./.test(m.t)) cut.push(w + "x" + hh + " " + JSON.stringify(m));
+    }
+    await page.setViewportSize({ width: 1440, height: 820 });
+    return cut;
+  };
+  same(await whole(), [], "THE RETRY SENTENCE IS NEVER CUT at the four sizes");
+
+  const plant = (from, to) => {
+    eq(TICKER_SRC.split(from).length - 1, 1, "(setup) a planted build's anchor occurs once: " + from.slice(0, 60));
+    return TICKER_SRC.replace(from, to);
+  };
+  const PLANTED = [
+    { name: "the schedule's end left as a bare fallback",
+      run: async () => (await neverDone(GENERATING, plant('note: ((sec.now || sec.identity) ? WAITED_READ : WAITED_ASSEMBLY) + " " + tail };', "};"))).after.text.includes("did not arrive while this page waited") },
+    { name: "no second round after the schedule",
+      run: async () => (await neverDone(GENERATING, plant("if (!last) setTimeout(() => { if (STATE.card === card) awaitReading(t, card, 0, round + 1); }, WAIT_AGAIN_S * 1000);", ""))).again },
+    { name: "a server fallback's reason hidden",
+      run: async () => { await mount(page, STALLED, { src: plant('} else if (read.status === "fallback" && typeof read.note === "string" && read.note && (retryOf(read) !== null || read.waited)) {', "} else if (false) {") }); return SAID.test((await block(page)).text); } },
+    { name: "a Neuron stall polled as pending",
+      run: async () => { await stallMount(plant('(neuron.status === "pending" && retryOf(neuron) === null)', 'neuron.status === "pending"')); await page.waitForTimeout(9000); return stubs.calls.length === 1; } },
+  ];
+  PLANTED.push(
+    { name: "a retry time never acted on", run: async () => (await retried(plant("    STATE.retry = card;\n    setTimeout(() => {", "    STATE.retry = card;\n    if (0) setTimeout(() => {")))[1].calls === 2 },
+    { name: "a fallback asked again without end", run: async () => (await stallsOn(plant("if (last && retryDue(next) !== null) next = ended(next);", "").replace("if (!last) follow(t, card, round + 1);", "follow(t, card, 0);"))).every((x) => x.calls === 4) },
+    { name: "the Neuron's round dropped", run: async () => (await neuronOn(plant("awaitNeuron(t, card, i + 1, round); }\n      NN.spoke = false;", "awaitNeuron(t, card, i + 1); }\n      NN.spoke = false;")))[0].reload },
+    { name: "a failed poll ends the wait in silence", run: async () => /did not arrive while this page waited/.test((await deaf(plant('{ awaitReading(t, card, i + 1, round); return; }', "{ NN.rail = 0; STATE.readWait = null; nnSync(); return; }")))[0].rail.text) },
+    { name: "the fallback line clamped to two lines", run: async () => (await whole(TICKER_CSS.replace(".ft-rail-held > span:last-child { min-width: 0;", ".ft-rail-held > span:last-child { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; min-width: 0;"))).length === 0 },
+  );
+  for (const m of PLANTED) ok(!(await m.run()), "A PLANTED WRONG BUILD (" + m.name + ") is caught");
 
   const mine = errors.filter((e) => !/flows-ticker: (buildGamma|buildFlow) failed/.test(e));
   eq(mine.length, 0, "no page error or console error through any of it, beyond the two modules the thin fixture card cannot feed (gamma and flow): " + mine.join(" | "));

@@ -798,7 +798,15 @@
   const readIs = (r, ...states) => !!r && typeof r === "object" && states.includes(r.status);
   const refreshing = (x) => !!x && typeof x === "object" && x.held === "previous" && x.refreshing === true;
   const readPending = (neuron) => !!neuron && (readIs(neuron.read, "generating") || (readIs(neuron.read, "ready") && refreshing(neuron.read)));
-  const neuronPending = (neuron) => !!neuron && (neuron.status === "pending" || (neuron.status === "ok" && refreshing(neuron)));
+  const retryOf = (x) => (!!x && typeof x === "object" && Number.isFinite(x.retryAfterS) && x.retryAfterS > 0 ? x.retryAfterS : null);
+  const neuronPending = (neuron) => !!neuron && ((neuron.status === "pending" && retryOf(neuron) === null) || (neuron.status === "ok" && refreshing(neuron)));
+  const nextIn = (sec) => { const m = Math.max(1, Math.round(sec / 60)); return "The next attempt is in about " + m + (m === 1 ? " minute." : " minutes."); };
+  const WAIT_ROUNDS = 3;
+  const WAIT_AGAIN_S = 300;
+  const WAITED_READ = "The model's wording did not arrive while this page waited.";
+  const WAITED_ASSEMBLY = "The dossier was still being assembled when this page stopped waiting.";
+  const WAITED_NEURON = "The Neuron's wording did not arrive while this page waited.";
+  const WAITED_LAST = "Reload the page to ask again.";
 
   const LOADING_READ = "Loading the Neuron's read.";
   const statePillOf = (state) => { const d = UI.STATES[state]; return d ? h("span", { class: "ui-pill", "data-state": state }, glyph(d.g), d.word) : null; };
@@ -1040,22 +1048,25 @@
     const idx = citeIndex(read), claims = claimsOf(read);
     Object.assign(GLANCE, { read, idx, claims });
     const lead = sec.now || sec.identity;
-    const bare = read.status === "absent" || read.status === "unavailable" || (read.status === "generating" && !lead);
+    const bare = read.status === "absent" || read.status === "unavailable" || ((read.status === "generating" || read.status === "fallback") && !lead);
     railEl.dataset.status = read.status;
     const bits = [read.generated ? "Model wording" : "Deterministic reading"];
     if (read.asOf) bits.push("Dossier as of " + F.time(read.asOf));
     railEl.append(h("p", { class: "visually-hidden", id: "ftReadSrc" }, bits.join(" · ") + "." + (read.provenance ? " " + String(read.provenance) : "")));
     if (bare) {
-      const state = read.status === "generating" ? "pending" : read.status === "absent" ? "quiet" : "unavailable";
+      const state = read.status === "generating" ? "pending" : read.status === "absent" ? "quiet" : read.status === "fallback" ? "stale" : "unavailable";
       railEl.append(h("p", { class: "ft-rail-state", role: "status" }, statePillOf(state),
         String(read.note || (read.status === "generating" ? "The reading is being written." : "No reading is available for this name."))));
     } else if (read.status === "generating") {
       railEl.append(h("p", { class: "ft-rail-state", role: "status" }, "Model wording is being written."));
     } else if (read.status === "ready" && (read.held === "previous" || read.held === "limited") && typeof read.note === "string" && read.note) {
       const soon = read.refreshing === true;
-      const mins = !soon && Number.isFinite(read.retryAfterS) && read.retryAfterS > 0 ? Math.max(1, Math.round(read.retryAfterS / 60)) : null;
-      const said = (soon ? "A newer reading is being written. " : mins !== null ? "The next attempt is in about " + mins + (mins === 1 ? " minute. " : " minutes. ") : "") + read.note;
+      const wait = soon ? null : retryOf(read);
+      const said = (soon ? "A newer reading is being written. " : wait !== null ? nextIn(wait) + " " : read.waited ? WAITED_READ + " " : "") + read.note;
       railEl.append(h("p", { class: "ft-rail-state ft-rail-held", role: "status", title: said }, statePillOf(soon ? "pending" : "stale"), h("span", null, said)));
+    } else if (read.status === "fallback" && typeof read.note === "string" && read.note && (retryOf(read) !== null || read.waited)) {
+      const said = "Model wording: " + read.note + " " + (retryOf(read) !== null ? nextIn(retryOf(read)) : "");
+      railEl.append(h("p", { class: "ft-rail-state ft-rail-held", role: "status", title: said.trim() }, statePillOf("stale"), h("span", null, said.trim())));
     }
     const said = claims.length && claims[0] && claims[0].it && String(claims[0].it.text) === String(lead && lead.text);
     if (lead && !said) railEl.append(h("p", { class: "ft-rail-lead" }, typo(String(lead.text)), sup(nums(lead, idx))));
@@ -1378,7 +1389,7 @@
       const xid = "ftVerdictX";
       const meta = st ? stateMeta(st) : n.screen ? screenMeta(n.screen) : [];
       const src = ok ? (n.provenance || (n.llm ? "Worded by " + String(n.model || "the model").replace(/^@cf\//, "") : "Deterministic read, no model wording"))
-        : "Read from the card, no model wording." + (n.status === "pending" ? " The Neuron's wording replaces it when it lands." : "");
+        : "Read from the card, no model wording." + (n.status === "pending" ? (retryOf(n) !== null && n.note ? " " + n.note + " " + nextIn(retryOf(n)) : n.waited ? " " + n.note : " The Neuron's wording replaces it when it lands.") : "");
       const x = h("div", { class: "ft-v-x", id: xid }, h("div", null,
         caveat ? h("p", null, caveat) : null,
         rest ? h("p", null, typo(rest)) : null,
@@ -3209,35 +3220,58 @@
   }
   const flowOf = (card) => (card.lite ? buildLiteFlow : buildFlow)(card);
 
-  function awaitNeuron(t, card, i = 0) {
+  function awaitNeuron(t, card, i = 0, round = 0) {
     const settle = (s) => renderVerdict(card, { ...STATE.neuron, status: s || "unavailable" });
     if (STATE.card !== card) return;
-    if (i > 6) { NN.strip = 0; return settle(STATE.neuron && STATE.neuron.status === "ok" ? "ok" : undefined); }
+    if (i > 6) {
+      NN.strip = 0;
+      const n = STATE.neuron || {};
+      const last = round + 1 >= WAIT_ROUNDS;
+      const tail = last ? WAITED_LAST : nextIn(WAIT_AGAIN_S);
+      const done = n.status === "ok" ? { ...n, refreshing: false, waited: true, ...(refreshing(n) ? { note: WAITED_NEURON + " " + tail + " " + (n.note || "") } : {}) }
+        : { ...n, status: "pending", refreshing: false, waited: true, note: WAITED_NEURON + " " + tail };
+      STATE.neuron = done;
+      renderVerdict(card, done);
+      if (readPending(done)) awaitReading(t, card);
+      if (!last) setTimeout(() => { if (STATE.card === card) awaitNeuron(t, card, 0, round + 1); }, WAIT_AGAIN_S * 1000);
+      return;
+    }
     NN.strip = 1;
     nnSync();
     setTimeout(() => soft(getJSON(api("summary", t))).then((nr) => {
       if (STATE.card !== card) return;
       const s = nr && nr.status;
-      const again = s === "ok" ? refreshing(nr) : s === "pending";
+      const again = s === "ok" ? refreshing(nr) : s === "pending" && retryOf(nr) === null;
       NN.strip = again ? 1 : 0;
       NN.spoke = s === "ok" && !again && !!nr.llm;
-      if (s === "ok") { STATE.neuron = nr; renderVerdict(card, nr); buildWorlds(card); if (refreshing(nr)) awaitNeuron(t, card, i + 1); else if (readPending(nr)) awaitReading(t, card); }
+      if (!nr) { awaitNeuron(t, card, i + 1, round); return; }
+      if (s === "ok") { STATE.neuron = nr; renderVerdict(card, nr); buildWorlds(card); if (refreshing(nr)) awaitNeuron(t, card, i + 1, round); else follow(t, card, round); }
+      else if (s === "pending" && !again) { STATE.neuron = nr; renderVerdict(card, nr); follow(t, card, round); }
       else if (s !== "pending") settle(typeof s === "string" && s);
-      else { const had = (STATE.neuron.context || {}).state; if (nr.context) STATE.neuron = nr; if (!had && (nr.context || {}).state) renderVerdict(card, nr); awaitNeuron(t, card, i + 1); }
+      else { const had = (STATE.neuron.context || {}).state; if (nr.context) STATE.neuron = nr; if (!had && (nr.context || {}).state) renderVerdict(card, nr); awaitNeuron(t, card, i + 1, round); }
       NN.spoke = false;
     }), 5000 + i * 3500);
   }
 
-  function awaitReading(t, card, i = 0) {
+  function awaitReading(t, card, i = 0, round = 0) {
     if (STATE.card !== card) return;
+    if (i === 0 && STATE.readWait === card) return;
+    STATE.readWait = card;
     if (i > 9) {
       NN.rail = 0;
       const r = STATE.neuron && STATE.neuron.read;
       if (readIs(r, "generating") || (readIs(r, "ready") && refreshing(r))) {
-        const done = readIs(r, "generating") ? { ...r, status: "fallback" } : { ...r, refreshing: false };
+        const last = round + 1 >= WAIT_ROUNDS;
+        const tail = last ? WAITED_LAST : nextIn(WAIT_AGAIN_S);
+        const sec = r.sections && typeof r.sections === "object" ? r.sections : {};
+        const done = readIs(r, "ready") ? { ...r, refreshing: false, waited: true, note: tail + " " + r.note }
+          : { ...r, status: "fallback", waited: true, note: ((sec.now || sec.identity) ? WAITED_READ : WAITED_ASSEMBLY) + " " + tail };
         STATE.neuron = { ...STATE.neuron, read: done };
         paintReading(done);
+        nnSync();
+        if (!last) setTimeout(() => { if (STATE.card === card) awaitReading(t, card, 0, round + 1); }, WAIT_AGAIN_S * 1000);
       }
+      STATE.readWait = null;
       return;
     }
     NN.rail = 1;
@@ -3245,15 +3279,50 @@
     setTimeout(() => soft(getJSON(api("summary", t))).then((nr) => {
       if (STATE.card !== card) return;
       const read = nr && nr.read;
-      if (!readIs(read, "ready", "generating", "fallback", "absent", "unavailable")) { NN.rail = 0; nnSync(); return; }
+      if (!readIs(read, "ready", "generating", "fallback", "absent", "unavailable")) { awaitReading(t, card, i + 1, round); return; }
       const again = read.status === "generating" || refreshing(read);
       NN.rail = again ? 1 : 0;
       NN.spokeRail = !again && read.status === "ready" && read.generated === true;
       STATE.neuron = { ...STATE.neuron, read };
       paintReading(read);
       NN.spokeRail = false;
-      if (again) awaitReading(t, card, i + 1);
+      if (again) awaitReading(t, card, i + 1, round); else { STATE.readWait = null; follow(t, card, round); }
     }), 4000 + i * 2500);
+  }
+
+  const retryDue = (n) => {
+    if (!n || typeof n !== "object") return null;
+    const a = n.status === "pending" ? retryOf(n) : null, b = readPending(n) ? null : retryOf(n.read);
+    return a === null ? b : b === null ? a : Math.min(a, b);
+  };
+  const ended = (n) => {
+    const tell = (x) => ({ ...x, retryAfterS: null, waited: true, note: ((x.note || "") + " " + WAITED_LAST).trim() });
+    const out = n.status === "pending" && retryOf(n) !== null ? tell(n) : { ...n };
+    if (retryOf(n.read) !== null) out.read = tell(n.read);
+    return out;
+  };
+  function follow(t, card, round = 0) {
+    if (STATE.card !== card) return;
+    const n = STATE.neuron;
+    if (neuronPending(n)) { awaitNeuron(t, card, 0, round); return; }
+    if (readPending(n)) awaitReading(t, card, 0, round);
+    const sec = retryDue(n);
+    if (sec === null || STATE.retry === card) return;
+    STATE.retry = card;
+    setTimeout(() => {
+      if (STATE.retry === card) STATE.retry = null;
+      if (STATE.card !== card) return;
+      soft(getJSON(api("summary", t))).then((nr) => {
+        if (STATE.card !== card) return;
+        const last = round + 1 >= WAIT_ROUNDS;
+        let next = nr && typeof nr.status === "string" ? nr : STATE.neuron;
+        if (last && retryDue(next) !== null) next = ended(next);
+        STATE.neuron = next;
+        renderVerdict(card, next);
+        if (next.status === "ok") buildWorlds(card);
+        if (!last) follow(t, card, round + 1);
+      });
+    }, (sec + 2) * 1000);
   }
 
   function jumpToHash() {
@@ -3328,8 +3397,7 @@
             if (!card || !card.panels) return;
             STATE.card = card; STATE.neuron = neuron || (STATE.neuron && STATE.neuron.loading ? { status: "unavailable" } : STATE.neuron); STATE.cardX = joined(cx, card); STATE.hist = joined(hist, card); if (SURF.api && SURF.api.setCardX) SURF.api.setCardX(STATE.cardX);
             paintAll();
-            if (neuronPending(STATE.neuron)) awaitNeuron(t, card);
-            else if (readPending(STATE.neuron)) awaitReading(t, card);
+            follow(t, card);
           });
       },
     });
@@ -3389,7 +3457,8 @@
     jumpToHash();
     const watch = (neuron) => {
       if (card.lite) return;
-      if (neuronPending(neuron)) awaitNeuron(ticker, card);
+      if (STATE.neuron === neuron) follow(ticker, card);
+      else if (neuronPending(neuron)) awaitNeuron(ticker, card);
       else if (readPending(neuron)) awaitReading(ticker, card);
     };
     if (had("summary")) watch(STATE.neuron);
