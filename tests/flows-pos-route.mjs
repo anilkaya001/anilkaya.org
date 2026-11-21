@@ -243,7 +243,7 @@ const readBattery = async () => {
       const M = await import(pathToFileURL(path.join(root, "shared/flows-pages.js")).href);
       const out = {};
       for (const [name, fn] of Object.entries(M.FLOWS_PAGES)) {
-        if (typeof fn !== "function" || name === "positioningPage" || name === "macroPage" || name === "digestPage" || name === "wiresPage") continue;
+        if (typeof fn !== "function" || name === "positioningPage" || name === "macroPage" || name === "digestPage") continue;
         for (const [label, args] of [["member", { username: "test" }], ["owner", { username: "test", owner: true }]]) {
           let html = fn(args);
           for (const [from, to] of NORMALISE) html = html.replace(from, to);

@@ -231,7 +231,11 @@
 
   function showRetry() {
     var digestBad = state.error && state.error.code !== "ff_export_range" && state.error.code !== "ff_cursor_invalid";
-    retry.hidden = !(digestBad || state.recordError);
+    var show = !!(digestBad || state.recordError);
+    var held = document.activeElement === retry;
+    retry.removeAttribute("aria-disabled");
+    if (!show && held) cap.focus();
+    retry.hidden = !show;
   }
 
   function paintQuadrant(m) {
@@ -320,7 +324,7 @@
       put(part(q, "rc"), "no receipts read: " + text, "unavailable");
       part(q, "all").hidden = true;
     });
-    live.textContent = "The Digest could not be read.";
+    live.textContent = "The Digest was not readable.";
   }
 
   function paintRecord(m) {
@@ -373,7 +377,7 @@
     var a = net.get(digestPath()).then(function (body) {
       var m = model(body, { shadow: shadow });
       if (!m) {
-        var e = new Error("the digest answer could not be read");
+        var e = new Error("the digest answer was not readable");
         e.code = "unreadable";
         throw e;
       }
@@ -382,7 +386,7 @@
     var b = net.get("/api/ff/house").then(function (body) {
       var m = recordModel(body);
       if (!m) {
-        var e = new Error("the house wires could not be read");
+        var e = new Error("the house wires were not readable");
         e.code = "unreadable";
         throw e;
       }
@@ -453,7 +457,9 @@
   });
   document.getElementById("ffxDigInfoBtn").addEventListener("click", function () { document.getElementById("ffxDigInfo").showModal(); });
   retry.addEventListener("click", function () {
-    retry.hidden = true;
+    if (retry.getAttribute("aria-disabled") === "true") return;
+    retry.setAttribute("aria-disabled", "true");
+    live.textContent = "Reading the digest.";
     put(cap, "reading the digest", "reading");
     load();
   });

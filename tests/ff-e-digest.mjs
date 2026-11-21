@@ -192,7 +192,12 @@ async function behaviourBattery(browser, files = [], count = false) {
       await page.waitForTimeout(80);
     } else t(false, "Show all hidden on a busy quadrant");
     for (const [btn, rows, title] of [["#ffxDigRecAll", 9, "Record so far: all 9 wires"], ["#ffxDigHyAll", 20, "Silent wires of yours: all 20"]]) {
-      if (!(await page.locator(btn).isVisible())) { t(false, btn + " hidden while rows are cut"); continue; }
+      if (!(await page.locator(btn).isVisible())) {
+        const list = btn === "#ffxDigRecAll" ? "#ffxDigRecs" : "#ffxDigHyList";
+        const cut = await page.evaluate((sel) => { const el = document.querySelector(sel); return el ? [el.querySelectorAll(":scope > .ffx-cut").length, el.children.length] : [-1, 0]; }, list);
+        t(cut[0] === 0 && cut[1] === rows, btn + " hidden while rows are cut: " + JSON.stringify(cut));
+        continue;
+      }
       await page.click(btn);
       await page.waitForTimeout(120);
       const d = await page.evaluate(() => ({ open: document.getElementById("ffxDigAll").open, rows: document.querySelectorAll("#ffxDigAllList > li").length, title: document.getElementById("ffxDigAllT").textContent }));
@@ -291,6 +296,14 @@ function serverChecks() {
   ok(on.includes('data-flows-page="digest"'), "body names the page");
   ok(!on.includes("not released yet"), "the digest is no longer the not-released placeholder");
   ok(on.includes(DIGEST_CALIBRATION_LINE.replace(/&/g, "&amp;")) || on.includes(DIGEST_CALIBRATION_LINE), "calibration not released line served");
+  {
+    const src = fs.readFileSync(new URL("../assets/js/flows-ff-digest.js", import.meta.url), "utf8");
+    const said = [...src.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]).filter((x) => / /.test(x));
+    const bad = said.filter((x) => BANNED.test(x));
+    ok(said.length > 20 && bad.length === 0, "no sentence the Digest script can print carries a banned copy word, the unreadable-answer messages included: " + JSON.stringify(bad));
+    ok(BANNED.test("the digest answer could not be read"), "PLANTED: the old unreadable-answer wording is caught by the same check");
+    ok(!BANNED.test(DIGEST_CALIBRATION_LINE) && !/ff-calibration/.test(DIGEST_CALIBRATION_LINE), "the calibration line names no payload key");
+  }
   for (const id of DIGEST_QUADRANTS) ok(on.includes('id="ffxDig-' + id + '"'), "quadrant " + id + " served");
   const routes = read("server/routes/flows-pages.js");
   ok(/slug: "digest", ff: "inbox", render: [^\n]*FLOWS_PAGES\.digestPage\(\{ username, shadow: ffMode\(env\) === "shadow" \}\)/.test(routes), "the page row renders digestPage with the shadow switch");
