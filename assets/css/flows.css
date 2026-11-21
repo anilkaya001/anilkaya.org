@@ -824,26 +824,46 @@ a.ff-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px
 @media (pointer: coarse) {
   a.ff-brand { min-height: 44px; }
 }
+body:has(#fxFresh:is([data-state="stale"], [data-state="pending"])) .ff-core { fill: var(--label-3); }
+body:has(#fxFresh:is([data-state="stale"], [data-state="pending"])) .ff-halo { stroke: var(--label-3); }
 @media (prefers-reduced-motion: no-preference) {
-  body:has(#fxFresh:is([data-state="live"], [data-state="fresh"], [data-state="closed"])) .ff-core {
-    animation: ff-breathe 3.2s ease-in-out infinite;
-  }
-  body:has(#fxFresh:is([data-state="live"], [data-state="fresh"], [data-state="closed"])) .ff-halo {
-    animation: ff-halo 3.2s ease-in-out infinite;
-  }
+  body:has(#fxFresh[data-beat="a"]) .ff-core { animation: ff-beat-a 1.2s ease-out 1; }
+  body:has(#fxFresh[data-beat="b"]) .ff-core { animation: ff-beat-b 1.2s ease-out 1; }
+  body:has(#fxFresh[data-beat="a"]) .ff-halo { animation: ff-ring-a 1.2s ease-out 1; }
+  body:has(#fxFresh[data-beat="b"]) .ff-halo { animation: ff-ring-b 1.2s ease-out 1; }
+  #fxFresh[data-beat="a"] { animation: fx-beat-a 1.2s ease-out 1; }
+  #fxFresh[data-beat="b"] { animation: fx-beat-b 1.2s ease-out 1; }
 }
-@keyframes ff-breathe {
-  0%, 100% { opacity: 0.8; transform: scale(0.94); }
-  50% { opacity: 1; transform: scale(1.06); }
+@keyframes ff-beat-a {
+  0%, 100% { opacity: 0.85; transform: scale(1); }
+  30% { opacity: 1; transform: scale(1.14); }
 }
-@keyframes ff-halo {
-  0%, 100% { opacity: 0.15; transform: scale(0.9); }
-  50% { opacity: 0.5; transform: scale(1.1); }
+@keyframes ff-beat-b {
+  0%, 100% { opacity: 0.85; transform: scale(1); }
+  30% { opacity: 1; transform: scale(1.14); }
+}
+@keyframes ff-ring-a {
+  0% { opacity: 0.6; transform: scale(0.9); }
+  100% { opacity: 0.35; transform: scale(1); }
+}
+@keyframes ff-ring-b {
+  0% { opacity: 0.6; transform: scale(0.9); }
+  100% { opacity: 0.35; transform: scale(1); }
+}
+@keyframes fx-beat-a {
+  0% { box-shadow: var(--glass-chrome-edge), 0 0 0 0 var(--s-orange); }
+  100% { box-shadow: var(--glass-chrome-edge), 0 0 0 8px transparent; }
+}
+@keyframes fx-beat-b {
+  0% { box-shadow: var(--glass-chrome-edge), 0 0 0 0 var(--s-orange); }
+  100% { box-shadow: var(--glass-chrome-edge), 0 0 0 8px transparent; }
 }
 @media (forced-colors: active) {
   .ff-brand, a.ff-brand:hover { color: CanvasText; }
   .ff-core { fill: CanvasText; }
   .ff-halo { stroke: CanvasText; }
+  body:has(#fxFresh:is([data-state="stale"], [data-state="pending"])) .ff-core { fill: GrayText; }
+  body:has(#fxFresh:is([data-state="stale"], [data-state="pending"])) .ff-halo { stroke: GrayText; }
 }
 .fx-doc-h .ff-brand, .st-title .ff-brand { font-size: 13px; }
 
@@ -1559,9 +1579,7 @@ span.ui-fresh, span.ui-fresh:hover { color: var(--label-2); cursor: default; bac
 .ui-state[data-state="live"] { color: var(--up); }
 .ui-state[data-state="stale"] { color: var(--warn); }
 .ui-state[data-state="pending"] .ui-g { animation: ui-spin 6s linear infinite; }
-.ui-state[data-state="live"] .ui-g { animation: ui-breathe 2.4s var(--ease-out) infinite; }
 @keyframes ui-spin { to { transform: rotate(360deg); } }
-@keyframes ui-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 @media (prefers-reduced-motion: reduce) {
   .ui-state .ui-g, .ui-fresh .ui-g { animation: none !important; }
 }
