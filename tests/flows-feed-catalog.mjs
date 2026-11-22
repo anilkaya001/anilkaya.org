@@ -105,6 +105,7 @@ function catalogProblems(gen, { specText = SPEC } = {}) {
   const need = (cond, msg) => { checks++; if (!cond) problems.push(msg); };
   let catalog;
   try { catalog = gen.buildCatalog(specText); } catch (error) { return [`the generator threw: ${error.message}`]; }
+  const docOf = yaml.parseYaml(specText);
   const scanned = scannedOperations(specText);
   const keys = catalog.ops.map((o) => `${o.method} ${o.path}`);
   need(JSON.stringify(keys.slice().sort()) === JSON.stringify(scanned.operations.slice().sort()), `the catalog's operations are not the document's: ${keys.length} against ${scanned.operations.length} counted on the document's own lines`);
@@ -129,7 +130,7 @@ function catalogProblems(gen, { specText = SPEC } = {}) {
 
     const want = ORACLE.ops[key];
     if (!want) { problems.push(`${key} is not in the oracle`); continue; }
-    need(digest([o.kind, o.statuses, o.documents, o.envelope, o.envelopeFrom ?? null, o.bare === true, o.unwrapped === true]) === want.shape, `${key}: kind, statuses, what the schema documents or how the answer is wrapped differ from the oracle`);
+    need(digest([o.kind, o.statuses, o.documents, o.envelope, o.envelopeFrom ?? null, o.bare === true, o.unwrapped === true, o.exampleKeys ?? null]) === want.shape, `${key}: kind, statuses, what the schema documents or how the answer is wrapped differ from the oracle`);
     need(digest(o.params) === want.params, `${key}: the typed parameters differ from the oracle (${o.params.length} against ${want.n[0]})`);
     need(digest(o.fields) === want.fields, `${key}: the response fields differ from the oracle (${o.fields.length} against ${want.n[1]})`);
     need((o.body === undefined) === (want.body === undefined) && (o.body === undefined || digest(o.body) === want.body), `${key}: the request body differs from the oracle`);
@@ -143,9 +144,15 @@ function catalogProblems(gen, { specText = SPEC } = {}) {
     need(o.kind === "json"
       ? typeof o.envelope === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(o.envelope) && ["schema", "example", "assumed"].includes(o.envelopeFrom) && ["envelope", "row", "list", "open"].includes(o.documents) &&
         (o.documents !== "envelope" || (o.envelope === catalog.envelope && o.envelopeFrom === "schema")) && (o.bare === undefined || (o.bare === true && o.documents !== "envelope" && o.envelopeFrom === "assumed")) &&
-        (o.unwrapped === undefined || (o.unwrapped === true && o.bare === undefined && o.envelopeFrom === "assumed" && o.envelope === catalog.envelope && ["row", "open"].includes(o.documents)))
-      : o.envelope === null && o.envelopeFrom === undefined && o.bare === undefined && o.unwrapped === undefined && o.documents === null && o.fields.length === 0, `${key}: the wrapper and the kind disagree`);
-    need(o.params.every((p) => p.in === "path" || p.in === "query"), `${key}: a parameter is sent somewhere other than the path or the query`);
+        (o.unwrapped === undefined || (o.unwrapped === true && o.bare === undefined && o.envelopeFrom === "assumed" && o.envelope === catalog.envelope && ["row", "open"].includes(o.documents))) &&
+        ((o.unwrapped === true && o.documents === "open") === (o.exampleKeys !== undefined)) &&
+        (o.exampleKeys === undefined || (Array.isArray(o.exampleKeys) && o.exampleKeys.length > 0 && o.exampleKeys.every((k, i, all) => typeof k === "string" && k !== "" && (i === 0 || all[i - 1] < k))))
+      : o.envelope === null && o.envelopeFrom === undefined && o.bare === undefined && o.unwrapped === undefined && o.exampleKeys === undefined && o.documents === null && o.fields.length === 0, `${key}: the wrapper and the kind disagree`);
+    need(o.params.every((p) => ["path", "query", "header", "cookie"].includes(p.in)), `${key}: a parameter is sent somewhere OpenAPI does not name`);
+    if (o.exampleKeys !== undefined) {
+      const shown = exampleOf(docOf, o);
+      need(isObj(shown) && canon(o.exampleKeys) === canon(Object.keys(shown).sort()), `${key}: the keys recorded for the answer its example shows are not the example's own top-level keys`);
+    }
     need(o.params.every((p) => typeof p.default !== "string" || !/\s/.test(p.default)), `${key}: a parameter default is free text`);
     need(!/(?:^|[.-])(?:tapes?|vendors?)(?:$|[.-])/.test(o.id), `${key}: the id ${o.id} carries a word the house rules retire`);
     for (const token of o.path.matchAll(/\{([^{}]+)\}/g)) need(o.params.some((p) => p.in === "path" && p.name === token[1] && p.required), `${key}: the path token ${token[1]} has no required path parameter`);
@@ -206,12 +213,16 @@ function catalogProblems(gen, { specText = SPEC } = {}) {
     need(canon(tiny.ops) === canon(TINY_CATALOG.ops), `the small document's operations are ${JSON.stringify(tiny.ops)}`);
     need(canon(tiny.channels) === canon(TINY_CATALOG.channels), `the small document's channels are ${JSON.stringify(tiny.channels)}`);
   }
-  for (const [title, edit, want] of WRAPPER_CASES) {
+  for (const [title, edit, want, retext] of WRAPPER_CASES) {
     const doc = structuredClone(TINY);
     edit(doc.components.schemas["Tiny row "]);
+    const written = yaml.dumpYaml(doc);
+    const text = retext ? retext(written) : written;
+    if (retext && text === written) { problems.push(`${title}: the case could not rewrite the document it reads`); continue; }
     let made = null;
-    try { made = gen.buildCatalog(yaml.dumpYaml(doc)).ops.find((o) => o.method === "GET" && o.path === "/api/tiny/{name}/rows") || { envelope: "no such operation" }; } catch (error) { made = { envelope: String(error.message) }; }
-    need(canon({ envelope: made.envelope, envelopeFrom: made.envelopeFrom, ...(made.bare === undefined ? {} : { bare: made.bare }), ...(made.unwrapped === undefined ? {} : { unwrapped: made.unwrapped }) }) === canon(want), `${title}: the answer is taken to be wrapped as ${JSON.stringify([made.envelope, made.envelopeFrom, made.bare, made.unwrapped])}`);
+    try { made = gen.buildCatalog(text).ops.find((o) => o.method === "GET" && o.path === "/api/tiny/{name}/rows") || { envelope: "no such operation" }; } catch (error) { made = { envelope: String(error.message) }; }
+    need(canon({ envelope: made.envelope, envelopeFrom: made.envelopeFrom, ...(made.bare === undefined ? {} : { bare: made.bare }), ...(made.unwrapped === undefined ? {} : { unwrapped: made.unwrapped }), ...(made.exampleKeys === undefined ? {} : { exampleKeys: made.exampleKeys }) }) === canon(want),
+      `${title}: the answer is taken to be wrapped as ${JSON.stringify([made.envelope, made.envelopeFrom, made.bare, made.unwrapped, made.exampleKeys])}`);
   }
   for (const [title, edit] of REFUSED_DOCUMENTS) {
     const doc = structuredClone(TINY);
@@ -219,6 +230,18 @@ function catalogProblems(gen, { specText = SPEC } = {}) {
     let refused = false;
     try { gen.buildCatalog(yaml.dumpYaml(doc)); } catch (error) { refused = error instanceof gen.CatalogError; }
     need(refused, `a document with ${title} is not refused`);
+  }
+  for (const place of ["header", "cookie"]) {
+    const doc = structuredClone(TINY);
+    doc.paths["/api/tiny/file"].get.parameters = [{ name: "x-sample", in: place, required: true, schema: { type: "string" } }];
+    let made = null;
+    try { made = gen.buildCatalog(yaml.dumpYaml(doc)); } catch (error) { problems.push(`A PARAMETER IN A ${place.toUpperCase()} IS RECORDED, NOT REFUSED: a document with one is refused (${error.message})`); }
+    const op = made ? made.ops.find((o) => o.id === "tiny-thing.file") : null;
+    if (!op) continue;
+    need(canon(op.params) === canon([{ name: "x-sample", in: place, required: true, type: "string" }]), `a parameter in a ${place} is not recorded as the document gives it: ${JSON.stringify(op.params)}`);
+    need(canon(feed.feedCoverage(made, {}).operations.elsewhere) === canon([{ id: "tiny-thing.file", params: [`${place} x-sample`] }]), `the coverage does not list the operation whose parameter goes in a ${place}`);
+    const built = refusal(() => feed.createFeedClient(made).request("tiny-thing.file", { "x-sample": "v" }));
+    need(built !== null && built.param === "x-sample" && built.reason === "place", `the client builds an operation whose parameter goes in a ${place} (${built ? built.reason : "built"})`);
   }
 
   const text = gen.renderCatalog(catalog);
@@ -310,6 +333,10 @@ const MINI = Object.freeze({
     { id: "t.shown", method: "GET", path: "/x/shown", kind: "json", params: [], envelope: "data", envelopeFrom: "example", documents: "row", fields: [{ path: "px", type: "string", numeric: true }] },
     { id: "t.stated", method: "GET", path: "/x/stated", kind: "json", params: [], envelope: "data", envelopeFrom: "schema", documents: "envelope", fields: [{ path: "data", type: "object" }, { path: "data.px", type: "string", numeric: true }] },
     { id: "t.seen", method: "GET", path: "/x/seen", kind: "json", params: [], envelope: "data", envelopeFrom: "assumed", documents: "row", fields: [{ path: "px", type: "string", numeric: true }] },
+    { id: "t.shown-open", method: "GET", path: "/x/shown-open", kind: "json", params: [], envelope: "data", envelopeFrom: "assumed", unwrapped: true, exampleKeys: ["company", "filings"], documents: "open", fields: [] },
+    { id: "t.confirmed", method: "GET", path: "/x/confirmed", kind: "json", params: [], envelope: "data", envelopeFrom: "assumed", documents: "row", fields: [{ path: "px", type: "string", numeric: true }] },
+    { id: "t.seen-bare", method: "GET", path: "/x/seen-bare", kind: "json", params: [], envelope: "data", envelopeFrom: "assumed", bare: true, documents: "row", fields: [{ path: "px", type: "string", numeric: true }] },
+    { id: "t.confirmed-open", method: "GET", path: "/x/confirmed-open", kind: "json", params: [], envelope: "data", envelopeFrom: "assumed", unwrapped: true, exampleKeys: ["company"], documents: "open", fields: [] },
     { id: "prediction.search-users", method: "GET", path: "/x/people", kind: "json", params: [{ name: "q", in: "query", required: true, type: "string" }], envelope: "data", documents: "row", fields: [{ path: "address", type: "string" }, { path: "name", type: "string" }] },
     { id: "alerts.create-config", method: "POST", path: "/x/alerts", kind: "json", params: [], envelope: "data", documents: "open", fields: [] },
     { id: "prediction.rows", method: "GET", path: "/x/pred", kind: "json", params: [], envelope: "data", documents: "row", fields: [
@@ -320,7 +347,7 @@ const MINI = Object.freeze({
       { path: "data", type: "object" }, { path: "data.bars", type: "array" }, { path: "data.bars[]", type: "object" }, { path: "data.bars[].close", type: "string", numeric: true }, { path: "data.bars[].volume", type: "string", numeric: true },
     ] },
     { id: "crypto.bars", method: "GET", path: "/x/crypto", kind: "json", params: [], envelope: "data", documents: "row", fields: [{ path: "close", type: "string", numeric: true }, { path: "volume", type: "string", numeric: true }, { path: "whale_score", type: "integer" }] },
-    { id: "crypto.open", method: "GET", path: "/x/crypto-open", kind: "json", params: [], envelope: "data", envelopeFrom: "assumed", documents: "open", fields: [] },
+    { id: "crypto.open", method: "GET", path: "/x/crypto-open", kind: "json", params: [], envelope: "data", envelopeFrom: "assumed", unwrapped: true, exampleKeys: ["whales"], documents: "open", fields: [] },
     { id: "crypto.list", method: "GET", path: "/x/crypto-list", kind: "json", params: [], envelope: "data", documents: "list", fields: [] },
     { id: "seasonality.month", method: "GET", path: "/x/season", kind: "json", params: [], envelope: "data", documents: "row", fields: [{ path: "avg_change", type: "string", numeric: true }, { path: "years", type: "integer" }] },
     { id: "private-markets.management", method: "GET", path: "/x/leaders", kind: "json", params: [], envelope: "data", documents: "row", fields: [{ path: "first_name", type: "string" }, { path: "last_name", type: "string" }, { path: "title", type: "string" }] },
@@ -457,6 +484,7 @@ function clientProblems(lib, catalog = FEED_CATALOG) {
   refused(() => mini.request("t.header", {}), "x-sample", "place", "an operation with a header parameter, even left out");
   refused(() => mini.request("t.header", { "x-sample": "v" }), "x-sample", "place", "a header parameter given a value");
   refused(() => mini.request("t.listpath", { names: ["a", "b"] }), "names", "place", "a list where one path segment goes");
+  same(lib.feedCoverage({ ...MINI, ops: MINI.ops.map((o) => ({ tags: [], ...o })) }, {}).operations.elsewhere, [{ id: "t.header", params: ["header x-sample"] }], "the coverage lists the operation whose parameter goes in a header, and no other");
   same(mini.request("t.file", { day: "2026-10-02" }).path, "/x/file/2026-10-02", "a file operation is a request like any other");
   need(Object.keys(mini.request("t.rows", { name: "n", day: "2026-10-02" })).join() === "id,method,path,query,search", "a built request carries something beside its id, method, path and query");
 
@@ -537,9 +565,25 @@ function clientProblems(lib, catalog = FEED_CATALOG) {
   same(got("t.loose", {}), { ok: false, reason: "unshaped" }, "an empty object where the wrapper is assumed");
   same(got("t.loose", { px: "x" }), { ok: false, reason: "type:px" }, "a row with no key around it keeps its types");
   same(got("t.loose", { data: null }), { ok: false, reason: "empty" }, "an assumed wrapper holding nothing");
-  same(got("t.loose-open", { company: "Sample", filings: [{ n: 1 }] }), answer({ company: "Sample", filings: [{ n: 1 }] }, { form: "unwrapped" }), "where nothing is documented and the wrapper is assumed, an object is the answer");
+  same(got("t.loose-open", { company: "Sample", filings: [{ n: 1 }] }), { ok: false, reason: "unshaped" }, "where nothing is documented, the wrapper is assumed and no example shows the answer itself, an object without the key is not the answer: nothing tells it from an error");
+  for (const error of [{ error: "rate limited" }, { message: "No data for this ticker" }]) same(got("t.loose-open", error), { ok: false, reason: "unshaped" }, `the error ${JSON.stringify(error)} where nothing is documented and the wrapper is assumed`);
   same(got("t.loose-open", { data: { company: "Sample" }, page: 2 }), answer({ company: "Sample" }, { meta: { page: 2 } }), "and an answer under the assumed key is unwrapped");
-  same(got("t.loose-open", {}), { ok: false, reason: "empty" }, "an empty object where nothing is documented");
+  same(got("t.loose-open", { data: {} }), { ok: false, reason: "empty" }, "an empty answer under the assumed key where nothing is documented");
+  same(got("t.loose-open", {}), { ok: false, reason: "unshaped" }, "an empty object where nothing is documented and the wrapper is assumed");
+  same(got("t.shown-open", { company: "Sample", filings: [{ n: 1 }], more: 1 }), answer({ company: "Sample", filings: [{ n: 1 }], more: 1 }, { form: "unwrapped" }),
+    "where the document's example shows the answer itself and the schema describes none of it, an object holding a key the example shows is the answer");
+  for (const error of [{ error: "rate limited" }, { message: "No data for this ticker" }, { error: { company: "Sample" } }, {}]) same(got("t.shown-open", error), { ok: false, reason: "unshaped" }, `the body ${JSON.stringify(error)} holds no key the example shows, so it is not taken for the answer`);
+  same(got("t.shown-open", { data: { company: "Sample" } }), answer({ company: "Sample" }), "and the answer under the usual key is read");
+  same(got("t.confirmed", { px: "2" }), { ok: false, reason: "unshaped" }, "THE WIRE SETTLES THE WRAPPER: where the wire was seen to send the answer under the assumed key, a row without it is not read");
+  same(got("t.confirmed", { data: [{ px: "2" }] }), answer([{ px: 2 }]), "and the answer under it is");
+  same(lib.createFeedClient(MINI, { wire: {} }).read("t.confirmed", { px: "2" }), answer({ px: 2 }, { form: "unwrapped" }), "without that observation the row itself is read, as for any assumed row holding a documented field");
+  same(got("t.confirmed-open", { company: "Sample" }), { ok: false, reason: "unshaped" }, "where the wire was seen to send the answer under the key, an answer the example shows bare is not read bare");
+  same(got("t.confirmed-open", { data: { company: "Sample" } }), answer({ company: "Sample" }), "and under the key it is");
+  same(lib.createFeedClient(MINI, { wire: {} }).read("t.confirmed-open", { company: "Sample" }), answer({ company: "Sample" }, { form: "unwrapped" }), "without the observation the example's evidence stands");
+  same(got("t.seen-bare", { px: "2" }), { ok: false, reason: "unshaped" }, "where the wire was seen to send a bare list, a row with no list around it is not read");
+  same(got("t.seen-bare", [{ px: "2" }]), answer([{ px: 2 }], { form: "bare" }), "and the bare list is");
+  same(got("t.seen-bare", { data: [{ px: "2" }] }), answer([{ px: 2 }]), "and so is the list under the assumed key");
+  same(lib.createFeedClient(MINI, { wire: {} }).read("t.seen-bare", { px: "2" }), answer({ px: 2 }, { form: "unwrapped" }), "without the observation a row holding a documented field is read");
   same(got("t.loose-list", { other: ["a"] }), { ok: false, reason: "unshaped" }, "an object where a list is documented is not the list");
   same(got("t.loose-list", { data: ["a"] }), answer(["a"]), "a documented list under its assumed key");
   same(got("t.shown", { px: "2" }), { ok: false, reason: "unshaped" }, "where the document's example shows the wrapper, an answer without it is not read");
@@ -647,52 +691,57 @@ function clientProblems(lib, catalog = FEED_CATALOG) {
     need(client.held(o.id) === null, `${key}: an operation the house has not held is marked held`);
     if (o.kind === "socket") { refused(() => client.request(o.id, {}), null, "not-a-request", `${key}: a socket page`); continue; }
     if (o.method !== "GET") { refused(() => client.request(o.id, fx.request.params), null, "write", `${key}: a write`); continue; }
-    let built;
-    try { built = client.request(o.id, fx.request.params); } catch (error) { problems.push(`${key}: the fixture's parameters are refused (${error.message})`); continue; }
-    need(built.method === o.method && built.path === fx.request.path && built.search === fx.request.search, `${key}: the request is not the one the fixture generator builds (${built.path}${built.search})`);
-    const lean = client.request(o.id, fx.request.required);
-    need(lean.path === fx.request.path && lean.search === fx.request.searchRequired, `${key}: the request with only its required parameters differs (${lean.path}${lean.search})`);
-    const template = o.path.split("/");
-    const segments = built.path.split("/");
-    need(segments.length === template.length && !/[{}]/.test(built.path) && template.every((part, i) => {
-      const token = /^\{(.+)\}$/.exec(part);
-      return token ? decodeURIComponent(segments[i]) === String(fx.request.params[token[1]]) : part === segments[i];
-    }), `${key}: a path parameter is not exactly one segment of ${built.path}`);
-    const url = new URL(VENDOR_BASE_DEFAULT + built.path + built.search);
-    need(url.pathname === built.path && JSON.stringify([...url.searchParams]) === JSON.stringify(built.query), `${key}: the request does not survive being parsed as a URL`);
-    if (!o.params.some((p) => p.type === "array")) {
-      const scalars = Object.fromEntries(o.params.filter((p) => p.in === "query" && fx.request.params[p.name] !== undefined).map((p) => [p.name, fx.request.params[p.name]]));
-      need(vendorUrl(VENDOR_BASE_DEFAULT, built.path, scalars).href === url.href, `${key}: the request differs from the one the existing URL builder makes`);
-    }
-    for (const p of o.params) {
-      const without = { ...fx.request.params };
-      delete without[p.name];
-      if (p.required) refused(() => client.request(o.id, without), p.name, "missing", `${key} without ${p.name}`);
-      else need(refusal(() => client.request(o.id, without)) === null, `${key}: leaving out the optional ${p.name} is refused`);
-      const leaf = p.type === "array" ? p.items : p.type;
-      const wrap = (v) => ({ ...fx.request.params, [p.name]: p.type === "array" ? [v] : v });
-      if (p.enum !== undefined) refused(() => client.request(o.id, wrap(leaf === "integer" || leaf === "number" ? 987654321 : "not a documented value")), p.name, "enum", `${key}: ${p.name} outside its enum`);
-      if (leaf === "integer") refused(() => client.request(o.id, wrap("7")), p.name, "type", `${key}: ${p.name} given as text`);
-      if (leaf === "number") refused(() => client.request(o.id, wrap("0.5")), p.name, "type", `${key}: ${p.name} given as text`);
-      if (leaf === "boolean") refused(() => client.request(o.id, wrap("true")), p.name, "type", `${key}: ${p.name} given as text`);
-      if (leaf === "string") refused(() => client.request(o.id, wrap(7)), p.name, "type", `${key}: ${p.name} given as a number`);
-      if (p.type === "array") refused(() => client.request(o.id, { ...fx.request.params, [p.name]: "one" }), p.name, "type", `${key}: ${p.name} given as one value`);
-      if (p.min !== undefined && p.enum === undefined) refused(() => client.request(o.id, wrap(p.min - 1)), p.name, "min", `${key}: ${p.name} below its minimum`);
-      if (p.max !== undefined && p.enum === undefined) refused(() => client.request(o.id, wrap(p.max + 1)), p.name, "max", `${key}: ${p.name} above its maximum`);
-      if (p.format === "date" && p.enum === undefined) refused(() => client.request(o.id, wrap("2026-02-30")), p.name, "format", `${key}: ${p.name} given a day that does not exist`);
-      if (p.pattern !== undefined) refused(() => client.request(o.id, wrap("no match")), p.name, "pattern", `${key}: ${p.name} outside its pattern`);
-      if (p.in === "path" && leaf === "string" && p.enum === undefined && p.format === undefined && p.pattern === undefined) {
-        const hostile = client.request(o.id, wrap("A/B c?#"));
-        need(hostile.path.split("/").length === template.length && hostile.path.includes(encodeURIComponent("A/B c?#")) && new URL(VENDOR_BASE_DEFAULT + hostile.path).pathname === hostile.path, `${key}: ${p.name} is not encoded as one segment`);
-        for (const dots of [".", ".."]) refused(() => client.request(o.id, wrap(dots)), p.name, "segment", `${key}: ${p.name} given ${dots}`);
+    const outside = o.params.filter((p) => p.in !== "path" && p.in !== "query");
+    need(canon(fx.request.elsewhere || []) === canon(outside.map((p) => `${p.in} ${p.name}`)), `${key}: the fixture generator and the catalog disagree on the parameters that go outside the path and the query`);
+    if (outside.length) refused(() => client.request(o.id, fx.request.params), outside[0].name, "place", `${key}: an operation with a parameter in the ${outside[0].in}`);
+    else {
+      let built;
+      try { built = client.request(o.id, fx.request.params); } catch (error) { problems.push(`${key}: the fixture's parameters are refused (${error.message})`); continue; }
+      need(built.method === o.method && built.path === fx.request.path && built.search === fx.request.search, `${key}: the request is not the one the fixture generator builds (${built.path}${built.search})`);
+      const lean = client.request(o.id, fx.request.required);
+      need(lean.path === fx.request.path && lean.search === fx.request.searchRequired, `${key}: the request with only its required parameters differs (${lean.path}${lean.search})`);
+      const template = o.path.split("/");
+      const segments = built.path.split("/");
+      need(segments.length === template.length && !/[{}]/.test(built.path) && template.every((part, i) => {
+        const token = /^\{(.+)\}$/.exec(part);
+        return token ? decodeURIComponent(segments[i]) === String(fx.request.params[token[1]]) : part === segments[i];
+      }), `${key}: a path parameter is not exactly one segment of ${built.path}`);
+      const url = new URL(VENDOR_BASE_DEFAULT + built.path + built.search);
+      need(url.pathname === built.path && JSON.stringify([...url.searchParams]) === JSON.stringify(built.query), `${key}: the request does not survive being parsed as a URL`);
+      if (!o.params.some((p) => p.type === "array")) {
+        const scalars = Object.fromEntries(o.params.filter((p) => p.in === "query" && fx.request.params[p.name] !== undefined).map((p) => [p.name, fx.request.params[p.name]]));
+        need(vendorUrl(VENDOR_BASE_DEFAULT, built.path, scalars).href === url.href, `${key}: the request differs from the one the existing URL builder makes`);
       }
+      for (const p of o.params) {
+        const without = { ...fx.request.params };
+        delete without[p.name];
+        if (p.required) refused(() => client.request(o.id, without), p.name, "missing", `${key} without ${p.name}`);
+        else need(refusal(() => client.request(o.id, without)) === null, `${key}: leaving out the optional ${p.name} is refused`);
+        const leaf = p.type === "array" ? p.items : p.type;
+        const wrap = (v) => ({ ...fx.request.params, [p.name]: p.type === "array" ? [v] : v });
+        if (p.enum !== undefined) refused(() => client.request(o.id, wrap(leaf === "integer" || leaf === "number" ? 987654321 : "not a documented value")), p.name, "enum", `${key}: ${p.name} outside its enum`);
+        if (leaf === "integer") refused(() => client.request(o.id, wrap("7")), p.name, "type", `${key}: ${p.name} given as text`);
+        if (leaf === "number") refused(() => client.request(o.id, wrap("0.5")), p.name, "type", `${key}: ${p.name} given as text`);
+        if (leaf === "boolean") refused(() => client.request(o.id, wrap("true")), p.name, "type", `${key}: ${p.name} given as text`);
+        if (leaf === "string") refused(() => client.request(o.id, wrap(7)), p.name, "type", `${key}: ${p.name} given as a number`);
+        if (p.type === "array") refused(() => client.request(o.id, { ...fx.request.params, [p.name]: "one" }), p.name, "type", `${key}: ${p.name} given as one value`);
+        if (p.min !== undefined && p.enum === undefined) refused(() => client.request(o.id, wrap(p.min - 1)), p.name, "min", `${key}: ${p.name} below its minimum`);
+        if (p.max !== undefined && p.enum === undefined) refused(() => client.request(o.id, wrap(p.max + 1)), p.name, "max", `${key}: ${p.name} above its maximum`);
+        if (p.format === "date" && p.enum === undefined) refused(() => client.request(o.id, wrap("2026-02-30")), p.name, "format", `${key}: ${p.name} given a day that does not exist`);
+        if (p.pattern !== undefined) refused(() => client.request(o.id, wrap("no match")), p.name, "pattern", `${key}: ${p.name} outside its pattern`);
+        if (p.in === "path" && leaf === "string" && p.enum === undefined && p.format === undefined && p.pattern === undefined) {
+          const hostile = client.request(o.id, wrap("A/B c?#"));
+          need(hostile.path.split("/").length === template.length && hostile.path.includes(encodeURIComponent("A/B c?#")) && new URL(VENDOR_BASE_DEFAULT + hostile.path).pathname === hostile.path, `${key}: ${p.name} is not encoded as one segment`);
+          for (const dots of [".", ".."]) refused(() => client.request(o.id, wrap(dots)), p.name, "segment", `${key}: ${p.name} given ${dots}`);
+        }
+      }
+      refused(() => client.request(o.id, { ...fx.request.params, no_such_parameter: 1 }), "no_such_parameter", "unknown", `${key} with an undocumented parameter`);
     }
-    refused(() => client.request(o.id, { ...fx.request.params, no_such_parameter: 1 }), "no_such_parameter", "unknown", `${key} with an undocumented parameter`);
 
     if (o.kind !== "json") { refused(() => client.read(o.id, {}), null, "not-a-request", `${key}: a file read as JSON`); continue; }
     const result = documented.read(o.id, fx.body);
     if (!result.ok) { problems.push(`${key}: the fixture does not read back (${result.reason})`); continue; }
-    need(fx.envelope === o.envelope && (fx.bare === true) === (o.bare === true) && (fx.unwrapped === true) === (o.unwrapped === true), `${key}: the catalog and the fixture generator disagree on how the answer is wrapped (${o.envelope} against ${fx.envelope})`);
+    need(fx.envelope === o.envelope && (fx.bare === true) === (o.bare === true) && (fx.unwrapped === true) === (o.unwrapped === true) && canon(fx.exampleKeys ?? null) === canon(o.exampleKeys ?? null), `${key}: the catalog and the fixture generator disagree on how the answer is wrapped (${o.envelope} against ${fx.envelope})`);
     need(result.form === (fx.bare ? "bare" : fx.unwrapped ? "unwrapped" : "wrapped"), `${key}: the fixture is read as ${result.form}`);
     const heldNames = expectedHeld(o.id);
     const numeric = new Set(o.fields.filter((f) => f.type === "integer" || f.type === "number" || f.numeric).map((f) => f.path));
@@ -727,8 +776,7 @@ function clientProblems(lib, catalog = FEED_CATALOG) {
     if (fx.envelope === catalog.envelope && !fx.bare) need(Array.isArray(unwrap(fx.body)) === Array.isArray(result.data), `${key}: the reader and the existing unwrap disagree on the container`);
     const inner = enveloped ? fx.body[o.envelope] : sent;
     const elsewhere = documented.read(o.id, { not_the_wrapper: inner });
-    if (o.envelopeFrom === "assumed" && o.documents === "open") need(elsewhere.ok === true && elsewhere.form === "unwrapped", `${key}: nothing is documented and the wrapper is assumed, and an object is not taken as the answer`);
-    else need(elsewhere.ok === false && elsewhere.reason === "unshaped", `${key}: an answer wrapped under another key is read`);
+    need(elsewhere.ok === false && elsewhere.reason === "unshaped", `${key}: an answer wrapped under another key is read (${elsewhere.ok ? elsewhere.form : elsewhere.reason})`);
     if (alone) {
       const under = documented.read(o.id, { [o.envelope]: fx.body });
       need(under.ok === true && under.form === "wrapped" && canon(under.data) === canon(result.data), `${key}: the same answer under the usual key is not read the same`);
@@ -736,8 +784,8 @@ function clientProblems(lib, catalog = FEED_CATALOG) {
     const one = Array.isArray(inner) ? inner[0] : inner;
     if (!alone && o.documents !== "list" && isObj(one) && !Object.hasOwn(one, o.envelope)) {
       const stripped = documented.read(o.id, one);
-      if (o.envelopeFrom === "assumed") need(stripped.ok === true && stripped.form === "unwrapped", `${key}: the wrapper is only assumed, and the answer without it is not read (${stripped.reason})`);
-      else need(stripped.ok === false && stripped.reason === "unshaped", `${key}: the document shows the wrapper, and an answer without it is read`);
+      if (o.envelopeFrom === "assumed" && o.documents === "row") need(stripped.ok === true && stripped.form === "unwrapped", `${key}: the wrapper is only assumed and the row holds documented fields, and the row without the wrapper is not read (${stripped.reason})`);
+      else need(stripped.ok === false && stripped.reason === "unshaped", `${key}: ${o.envelopeFrom === "assumed" ? "nothing shows that this answer comes without its wrapper" : "the document shows the wrapper"}, and an answer without it is read`);
     }
     need(result.rows.length === (Array.isArray(result.data) ? result.data.length : 1), `${key}: rows is not the list of rows`);
   }
@@ -755,6 +803,43 @@ function clientProblems(lib, catalog = FEED_CATALOG) {
     need(got1.ok !== true || ![...keysWithin(got1.data), ...keysWithin(got1.meta)].some((name) => expectedHeld(o.id).has(name)), `${key}: a held field of the document's example is in what the reader returns`);
   }
   need(shown === EXAMPLES_SHOWN, `the document shows an example answer for ${shown} operations`);
+
+  const answering = catalog.ops.filter((o) => o.kind === "json" && !Object.hasOwn(HELD_ROUTES, o.id));
+  for (const o of answering) {
+    for (const body of ERROR_BODIES) {
+      for (const [name, reader] of [["the client", client], ["the client without the observation", documented]]) {
+        const got = reader.read(o.id, body);
+        need(got.ok === false && got.reason === "unshaped", `AN ERROR IS NEVER AN ANSWER: ${o.method} ${o.path} reads ${JSON.stringify(body)} through ${name} as ${got.ok ? `an answer (${got.form})` : got.reason}`);
+      }
+    }
+  }
+  for (const id of ["volatility.anomaly", "nasdaq-pulse.top", "politics-fec.lobbying"]) {
+    for (const body of ERROR_BODIES.slice(0, 2)) same(client.read(id, body), { ok: false, reason: "unshaped" }, `${id} reads ${JSON.stringify(body)} as an answer`);
+  }
+  const observedIds = new Set(observedOps(catalog).map((seen) => seen.o.id));
+  const witness = (reader, o) => {
+    const heldHere = lib.heldFieldsOf(o.id);
+    const top = o.fields.find((f) => !/[.[]/.test(f.path) && f.path !== reader.envelope(o.id) && !heldHere.has(f.path));
+    return { [top ? top.path : o.exampleKeys ? o.exampleKeys[0] : "sample_key"]: null };
+  };
+  const reachOf = (reader) => answering.filter((o) => { const got = reader.read(o.id, witness(reader, o)); return got.ok === true && got.form === "unwrapped"; }).map((o) => o.id).sort();
+  const ruled = (wire) => answering.filter((o) => o.envelopeFrom === "assumed" && !wire.has(o.id) && (o.documents === "row" || (o.documents === "open" && o.unwrapped === true))).map((o) => o.id).sort();
+  need(canon(reachOf(client)) === canon(LOOSE_READS) && canon(ruled(observedIds)) === canon(LOOSE_READS),
+    `AN ANSWER IS TAKEN WITHOUT ITS WRAPPER ONLY ON EVIDENCE: an assumed row holding a documented field, or an answer the example shows bare holding a key the example shows, and never where the wire was seen to send one; the client takes it for ${JSON.stringify(reachOf(client))}`);
+  need(canon(reachOf(documented)) === canon([...LOOSE_READS, ...LOOSE_WITHOUT_WIRE].sort()) && canon(ruled(new Set())) === canon([...LOOSE_READS, ...LOOSE_WITHOUT_WIRE].sort()),
+    `without the observation the client takes an answer without its wrapper for ${JSON.stringify(reachOf(documented))}`);
+  let stripped = 0;
+  for (const seen of observedOps(catalog)) {
+    if (Object.hasOwn(HELD_ROUTES, seen.o.id)) continue;
+    const sample = bodyFromSets(seen.sets, 0);
+    const inner = seen.bare ? sample : sample[seen.wrapper];
+    const one = Array.isArray(inner) ? inner[0] : inner;
+    if (!isObj(one) || Object.hasOwn(one, client.envelope(seen.o.id))) continue;
+    stripped += 1;
+    const got = client.read(seen.o.id, one);
+    need(got.ok === false && got.reason === "unshaped", `THE WIRE SETTLES THE WRAPPER: ${seen.route} was seen ${seen.bare ? "as a bare list" : `under ${seen.wrapper}`}, and its answer without that is read (${got.ok ? got.form : got.reason})`);
+  }
+  need(stripped >= 60, `only ${stripped} observed answers were read with their wrapper taken off`);
 
   for (const c of catalog.channels) {
     const fx = FIXTURES.channels[c.id];
@@ -830,7 +915,7 @@ function clientProblems(lib, catalog = FEED_CATALOG) {
   for (const seen of observedOps(catalog)) {
     const { o } = seen;
     if (seen.bare) need(o.documents !== "envelope", `${seen.route}: the wire answers a bare list where the document describes a whole answer`);
-    else if (seen.wrapper !== o.envelope) (expectedWire[o.id] = expectedWire[o.id] || {}).envelope = seen.wrapper;
+    expectedWire[o.id] = seen.bare ? { bare: true } : { envelope: seen.wrapper };
     const byPath = new Map(o.fields.map((f) => [f.path, f]));
     const clash = [...new Set(seen.cells.filter((c) => byPath.has(c.path) && contradicts(byPath.get(c.path), c.token)).map((c) => c.path))].sort();
     if (clash.length) (expectedWire[o.id] = expectedWire[o.id] || {}).untyped = clash;
@@ -839,7 +924,9 @@ function clientProblems(lib, catalog = FEED_CATALOG) {
       need(got.ok === true, `${seen.route}: an answer shaped like the observed wire does not read (${got.reason})`);
     }
   }
-  need(canon(lib.FEED_WIRE) === canon(expectedWire), `the table of observed deviations is ${JSON.stringify(lib.FEED_WIRE)}; the committed observation implies ${JSON.stringify(expectedWire)}`);
+  const wireDiff = [...new Set([...Object.keys(lib.FEED_WIRE), ...Object.keys(expectedWire)])].filter((id) => canon(lib.FEED_WIRE[id]) !== canon(expectedWire[id])).sort();
+  need(wireDiff.length === 0 && Object.keys(expectedWire).length >= 60,
+    `THE TABLE OF WHAT THE WIRE SENT IS THE COMMITTED OBSERVATION, CONFIRMATIONS INCLUDED: it differs on ${wireDiff.slice(0, 6).map((id) => `${id} (${JSON.stringify(lib.FEED_WIRE[id] ?? null)} against ${JSON.stringify(expectedWire[id] ?? null)})`).join(", ")}${wireDiff.length > 6 ? ` and ${wireDiff.length - 6} more` : ""}`);
   for (const [id, readers] of join.readers) for (const r of readers) need(OPS.some((e) => e.id === r && `${e.method} ${e.op}` === `${catalog.ops.find((o) => o.id === id).method} ${catalog.ops.find((o) => o.id === id).path}`), `the join gives ${id} a reader that is not a registry entry for it`);
   const coverage = lib.feedCoverage(catalog, { registry: OPS, rail: RT_UPSTREAM, joined: SOCKET_CHANNELS });
   const requests = catalog.ops.filter((o) => o.kind === "json" || o.kind === "file");
@@ -851,6 +938,9 @@ function clientProblems(lib, catalog = FEED_CATALOG) {
   need(canon(coverage.operations.held) === canon(notRead.filter((o) => Object.hasOwn(HELD_ROUTES, o.id)).map((o) => ({ id: o.id, reason: lib.FEED_HELD[o.id] && lib.FEED_HELD[o.id].reason, cite: lib.FEED_HELD[o.id] && lib.FEED_HELD[o.id].cite }))) && coverage.operations.held.length === Object.keys(HELD_ROUTES).length,
     `the coverage does not set the held operations apart with their reasons: ${JSON.stringify(coverage.operations.held)}`);
   need(coverage.operations.heldAndRead.length === 0, `production reads an operation the house holds: ${coverage.operations.heldAndRead}`);
+  const outsideOf = (o) => o.params.filter((p) => !["path", "query"].includes(p.in));
+  need(canon(coverage.operations.elsewhere) === canon(requests.filter((o) => outsideOf(o).length).map((o) => ({ id: o.id, params: outsideOf(o).map((p) => `${p.in} ${p.name}`) }))) && coverage.operations.elsewhere.length === ELSEWHERE_COUNT,
+    `the coverage lists ${coverage.operations.elsewhere.length} operations with a parameter in a header or a cookie: ${JSON.stringify(coverage.operations.elsewhere)}`);
   need(coverage.operations.read + coverage.operations.unread.length + coverage.operations.held.length === coverage.operations.requests, "read, unread and held do not add up to the requests");
   need(Object.values(coverage.operations.byTag).reduce((n, row) => n + row.documented, 0) === requests.length && Object.values(coverage.operations.byTag).reduce((n, row) => n + row.unread.length, 0) === coverage.operations.unread.length &&
     Object.values(coverage.operations.byTag).reduce((n, row) => n + row.held.length, 0) === coverage.operations.held.length, "the tags do not add up");
@@ -886,6 +976,10 @@ const FREE_DEFAULTS = [
 ];
 const SHOWN_UNWRAPPED = ["etf.weights", "option-contract.flow", "option-trade.flow-alert", "politics-fec.lobbying", "politics-fec.people"];
 const SHOWN_BARE = ["ticker.flow-per-strike", "ticker.flow-per-strike-intraday"];
+const ERROR_BODIES = [{ error: "rate limited" }, { message: "No data for this ticker" }, { error: "rate limited", code: 429 }, { status: "error", message: "Unauthorized" }];
+const LOOSE_READS = ["etf.weights", "option-contract.flow", "option-trade.flow-alert", "politics-fec.lobbying", "politics-fec.people", "ticker.flow-per-strike-intraday", "unusual-trades.chart-data"];
+const LOOSE_WITHOUT_WIRE = ["ticker.flow-per-strike"];
+const ELSEWHERE_COUNT = 0;
 
 const BRAND_CASES = [
   ["https://api.samplebrand.test", "s[\\s_-]*a[\\s_-]*m[\\s_-]*p[\\s_-]*l[\\s_-]*e[\\s_-]*b[\\s_-]*r[\\s_-]*a[\\s_-]*n[\\s_-]*d"], ["https://ab.test/path?x=1", "a[\\s_-]*b"], ["http://localhost:8787", null], ["http://127.0.0.1:8787", null], ["https://10.20.30.40", null],
@@ -964,14 +1058,16 @@ const WRAPPER_CASES = [
   ["an example whose one list is a documented field", (row) => { row.example = { legs: [{ k: "5" }] }; }, { envelope: "data", envelopeFrom: "assumed", unwrapped: true }],
   ["an empty example", (row) => { row.example = {}; }, { envelope: "data", envelopeFrom: "assumed" }],
   ["no example", (row) => { delete row.example; }, { envelope: "data", envelopeFrom: "assumed" }],
-  ["an example of an answer the schema does not describe", (row) => { delete row.properties; row.example = { company: "Sample", filings: [], periods: [] }; }, { envelope: "data", envelopeFrom: "assumed", unwrapped: true }],
+  ["an example of an answer the schema does not describe", (row) => { delete row.properties; row.example = { company: "Sample", filings: [], periods: [] }; }, { envelope: "data", envelopeFrom: "assumed", unwrapped: true, exampleKeys: ["company", "filings", "periods"] }],
+  ["an example of an answer the schema does not describe, its keys out of order", (row) => { delete row.properties; row.example = { zeta: "z", beta: [], alpha: {} }; }, { envelope: "data", envelopeFrom: "assumed", unwrapped: true, exampleKeys: ["alpha", "beta", "zeta"] },
+    (text) => text.replace(/^( +)alpha: \{\}\n\1beta: \[\]\n\1zeta: z\n/m, "$1zeta: z\n$1beta: []\n$1alpha: {}\n")],
   ["an example with one container where the schema describes nothing", (row) => { delete row.properties; row.example = { results: [{ a: 1 }] }; }, { envelope: "results", envelopeFrom: "example" }],
   ["a schema that documents data", (row) => { row.properties = { data: { type: "array", items: { type: "object", properties: { k: { type: "string" } } } } }; row.example = { rows: [] }; }, { envelope: "data", envelopeFrom: "schema" }],
 ];
 
 const REFUSED_DOCUMENTS = [
-  ["a parameter sent in a header", (doc) => { doc.paths["/api/tiny/file"].get.parameters = [{ name: "x-sample", in: "header", schema: { type: "string" } }]; }],
-  ["a parameter sent in a cookie", (doc) => { doc.paths["/api/tiny/file"].get.parameters = [{ name: "session", in: "cookie", schema: { type: "string" } }]; }],
+  ["a parameter sent in the body, which OpenAPI 3 does not place there", (doc) => { doc.paths["/api/tiny/file"].get.parameters = [{ name: "payload", in: "body", schema: { type: "string" } }]; }],
+  ["a parameter sent in a form, which OpenAPI 3 does not place there", (doc) => { doc.paths["/api/tiny/file"].get.parameters = [{ name: "field", in: "formData", schema: { type: "string" } }]; }],
   ["a parameter that names no place", (doc) => { doc.paths["/api/tiny/file"].get.parameters = [{ name: "nowhere", schema: { type: "string" } }]; }],
   ["two operations of one name", (doc) => { doc.paths["/api/tiny/file"].get.operationId = "PublicApi.TinyThingController.drop"; }],
   ["an operation with no operationId", (doc) => { delete doc.paths["/api/tiny/file"].get.operationId; }],
@@ -987,7 +1083,7 @@ const WIRE_ONLY_READS = [
 ];
 const OTHER_WRAPPERS = Object.freeze({ "contract-historic": "chains", "shorts-volume": "si" });
 const BARE_LISTS = Object.freeze(["flow-per-strike", "strike-flow-intraday"]);
-const MINI_WIRE = Object.freeze({ "t.wired": { envelope: "si", untyped: ["flag"] }, "t.seen": { envelope: "si" } });
+const MINI_WIRE = Object.freeze({ "t.wired": { envelope: "si", untyped: ["flag"] }, "t.seen": { envelope: "si" }, "t.confirmed": { envelope: "data" }, "t.seen-bare": { bare: true }, "t.confirmed-open": { envelope: "data" } });
 
 function observedOps(catalog) {
   const byRoute = new Map(catalog.ops.map((o) => [`${o.method} ${o.path}`, o]));
@@ -1206,7 +1302,9 @@ const GENERATOR_MUTANTS = [
   ["channel payloads not read", [["      if (payload) payloadFields(payload, types, \"\", fields);\n", ""]]],
   ["an id that is not the operationId's", [["  return parts.map((p) => kebab(p.replace(/Controller$/, \"\")) || kebab(p)).join(\".\");", "  return parts.map((p) => kebab(p)).join(\".\");"]]],
   ["a file called JSON", [["media.includes(\"application/json\") ? \"json\" : media.length ? \"file\" : \"none\",", "media.length ? \"json\" : \"none\","], ["    const schema = content[\"application/json\"].schema;", "    const schema = content[media[0]].schema;"]]],
-  ["a parameter sent in a header described as a query parameter", [["  if (!PLACES.has(raw.in)) throw new CatalogError(", "  if (false) throw new CatalogError("]]],
+  ["a parameter with no place, or a place OpenAPI does not have, accepted", [["  if (!PLACES.has(raw.in)) throw new CatalogError(", "  if (false) throw new CatalogError("]]],
+  ["a header parameter recorded as a query parameter", [["const out = { name: String(raw.name), in: String(raw.in), required:", "const out = { name: String(raw.name), in: raw.in === \"header\" ? \"query\" : String(raw.in), required:"]]],
+  ["a header parameter refusing the whole document", [["const PLACES = new Set([\"path\", \"query\", \"header\", \"cookie\"]);", "const PLACES = new Set([\"path\", \"query\"]);"]]],
   ["a free-text default kept", [["const keepsDefault = (leaf) => typeof leaf.default !== \"string\" || (leaf.enum !== undefined ? leaf.enum.includes(leaf.default) : TOKEN_DEFAULT.test(leaf.default));", "const keepsDefault = (leaf) => leaf !== null;"]]],
   ["a default that is no member of its enum kept", [["(leaf.enum !== undefined ? leaf.enum.includes(leaf.default) : TOKEN_DEFAULT.test(leaf.default));", "TOKEN_DEFAULT.test(leaf.default);"]]],
   ["every text default dropped", [["const keepsDefault = (leaf) => typeof leaf.default !== \"string\" || (leaf.enum !== undefined ? leaf.enum.includes(leaf.default) : TOKEN_DEFAULT.test(leaf.default));", "const keepsDefault = (leaf) => typeof leaf.default !== \"string\";"]]],
@@ -1214,7 +1312,10 @@ const GENERATOR_MUTANTS = [
   ["only one of the retired words replaced in an id", [[".replace(/^vendor(s?)$/, \"source$1\");", ";"]]],
   ["a retired word's plural left in an id", [["word.replace(/^tapes?$/, \"prints\")", "word.replace(/^tape$/, \"prints\")"]]],
   ["a word rewritten inside another word of an id", [[".toLowerCase().split(\"-\").map(houseWord).join(\"-\");", ".toLowerCase().replace(/tapes?/g, \"prints\").replace(/vendor/g, \"source\");"]]],
-  ["an example of the answer itself not noticed", [["    if (keys.length > 0 && (shape.documents === \"open\" || keys.some((k) => documented.has(k)))) return { envelope: ENVELOPE, envelopeFrom: \"assumed\", unwrapped: true };\n", ""]]],
+  ["an example of the answer itself not noticed", [["    if (keys.length > 0 && (shape.documents === \"open\" || keys.some((k) => documented.has(k)))) return { envelope: ENVELOPE, envelopeFrom: \"assumed\", unwrapped: true, ...shownKeys(shape, keys) };\n", ""]]],
+  ["an open answer's example keys not recorded", [["const shownKeys = (shape, keys) => (shape.documents === \"open\" ? { exampleKeys: [...keys].sort() } : {});", "const shownKeys = () => ({});"]]],
+  ["example keys recorded beside a documented row", [["const shownKeys = (shape, keys) => (shape.documents === \"open\" ? { exampleKeys: [...keys].sort() } : {});", "const shownKeys = (shape, keys) => ({ exampleKeys: [...keys].sort() });"]]],
+  ["example keys kept in the example's order", [["const shownKeys = (shape, keys) => (shape.documents === \"open\" ? { exampleKeys: [...keys].sort() } : {});", "const shownKeys = (shape, keys) => (shape.documents === \"open\" ? { exampleKeys: [...keys] } : {});"]]],
   ["an example holding no documented key called the answer itself", [["    if (keys.length > 0 && (shape.documents === \"open\" || keys.some((k) => documented.has(k))))", "    if (keys.length > 0)"]]],
   ["an empty example called the answer itself", [["    if (keys.length > 0 && (shape.documents === \"open\" || keys.some((k) => documented.has(k))))", "    if (shape.documents === \"open\" || keys.some((k) => documented.has(k)) || keys.length === 0)"]]],
 ];
@@ -1262,14 +1363,20 @@ const CLIENT_MUTANTS = [
   ["a dot segment built", [["      if (text === \".\" || text === \"..\") throw new FeedRequestError(o.id, p.name, \"segment\", \"is a dot segment, which an address reads as another path\");\n", ""]]],
   ["only the double dot refused", [["      if (text === \".\" || text === \"..\") throw", "      if (text === \"..\") throw"]]],
   ["half of a surrogate pair encoded", [["  if (typeof value === \"string\" && !wellFormed(value)) refuse(\"type\", \"must be well-formed text; it holds half of a surrogate pair\");\n", ""]]],
-  ["a header parameter sent in the query", [["      if (p.in !== \"path\" && p.in !== \"query\") throw new FeedRequestError(o.id, p.name, \"place\", `is documented in the ${String(p.in)}, where this client sends nothing`);\n", ""]]],
+  ["a header parameter left out without a word", [["      if (p.in !== \"path\" && p.in !== \"query\") throw new FeedRequestError(o.id, p.name, \"place\", `is documented in the ${String(p.in)}, where this client sends nothing`);\n", ""]]],
+  ["a header parameter sent in the query", [["      if (p.in !== \"path\" && p.in !== \"query\") throw new FeedRequestError(o.id, p.name, \"place\", `is documented in the ${String(p.in)}, where this client sends nothing`);\n", ""], ["      if (p.in === \"query\") { query.push([p.name, text]); continue; }", "      if (p.in !== \"path\") { query.push([p.name, text]); continue; }"]]],
+  ["an operation with a header parameter left out of the coverage", [["  const outside = (o) => o.params.filter((p) => p.in !== \"path\" && p.in !== \"query\");", "  const outside = (o) => o.params.filter((p) => p.in === \"cookie\");"]]],
   ["a list written into the path", [["        if (p.in === \"path\") throw new FeedRequestError(o.id, p.name, \"place\", \"is a list, which a path segment cannot carry\");\n", ""]]],
   ["a nonzero text read as zero", [["  if (n === 0 && /[1-9]/.test(value.split(/[eE]/)[0])) return { ok: false };\n", ""]]],
   ["a zero in text refused", [["  if (n === 0 && /[1-9]/.test(value.split(/[eE]/)[0])) return { ok: false };", "  if (n === 0 && /[eE]/.test(value)) return { ok: false };"]]],
   ["the assumed wrapper insisted on", [["    const loose = !bare && !wrapped && isObj(body) && o.envelopeFrom === \"assumed\"", "    const loose = false && isObj(body) && o.envelopeFrom === \"assumed\""]]],
-  ["an answer read without the wrapper its document shows", [["isObj(body) && o.envelopeFrom === \"assumed\" && observed(o) === null &&", "isObj(body) &&"]]],
-  ["an answer read without the wrapper the wire was seen to use", [["o.envelopeFrom === \"assumed\" && observed(o) === null &&", "o.envelopeFrom === \"assumed\" &&"]]],
-  ["an object holding no documented field taken for a row", [["(o.documents === \"row\" && Object.keys(body).some((name) => root.children.has(name))));", "o.documents === \"row\");"]]],
+  ["an answer read without the wrapper its document shows", [["isObj(body) && o.envelopeFrom === \"assumed\" && seen(o) === null &&", "isObj(body) &&"]]],
+  ["an answer read without the wrapper the wire was seen to use", [["o.envelopeFrom === \"assumed\" && seen(o) === null &&", "o.envelopeFrom === \"assumed\" &&"]]],
+  ["a confirming observation ignored", [["seen(o) === null && answerItself(o, root, body)", "(seen(o) === null || observed(o) === o.envelope) && answerItself(o, root, body)"]]],
+  ["a bare observation ignored", [["seen(o) === null && answerItself(o, root, body)", "(seen(o) === null || seen(o).bare === true) && answerItself(o, root, body)"]]],
+  ["an open answer read where no example shows it", [["  : o.documents === \"open\" && o.unwrapped === true && Array.isArray(o.exampleKeys) && Object.keys(body).some((name) => o.exampleKeys.includes(name)));", "  : o.documents === \"open\");"]]],
+  ["an open answer read without a key its example shows", [["  : o.documents === \"open\" && o.unwrapped === true && Array.isArray(o.exampleKeys) && Object.keys(body).some((name) => o.exampleKeys.includes(name)));", "  : o.documents === \"open\" && o.unwrapped === true);"]]],
+  ["an object holding no documented field taken for a row", [["(o.documents === \"row\" ? Object.keys(body).some((name) => root.children.has(name))", "(o.documents === \"row\" ? true"]]],
   ["the form an answer came in misreported", [["form: bare ? \"bare\" : wrapped ? \"wrapped\" : \"unwrapped\",", "form: bare ? \"bare\" : \"wrapped\","]]],
   ["a held field returned", [["    if (ctx.held.has(key)) { ctx.withheld.add(here); continue; }\n    const child = node.children.get(key);", "    const child = node.children.get(key);"]]],
   ["a held field left inside a value that is passed through", [["  if (ctx.held.size === 0 || value === null || typeof value !== \"object\") return value;", "  if (value !== undefined) return value;"]]],
@@ -1284,7 +1391,9 @@ const CLIENT_MUTANTS = [
   ["a field the wire types otherwise still held to the document", [["    return o.fields.map((f) => (note.untyped.includes(f.path) ? { path: f.path, type: \"any\" } : f));", "    return o.fields;"]]],
   ["a bare list of rows not read", [["    const bare = Array.isArray(body) && o.documents !== \"envelope\";", "    const bare = false;"]]],
   ["a bare list read where the whole answer is documented", [["    const bare = Array.isArray(body) && o.documents !== \"envelope\";", "    const bare = Array.isArray(body);"]]],
-  ["the table of observed deviations emptied", [["  \"short.short-volume-and-ratio\": Object.freeze({ envelope: \"si\" }),\n", ""]]],
+  ["the wire's wrapper for short volume dropped from the table", [["  si: Object.freeze([\"short.short-volume-and-ratio\"]),\n", ""]]],
+  ["the observations that confirm the document left out of the table", [["  ...Object.entries(SEEN_UNDER).flatMap(", "  ...Object.entries(SEEN_UNDER).filter(([envelope]) => envelope !== \"data\").flatMap("]]],
+  ["the bare observations left out of the table", [["  ...SEEN_BARE.map((id) => [id, Object.freeze({ bare: true })]),\n", ""]]],
   ["an empty answer not named", [["    if (isEmpty(data)) return fail(\"empty\");\n", ""]]],
   ["a mistyped field passed through", [["    if (typeof value !== \"string\") throw new Mistyped(entry.path);\n    return value;\n  }\n  if (entry.type === \"boolean\") {", "    return value;\n  }\n  if (entry.type === \"boolean\") {"]]],
   ["a type failure that names no field", [["      if (error instanceof Mistyped) return fail(`type:${error.at}`);\n      throw error;\n    }\n    if (isEmpty(data))", "      if (error instanceof Mistyped) return fail(\"type\");\n      throw error;\n    }\n    if (isEmpty(data))"]]],
@@ -1338,14 +1447,28 @@ for (const [title, transforms] of CLIENT_MUTANTS) {
     if (got.undocumented.length) { strayOps += 1; strayKeys += got.undocumented.length; }
   }
   ok(seenOps.length >= 60 && Object.keys(SHAPES).length - seenOps.length < 10, `THE READER TAKES THE WIRE AS IT WAS OBSERVED: ${seenOps.length} of the ${Object.keys(SHAPES).length} operations in the committed observation of ${OBSERVATION.observed} are in the document with a shape on record, and every one reads`);
-  ok(/rowsOf\(d\.volume\.body, "si"\)/.test(read("scripts/flows-legs/ownership.mjs")), "production reads short volume under si, as the observation and the deviation table say");
+  ok(/rowsOf\(d\.volume\.body, "si"\)/.test(read("scripts/flows-legs/ownership.mjs")), "production reads short volume under si, as the observation and the wire table say");
+  ok(Object.keys(feed.FEED_WIRE).length === seenOps.length && seenOps.every((seen) => Object.hasOwn(feed.FEED_WIRE, seen.o.id)), `the wire table has one entry for each of the ${seenOps.length} observed operations, the ones that confirm the document included`);
   ok(/if \(rule === "chains"\) return body && typeof body === "object" && Array\.isArray\(body\.chains\) \? body\.chains : null;/.test(read("shared/flows-positioning.js")), "production reads a contract's history under chains, as the document's example shows");
   const lines = generator.coverageLines(await generator.coverageOf(FEED_CATALOG));
   const coverage = feed.feedCoverage(FEED_CATALOG, { registry: OPS, rail: RT_UPSTREAM, joined: SOCKET_CHANNELS });
   ok(lines.some((l) => l.includes(`${coverage.operations.read} of ${coverage.operations.requests} requests have a reader`) && l.includes(`${coverage.operations.unread.length} have none and ${coverage.operations.held.length} are held`)) &&
     lines.some((l) => l.includes(`${FEED_CATALOG.channels.length} documented; the rail lists ${coverage.channels.listed.length} and joins ${coverage.channels.joined.length}`)), "the coverage report prints the counts the join computes");
-  const [unreadAt, heldAt, withheldAt, channelsAt] = ["unread by tag", "held ", "withheld ", "channels "].map((head) => lines.findIndex((l) => l.startsWith(head)));
-  ok(unreadAt > 0 && unreadAt < heldAt && heldAt < withheldAt && withheldAt < channelsAt, "the coverage report has its unread, held, withheld and channel parts, in that order");
+  const [unreadAt, heldAt, withheldAt, elsewhereAt, channelsAt] = ["unread by tag", "held ", "withheld ", "elsewhere ", "channels "].map((head) => lines.findIndex((l) => l.startsWith(head)));
+  ok(unreadAt > 0 && unreadAt < heldAt && heldAt < withheldAt && withheldAt < elsewhereAt && elsewhereAt < channelsAt, "the coverage report has its unread, held, withheld, elsewhere and channel parts, in that order");
+  ok(lines[elsewhereAt].endsWith(`which the client does not build: ${coverage.operations.elsewhere.length || "none"}`) && channelsAt - elsewhereAt === 1 + coverage.operations.elsewhere.length,
+    "THE COVERAGE REPORT SETS APART AN OPERATION WITH A PARAMETER IN A HEADER OR A COOKIE: its heading counts them, and each has a line of its own");
+  {
+    const doc = yaml.parseYaml(SPEC);
+    doc.paths["/api/alerts"].get.parameters = [...(doc.paths["/api/alerts"].get.parameters || []), { name: "Authorization", in: "header", required: false, schema: { type: "string" } }];
+    const withHeader = generator.buildCatalog(yaml.dumpYaml(doc));
+    const shownLines = generator.coverageLines(await generator.coverageOf(withHeader));
+    const at = shownLines.findIndex((l) => l.startsWith("elsewhere "));
+    const alerts = withHeader.ops.find((o) => o.method === "GET" && o.path === "/api/alerts");
+    ok(at > 0 && shownLines[at].endsWith("does not build: 1") && shownLines[at + 1] === `    ${alerts.id}  GET /api/alerts  header Authorization`, `a document with a header parameter on GET /api/alerts is read, and the coverage report lists the operation under its own heading (${shownLines[at + 1]})`);
+    const told = refusal(() => feed.createFeedClient(withHeader).request(alerts.id, FIXTURES.ops["GET /api/alerts"].request.required));
+    ok(told !== null && told.param === "Authorization" && told.reason === "place", "and the client refuses to build it, naming the parameter and its place");
+  }
   for (const id of coverage.operations.unread) ok(lines.slice(unreadAt, heldAt).some((l) => l.includes(`    ${id}  `)), `the coverage report lists the unread ${id}`);
   ok(coverage.operations.held.length === Object.keys(HELD_ROUTES).length, "the coverage counts the held operations");
   for (const hold of coverage.operations.held) {

@@ -286,6 +286,8 @@ function refineField(entry, shown, notes) {
 
 const WRAPPER_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+const shownKeys = (shape, keys) => (shape.documents === "open" ? { exampleKeys: [...keys].sort() } : {});
+
 function wrapperOf(reader, schema, shape) {
   if (shape.documents === "envelope") return { envelope: ENVELOPE, envelopeFrom: "schema" };
   const node = reader.deref(schema);
@@ -296,18 +298,18 @@ function wrapperOf(reader, schema, shape) {
     const keys = Object.keys(example);
     const wrappers = keys.filter((k) => !documented.has(k) && WRAPPER_NAME.test(k) && (Array.isArray(example[k]) || isObj(example[k])));
     if (wrappers.length === 1) return { envelope: wrappers[0], envelopeFrom: "example" };
-    if (keys.length > 0 && (shape.documents === "open" || keys.some((k) => documented.has(k)))) return { envelope: ENVELOPE, envelopeFrom: "assumed", unwrapped: true };
+    if (keys.length > 0 && (shape.documents === "open" || keys.some((k) => documented.has(k)))) return { envelope: ENVELOPE, envelopeFrom: "assumed", unwrapped: true, ...shownKeys(shape, keys) };
   }
   return { envelope: ENVELOPE, envelopeFrom: "assumed" };
 }
 
-const PLACES = new Set(["path", "query"]);
+const PLACES = new Set(["path", "query", "header", "cookie"]);
 const TOKEN_DEFAULT = /^[A-Za-z0-9_.-]+$/;
 
 const keepsDefault = (leaf) => typeof leaf.default !== "string" || (leaf.enum !== undefined ? leaf.enum.includes(leaf.default) : TOKEN_DEFAULT.test(leaf.default));
 
 function paramEntry(reader, raw, where) {
-  if (!PLACES.has(raw.in)) throw new CatalogError(`${where}: the parameter ${String(raw.name)} ${typeof raw.in === "string" ? `is sent in the ${raw.in}` : "names no place"}; this catalog describes path and query parameters only`);
+  if (!PLACES.has(raw.in)) throw new CatalogError(`${where}: the parameter ${String(raw.name)} ${typeof raw.in === "string" ? `is sent in the ${raw.in}` : "names no place"}; OpenAPI puts a parameter in the path, the query, a header or a cookie`);
   const v = reader.view(raw.schema, []);
   const out = { name: String(raw.name), in: String(raw.in), required: raw.required === true, type: v.type };
   let leaf = v;
@@ -630,6 +632,11 @@ export function coverageLines({ catalog, coverage, byTier, probed, probedUndocum
   for (const hold of ops.fieldHolds) {
     const on = new Set(hold.fields.map((f) => f.split(" ")[0]));
     lines.push(`    ${hold.rule}  ${hold.fields.length} fields on ${on.size} operation${on.size === 1 ? "" : "s"}  ${hold.reason} (${hold.cite})`);
+  }
+  lines.push(`elsewhere      operations with a parameter in a header or a cookie, which the client does not build: ${ops.elsewhere.length || "none"}`);
+  for (const row of ops.elsewhere) {
+    const op = byId.get(row.id);
+    lines.push(`    ${row.id}  ${op.method} ${op.path}  ${row.params.join(", ")}`);
   }
   const ch = coverage.channels;
   const notJoined = ch.listed.filter((c) => !ch.joined.includes(c));

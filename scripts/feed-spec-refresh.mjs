@@ -27,6 +27,7 @@ export const DATA_PATHS = "/api/";
 export const MAX_LINKS = 3;
 export const MAX_LOST_SHARE = 0.1;
 export const ERROR_CHARS = 300;
+export const OUTSIDE_SHOWN = 5;
 export const PUSH_HOST = "https://github.com/";
 export const COMMITTER = Object.freeze({ name: "github-actions[bot]", email: "41898282+github-actions[bot]@users.noreply.github.com" });
 
@@ -355,31 +356,41 @@ export async function refresh({ root, env = {}, fetchImpl = fetch, out = () => {
     const before = digestSpec(committed);
     let text;
     let after;
-    let catalog;
     try {
       text = committedLayout(got.text, got.format, got.doc, got.operations);
       after = digestSpec(text);
-      catalog = buildCatalog(text);
     } catch (error) {
       if (error instanceof CatalogError || error instanceof YamlError || error instanceof SpecError) throw new RefreshError(plain(`the document cannot be read back (${error.message})`));
       throw error;
     }
-    if (Object.keys(after.ops).length !== got.operations || catalog.ops.length !== got.operations) throw new RefreshError("the rewritten document does not read back with the operations it was given");
     const diff = diffDigests(before, after);
-    const lost = Object.keys(before.ops).filter((k) => !Object.hasOwn(after.ops, k)).length;
-    if (lost > Math.max(10, MAX_LOST_SHARE * Object.keys(before.ops).length)) throw new RefreshError(`the document lacks ${lost} of the ${Object.keys(before.ops).length} committed operations, so it was cut short or is another document`);
     const report = formatDiff(diff, { from: "committed", to: "downloaded" }).slice(1);
-    const changed = text !== committed && !sameDocument(parseYaml(committed), got.doc);
+    let catalog = null;
+    let refused = null;
+    try {
+      catalog = buildCatalog(text);
+    } catch (error) {
+      if (!(error instanceof CatalogError || error instanceof YamlError)) throw error;
+      refused = `the catalog cannot be built from the document (${error.message})`;
+    }
+    const lost = Object.keys(before.ops).filter((k) => !Object.hasOwn(after.ops, k)).length;
+    if (refused === null && (Object.keys(after.ops).length !== got.operations || catalog.ops.length !== got.operations)) refused = "the rewritten document does not read back with the operations it was given";
+    if (refused === null && lost > Math.max(10, MAX_LOST_SHARE * Object.keys(before.ops).length)) refused = `the document lacks ${lost} of the ${Object.keys(before.ops).length} committed operations, so it was cut short or is another document`;
+    const changed = refused === null && text !== committed && !sameDocument(parseYaml(committed), got.doc);
+    const outside = catalog === null ? [] : catalog.ops.filter((o) => o.params.some((p) => p.in !== "path" && p.in !== "query"));
+    const newest = catalog === null ? after.changelog.slice().sort().pop() : catalog.source.newestChange;
     const head = [
       `address     ${placeOf(got.address, origin)} (${got.type || "no content type"}, ${got.bytes} bytes, ${got.format})`,
       `committed   sha256 ${sha256(committed).slice(0, 12)}  ${Object.keys(before.ops).length} operations, newest change ${before.changelog.slice().sort().pop() || "none"}`,
-      `downloaded  sha256 ${sha256(text).slice(0, 12)}  ${got.paths} paths, ${got.operations} operations, ${catalog.channels.length} channels, newest change ${catalog.source.newestChange || "none"}`,
-      changed ? `changed     ${SPEC_FILE} is rewritten in the working tree` : "unchanged   the downloaded document says what the committed copy says; nothing is written",
+      `downloaded  sha256 ${sha256(text).slice(0, 12)}  ${got.paths} paths, ${got.operations} operations, ${catalog === null ? "no catalog" : `${catalog.channels.length} channels`}, newest change ${newest || "none"}`,
+      ...(outside.length ? [`elsewhere   ${outside.length} operation${outside.length === 1 ? " takes" : "s take"} a parameter in a header or a cookie, which the feed client does not build: ${outside.slice(0, OUTSIDE_SHOWN).map((o) => `${o.method} ${o.path}`).join(", ")}${outside.length > OUTSIDE_SHOWN ? ` and ${outside.length - OUTSIDE_SHOWN} more` : ""}`] : []),
+      refused !== null ? `refused     ${refused}; nothing is written` : changed ? `changed     ${SPEC_FILE} is rewritten in the working tree` : "unchanged   the downloaded document says what the committed copy says; nothing is written",
     ];
-    return { text, diff, changed, lines: [...head, ...report].map(plain), block: ["### Feed document refresh", "", ...fenced(head), ...fenced(report)].join("\n") };
+    return { text, diff, changed, refused, lines: [...head, ...report].map(plain), block: ["### Feed document refresh", "", ...fenced(head), ...fenced(report)].join("\n") };
   });
   for (const line of read.lines) out(line);
   summary(read.block);
+  if (read.refused !== null) throw new RefreshError(plain(read.refused));
   if (read.changed) write(target, read.text);
   return { changed: read.changed, address: got.address, operations: got.operations, paths: got.paths, diff: read.diff, text: read.text };
 }

@@ -477,11 +477,35 @@ define("another document of the right size", async ({ run, need, feedServer, bas
   feedServer.routes.set("/spec.yaml", send(dumpYaml(stranger)));
   const got = await run(root, { FEED_SPEC_ADDRESS: `${feedServer.origin}/spec.yaml` });
   need(moved > 22 && got.code === 1 && got.text.includes(`lacks ${moved} of the 218 committed operations`) && got.spec === base, `a document of the same size that lost ${moved} of the committed operations is taken (${got.text.slice(0, 200)})`);
+  need(got.output === "" && /refused     the document lacks/.test(got.summary) && /nothing is written/.test(got.summary) && (got.summary.match(/^- operation /gm) || []).length === moved,
+    `the step summary of a document refused for what it lacks does not carry the comparison and the reason (${got.summary.slice(0, 200)})`);
   const fewer = parseYaml(base);
   for (const route of Object.keys(fewer.paths).slice(0, 12)) { fewer.paths[`/other${route}`] = fewer.paths[route]; delete fewer.paths[route]; }
   feedServer.routes.set("/spec.yaml", send(dumpYaml(fewer)));
   const fine = await run(makeRoot(base), { FEED_SPEC_ADDRESS: `${feedServer.origin}/spec.yaml` });
   need(fine.code === 0 && /- operation /.test(fine.summary), `a document that renamed a dozen paths is refused (${fine.text.slice(0, 200)})`);
+});
+
+define("a document with a parameter in a header", async ({ run, need, feedServer, base, edited }) => {
+  const doc = structuredClone(edited.doc);
+  doc.paths["/api/alerts"].get.parameters.push({ name: "Authorization", in: "header", required: false, schema: { type: "string" } });
+  const text = dumpYaml(doc);
+  feedServer.routes.set("/spec.yaml", send(text));
+  const got = await run(makeRoot(base), { FEED_SPEC_ADDRESS: `${feedServer.origin}/spec.yaml` });
+  need(got.code === 0 && got.spec === text && got.output === "changed=true\n", `A PARAMETER IN A HEADER DOES NOT STOP THE REFRESH: a document with one is refused (${got.code}: ${got.text.slice(0, 240)})`);
+  need(got.summary.includes("+ operation GET /api/sample/new-thing") && got.summary.includes("header:Authorization"), `the step summary does not carry the comparison with the new operation and the header parameter (${got.summary.slice(0, 300)})`);
+  need(got.summary.includes("elsewhere   1 operation takes a parameter in a header or a cookie, which the feed client does not build: GET /api/alerts"), `the step summary does not set apart the operation whose parameter goes in a header (${got.summary.slice(0, 600)})`);
+});
+
+define("a document whose catalog cannot be built", async ({ run, need, feedServer, base, edited }) => {
+  const doc = structuredClone(edited.doc);
+  doc.paths["/api/alerts"].get.parameters.push({ name: "payload", in: "body", schema: { type: "string" } });
+  feedServer.routes.set("/spec.yaml", send(dumpYaml(doc)));
+  const got = await run(makeRoot(base), { FEED_SPEC_ADDRESS: `${feedServer.origin}/spec.yaml` });
+  need(got.code === 1 && got.spec === base && got.output === "", `a document whose catalog cannot be built is taken (${got.code}: ${got.text.slice(0, 200)})`);
+  need(/the catalog cannot be built from the document \(GET \/api\/alerts: the parameter payload is sent in the body/.test(got.text), `the refusal does not say why the catalog cannot be built (${got.text.slice(-300)})`);
+  need(got.summary.includes("+ operation GET /api/sample/new-thing") && got.summary.includes("~ GET /api/alerts") && /refused     the catalog cannot be built from the document/.test(got.summary) && /nothing is written/.test(got.summary) && /no catalog/.test(got.summary),
+    `THE COMPARISON IS WRITTEN BEFORE A REFUSAL: the step summary of a refused document does not say what moved and why it was refused (${got.summary.slice(0, 300)})`);
 });
 
 define("a document that names another server", async ({ run, need, feedServer, other, base, edited }) => {
@@ -783,6 +807,10 @@ sweep();
 
 const MUTANTS = [
   ["a document of any size taken", ["fewer than 200 paths"], [["export const MIN_PATHS = 200;", "export const MIN_PATHS = 1;"]]],
+  ["the comparison left out of the summary when the document is refused", ["a document whose catalog cannot be built", "another document of the right size"], [["  summary(read.block);\n  if (read.refused !== null) throw new RefreshError(plain(read.refused));", "  if (read.refused !== null) throw new RefreshError(plain(read.refused));\n  summary(read.block);"]]],
+  ["a document whose catalog cannot be built taken", ["a document whose catalog cannot be built"], [["  if (read.refused !== null) throw new RefreshError(plain(read.refused));\n", ""]]],
+  ["a catalog that cannot be built refusing before the comparison", ["a document whose catalog cannot be built"], [["      refused = `the catalog cannot be built from the document (${error.message})`;", "      throw new RefreshError(`the catalog cannot be built from the document (${error.message})`);"]]],
+  ["the operations that take a header parameter not set apart", ["a document with a parameter in a header"], [["    const outside = catalog === null ? [] : catalog.ops.filter((o) => o.params.some((p) => p.in !== \"path\" && p.in !== \"query\"));", "    const outside = [];"]]],
   ["the key sent to another origin", ["the key stays on the feed's own origin"], [["    if (url.origin !== origin) return false;\n", ""]]],
   ["the key sent before any refusal", ["a good document in the committed layout"], [["        got = await getText(fetchImpl, address, { accept: ACCEPT, \"user-agent\": \"feed-spec-refresh\" }, timeoutMs);\n        if (", "        got = await getText(fetchImpl, address, { accept: ACCEPT, \"user-agent\": \"feed-spec-refresh\", ...(key ? { authorization: `Bearer ${key}` } : {}) }, timeoutMs);\n        if ("]]],
   ["a keyed request following a redirect", ["the key does not follow a redirect"], [["redirect: headers.authorization ? \"error\" : \"follow\"", "redirect: \"follow\""]]],
@@ -819,9 +847,9 @@ const MUTANTS = [
   ["a document without its servers taken", ["a document cut short"], [["  if (!Array.isArray(doc.servers) || !isObj(doc.servers[0]) || typeof doc.servers[0].url !== \"string\") throw new RefreshError(\"the document names no server, so it was cut short\");\n", ""]]],
   ["a document without its last line break taken", ["a document cut short"], [["  if (!body.endsWith(\"\\n\")) throw new RefreshError(\"the document does not end with a line break, so it was cut short\");\n", ""]]],
   ["references to missing schemas ignored", ["a document cut short"], [["  if (dangling.length) throw new RefreshError(", "  if (dangling.length < 0) throw new RefreshError("]]],
-  ["a document that lost a tenth of its operations taken", ["another document of the right size"], [["  if (lost > Math.max(10, MAX_LOST_SHARE * Object.keys(before.ops).length)) throw new RefreshError(", "  if (lost < 0) throw new RefreshError("]]],
-  ["the same document written again", ["the same document again"], [["  const changed = text !== committed && !sameDocument(parseYaml(committed), got.doc);", "  const changed = true;"]]],
-  ["a layout change counted as a change", ["the same document again"], [["  const changed = text !== committed && !sameDocument(parseYaml(committed), got.doc);", "  const changed = text !== committed;"]]],
+  ["a document that lost a tenth of its operations taken", ["another document of the right size"], [["    if (refused === null && lost > Math.max(10, MAX_LOST_SHARE * Object.keys(before.ops).length)) refused =", "    if (refused === null && lost < 0) refused ="]]],
+  ["the same document written again", ["the same document again"], [["  const changed = refused === null && text !== committed && !sameDocument(parseYaml(committed), got.doc);", "  const changed = refused === null;"]]],
+  ["a layout change counted as a change", ["the same document again"], [["  const changed = refused === null && text !== committed && !sameDocument(parseYaml(committed), got.doc);", "  const changed = refused === null && text !== committed;"]]],
   ["an address of any scheme asked", ["an address that may not be asked"], [["  if (url.protocol !== \"https:\" && !(url.protocol === \"http:\" && LOOPBACK.has(url.hostname))) throw new RefreshError(\"the address must be https\");\n", ""]]],
   ["credentials in the address allowed", ["an address that may not be asked"], [["  if (url.username || url.password) throw new RefreshError(\"the address must carry no credentials\");\n", ""]]],
   ["the provider named in the log", ["the provider is not named in the log"], [["  const plain = (text) => oneLine(redact(brand ? String(text).replace(brand, \"the feed\").replace(/\\b([Tt])he the feed\\b/g, \"$1he feed\") : String(text)));", "  const plain = (text) => oneLine(redact(String(text)));"]]],

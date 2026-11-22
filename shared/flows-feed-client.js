@@ -8,9 +8,28 @@ export const FEED_READ_FORMS = Object.freeze(["wrapped", "bare", "unwrapped"]);
 
 export const FEED_JOIN = "join";
 
-export const FEED_WIRE = Object.freeze({
-  "short.short-volume-and-ratio": Object.freeze({ envelope: "si" }),
+const SEEN_UNDER = Object.freeze({
+  data: Object.freeze([
+    "av-fundamental.financials", "companies.earnings-estimates", "companies.profile", "congress.congress-recent-trades", "darkpool.darkpool-price-levels", "darkpool.darkpool-recent",
+    "darkpool.darkpool-ticker", "earnings.ticker", "economy.show", "etf.holdings", "etf.in-outflow", "fundamental.show", "group-flow.greek-flow", "insider.ticker-flow", "insider.transactions",
+    "institution.ownership", "market.etf-tide", "market.events", "market.fda-calendar", "market.insider-buy-sells", "market.market-tide", "market.oi-change", "market.sec-indst", "market.sector-etfs",
+    "market.top-net-impact", "market.total-options-volume", "multi-leg.index", "nasdaq-pulse.total", "news.headlines", "option-contract.expiry-breakdown", "option-contract.option-contracts",
+    "option-trade.flow-alerts", "screener.analyst-ratings", "screener.contract-screener", "screener.stock-screener", "screener.unusual-activity", "seasonality.market-seasonality", "short.short-data",
+    "short.short-interest-and-float-v2", "short.short-screener", "ticker.greek-exposure", "ticker.greek-exposure-by-expiry", "ticker.greek-flow", "ticker.greeks", "ticker.historical-risk-reversal-skew",
+    "ticker.implied-volatility-term-structure", "ticker.iv-rank", "ticker.last-stock-state", "ticker.max-pain", "ticker.net-prem-ticks", "ticker.nope", "ticker.ohlc", "ticker.oi-change", "ticker.oi-per-strike",
+    "ticker.option-chains", "ticker.options-volume", "ticker.spot-exposures-by-strike", "ticker.spot-exposures-by-strike-expiry-v2", "ticker.spot-exposures-one-minute", "volatility.anomaly",
+    "volatility.anomaly-top", "volatility.character", "volatility.variance-risk-premium",
+  ]),
+  chains: Object.freeze(["option-contract.history"]),
+  si: Object.freeze(["short.short-volume-and-ratio"]),
 });
+
+const SEEN_BARE = Object.freeze(["ticker.flow-per-expiry", "ticker.flow-per-strike"]);
+
+export const FEED_WIRE = Object.freeze(Object.fromEntries([
+  ...Object.entries(SEEN_UNDER).flatMap(([envelope, ids]) => ids.map((id) => [id, Object.freeze({ envelope })])),
+  ...SEEN_BARE.map((id) => [id, Object.freeze({ bare: true })]),
+]));
 
 const MACRO_RULES = "docs/packages/WP5-cross-asset-macro.md 2.3";
 const EVENT_RULES = "docs/packages/WP6-event-risk.md 3";
@@ -199,6 +218,9 @@ const wellFormed = (text) => {
 
 const isEmpty = (v) => v === null || v === undefined || (Array.isArray(v) ? v.length === 0 : isObj(v) && Object.keys(v).length === 0);
 
+const answerItself = (o, root, body) => (o.documents === "row" ? Object.keys(body).some((name) => root.children.has(name))
+  : o.documents === "open" && o.unwrapped === true && Array.isArray(o.exampleKeys) && Object.keys(body).some((name) => o.exampleKeys.includes(name)));
+
 const fail = (reason) => ({ ok: false, reason });
 
 function paramText(op, p, value, leafType) {
@@ -323,8 +345,7 @@ export function createFeedClient(catalog, options) {
     const root = shape(o.id, fieldsOf(o));
     const bare = Array.isArray(body) && o.documents !== "envelope";
     const wrapped = !bare && isObj(body) && Object.hasOwn(body, key);
-    const loose = !bare && !wrapped && isObj(body) && o.envelopeFrom === "assumed" && observed(o) === null &&
-      (o.documents === "open" || (o.documents === "row" && Object.keys(body).some((name) => root.children.has(name))));
+    const loose = !bare && !wrapped && isObj(body) && o.envelopeFrom === "assumed" && seen(o) === null && answerItself(o, root, body);
     if (!bare && !wrapped && !loose) return fail("unshaped");
     const ctx = reading(heldIn(o));
     let data;
@@ -452,6 +473,8 @@ export function feedCoverage(catalog, { registry = [], rail = {}, joined = {} } 
   const read = requests.filter((o) => readers.get(o.id).length > 0);
   const held = requests.filter((o) => isHeld(o) && readers.get(o.id).length === 0);
   const unread = requests.filter((o) => !isHeld(o) && readers.get(o.id).length === 0);
+  const outside = (o) => o.params.filter((p) => p.in !== "path" && p.in !== "query");
+  const elsewhere = requests.filter((o) => outside(o).length > 0).map((o) => ({ id: o.id, params: outside(o).map((p) => `${p.in} ${p.name}`) }));
   const byTag = {};
   for (const o of requests) {
     const tag = o.tags[0] || "untagged";
@@ -482,6 +505,7 @@ export function feedCoverage(catalog, { registry = [], rail = {}, joined = {} } 
       unread: unread.map((o) => o.id),
       held: held.map((o) => ({ id: o.id, reason: FEED_HELD[o.id].reason, cite: FEED_HELD[o.id].cite })),
       heldAndRead: read.filter(isHeld).map((o) => o.id),
+      elsewhere,
       fieldHolds,
       byTag,
       readers: Object.fromEntries([...readers].filter(([, ids]) => ids.length)),

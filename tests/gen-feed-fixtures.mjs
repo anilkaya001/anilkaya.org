@@ -116,10 +116,12 @@ function wrapperShown(sample, members, freeForm) {
     const present = Object.keys(sample);
     const named = present.filter((k) => !Object.hasOwn(members, k) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && (Array.isArray(sample[k]) || plain(sample[k])));
     if (named.length === 1) return { key: named[0], bare: false, shown: true };
-    if (present.length && (freeForm || present.some((k) => Object.hasOwn(members, k)))) return { key: "data", bare: false, shown: false, alone: true };
+    if (present.length && (freeForm || present.some((k) => Object.hasOwn(members, k)))) return { key: "data", bare: false, shown: false, alone: true, ...(freeForm ? { keys: [...present].sort() } : {}) };
   }
   return { key: "data", bare: false, shown: false };
 }
+
+const inventKind = (value, name) => (Array.isArray(value) ? [] : plain(value) ? {} : typeof value === "boolean" ? true : typeof value === "number" ? 7 : value === null ? null : `sample ${name}`);
 
 const carriesNumber = (shape, name) => shape.kind === "string" && shape.options === null && !["date", "date-time", "uuid"].includes(shape.format) &&
   typeof shape.example === "string" && DECIMAL_TEXT.test(shape.example) && !NAMES_AN_IDENTIFIER.test(name);
@@ -194,7 +196,9 @@ function inventRequest(w, route, op) {
   const pairs = [];
   const pairsRequired = [];
   const segments = {};
+  const elsewhere = [];
   for (const p of Array.isArray(op.parameters) ? op.parameters : []) {
+    if (p.in !== "path" && p.in !== "query") { elsewhere.push(`${p.in} ${p.name}`); continue; }
     const shape = w.shapeOf(p.schema);
     let value;
     if (shape.kind === "array") {
@@ -215,7 +219,7 @@ function inventRequest(w, route, op) {
     return token ? encodeURIComponent(segments[token[1]]) : part;
   }).join("/");
   const query = (list) => (list.length ? `?${new URLSearchParams(list).toString()}` : "");
-  return { params, path: built, search: query(pairs), required, searchRequired: query(pairsRequired) };
+  return { params, path: built, search: query(pairs), required, searchRequired: query(pairsRequired), ...(elsewhere.length ? { elsewhere } : {}) };
 }
 
 function socketFrames(spec) {
@@ -290,11 +294,12 @@ export function buildFixtures(specText) {
         if (enveloped) rows = null;
         else if (rowDocumented) rows = wrap.alone ? inventBody(w, ok.schema, "", "[]", 0, [], marks) : [0, 1].map((r) => inventBody(w, ok.schema, "", "[]", r, [], marks));
         else if (root.kind === "array") rows = root.each === undefined ? [...TICKERS] : [0, 1].map((r) => inventBody(w, root.each, "", "[]", r, root.trail, marks));
-        else rows = { sample_key: "sample value", sample_list: [1, 2] };
+        else rows = wrap.keys ? Object.fromEntries(wrap.keys.map((k) => [k, inventKind(sample[k], k)])) : { sample_key: "sample value", sample_list: [1, 2] };
         const strip = (p) => (rowDocumented ? p.replace(/^\[\]\.?/, "") : p);
         entry.envelope = wrap.key;
         if (wrap.bare) entry.bare = true;
         if (wrap.alone) entry.unwrapped = true;
+        if (wrap.keys) entry.exampleKeys = wrap.keys;
         entry.body = enveloped ? inventBody(w, ok.schema, "", "", 0, [], marks) : wrap.bare || wrap.alone ? rows : { [wrap.key]: rows };
         entry.numeric = [...marks.numeric].map(strip).sort();
         entry.nulls = [...marks.nulls].map(strip).sort();

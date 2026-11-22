@@ -324,7 +324,7 @@ WRAPPER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 def wrapper(spec, schema, documents, rows):
     if documents == "envelope":
-        return ["data", "schema", False, False]
+        return ["data", "schema", False, False, None]
     node = schema
     hops = 0
     while isinstance(node, dict) and "$ref" in node and hops < 32:
@@ -332,15 +332,15 @@ def wrapper(spec, schema, documents, rows):
         hops += 1
     sample = node.get("example") if isinstance(node, dict) else None
     if isinstance(sample, list) and sample and all(isinstance(item, dict) for item in sample):
-        return ["data", "assumed", True, False]
+        return ["data", "assumed", True, False, None]
     if isinstance(sample, dict):
         top = set(row["path"] for row in rows if "." not in row["path"] and "[" not in row["path"])
         named = [key for key in sample if key not in top and WRAPPER.match(key) and isinstance(sample[key], (list, dict))]
         if len(named) == 1:
-            return [named[0], "example", False, False]
+            return [named[0], "example", False, False, None]
         if sample and (documents == "open" or any(key in top for key in sample)):
-            return ["data", "assumed", False, True]
-    return ["data", "assumed", False, False]
+            return ["data", "assumed", False, True, sorted(sample) if documents == "open" else None]
+    return ["data", "assumed", False, False, None]
 
 
 SINGLE_TOKEN = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -356,8 +356,8 @@ def stated_default(leaf):
 
 
 def param_row(spec, raw):
-    if raw["in"] not in ("path", "query"):
-        raise SystemExit("a parameter in the %s" % raw["in"])
+    if raw.get("in") not in ("path", "query", "header", "cookie"):
+        raise SystemExit("a parameter in the %s" % raw.get("in"))
     d = spec.describe(raw.get("schema"))
     row = {"name": str(raw["name"]), "in": str(raw["in"]), "required": raw.get("required") is True, "type": d["t"]}
     leaf = d
@@ -377,7 +377,7 @@ def operation(spec, verb, route, op):
     params = []
     seen = set()
     for raw in op.get("parameters") or []:
-        key = (raw["in"], raw["name"])
+        key = (raw.get("in"), raw["name"])
         if key in seen:
             continue
         seen.add(key)
@@ -393,7 +393,7 @@ def operation(spec, verb, route, op):
     content = (responses.get("200") or {}).get("content") or {}
     kind = "socket" if SOCKET in tags else "json" if "application/json" in content else "file" if content else "none"
     documents, rows = (None, [])
-    wrapped = [None, None, False, False]
+    wrapped = [None, None, False, False, None]
     if kind == "json":
         documents, rows = body_rows(spec, content["application/json"]["schema"])
         wrapped = wrapper(spec, content["application/json"]["schema"], documents, rows)
