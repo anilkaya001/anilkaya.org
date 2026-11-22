@@ -873,9 +873,18 @@ const ASK_SHARE = JSON.parse(fs.readFileSync(path.join(ROOT, "tests", "fixtures-
   {
     const walk = (dir) => fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : /\.m?js$/.test(e.name) ? [path.join(dir, e.name)] : []));
     const files = [...walk("shared"), ...walk("server"), ...walk("scripts/flows-nightly"), ...walk("scripts/flows-legs"), "worker.js"];
-    const named = files.filter((f) => /\b(?:askPrem|bidPrem|total_ask_side_prem|total_bid_side_prem)\b/.test(fs.readFileSync(path.join(ROOT, f), "utf8"))).sort();
-    deep(named, ["scripts/flows-legs/flow-fake.mjs", "scripts/flows-legs/live-fake.mjs", "scripts/flows-nightly/fixtures.mjs", "shared/flows-alerts.js", "shared/flows-ledger-book.js", "shared/flows-live.js", "shared/flows-positioning.js", "shared/flows-sides.js", "shared/flows-tape-stats.js", "shared/flows-vendor-ops.js"],
+    const FEED_CATALOG_FILE = "shared/flows-feed-catalog.js";
+    const SIDE_FIELDS = /\b(?:askPrem|bidPrem|total_ask_side_prem|total_bid_side_prem)\b/;
+    const sideReaders = (tree) => tree.filter(([f, text]) => f !== FEED_CATALOG_FILE && SIDE_FIELDS.test(text)).map(([f]) => f).sort();
+    const tree = files.map((f) => [f.split(path.sep).join("/"), fs.readFileSync(path.join(ROOT, f), "utf8")]);
+    deep(sideReaders(tree), ["scripts/flows-legs/flow-fake.mjs", "scripts/flows-legs/live-fake.mjs", "scripts/flows-nightly/fixtures.mjs", "shared/flows-alerts.js", "shared/flows-ledger-book.js", "shared/flows-live.js", "shared/flows-positioning.js", "shared/flows-sides.js", "shared/flows-tape-stats.js", "shared/flows-vendor-ops.js"],
          "NO SHARED MODULE, SERVER FILE OR NIGHTLY LEG BUT THESE READS THE VENDOR'S ASK-SIDE AND BID-SIDE FIELDS: a new reader must be added here on review and use askShareRead, not divide by the premium itself (the ticker's alert card and the dossier did, and printed 30% for a name the Unusual page read at 75% of what the feed sided)");
+    ok(tree.some(([f, text]) => f === FEED_CATALOG_FILE && /\btotal_ask_side_prem\b/.test(text) && /\btotal_bid_side_prem\b/.test(text)),
+       "the generated catalog of every documented operation lists the two fields too; flows-probe holds that file byte for byte to its generator, so it describes the document and reads nothing");
+    for (const planted of ["shared/flows-feed-client.js", "shared/flows-feed-catalog-extra.js", "shared/sub/flows-feed-catalog.js", "server/flows-feed-catalog.js", "scripts/flows-legs/flows-feed-catalog.mjs", "worker.js"]) {
+      const withReader = [...tree.filter(([f]) => f !== planted), [planted, "const share = row.total_ask_side_prem / row.premium;\n"]];
+      deep(sideReaders(withReader).filter((f) => f === planted), [planted], `PLANTED WRONG BUILD: a reader of the ask-side field in ${planted} is still found, so the catalog's exemption is that one generated file`);
+    }
     for (const f of ["shared/flows-positioning.js", "shared/flows-dossier.js"]) {
       ok(/askShareRead/.test(fs.readFileSync(path.join(ROOT, f), "utf8")), `${f} takes the alert ask share from askShareRead`);
     }

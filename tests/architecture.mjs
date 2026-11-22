@@ -144,6 +144,8 @@ const LEAVES = {
   "shared/flows-neuron-screen.js": ["shared/flows-cross.js", "shared/flows-horizon.js", "shared/flows-neuron.js", "shared/flows-quant-structures.js"],
   "shared/flows-reading.js": ["shared/flows-ask.js", "shared/flows-dossier.js"],
   "shared/flows-fact-ids.js": ["shared/flows-quant-structures.js"],
+  "shared/flows-feed-catalog.js": [],
+  "shared/flows-feed-client.js": ["shared/flows-feed-catalog.js"],
 };
 
 function leaves(g) {

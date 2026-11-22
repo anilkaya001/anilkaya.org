@@ -18,6 +18,8 @@ import { COPY } from "../shared/flows-macro-copy.js";
 import { loadMutated } from "./truth/mutants.mjs";
 import { buildPeersPacket, buildMacroPacket } from "../shared/flows-dossier.js";
 import { dossierStatements, DOSSIER_SQL } from "../shared/flows-dossier-worker.js";
+import { FEED_CATALOG } from "../shared/flows-feed-catalog.js";
+import { buildCatalog, renderCatalog } from "../scripts/gen-feed-catalog.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FX = JSON.parse(fs.readFileSync(path.join(ROOT, "tests/fixtures-macro.json"), "utf8"));
@@ -27,6 +29,35 @@ const ok = (c, m) => { assert.ok(c, m); checks++; };
 const eq = (a, b, m) => { assert.equal(a, b, m); checks++; };
 const deep = (a, b, m) => { assert.deepEqual(a, b, m); checks++; };
 const near = (a, b, tol, m) => { assert.ok(Math.abs(a - b) <= tol, `${m}: ${a} vs ${b}`); checks++; };
+
+const LOOKUP = "search" + "-users";
+const LOOKUP_CATALOG = "shared/flows-feed-catalog.js";
+const LOOKUP_HOLDS = "shared/flows-feed-client.js";
+const LOOKUP_HOLD_ROW = `  "prediction.${LOOKUP}": Object.freeze({ reason: "The site does not look people up.", cite: MACRO_RULES }),`;
+
+function lookupNamed(tree) {
+  const found = [];
+  for (const [file, text] of tree) {
+    if (!text.includes(LOOKUP) || file === LOOKUP_CATALOG) continue;
+    const lines = text.split("\n").filter((line) => line.includes(LOOKUP));
+    if (file !== LOOKUP_HOLDS || lines.length !== 1 || lines[0] !== LOOKUP_HOLD_ROW) found.push(file);
+  }
+  return found;
+}
+
+function lookupHeld(lib) {
+  const client = lib.createFeedClient(FEED_CATALOG);
+  const op = client.find("GET", `/api/predictions/${LOOKUP}`);
+  if (!op || op.id !== `prediction.${LOOKUP}`) return false;
+  const heldBy = (fn) => { try { fn(); } catch (error) { return error && error.name === "FeedRequestError" && error.reason === "held"; } return false; };
+  const asked = [[{ q: "sample" }], [{ q: "sample", limit: 5 }], [{}], [undefined], [{ q: "sample" }, { write: true }], [{ q: "sample" }, { force: true, held: false }]];
+  if (!asked.every((args) => heldBy(() => client.request(op.id, ...args)))) return false;
+  if (![{ data: [{ address: "sample", name: "sample" }] }, [], {}].every((body) => heldBy(() => client.read(op.id, body)))) return false;
+  const hold = client.held(op.id);
+  const coverage = lib.feedCoverage(FEED_CATALOG, { registry: OPS });
+  return hold !== null && hold.reason === "The site does not look people up." && hold.cite === "docs/packages/WP5-cross-asset-macro.md 2.3" &&
+    !coverage.operations.unread.includes(op.id) && coverage.operations.held.some((row) => row.id === op.id) && !OPS.some((e) => e.op === op.path);
+}
 
 const world = (name) => structuredClone({ ...FX.worlds.ok, ...(FX.worlds[name] || {}) });
 const build = (mod, name, edit) => {
@@ -435,8 +466,19 @@ function MACRO_CAP() { return M.MACRO_CAP_BYTES; }
 
 {
   const files = spawnSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "worker.js", "shared", "scripts", "server", "assets/js"], { cwd: ROOT, encoding: "utf8" }).stdout.split("\n").filter((f) => /\.(m?js)$/.test(f));
-  const hits = files.filter((f) => fs.readFileSync(path.join(ROOT, f), "utf8").includes("search" + "-users"));
-  deep(hits, [], "no source names the people lookup route");
+  const tree = files.map((f) => [f, fs.readFileSync(path.join(ROOT, f), "utf8")]);
+  deep(lookupNamed(tree), [], "NO SOURCE NAMES THE PEOPLE LOOKUP but the generated catalog of what the feed documents and the one row of the client's table that holds it");
+  deep(tree.filter(([, text]) => text.includes(LOOKUP)).map(([f]) => f), [LOOKUP_CATALOG, LOOKUP_HOLDS], "and those two files are where it is named");
+  eq(tree.find(([f]) => f === LOOKUP_CATALOG)[1], renderCatalog(buildCatalog(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.yaml"), "utf8"))), "the catalog that lists the lookup is byte for byte what its generator writes from the committed document, so nothing in it is written by hand");
+  ok(lookupHeld(await import("../shared/flows-feed-client.js")), "THE CLIENT REFUSES TO BUILD THE PEOPLE LOOKUP: whatever parameters or options it is handed, the request and the reading of its answer are refused as held, and the coverage does not call it merely unread");
+  for (const [where, text] of [
+    ["shared/flows-macro.js", `const path = "/api/predictions/${LOOKUP}";\n`], ["scripts/flows-legs/macro.mjs", `ask("${LOOKUP}");\n`], ["worker.js", `const op = "prediction.${LOOKUP}";\n`], ["assets/js/flows-macro.js", `fetch("/x/${LOOKUP}");\n`],
+    ["shared/flows-feed-catalog-extra.js", `export const more = "${LOOKUP}";\n`], ["server/flows-feed-catalog.js", `export const more = "${LOOKUP}";\n`],
+    [LOOKUP_HOLDS, `const lookup = (client) => client.request("prediction.${LOOKUP}", { q: "sample" });\n`], [LOOKUP_HOLDS, `  "prediction.${LOOKUP}": Object.freeze({ reason: "It is fine.", cite: MACRO_RULES }),\n`],
+  ]) {
+    const planted = tree.some(([f]) => f === where) ? tree.map(([f, body]) => [f, f === where ? body + text : body]) : [...tree, [where, text]];
+    deep(lookupNamed(planted), [where], `PLANTED WRONG BUILD: the lookup named in ${where} is found`);
+  }
   ok(files.length > 100, "the scan reads the tree");
   const forbidden = ["from_address", "to_address", "maker_address", "taker_address", "transaction_hash", "user_name"];
   const readers = ["shared/flows-macro.js", "shared/flows-macro-live.js", "shared/flows-private.js"].map((f) => fs.readFileSync(path.join(ROOT, f), "utf8")).join("\n").split("\n").filter((l) => !l.includes("ADDRESS_KEYS")).join("\n");
@@ -520,6 +562,10 @@ const MUTANTS = [
     (m) => /no dollar index/.test(m.COPY["fx.nodxy"])],
   ["provider-word-in-copy", "shared/flows-macro-copy.js", [['"nothere.title": "What is not shown"', '"nothere.title": "Vendor data not shown"']],
     (m) => !Object.values(m.COPY).some((t) => /vendor/i.test(t))],
+  ["lookup-taken-off-the-held-table", LOOKUP_HOLDS, [[`${LOOKUP_HOLD_ROW}\n`, ""]], (m) => lookupHeld(m)],
+  ["lookup-built-though-held", LOOKUP_HOLDS, [["    if (hold) throw new FeedRequestError(o.id, null, \"held\", `is held and never asked for: ${hold.reason} (${hold.cite})`);\n", ""]], (m) => lookupHeld(m)],
+  ["lookup-answer-read-though-held", LOOKUP_HOLDS, [["    const o = allowed(id);\n    if (o.kind !== \"json\")", "    const o = op(id);\n    if (o.kind !== \"json\")"]], (m) => lookupHeld(m)],
+  ["lookup-counted-as-unread", LOOKUP_HOLDS, [["  const unread = requests.filter((o) => !isHeld(o) && readers.get(o.id).length === 0);", "  const unread = requests.filter((o) => readers.get(o.id).length === 0);"]], (m) => lookupHeld(m)],
   ["fixtures-allowed", "shared/flows-macro.js", [['if (bad && !test) throw new Error("fixture name " + bad);', "if (false) throw new Error(\"fixture name \" + bad);"]],
     (m) => { try { m.buildMacro(world(), {}); return false; } catch { return true; } }],
 ];
@@ -589,9 +635,8 @@ for (const [id, target, transforms, check] of MUTANTS) {
 ok(killed.length >= 34, `${killed.length} planted wrong builds are killed`);
 
 {
-  const scan = (text) => text.includes("search" + "-users");
-  ok(!scan("shared/flows-macro.js"), "the scanner passes clean text");
-  ok(scan("const path = '/api/predictions/search" + "-users';"), "and fails a planted call to the people lookup route");
+  deep(lookupNamed([["shared/flows-macro.js", "const path = pathFor(\"pred-user\", { user_id });\n"]]), [], "the scanner passes clean text");
+  deep(lookupNamed([["shared/flows-macro.js", `const path = '/api/predictions/${LOOKUP}';\n`]]), ["shared/flows-macro.js"], "and fails a planted call to the people lookup route");
 }
 
 console.log(`flows-macro: ${checks} assertions - the macro, live and private-markets leaves, the nightly and live legs, the call budgets, the health checks and ${killed.length} planted wrong builds`);
