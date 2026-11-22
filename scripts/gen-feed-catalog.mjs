@@ -76,8 +76,10 @@ export function statedSentences(text, scrub) {
   return { plan: unique(plan.map(scrub)), limits: unique(limits) };
 }
 
+const houseWord = (word) => word.replace(/^tapes?$/, "prints").replace(/^vendor(s?)$/, "source$1");
+
 export function idOf(operationId) {
-  const kebab = (s) => s.replace(/([a-z0-9])([A-Z])/g, "$1-$2").replace(/_/g, "-").toLowerCase();
+  const kebab = (s) => s.replace(/([a-z0-9])([A-Z])/g, "$1-$2").replace(/_/g, "-").toLowerCase().split("-").map(houseWord).join("-");
   const parts = String(operationId).split(".").filter(Boolean);
   if (parts.length > 1 && parts[0] === "PublicApi") parts.shift();
   if (!parts.length) throw new CatalogError("an operation has no operationId to name it by");
@@ -291,13 +293,21 @@ function wrapperOf(reader, schema, shape) {
   if (Array.isArray(example) && example.length > 0 && example.every(isObj)) return { envelope: ENVELOPE, envelopeFrom: "assumed", bare: true };
   if (isObj(example)) {
     const documented = new Set(shape.fields.filter((f) => !/[.[]/.test(f.path)).map((f) => f.path));
-    const wrappers = Object.keys(example).filter((k) => !documented.has(k) && WRAPPER_NAME.test(k) && (Array.isArray(example[k]) || isObj(example[k])));
+    const keys = Object.keys(example);
+    const wrappers = keys.filter((k) => !documented.has(k) && WRAPPER_NAME.test(k) && (Array.isArray(example[k]) || isObj(example[k])));
     if (wrappers.length === 1) return { envelope: wrappers[0], envelopeFrom: "example" };
+    if (keys.length > 0 && (shape.documents === "open" || keys.some((k) => documented.has(k)))) return { envelope: ENVELOPE, envelopeFrom: "assumed", unwrapped: true };
   }
   return { envelope: ENVELOPE, envelopeFrom: "assumed" };
 }
 
-function paramEntry(reader, raw) {
+const PLACES = new Set(["path", "query"]);
+const TOKEN_DEFAULT = /^[A-Za-z0-9_.-]+$/;
+
+const keepsDefault = (leaf) => typeof leaf.default !== "string" || (leaf.enum !== undefined ? leaf.enum.includes(leaf.default) : TOKEN_DEFAULT.test(leaf.default));
+
+function paramEntry(reader, raw, where) {
+  if (!PLACES.has(raw.in)) throw new CatalogError(`${where}: the parameter ${String(raw.name)} ${typeof raw.in === "string" ? `is sent in the ${raw.in}` : "names no place"}; this catalog describes path and query parameters only`);
   const v = reader.view(raw.schema, []);
   const out = { name: String(raw.name), in: String(raw.in), required: raw.required === true, type: v.type };
   let leaf = v;
@@ -307,7 +317,7 @@ function paramEntry(reader, raw) {
   }
   if (leaf.format !== undefined) out.format = leaf.format;
   if (leaf.enum !== undefined) out.enum = leaf.enum;
-  if (leaf.default !== undefined) out.default = leaf.default;
+  if (leaf.default !== undefined && keepsDefault(leaf)) out.default = leaf.default;
   if (leaf.min !== undefined) out.min = leaf.min;
   if (leaf.max !== undefined) out.max = leaf.max;
   if (leaf.pattern !== undefined) out.pattern = leaf.pattern;
@@ -327,7 +337,7 @@ function operationEntry(reader, notes, method, pathTemplate, op) {
     const key = `${raw.in}:${raw.name}`;
     if (seen.has(key)) { notes.paramsDuplicated += 1; continue; }
     seen.add(key);
-    params.push(paramEntry(reader, raw));
+    params.push(paramEntry(reader, raw, `${method.toUpperCase()} ${pathTemplate}`));
   }
   for (const token of pathTemplate.matchAll(/\{([^{}]+)\}/g)) {
     const found = params.find((p) => p.in === "path" && p.name === token[1]);
@@ -597,7 +607,7 @@ export function coverageLines({ catalog, coverage, byTier, probed, probedUndocum
   const lines = [
     `feed coverage  ${catalog.source.file} ${catalog.source.sha256.slice(0, 12)}  document version ${catalog.source.documentVersion}, newest change ${catalog.source.newestChange}`,
     `operations     ${ops.documented} documented: ${ops.requests} requests and ${ops.pages} socket pages`,
-    `read today     ${ops.read} of ${ops.requests} requests have a reader in the registry (${coverage.registry.entries} entries); ${ops.unread.length} have none`,
+    `read today     ${ops.read} of ${ops.requests} requests have a reader in the registry (${coverage.registry.entries} entries); ${ops.unread.length} have none and ${ops.held.length} are held`,
     `               by probe tier: ${Object.keys(byTier).sort().map((t) => `${byTier[t]} ${t}`).join(", ")}`,
     `               ${coverage.registry.absent.length} registry entries read operations this copy of the document lacks: ${coverage.registry.absent.join(", ")}`,
     "unread by tag",
@@ -610,6 +620,16 @@ export function coverageLines({ catalog, coverage, byTier, probed, probedUndocum
       const op = byId.get(id);
       lines.push(`    ${id}  ${op.method} ${op.path}  ${op.summary}${op.deprecated && !/deprecated/i.test(op.summary) ? "  (deprecated)" : ""}${op.kind === "file" ? "  (a file, not JSON)" : ""}`);
     }
+  }
+  lines.push("held           never asked for, by a decision of the house; the client refuses to build them");
+  for (const hold of ops.held) {
+    const op = byId.get(hold.id);
+    lines.push(`    ${hold.id}  ${op.method} ${op.path}  ${op.summary}  ${hold.reason} (${hold.cite})`);
+  }
+  lines.push("withheld       documented fields the reader leaves out of every answer");
+  for (const hold of ops.fieldHolds) {
+    const on = new Set(hold.fields.map((f) => f.split(" ")[0]));
+    lines.push(`    ${hold.rule}  ${hold.fields.length} fields on ${on.size} operation${on.size === 1 ? "" : "s"}  ${hold.reason} (${hold.cite})`);
   }
   const ch = coverage.channels;
   const notJoined = ch.listed.filter((c) => !ch.joined.includes(c));

@@ -43,8 +43,16 @@ const NEW_OPS = ["dividends", "splits", "interpolated-iv", "etf-exposure"];
     const walk = (d) => fs.readdirSync(path.join(ROOT, d), { withFileTypes: true }).flatMap((en) => (en.isDirectory() ? walk(path.join(d, en.name)) : [path.join(d, en.name)]));
     sources.push(...walk(dir).filter((f) => /\.m?js$/.test(f)));
   }
-  const reads = sources.filter((f) => !/flows-vendor-ops\.js$|flows-probe/.test(f) && fs.readFileSync(path.join(ROOT, f), "utf8").includes("option-stance"));
-  same(reads, ["scripts/flows-legs/voldesk-fake.mjs", "scripts/flows-legs/voldesk.mjs"], "and only the volatility audit and its dry-run fake name the option-stance operation");
+  const FEED_CATALOG_FILE = "shared/flows-feed-catalog.js";
+  const describesOperations = (f) => /flows-vendor-ops\.js$|flows-probe/.test(f) || f === FEED_CATALOG_FILE;
+  const namesStance = (tree) => tree.filter(([f, text]) => !describesOperations(f) && text.includes("option-stance")).map(([f]) => f);
+  const tree = sources.map((f) => [f.split(path.sep).join("/"), fs.readFileSync(path.join(ROOT, f), "utf8")]);
+  same(namesStance(tree), ["scripts/flows-legs/voldesk-fake.mjs", "scripts/flows-legs/voldesk.mjs"], "and only the volatility audit and its dry-run fake name the option-stance operation");
+  ok(tree.some(([f, text]) => f === FEED_CATALOG_FILE && text.includes("option-stance")), "the generated catalog of every documented operation lists it too; flows-probe holds that file byte for byte to its generator, so it is not read here");
+  for (const planted of ["shared/flows-feed-client.js", "shared/flows-feed-catalog-extra.js", "shared/sub/flows-feed-catalog.js", "scripts/flows-feed-catalog.js", "server/flows-feed-catalog.js", "shared/flows-vendor-extras.js"]) {
+    const withReference = [...tree.filter(([f]) => f !== planted), [planted, "const op = \"option-stance\";\n"]];
+    same(namesStance(withReference).filter((f) => f === planted), [planted], `PLANTED WRONG BUILD: a reference to the operation in ${planted} is still found, so the catalog's exemption is that one generated file`);
+  }
 
   for (const [id, spec] of Object.entries(X.PARTS)) {
     ok(opById(spec.op), `${id}: its operation is registered`);

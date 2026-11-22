@@ -173,7 +173,7 @@
     8
    ],
    "params": "989abf3913c79f52",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/alerts/configuration": {
    "fields": "4a46e0cec38b2d37",
@@ -182,7 +182,7 @@
     6
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/alerts/filters": {
    "fields": "fdf190edbbf0fb72",
@@ -191,7 +191,7 @@
     5
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/alerts/query/grammar": {
    "fields": "4f53cda18c2baa0c",
@@ -200,7 +200,7 @@
     0
    ],
    "params": "fca2bcb08064aba1",
-   "shape": "2244ed36be91a1b7"
+   "shape": "317575180ff2e031"
   },
   "GET /api/analytics/sliding": {
    "fields": "425214df1ac7466f",
@@ -209,7 +209,7 @@
     3
    ],
    "params": "669608ba20b013d9",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/analytics/window": {
    "fields": "425214df1ac7466f",
@@ -218,7 +218,7 @@
     3
    ],
    "params": "65f5982816f86870",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/calendar/ipo": {
    "fields": "5320f888cd2a7f6a",
@@ -227,7 +227,7 @@
     10
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/commodities/{name}": {
    "fields": "5b5ee9c918862eeb",
@@ -236,7 +236,7 @@
     8
    ],
    "params": "88282155ca83e2f9",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/companies/listings": {
    "fields": "7e5a59921838b69d",
@@ -245,7 +245,7 @@
     12
    ],
    "params": "10745a78e7928eea",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/companies/{ticker}/dividends": {
    "fields": "b6fe68a4610eb412",
@@ -254,7 +254,7 @@
     9
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/companies/{ticker}/earnings-estimates": {
    "fields": "842ff0f77118d991",
@@ -263,7 +263,7 @@
     14
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/companies/{ticker}/profile": {
    "fields": "be4bc0f557fb8840",
@@ -272,7 +272,7 @@
     22
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/companies/{ticker}/splits": {
    "fields": "d0fd556ba7e7a4db",
@@ -281,7 +281,7 @@
     6
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/companies/{ticker}/transcripts/{quarter}": {
    "fields": "996a5caa4a767317",
@@ -290,7 +290,7 @@
     9
    ],
    "params": "00887dd9ac7784a1",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/congress/congress-trader": {
    "fields": "72c15bfdd206da34",
@@ -298,8 +298,8 @@
     6,
     12
    ],
-   "params": "bf6355fdf79366eb",
-   "shape": "f1a604feccb24f88"
+   "params": "69656fe7a8d82cc4",
+   "shape": "319c0578a4c50099"
   },
   "GET /api/congress/late-reports": {
    "fields": "72c15bfdd206da34",
@@ -308,7 +308,7 @@
     12
    ],
    "params": "52ef7d65cecbb394",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/congress/politicians": {
    "fields": "72c15bfdd206da34",
@@ -317,7 +317,7 @@
     12
    ],
    "params": "f496db38987f4e86",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/congress/recent-trades": {
    "fields": "72c15bfdd206da34",
@@ -326,7 +326,7 @@
     12
    ],
    "params": "52ef7d65cecbb394",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/congress/unusual-trades": {
    "fields": "6c7edf2a268532a0",
@@ -335,7 +335,7 @@
     18
    ],
    "params": "73b318c8f2be1b62",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/congress/unusual-trades/by-tickers": {
    "fields": "6c7edf2a268532a0",
@@ -344,7 +344,7 @@
     18
    ],
    "params": "23b7b4b3f9491dc8",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/congress/unusual-trades/chart-data": {
    "fields": "b5dc5358338e8309",
@@ -353,7 +353,7 @@
     22
    ],
    "params": "c034697979cedbca",
-   "shape": "fbe1dc50be840a1d"
+   "shape": "a96eb0af879737f5"
   },
   "GET /api/congress/unusual-trades/stats": {
    "fields": "688ff0d7aec34b98",
@@ -362,7 +362,7 @@
     3
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/crypto/whale-transactions": {
    "fields": "bb769498cc241096",
@@ -371,7 +371,7 @@
     14
    ],
    "params": "41768f81f3b37395",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/crypto/whales/recent": {
    "fields": "5e0d6cec3635ed50",
@@ -380,7 +380,7 @@
     11
    ],
    "params": "41768f81f3b37395",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/crypto/{pair}/ohlc/{candle_size}": {
    "fields": "3246a6b29e6bf5c0",
@@ -389,7 +389,7 @@
     10
    ],
    "params": "80868a5d1ae956f6",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/crypto/{pair}/state": {
    "fields": "d69e9a9a2cefc0fd",
@@ -398,7 +398,7 @@
     9
    ],
    "params": "437e6e6412f7a245",
-   "shape": "bf842e52e0a6cdca"
+   "shape": "9b88c4ddfeae1e9e"
   },
   "GET /api/darkpool/recent": {
    "fields": "dcf637d3404f47e3",
@@ -407,7 +407,7 @@
     18
    ],
    "params": "fdb99552f50b5c27",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/darkpool/{ticker}": {
    "fields": "dcf637d3404f47e3",
@@ -416,7 +416,7 @@
     18
    ],
    "params": "5de5bc77487642d9",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/darkpool/{ticker}/price-levels": {
    "fields": "09eff9c0fc83ae97",
@@ -425,7 +425,7 @@
     6
    ],
    "params": "d85cdd2879814741",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/digital-currencies/history": {
    "fields": "dd1783aca69bbb55",
@@ -434,7 +434,7 @@
     15
    ],
    "params": "4e300be20ad6a0c6",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/digital-currencies/intraday": {
    "fields": "dd1783aca69bbb55",
@@ -443,7 +443,7 @@
     15
    ],
    "params": "3b08cde136e7328d",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/earnings/afterhours": {
    "fields": "56acdd5b74e2cbff",
@@ -452,7 +452,7 @@
     22
    ],
    "params": "76aa19475f77e517",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/earnings/premarket": {
    "fields": "56acdd5b74e2cbff",
@@ -461,7 +461,7 @@
     22
    ],
    "params": "76aa19475f77e517",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/earnings/{ticker}": {
    "fields": "34925290955b7472",
@@ -470,7 +470,7 @@
     20
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/economy/{indicator}": {
    "fields": "5b5ee9c918862eeb",
@@ -479,7 +479,7 @@
     8
    ],
    "params": "a8cea86d09304424",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/etfs/{ticker}/exposure": {
    "fields": "06ea734a3ac8dafc",
@@ -488,7 +488,7 @@
     6
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "6b88aa01d5efcc50"
+   "shape": "d882303d350df3d2"
   },
   "GET /api/etfs/{ticker}/holdings": {
    "fields": "6ad8c21adb372f22",
@@ -497,7 +497,7 @@
     19
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "6b88aa01d5efcc50"
+   "shape": "d882303d350df3d2"
   },
   "GET /api/etfs/{ticker}/in-outflow": {
    "fields": "dfaf9d4c73897dd7",
@@ -506,7 +506,7 @@
     6
    ],
    "params": "f3ff987a077da8a6",
-   "shape": "6b88aa01d5efcc50"
+   "shape": "d882303d350df3d2"
   },
   "GET /api/etfs/{ticker}/info": {
    "fields": "b1631121b0ca7ad3",
@@ -515,7 +515,7 @@
     15
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/etfs/{ticker}/weights": {
    "fields": "455ae5cf7649400e",
@@ -524,7 +524,7 @@
     8
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "fbe1dc50be840a1d"
+   "shape": "833823dcc0d63175"
   },
   "GET /api/forex/history": {
    "fields": "dd1783aca69bbb55",
@@ -533,7 +533,7 @@
     15
    ],
    "params": "7f6fa26db70be320",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/forex/intraday": {
    "fields": "dd1783aca69bbb55",
@@ -542,7 +542,7 @@
     15
    ],
    "params": "023859818ac200a9",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/forex/rate": {
    "fields": "3df5cc8fd2369d46",
@@ -551,7 +551,7 @@
     8
    ],
    "params": "1766138727d6586c",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/futures/contracts": {
    "fields": "90fe12caa489af5c",
@@ -560,7 +560,7 @@
     11
    ],
    "params": "53b0b8d71f967059",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/futures/flow": {
    "fields": "c645652451fdf257",
@@ -569,7 +569,7 @@
     12
    ],
    "params": "5e32c5157628bf76",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/futures/{contract}/candles": {
    "fields": "6d6d170c34658a8b",
@@ -578,7 +578,7 @@
     10
    ],
    "params": "d0ed1860a5db3bb5",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/futures/{contract}/stats": {
    "fields": "2f69996a4977b51d",
@@ -587,7 +587,7 @@
     5
    ],
    "params": "2ac34e78d31eec5d",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/futures/{contract}/trades": {
    "fields": "a5caf93128f43f7a",
@@ -596,7 +596,7 @@
     10
    ],
    "params": "5255b862994b2d02",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/group-flow/{flow_group}/greek-flow": {
    "fields": "d3c654a1449e65f5",
@@ -605,7 +605,7 @@
     16
    ],
    "params": "68c06c2033b0e50b",
-   "shape": "6b88aa01d5efcc50"
+   "shape": "d882303d350df3d2"
   },
   "GET /api/group-flow/{flow_group}/greek-flow/{expiry}": {
    "fields": "c63202c566122db7",
@@ -614,7 +614,7 @@
     17
    ],
    "params": "c2b8259cb462d540",
-   "shape": "6b88aa01d5efcc50"
+   "shape": "d882303d350df3d2"
   },
   "GET /api/insider/transactions": {
    "fields": "95945efd76d48f45",
@@ -623,7 +623,7 @@
     24
    ],
    "params": "8bbdf03c970693fc",
-   "shape": "6b88aa01d5efcc50"
+   "shape": "d882303d350df3d2"
   },
   "GET /api/insider/{sector}/sector-flow": {
    "fields": "a0a4547190ae5410",
@@ -632,7 +632,7 @@
     8
    ],
    "params": "e39f4dbd9ce44024",
-   "shape": "6b88aa01d5efcc50"
+   "shape": "d882303d350df3d2"
   },
   "GET /api/insider/{ticker}": {
    "fields": "6617887b2c287cce",
@@ -641,7 +641,7 @@
     8
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "6b88aa01d5efcc50"
+   "shape": "d882303d350df3d2"
   },
   "GET /api/insider/{ticker}/ticker-flow": {
    "fields": "a0a4547190ae5410",
@@ -650,7 +650,7 @@
     8
    ],
    "params": "3f04a6242c8120f2",
-   "shape": "6b88aa01d5efcc50"
+   "shape": "d882303d350df3d2"
   },
   "GET /api/institution/{name}/activity": {
    "fields": "570c3a011da2e5c9",
@@ -659,7 +659,7 @@
     14
    ],
    "params": "b7a1dbb43422f112",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/institution/{name}/activity/v2": {
    "fields": "570c3a011da2e5c9",
@@ -668,7 +668,7 @@
     14
    ],
    "params": "c8e731ba87930b40",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/institution/{name}/holdings": {
    "fields": "ff7a48fd61906cb8",
@@ -677,7 +677,7 @@
     18
    ],
    "params": "99d621a45452d46f",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/institution/{name}/sectors": {
    "fields": "ef30449e461cd022",
@@ -686,7 +686,7 @@
     7
    ],
    "params": "a788e5dd076ce9dd",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/institution/{ticker}/ownership": {
    "fields": "61ce9b048dfb8edd",
@@ -695,7 +695,7 @@
     18
    ],
    "params": "e3f86700ad7a23b4",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/institutions": {
    "fields": "11cabf23f3c5ce1f",
@@ -704,7 +704,7 @@
     30
    ],
    "params": "1f6cb2d349cffd85",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/institutions/latest_filings": {
    "fields": "135b82f0746c9879",
@@ -713,7 +713,7 @@
     9
    ],
    "params": "4749ceade5c789b5",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/lit-flow/recent": {
    "fields": "bb85f119d4fb0207",
@@ -722,7 +722,7 @@
     17
    ],
    "params": "d14106bbdedcc13c",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/lit-flow/{ticker}": {
    "fields": "bb85f119d4fb0207",
@@ -731,7 +731,7 @@
     17
    ],
    "params": "408e1ce849455173",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/market/correlations": {
    "fields": "393f8acabb79c71a",
@@ -740,7 +740,7 @@
     6
    ],
    "params": "10a5b4180c135401",
-   "shape": "6b88aa01d5efcc50"
+   "shape": "d882303d350df3d2"
   },
   "GET /api/market/economic-calendar": {
    "fields": "c8af1caf8d8eb54e",
@@ -749,7 +749,7 @@
     6
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "474754c0bdba0614"
+   "shape": "949c5bf548299966"
   },
   "GET /api/market/fda-calendar": {
    "fields": "a84c28d453db3c07",
@@ -758,7 +758,7 @@
     14
    ],
    "params": "35370afe8d61760a",
-   "shape": "474754c0bdba0614"
+   "shape": "949c5bf548299966"
   },
   "GET /api/market/insider-buy-sells": {
    "fields": "2f442b6b945e61fb",
@@ -767,7 +767,7 @@
     5
    ],
    "params": "c4c2f13901b1cca5",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/market/market-tide": {
    "fields": "80ccf34153c2ae21",
@@ -776,7 +776,7 @@
     4
    ],
    "params": "43b570be3a7bac0b",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/market/movers": {
    "fields": "eba1aaf2f07af709",
@@ -785,7 +785,7 @@
     23
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/market/oi-change": {
    "fields": "11edc5cf0b4e3c8f",
@@ -794,7 +794,7 @@
     23
    ],
    "params": "7d627ff421b5b2ec",
-   "shape": "6b88aa01d5efcc50"
+   "shape": "d882303d350df3d2"
   },
   "GET /api/market/sector-etfs": {
    "fields": "38d7bfdf19981cfd",
@@ -803,7 +803,7 @@
     23
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "474754c0bdba0614"
+   "shape": "949c5bf548299966"
   },
   "GET /api/market/top-net-impact": {
    "fields": "7e7460bb171f4b46",
@@ -812,7 +812,7 @@
     2
    ],
    "params": "55ab0fba9fbc7078",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/market/total-options-volume": {
    "fields": "4fceac76ae5a5a2a",
@@ -821,7 +821,7 @@
     5
    ],
    "params": "56c9003e0043dd86",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/market/{sector}/sector-tide": {
    "fields": "80ccf34153c2ae21",
@@ -830,7 +830,7 @@
     4
    ],
    "params": "88229f85ba3518a9",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/market/{ticker}/etf-tide": {
    "fields": "80ccf34153c2ae21",
@@ -839,7 +839,7 @@
     4
    ],
    "params": "d85cdd2879814741",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/net-flow/expiry": {
    "fields": "12a6e88281320255",
@@ -848,7 +848,7 @@
     19
    ],
    "params": "16da79856da890a3",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/news/headlines": {
    "fields": "6433e94c27092fa0",
@@ -857,7 +857,7 @@
     10
    ],
    "params": "96e40cc0cb356120",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/option-activity/unusual": {
    "fields": "3eb3462eb983ae5f",
@@ -866,7 +866,7 @@
     31
    ],
    "params": "d0c85ffaf0f0167e",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/option-contract/{id}/flow": {
    "fields": "022a31b58f958557",
@@ -875,7 +875,7 @@
     48
    ],
    "params": "ab1dc3366b2c7f34",
-   "shape": "fbe1dc50be840a1d"
+   "shape": "833823dcc0d63175"
   },
   "GET /api/option-contract/{id}/historic": {
    "fields": "91db09aa4eb09418",
@@ -884,7 +884,7 @@
     27
    ],
    "params": "2e17824bfa495adf",
-   "shape": "838a74d306ee03df"
+   "shape": "fa975fdbfdc24b30"
   },
   "GET /api/option-contract/{id}/intraday": {
    "fields": "b2d0096d6e7eefe6",
@@ -893,7 +893,7 @@
     20
    ],
    "params": "8c9a52ad75317fe9",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/option-contract/{id}/volume-profile": {
    "fields": "44098017a057e1b7",
@@ -902,7 +902,7 @@
     11
    ],
    "params": "8c9a52ad75317fe9",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/option-trades": {
    "fields": "215e757c053c8ac6",
@@ -911,7 +911,7 @@
     50
    ],
    "params": "d589df4eb057766b",
-   "shape": "eb8fad5eafe92f2d"
+   "shape": "34d11fccf7083221"
   },
   "GET /api/option-trades/exchange-breakdown/{date}": {
    "fields": "3366e9f111ed02e1",
@@ -920,7 +920,7 @@
     8
    ],
    "params": "8400d5980f90fc08",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/option-trades/flow-alerts": {
    "fields": "a56571812be48679",
@@ -929,7 +929,7 @@
     24
    ],
    "params": "ab7ec4a7602871f8",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/option-trades/flow-alerts/{id}": {
    "fields": "14cc286418616ced",
@@ -938,7 +938,7 @@
     4
    ],
    "params": "8dcbfa2ef8ceb783",
-   "shape": "fbe1dc50be840a1d"
+   "shape": "833823dcc0d63175"
   },
   "GET /api/option-trades/full-tape/{date}": {
    "fields": "4f53cda18c2baa0c",
@@ -947,7 +947,7 @@
     0
    ],
    "params": "62900fcdbeca34dd",
-   "shape": "55edfde98feacd7c"
+   "shape": "a41d9275196af6a3"
   },
   "GET /api/option-trades/multi-leg": {
    "fields": "51470cabe1562139",
@@ -956,7 +956,7 @@
     40
    ],
    "params": "6b81a852e21c7f03",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/option-trades/multi-leg/{id}/legs": {
    "fields": "5ec48b61b56e2618",
@@ -965,7 +965,7 @@
     17
    ],
    "params": "eb4d19bfd67e2702",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/option-trades/optionable-tickers": {
    "fields": "464595b6652aa83b",
@@ -974,7 +974,7 @@
     1
    ],
    "params": "ce4a7b9d031bb574",
-   "shape": "285669e348ad56cb"
+   "shape": "1655cc1880a6fdcb"
   },
   "GET /api/options-pulse/sectors": {
    "fields": "4f53cda18c2baa0c",
@@ -983,7 +983,7 @@
     0
    ],
    "params": "924dbb74bf610368",
-   "shape": "2244ed36be91a1b7"
+   "shape": "317575180ff2e031"
   },
   "GET /api/options-pulse/top": {
    "fields": "4f53cda18c2baa0c",
@@ -992,7 +992,7 @@
     0
    ],
    "params": "96d9338e08ea4764",
-   "shape": "2244ed36be91a1b7"
+   "shape": "317575180ff2e031"
   },
   "GET /api/options-pulse/total": {
    "fields": "4f53cda18c2baa0c",
@@ -1001,7 +1001,7 @@
     0
    ],
    "params": "924dbb74bf610368",
-   "shape": "2244ed36be91a1b7"
+   "shape": "317575180ff2e031"
   },
   "GET /api/politician-portfolios/disclosures": {
    "fields": "3102f0451112807a",
@@ -1010,7 +1010,7 @@
     11
    ],
    "params": "d000e65fcef7aca1",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/politician-portfolios/holders/{ticker}": {
    "fields": "1dcaba9de0250ab8",
@@ -1019,7 +1019,7 @@
     8
    ],
    "params": "cd7713d2ff2f0b7b",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/politician-portfolios/people": {
    "fields": "ac9297d2f6da2c89",
@@ -1028,7 +1028,7 @@
     4
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/politician-portfolios/recent_trades": {
    "fields": "72c15bfdd206da34",
@@ -1037,7 +1037,7 @@
     12
    ],
    "params": "3174896b2adf74b7",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/politician-portfolios/{politician_id}": {
    "fields": "13f4ea48044d5b8f",
@@ -1046,7 +1046,7 @@
     27
    ],
    "params": "bf1ca4fdc9dc1f43",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/politics/fec/candidates": {
    "fields": "4f53cda18c2baa0c",
@@ -1055,7 +1055,7 @@
     0
    ],
    "params": "efbbd3db5df87769",
-   "shape": "a344b7c71c0394d9"
+   "shape": "b07bea1b1ef0bf2e"
   },
   "GET /api/politics/fec/companies": {
    "fields": "4f53cda18c2baa0c",
@@ -1064,7 +1064,7 @@
     0
    ],
    "params": "af4f490fc9d70f0e",
-   "shape": "a344b7c71c0394d9"
+   "shape": "b07bea1b1ef0bf2e"
   },
   "GET /api/politics/fec/company/{ticker}/lobbying": {
    "fields": "4f53cda18c2baa0c",
@@ -1073,7 +1073,7 @@
     0
    ],
    "params": "c0ea835c2f7b625d",
-   "shape": "7ba80eb48b12e0b6"
+   "shape": "6a347e7ee374f4ad"
   },
   "GET /api/politics/fec/company/{ticker}/people": {
    "fields": "4f53cda18c2baa0c",
@@ -1082,7 +1082,7 @@
     0
    ],
    "params": "e13e963678e85468",
-   "shape": "7ba80eb48b12e0b6"
+   "shape": "6a347e7ee374f4ad"
   },
   "GET /api/politics/fec/contributions": {
    "fields": "4f53cda18c2baa0c",
@@ -1091,7 +1091,7 @@
     0
    ],
    "params": "936bfeac0e1b292e",
-   "shape": "2244ed36be91a1b7"
+   "shape": "317575180ff2e031"
   },
   "GET /api/politics/politician/trades": {
    "fields": "4f53cda18c2baa0c",
@@ -1100,7 +1100,7 @@
     0
    ],
    "params": "0fcfa4d14ebf6c02",
-   "shape": "a344b7c71c0394d9"
+   "shape": "b07bea1b1ef0bf2e"
   },
   "GET /api/potus/posts": {
    "fields": "587add540713eb26",
@@ -1109,7 +1109,7 @@
     2
    ],
    "params": "b93c841c42c186ee",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/potus/schedule": {
    "fields": "d4b0fce1791e7dc1",
@@ -1118,7 +1118,7 @@
     8
    ],
    "params": "fa34998141e3c74f",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/predictions/insiders": {
    "fields": "008d38407363724e",
@@ -1127,7 +1127,7 @@
     29
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/predictions/market/{asset_id}": {
    "fields": "1f65516261d7da75",
@@ -1136,7 +1136,7 @@
     94
    ],
    "params": "a082242b751979f0",
-   "shape": "5c7252019e197c13"
+   "shape": "14b48cda47776c26"
   },
   "GET /api/predictions/market/{asset_id}/liquidity": {
    "fields": "70ed12b2a8d4316f",
@@ -1145,7 +1145,7 @@
     18
    ],
    "params": "a082242b751979f0",
-   "shape": "5c7252019e197c13"
+   "shape": "14b48cda47776c26"
   },
   "GET /api/predictions/market/{asset_id}/positions": {
    "fields": "ac93646711b31385",
@@ -1154,7 +1154,7 @@
     19
    ],
    "params": "a082242b751979f0",
-   "shape": "5c7252019e197c13"
+   "shape": "14b48cda47776c26"
   },
   "GET /api/predictions/search-users": {
    "fields": "8d59f2f7a26c4469",
@@ -1163,7 +1163,7 @@
     4
    ],
    "params": "805ce70b110891a6",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/predictions/smart-money": {
    "fields": "7dcd713732ef4e09",
@@ -1172,7 +1172,7 @@
     22
    ],
    "params": "2f71853f35885217",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/predictions/unusual": {
    "fields": "4411f83de2a1f6ff",
@@ -1181,7 +1181,7 @@
     27
    ],
    "params": "c3bc865d149f46a7",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/predictions/user/{user_id}": {
    "fields": "fc87329efc6fa5a2",
@@ -1190,7 +1190,7 @@
     60
    ],
    "params": "f05663946ae5e9ca",
-   "shape": "5c7252019e197c13"
+   "shape": "14b48cda47776c26"
   },
   "GET /api/predictions/whales": {
    "fields": "7fcf65ec750ac845",
@@ -1199,7 +1199,7 @@
     30
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/private-markets/companies": {
    "fields": "8052a7951b11095d",
@@ -1208,7 +1208,7 @@
     13
    ],
    "params": "c40aa7a974a6833b",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/private-markets/companies/{npm_ticker}": {
    "fields": "8be27ae8e63a5827",
@@ -1217,7 +1217,7 @@
     20
    ],
    "params": "aafb952ba0c91407",
-   "shape": "5c7252019e197c13"
+   "shape": "14b48cda47776c26"
   },
   "GET /api/private-markets/companies/{npm_ticker}/funding": {
    "fields": "ce8de072d026675e",
@@ -1226,7 +1226,7 @@
     7
    ],
    "params": "9d6a93bac6d16497",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/private-markets/companies/{npm_ticker}/investors": {
    "fields": "41036b157f1c681c",
@@ -1235,7 +1235,7 @@
     5
    ],
    "params": "9d6a93bac6d16497",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/private-markets/companies/{npm_ticker}/management": {
    "fields": "e26e163b5fd2b465",
@@ -1244,7 +1244,7 @@
     7
    ],
    "params": "9d6a93bac6d16497",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/private-markets/companies/{npm_ticker}/pricing": {
    "fields": "bdc61dc7507b535d",
@@ -1253,7 +1253,7 @@
     6
    ],
    "params": "d7916ffccf058875",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/private-markets/investors": {
    "fields": "412693d61b15cbd3",
@@ -1262,7 +1262,7 @@
     4
    ],
    "params": "98d03501798155d9",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/private-markets/investors/{name}": {
    "fields": "4d54099af2cb794c",
@@ -1271,7 +1271,7 @@
     15
    ],
    "params": "309f863788bc2353",
-   "shape": "5c7252019e197c13"
+   "shape": "14b48cda47776c26"
   },
   "GET /api/private-markets/search": {
    "fields": "9f3a9a48c20942d6",
@@ -1280,7 +1280,7 @@
     11
    ],
    "params": "0fbaa19f1f6f5660",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/screener/analysts": {
    "fields": "82499c2eebe74ab8",
@@ -1289,7 +1289,7 @@
     8
    ],
    "params": "29d88fa4eb31a781",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/screener/option-contracts": {
    "fields": "3eb3462eb983ae5f",
@@ -1298,7 +1298,7 @@
     31
    ],
    "params": "a149ed2f0722e2e7",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/screener/stocks": {
    "fields": "14fe583fef29e51d",
@@ -1307,7 +1307,7 @@
     45
    ],
    "params": "f25e5f1deb9bb5df",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/seasonality/market": {
    "fields": "20d80d33714306c4",
@@ -1316,7 +1316,7 @@
     9
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "474754c0bdba0614"
+   "shape": "949c5bf548299966"
   },
   "GET /api/seasonality/{month}/performers": {
    "fields": "979774b0b5dde171",
@@ -1325,7 +1325,7 @@
     11
    ],
    "params": "8f46a6094e3fd8fa",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/seasonality/{ticker}/monthly": {
    "fields": "270e0f6efba0a6c7",
@@ -1334,7 +1334,7 @@
     8
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/seasonality/{ticker}/year-month": {
    "fields": "50feef37ce0f9da0",
@@ -1343,7 +1343,7 @@
     5
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/short_screener": {
    "fields": "7920cfc6e7c03491",
@@ -1352,7 +1352,7 @@
     10
    ],
    "params": "f52f5b33186914a6",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/shorts/{ticker}/data": {
    "fields": "193575268983b3c0",
@@ -1361,7 +1361,7 @@
     7
    ],
    "params": "594347e4083ecdb7",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/shorts/{ticker}/ftds": {
    "fields": "a985fa35cac47970",
@@ -1370,7 +1370,7 @@
     3
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/shorts/{ticker}/interest-float": {
    "fields": "50be61c2819422a9",
@@ -1379,7 +1379,7 @@
     7
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/shorts/{ticker}/interest-float/v2": {
    "fields": "7920cfc6e7c03491",
@@ -1388,7 +1388,7 @@
     10
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/shorts/{ticker}/volume-and-ratio": {
    "fields": "5441903e5960c972",
@@ -1397,7 +1397,7 @@
     5
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/shorts/{ticker}/volumes-by-exchange": {
    "fields": "cdd89bd4cafded60",
@@ -1406,7 +1406,7 @@
     5
    ],
    "params": "594347e4083ecdb7",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/socket": {
    "fields": "4f53cda18c2baa0c",
@@ -1415,7 +1415,7 @@
     0
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "71acf6b86e559e80"
+   "shape": "1cf39ee0e950099b"
   },
   "GET /api/socket/contract_screener": {
    "fields": "4f53cda18c2baa0c",
@@ -1424,7 +1424,7 @@
     0
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "71acf6b86e559e80"
+   "shape": "1cf39ee0e950099b"
   },
   "GET /api/socket/custom_alerts": {
    "fields": "4f53cda18c2baa0c",
@@ -1433,7 +1433,7 @@
     0
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "71acf6b86e559e80"
+   "shape": "1cf39ee0e950099b"
   },
   "GET /api/socket/flow_alerts": {
    "fields": "4f53cda18c2baa0c",
@@ -1442,7 +1442,7 @@
     0
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "71acf6b86e559e80"
+   "shape": "1cf39ee0e950099b"
   },
   "GET /api/socket/gex": {
    "fields": "4f53cda18c2baa0c",
@@ -1451,7 +1451,7 @@
     0
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "71acf6b86e559e80"
+   "shape": "1cf39ee0e950099b"
   },
   "GET /api/socket/greeks": {
    "fields": "4f53cda18c2baa0c",
@@ -1460,7 +1460,7 @@
     0
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "71acf6b86e559e80"
+   "shape": "1cf39ee0e950099b"
   },
   "GET /api/socket/interpolated_iv": {
    "fields": "4f53cda18c2baa0c",
@@ -1469,7 +1469,7 @@
     0
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "71acf6b86e559e80"
+   "shape": "1cf39ee0e950099b"
   },
   "GET /api/socket/interval_flow": {
    "fields": "4f53cda18c2baa0c",
@@ -1478,7 +1478,7 @@
     0
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "71acf6b86e559e80"
+   "shape": "1cf39ee0e950099b"
   },
   "GET /api/socket/iv_term_structure": {
    "fields": "4f53cda18c2baa0c",
@@ -1487,7 +1487,7 @@
     0
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "71acf6b86e559e80"
+   "shape": "1cf39ee0e950099b"
   },
   "GET /api/socket/lit_trades": {
    "fields": "4f53cda18c2baa0c",
@@ -1496,7 +1496,7 @@
     0
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "71acf6b86e559e80"
+   "shape": "1cf39ee0e950099b"
   },
   "GET /api/socket/market_tide": {
    "fields": "4f53cda18c2baa0c",
@@ -1505,7 +1505,7 @@
     0
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "71acf6b86e559e80"
+   "shape": "1cf39ee0e950099b"
   },
   "GET /api/socket/net_flow": {
    "fields": "4f53cda18c2baa0c",
@@ -1514,7 +1514,7 @@
     0
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "71acf6b86e559e80"
+   "shape": "1cf39ee0e950099b"
   },
   "GET /api/socket/news": {
    "fields": "4f53cda18c2baa0c",
@@ -1523,7 +1523,7 @@
     0
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "71acf6b86e559e80"
+   "shape": "1cf39ee0e950099b"
   },
   "GET /api/socket/off_lit_trades": {
    "fields": "4f53cda18c2baa0c",
@@ -1532,7 +1532,7 @@
     0
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "71acf6b86e559e80"
+   "shape": "1cf39ee0e950099b"
   },
   "GET /api/socket/option_trades": {
    "fields": "4f53cda18c2baa0c",
@@ -1541,7 +1541,7 @@
     0
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "71acf6b86e559e80"
+   "shape": "1cf39ee0e950099b"
   },
   "GET /api/socket/periscope": {
    "fields": "4f53cda18c2baa0c",
@@ -1550,7 +1550,7 @@
     0
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "71acf6b86e559e80"
+   "shape": "1cf39ee0e950099b"
   },
   "GET /api/socket/price": {
    "fields": "4f53cda18c2baa0c",
@@ -1559,7 +1559,7 @@
     0
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "71acf6b86e559e80"
+   "shape": "1cf39ee0e950099b"
   },
   "GET /api/socket/risk_reversal_skew": {
    "fields": "4f53cda18c2baa0c",
@@ -1568,7 +1568,7 @@
     0
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "71acf6b86e559e80"
+   "shape": "1cf39ee0e950099b"
   },
   "GET /api/socket/trading_halts": {
    "fields": "4f53cda18c2baa0c",
@@ -1577,7 +1577,7 @@
     0
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "71acf6b86e559e80"
+   "shape": "1cf39ee0e950099b"
   },
   "GET /api/stock-directory/ticker-exchanges": {
    "fields": "7b020b2c98d0c363",
@@ -1586,7 +1586,7 @@
     4
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "bf842e52e0a6cdca"
+   "shape": "9b88c4ddfeae1e9e"
   },
   "GET /api/stock/{sector}/tickers": {
    "fields": "4f53cda18c2baa0c",
@@ -1595,7 +1595,7 @@
     0
    ],
    "params": "bec9a21d5673da44",
-   "shape": "285669e348ad56cb"
+   "shape": "1655cc1880a6fdcb"
   },
   "GET /api/stock/{ticker}/atm-chains": {
    "fields": "3eb3462eb983ae5f",
@@ -1604,7 +1604,7 @@
     31
    ],
    "params": "d374932ce6ffa4cc",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/balance-sheets": {
    "fields": "37e75b47a0f9b877",
@@ -1613,7 +1613,7 @@
     44
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/stock/{ticker}/cash-flows": {
    "fields": "58cbda0f9f7fdd5b",
@@ -1622,7 +1622,7 @@
     36
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/stock/{ticker}/earnings": {
    "fields": "ae94d8458b307ad4",
@@ -1631,7 +1631,7 @@
     13
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/stock/{ticker}/expiry-breakdown": {
    "fields": "0b3913caaadcf739",
@@ -1640,7 +1640,7 @@
     4
    ],
    "params": "d85cdd2879814741",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/financials": {
    "fields": "b1095d95bafb148b",
@@ -1649,7 +1649,7 @@
     126
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/stock/{ticker}/flow-alerts": {
    "fields": "a56571812be48679",
@@ -1658,7 +1658,7 @@
     24
    ],
    "params": "9122c4d38ba0e659",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/flow-per-expiry": {
    "fields": "a73a9e1030bc860e",
@@ -1667,7 +1667,7 @@
     23
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "6b88aa01d5efcc50"
+   "shape": "d882303d350df3d2"
   },
   "GET /api/stock/{ticker}/flow-per-strike": {
    "fields": "3fda3b40711d7e60",
@@ -1676,7 +1676,7 @@
     18
    ],
    "params": "d85cdd2879814741",
-   "shape": "1cd2437c3cef46ff"
+   "shape": "ab5cd675a49bcf76"
   },
   "GET /api/stock/{ticker}/flow-per-strike-intraday": {
    "fields": "3fda3b40711d7e60",
@@ -1685,7 +1685,7 @@
     18
    ],
    "params": "6b28caeac9aaa595",
-   "shape": "1cd2437c3cef46ff"
+   "shape": "ab5cd675a49bcf76"
   },
   "GET /api/stock/{ticker}/flow-recent": {
    "fields": "a73a9e1030bc860e",
@@ -1694,7 +1694,7 @@
     23
    ],
    "params": "f4e564034649c0fc",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/fundamental-breakdown": {
    "fields": "25df4c899f504220",
@@ -1703,7 +1703,7 @@
     68
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/stock/{ticker}/gex-levels": {
    "fields": "ef80b59fba5aaceb",
@@ -1712,7 +1712,7 @@
     9
    ],
    "params": "939981d400b80b3f",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/greek-exposure": {
    "fields": "f55d94b6d92221e8",
@@ -1721,7 +1721,7 @@
     9
    ],
    "params": "e12d2d7ef3647ff9",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/greek-exposure/expiry": {
    "fields": "10c630950d4d0abf",
@@ -1730,7 +1730,7 @@
     9
    ],
    "params": "d85cdd2879814741",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/greek-exposure/strike": {
    "fields": "5a305b9ddebefec0",
@@ -1739,7 +1739,7 @@
     9
    ],
    "params": "d85cdd2879814741",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/greek-exposure/strike-expiry": {
    "fields": "8af591b791abd9d0",
@@ -1748,7 +1748,7 @@
     10
    ],
    "params": "6aaf29dd55e55896",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/greek-flow": {
    "fields": "4c33f82f6637b8ed",
@@ -1757,7 +1757,7 @@
     12
    ],
    "params": "d85cdd2879814741",
-   "shape": "6b88aa01d5efcc50"
+   "shape": "d882303d350df3d2"
   },
   "GET /api/stock/{ticker}/greek-flow/{expiry}": {
    "fields": "3b87f7ddaa8021d3",
@@ -1766,7 +1766,7 @@
     13
    ],
    "params": "e9bad0035324b7d0",
-   "shape": "6b88aa01d5efcc50"
+   "shape": "d882303d350df3d2"
   },
   "GET /api/stock/{ticker}/greeks": {
    "fields": "d9e09ac7d135d04c",
@@ -1775,7 +1775,7 @@
     19
    ],
    "params": "6aaf29dd55e55896",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/historical-risk-reversal-skew": {
    "fields": "cf83f545c7c87fdc",
@@ -1784,7 +1784,7 @@
     4
    ],
    "params": "6bd5430b9127ec91",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/income-statements": {
    "fields": "2a141214b36d5230",
@@ -1793,7 +1793,7 @@
     32
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/stock/{ticker}/info": {
    "fields": "f2accac354bb23bb",
@@ -1802,7 +1802,7 @@
     14
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "78d8e564b9276827"
+   "shape": "3547a4711511ecc5"
   },
   "GET /api/stock/{ticker}/insider-buy-sells": {
    "fields": "2f442b6b945e61fb",
@@ -1811,7 +1811,7 @@
     5
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/interpolated-iv": {
    "fields": "0a1a79dd6ccb1bff",
@@ -1820,7 +1820,7 @@
     5
    ],
    "params": "d85cdd2879814741",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/iv-rank": {
    "fields": "6a5e81d96e71430f",
@@ -1829,7 +1829,7 @@
     5
    ],
    "params": "5feb001918bf2161",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/max-pain": {
    "fields": "0290904e6fef6925",
@@ -1838,7 +1838,7 @@
     2
    ],
    "params": "d85cdd2879814741",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/net-prem-ticks": {
    "fields": "6a3585359b9297e7",
@@ -1847,7 +1847,7 @@
     13
    ],
    "params": "d85cdd2879814741",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/nope": {
    "fields": "a5ca2a5ce5e33b0a",
@@ -1856,7 +1856,7 @@
     10
    ],
    "params": "d85cdd2879814741",
-   "shape": "6b88aa01d5efcc50"
+   "shape": "d882303d350df3d2"
   },
   "GET /api/stock/{ticker}/ohlc/{candle_size}": {
    "fields": "87e3ab1af28c32de",
@@ -1865,7 +1865,7 @@
     9
    ],
    "params": "5fdb0e043edfbebc",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/oi-change": {
    "fields": "11edc5cf0b4e3c8f",
@@ -1874,7 +1874,7 @@
     23
    ],
    "params": "964f943b6ad758c4",
-   "shape": "6b88aa01d5efcc50"
+   "shape": "d882303d350df3d2"
   },
   "GET /api/stock/{ticker}/oi-per-expiry": {
    "fields": "3e776563c7c34a9d",
@@ -1883,7 +1883,7 @@
     4
    ],
    "params": "d85cdd2879814741",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/oi-per-strike": {
    "fields": "cf8042cc4e74d016",
@@ -1892,7 +1892,7 @@
     4
    ],
    "params": "d85cdd2879814741",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/option-chains": {
    "fields": "4f53cda18c2baa0c",
@@ -1901,7 +1901,7 @@
     0
    ],
    "params": "da8a2442b96806d4",
-   "shape": "a344b7c71c0394d9"
+   "shape": "b07bea1b1ef0bf2e"
   },
   "GET /api/stock/{ticker}/option-contracts": {
    "fields": "ed517174123bcbcc",
@@ -1910,7 +1910,7 @@
     27
    ],
    "params": "0949d7c8eb7d1642",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/option-stance": {
    "fields": "413dd4149f79d056",
@@ -1919,7 +1919,7 @@
     41
    ],
    "params": "6720a7c0ecc06370",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/stock/{ticker}/option/stock-price-levels": {
    "fields": "fc041521c69705ca",
@@ -1928,7 +1928,7 @@
     3
    ],
    "params": "d85cdd2879814741",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/option/volume-oi-expiry": {
    "fields": "07197930fff368df",
@@ -1937,7 +1937,7 @@
     3
    ],
    "params": "d85cdd2879814741",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/options-pulse": {
    "fields": "4f53cda18c2baa0c",
@@ -1946,7 +1946,7 @@
     0
    ],
    "params": "d85cdd2879814741",
-   "shape": "2244ed36be91a1b7"
+   "shape": "317575180ff2e031"
   },
   "GET /api/stock/{ticker}/options-volume": {
    "fields": "bad79c5561ef4965",
@@ -1955,7 +1955,7 @@
     21
    ],
    "params": "1241a7c4f47c3bc4",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/ownership": {
    "fields": "7c04ce7172b78c1e",
@@ -1964,7 +1964,7 @@
     6
    ],
    "params": "7bae66d726328711",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/quote": {
    "fields": "4652a99e5d2d7edd",
@@ -1973,7 +1973,7 @@
     43
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "f8cc3bb63d452520"
+   "shape": "1c0e40a43a84e4a4"
   },
   "GET /api/stock/{ticker}/spot-exposures": {
    "fields": "e983acf406618a45",
@@ -1982,7 +1982,7 @@
     11
    ],
    "params": "d85cdd2879814741",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/spot-exposures/expiry-strike": {
    "fields": "d7aec8d01ac55389",
@@ -1991,7 +1991,7 @@
     35
    ],
    "params": "25413ca292263f1f",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/spot-exposures/strike": {
    "fields": "d7aec8d01ac55389",
@@ -2000,7 +2000,7 @@
     35
    ],
    "params": "9d5439818ddf5240",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/spot-exposures/{expiry}/strike": {
    "fields": "d7aec8d01ac55389",
@@ -2009,7 +2009,7 @@
     35
    ],
    "params": "d9bad26d7cb90039",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/stock-state": {
    "fields": "269f5e956197dfe9",
@@ -2018,7 +2018,7 @@
     9
    ],
    "params": "cb6f5ebf9f22f28a",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/stock-volume-price-levels": {
    "fields": "68fe3f2a049782ac",
@@ -2027,7 +2027,7 @@
     5
    ],
    "params": "d85cdd2879814741",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/stock/{ticker}/technical-indicator/{function}": {
    "fields": "5dc02564d1e5f657",
@@ -2036,7 +2036,7 @@
     9
    ],
    "params": "37069c8d790f5008",
-   "shape": "055affcc5d6c9702"
+   "shape": "ffa34742604a713c"
   },
   "GET /api/stock/{ticker}/volatility/anomaly": {
    "fields": "4f53cda18c2baa0c",
@@ -2045,7 +2045,7 @@
     0
    ],
    "params": "d85cdd2879814741",
-   "shape": "2244ed36be91a1b7"
+   "shape": "317575180ff2e031"
   },
   "GET /api/stock/{ticker}/volatility/character": {
    "fields": "4f53cda18c2baa0c",
@@ -2054,7 +2054,7 @@
     0
    ],
    "params": "d85cdd2879814741",
-   "shape": "2244ed36be91a1b7"
+   "shape": "317575180ff2e031"
   },
   "GET /api/stock/{ticker}/volatility/realized": {
    "fields": "13ca399cb0e8d787",
@@ -2063,7 +2063,7 @@
     5
    ],
    "params": "e12d2d7ef3647ff9",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/volatility/stats": {
    "fields": "d97214dbd5d0255d",
@@ -2072,7 +2072,7 @@
     9
    ],
    "params": "d85cdd2879814741",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/volatility/term-structure": {
    "fields": "4e19dbf4daa1aea8",
@@ -2081,7 +2081,7 @@
     6
    ],
    "params": "d85cdd2879814741",
-   "shape": "f1a604feccb24f88"
+   "shape": "319c0578a4c50099"
   },
   "GET /api/stock/{ticker}/volatility/variance-risk-premium": {
    "fields": "4f53cda18c2baa0c",
@@ -2090,7 +2090,7 @@
     0
    ],
    "params": "d85cdd2879814741",
-   "shape": "2244ed36be91a1b7"
+   "shape": "317575180ff2e031"
   },
   "GET /api/volatility/anomaly/top": {
    "fields": "4f53cda18c2baa0c",
@@ -2099,7 +2099,7 @@
     0
    ],
    "params": "b8856619ba816cbd",
-   "shape": "2244ed36be91a1b7"
+   "shape": "317575180ff2e031"
   },
   "GET /api/volatility/character/top": {
    "fields": "4f53cda18c2baa0c",
@@ -2108,7 +2108,7 @@
     0
    ],
    "params": "292b09ceb1c68ffa",
-   "shape": "2244ed36be91a1b7"
+   "shape": "317575180ff2e031"
   },
   "GET /api/volatility/vix-term-structure": {
    "fields": "4f53cda18c2baa0c",
@@ -2117,7 +2117,7 @@
     0
    ],
    "params": "458bbc671295e785",
-   "shape": "2244ed36be91a1b7"
+   "shape": "317575180ff2e031"
   },
   "POST /api/alerts/configuration": {
    "body": "e0fe7886d0f8dea2",
@@ -2127,12 +2127,12 @@
     8
    ],
    "params": "4f53cda18c2baa0c",
-   "shape": "b1985cb0d5623161"
+   "shape": "5bbb8d4c1878cff5"
   }
  },
  "provenance": {
   "generator": "tests/gen-feed-catalog-oracle.py",
-  "generatorSha256": "edcb74e97eb027162e76a9b1853eb235819d20c2b1f6935bccd7287bdfb5b52c",
+  "generatorSha256": "2230989317224a481ac6f5f9640431d08c4ed83b4b6bbf131b565c6b06dfd68e",
   "nature": "hashes and counts of what an independent reader (PyYAML and this script) derives from the committed document; no value of the document and no data from the feed",
   "python": "3.11.17",
   "pyyaml": "6.0.1",

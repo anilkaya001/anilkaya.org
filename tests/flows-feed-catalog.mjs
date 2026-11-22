@@ -4,7 +4,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
-import { loadMutated } from "./truth/mutants.mjs";
+import { loadMutated, applyTransforms } from "./truth/mutants.mjs";
 import { closure, treeFiles, importsOf, moduleSource, parseImports } from "./lib/source-scan.mjs";
 import { bindingReads } from "./lib/ai-guard.mjs";
 import { servedFiles } from "./lib/served-tree.mjs";
@@ -24,6 +24,7 @@ const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
 const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 
 let checks = 0;
+let plantedYaml = 100;
 const ok = (cond, msg) => { assert.ok(cond, msg); checks++; };
 const eq = (a, b, msg) => { assert.equal(a, b, msg); checks++; };
 const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
@@ -36,11 +37,14 @@ const SHAPES = OBSERVATION.ops;
 const BRAND = generator.brandPattern(VENDOR_BASE_DEFAULT);
 const isObj = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 
+const judged = (problems) => problems.filter((line) => !/^the generator threw|^the client could not be made/.test(line));
+const show = (title, problems) => { if (process.env.FEED_SHOW) console.log(`${title}\n${problems.slice(0, 3).map((line) => `    ${line.slice(0, 260)}`).join("\n")}${problems.length > 3 ? `\n    and ${problems.length - 3} more` : ""}`); };
+
 const fixedNumber = (n) => {
   const text = n.toFixed(10).replace(/0+$/, "").replace(/\.$/, "");
   return text === "-0" || text === "" ? "0" : text;
 };
-const canon = (v) => (v === null ? "null" : v === true ? "true" : v === false ? "false" : typeof v === "number" ? `#${fixedNumber(v)}` : typeof v === "string" ? JSON.stringify(v)
+const canon = (v) => (v === undefined ? "undefined" : v === null ? "null" : v === true ? "true" : v === false ? "false" : typeof v === "number" ? `#${fixedNumber(v)}` : typeof v === "string" ? JSON.stringify(v)
   : Array.isArray(v) ? `[${v.map(canon).join(",")}]` : `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canon(v[k])}`).join(",")}}`);
 const digest = (v) => sha256(Buffer.from(canon(v), "utf8")).slice(0, 16);
 const treeText = (v) => (Array.isArray(v) ? `[${v.map(treeText).join(",")}]` : isObj(v) ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${treeText(v[k])}`).join(",")}}` : JSON.stringify(v));
@@ -125,7 +129,7 @@ function catalogProblems(gen, { specText = SPEC } = {}) {
 
     const want = ORACLE.ops[key];
     if (!want) { problems.push(`${key} is not in the oracle`); continue; }
-    need(digest([o.kind, o.statuses, o.documents, o.envelope, o.envelopeFrom ?? null, o.bare === true]) === want.shape, `${key}: kind, statuses, what the schema documents or how the answer is wrapped differ from the oracle`);
+    need(digest([o.kind, o.statuses, o.documents, o.envelope, o.envelopeFrom ?? null, o.bare === true, o.unwrapped === true]) === want.shape, `${key}: kind, statuses, what the schema documents or how the answer is wrapped differ from the oracle`);
     need(digest(o.params) === want.params, `${key}: the typed parameters differ from the oracle (${o.params.length} against ${want.n[0]})`);
     need(digest(o.fields) === want.fields, `${key}: the response fields differ from the oracle (${o.fields.length} against ${want.n[1]})`);
     need((o.body === undefined) === (want.body === undefined) && (o.body === undefined || digest(o.body) === want.body), `${key}: the request body differs from the oracle`);
@@ -138,8 +142,12 @@ function catalogProblems(gen, { specText = SPEC } = {}) {
     }
     need(o.kind === "json"
       ? typeof o.envelope === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(o.envelope) && ["schema", "example", "assumed"].includes(o.envelopeFrom) && ["envelope", "row", "list", "open"].includes(o.documents) &&
-        (o.documents !== "envelope" || (o.envelope === catalog.envelope && o.envelopeFrom === "schema")) && (o.bare === undefined || (o.bare === true && o.documents !== "envelope" && o.envelopeFrom === "assumed"))
-      : o.envelope === null && o.envelopeFrom === undefined && o.bare === undefined && o.documents === null && o.fields.length === 0, `${key}: the wrapper and the kind disagree`);
+        (o.documents !== "envelope" || (o.envelope === catalog.envelope && o.envelopeFrom === "schema")) && (o.bare === undefined || (o.bare === true && o.documents !== "envelope" && o.envelopeFrom === "assumed")) &&
+        (o.unwrapped === undefined || (o.unwrapped === true && o.bare === undefined && o.envelopeFrom === "assumed" && o.envelope === catalog.envelope && ["row", "open"].includes(o.documents)))
+      : o.envelope === null && o.envelopeFrom === undefined && o.bare === undefined && o.unwrapped === undefined && o.documents === null && o.fields.length === 0, `${key}: the wrapper and the kind disagree`);
+    need(o.params.every((p) => p.in === "path" || p.in === "query"), `${key}: a parameter is sent somewhere other than the path or the query`);
+    need(o.params.every((p) => typeof p.default !== "string" || !/\s/.test(p.default)), `${key}: a parameter default is free text`);
+    need(!/(?:^|[.-])(?:tapes?|vendors?)(?:$|[.-])/.test(o.id), `${key}: the id ${o.id} carries a word the house rules retire`);
     for (const token of o.path.matchAll(/\{([^{}]+)\}/g)) need(o.params.some((p) => p.in === "path" && p.name === token[1] && p.required), `${key}: the path token ${token[1]} has no required path parameter`);
   }
   const count = (f) => catalog.ops.reduce((n, o) => n + f(o), 0);
@@ -150,6 +158,10 @@ function catalogProblems(gen, { specText = SPEC } = {}) {
     paths: catalog.source.paths, schemas: catalog.source.schemas, channels: catalog.channels.length,
   };
   need(JSON.stringify(Object.keys(counted).sort().map((k) => [k, counted[k]])) === JSON.stringify(Object.keys(ORACLE.counts).sort().map((k) => [k, ORACLE.counts[k]])), `the totals differ from the oracle's: ${JSON.stringify(counted)}`);
+  const freeDefaults = catalog.ops.flatMap((o) => o.params.filter((p) => typeof p.default === "string" && p.enum === undefined).map((p) => `${o.id} ${p.name}=${p.default}`));
+  need(JSON.stringify(freeDefaults) === JSON.stringify(FREE_DEFAULTS), `the defaults the catalog keeps that are no documented enum value are ${JSON.stringify(freeDefaults)}`);
+  need(JSON.stringify(catalog.ops.filter((o) => o.unwrapped).map((o) => o.id)) === JSON.stringify(SHOWN_UNWRAPPED) && JSON.stringify(catalog.ops.filter((o) => o.bare).map((o) => o.id)) === JSON.stringify(SHOWN_BARE),
+    `the operations whose example shows the answer with no key around it are ${JSON.stringify(catalog.ops.filter((o) => o.unwrapped || o.bare).map((o) => o.id))}`);
 
   const byId = new Map(catalog.ops.map((o) => [o.id, o]));
   need(JSON.stringify(catalog.channels.map((c) => c.id).sort()) === JSON.stringify(Object.keys(ORACLE.channels).sort()), "the channels are not the ones the oracle reads off the document");
@@ -199,7 +211,7 @@ function catalogProblems(gen, { specText = SPEC } = {}) {
     edit(doc.components.schemas["Tiny row "]);
     let made = null;
     try { made = gen.buildCatalog(yaml.dumpYaml(doc)).ops.find((o) => o.method === "GET" && o.path === "/api/tiny/{name}/rows") || { envelope: "no such operation" }; } catch (error) { made = { envelope: String(error.message) }; }
-    need(canon({ envelope: made.envelope, envelopeFrom: made.envelopeFrom, ...(made.bare === undefined ? {} : { bare: made.bare }) }) === canon(want), `${title}: the answer is taken to be wrapped as ${JSON.stringify([made.envelope, made.envelopeFrom, made.bare])}`);
+    need(canon({ envelope: made.envelope, envelopeFrom: made.envelopeFrom, ...(made.bare === undefined ? {} : { bare: made.bare }), ...(made.unwrapped === undefined ? {} : { unwrapped: made.unwrapped }) }) === canon(want), `${title}: the answer is taken to be wrapped as ${JSON.stringify([made.envelope, made.envelopeFrom, made.bare, made.unwrapped])}`);
   }
   for (const [title, edit] of REFUSED_DOCUMENTS) {
     const doc = structuredClone(TINY);
@@ -287,9 +299,105 @@ const MINI = Object.freeze({
     { id: "t.wired", method: "GET", path: "/x/wired", kind: "json", params: [], envelope: "data", documents: "row", fields: [{ path: "flag", type: "string" }, { path: "px", type: "string", numeric: true }] },
     { id: "t.file", method: "GET", path: "/x/file/{day}", kind: "file", params: [{ name: "day", in: "path", required: true, type: "string", format: "date" }], envelope: null, documents: null, fields: [] },
     { id: "t.page", method: "GET", path: "/x/socket/px", kind: "socket", params: [], envelope: null, documents: null, fields: [] },
-    { id: "t.write", method: "POST", path: "/x/write", kind: "json", params: [], body: { required: false, fields: [{ path: "name", type: "string" }, { path: "status", type: "string", enum: ["active", "paused"] }, { path: "config", type: "object" }, { path: "input", type: "string" }], requiredSets: [["name", "config"], ["name", "input"]] }, envelope: "data", documents: "open", fields: [] },
+    { id: "t.write", method: "POST", path: "/x/write", kind: "json", params: [], body: { required: false, fields: [{ path: "name", type: "string" }], requiredSets: [["name"]] }, envelope: "data", documents: "open", fields: [] },
+    { id: "t.drop", method: "DELETE", path: "/x/drop", kind: "none", params: [], envelope: null, documents: null, fields: [] },
+    { id: "t.silent", method: "GET", path: "/x/silent", kind: "none", params: [], envelope: null, documents: null, fields: [] },
+    { id: "t.header", method: "GET", path: "/x/header", kind: "json", params: [{ name: "x-sample", in: "header", required: false, type: "string" }], envelope: "data", documents: "open", fields: [] },
+    { id: "t.listpath", method: "GET", path: "/x/{names}/rows", kind: "json", params: [{ name: "names", in: "path", required: true, type: "array", items: "string" }], envelope: "data", documents: "open", fields: [] },
+    { id: "t.loose", method: "GET", path: "/x/loose", kind: "json", params: [], envelope: "data", envelopeFrom: "assumed", documents: "row", fields: [{ path: "px", type: "string", numeric: true }, { path: "s", type: "string" }] },
+    { id: "t.loose-open", method: "GET", path: "/x/loose-open", kind: "json", params: [], envelope: "data", envelopeFrom: "assumed", documents: "open", fields: [] },
+    { id: "t.loose-list", method: "GET", path: "/x/loose-list", kind: "json", params: [], envelope: "data", envelopeFrom: "assumed", documents: "list", fields: [{ path: "[]", type: "string" }] },
+    { id: "t.shown", method: "GET", path: "/x/shown", kind: "json", params: [], envelope: "data", envelopeFrom: "example", documents: "row", fields: [{ path: "px", type: "string", numeric: true }] },
+    { id: "t.stated", method: "GET", path: "/x/stated", kind: "json", params: [], envelope: "data", envelopeFrom: "schema", documents: "envelope", fields: [{ path: "data", type: "object" }, { path: "data.px", type: "string", numeric: true }] },
+    { id: "t.seen", method: "GET", path: "/x/seen", kind: "json", params: [], envelope: "data", envelopeFrom: "assumed", documents: "row", fields: [{ path: "px", type: "string", numeric: true }] },
+    { id: "prediction.search-users", method: "GET", path: "/x/people", kind: "json", params: [{ name: "q", in: "query", required: true, type: "string" }], envelope: "data", documents: "row", fields: [{ path: "address", type: "string" }, { path: "name", type: "string" }] },
+    { id: "alerts.create-config", method: "POST", path: "/x/alerts", kind: "json", params: [], envelope: "data", documents: "open", fields: [] },
+    { id: "prediction.rows", method: "GET", path: "/x/pred", kind: "json", params: [], envelope: "data", documents: "row", fields: [
+      { path: "asset_id", type: "string" }, { path: "bag", type: "object", open: true }, { path: "extra", type: "any" }, { path: "list", type: "array" }, { path: "smart_score", type: "string", numeric: true },
+      { path: "trades", type: "array" }, { path: "trades[]", type: "object" }, { path: "trades[].maker_address", type: "string" }, { path: "trades[].price", type: "string", numeric: true }, { path: "user_address", type: "string" },
+    ] },
+    { id: "forex.bars", method: "GET", path: "/x/fx", kind: "json", params: [], envelope: "data", envelopeFrom: "schema", documents: "envelope", fields: [
+      { path: "data", type: "object" }, { path: "data.bars", type: "array" }, { path: "data.bars[]", type: "object" }, { path: "data.bars[].close", type: "string", numeric: true }, { path: "data.bars[].volume", type: "string", numeric: true },
+    ] },
+    { id: "crypto.bars", method: "GET", path: "/x/crypto", kind: "json", params: [], envelope: "data", documents: "row", fields: [{ path: "close", type: "string", numeric: true }, { path: "volume", type: "string", numeric: true }, { path: "whale_score", type: "integer" }] },
+    { id: "crypto.open", method: "GET", path: "/x/crypto-open", kind: "json", params: [], envelope: "data", envelopeFrom: "assumed", documents: "open", fields: [] },
+    { id: "crypto.list", method: "GET", path: "/x/crypto-list", kind: "json", params: [], envelope: "data", documents: "list", fields: [] },
+    { id: "seasonality.month", method: "GET", path: "/x/season", kind: "json", params: [], envelope: "data", documents: "row", fields: [{ path: "avg_change", type: "string", numeric: true }, { path: "years", type: "integer" }] },
+    { id: "private-markets.management", method: "GET", path: "/x/leaders", kind: "json", params: [], envelope: "data", documents: "row", fields: [{ path: "first_name", type: "string" }, { path: "last_name", type: "string" }, { path: "title", type: "string" }] },
   ],
 });
+
+const HOSTILE_SEGMENTS = ["A/B", "BRK.B", "a b", "x?y=1#z", "50%", "\u00e9", "{name}", "...", ". .", " ..", ".. ", "%2e%2e", "%2E", ".%2e", "..%2f", "a/../b", "a\\..\\b", "\\", "\t", "\n", "\r\n..", "\u0000", "\u202e", "//", ";", ":", "@", "~", "*", "x".repeat(5000)];
+
+const HELD_ROUTES = Object.freeze({ "alerts.create-config": ["POST", "/api/alerts/configuration"], "prediction.search-users": ["GET", "/api/predictions/search-users"] });
+const HELD_SOURCES = Object.freeze({
+  "alerts.create-config": ["docs/packages/WP6-event-risk.md", "## 3. ", "is never registered and never called"],
+  "prediction.search-users": ["docs/packages/WP5-cross-asset-macro.md", "### 2.3 ", "The site does not look people up."],
+});
+const MACRO_RULES = "docs/packages/WP5-cross-asset-macro.md 2.3";
+const HOLD_EXPECT = Object.freeze([
+  { rule: "wallet", ops: ["crypto.", "prediction."], cite: MACRO_RULES, reason: "Wallet addresses are not shown.",
+    names: ["address", "counterparty_address", "from_address", "maker_address", "taker_address", "to_address", "transaction_hash", "user_address", "user_name"] },
+  { rule: "leaders", ops: ["private-markets."], cite: MACRO_RULES, reason: "Leaders are counted by title; names are not shown.", names: ["first_name", "last_name"] },
+  { rule: "seasonal-averages", ops: ["seasonality."], cite: MACRO_RULES, reason: "The feed describes the average as per day for the month; the site computes its own from each year's open and close.",
+    names: ["avg_change", "max_change", "median_change", "min_change", "positive_months_perc"] },
+  { rule: "scores", ops: ["crypto.", "prediction."], cite: MACRO_RULES, reason: "The feed's scores are not explained, so they are not shown.",
+    names: ["invested_zscore", "pnl_percent", "smart_gap", "smart_score", "tags_score", "unusual_score", "whale_score"] },
+  { rule: "spot-volume", ops: ["digital-currencies.", "forex."], cite: MACRO_RULES, reason: "Spot FX has no consolidated volume.", names: ["volume"] },
+]);
+const HOLD_COUNTS = Object.freeze({
+  wallet: [21, ["crypto.whale-transactions", "prediction.insiders", "prediction.market", "prediction.positions", "prediction.unusual", "prediction.user", "prediction.whales"]],
+  leaders: [2, ["private-markets.management"]],
+  "seasonal-averages": [15, ["seasonality.market-seasonality", "seasonality.month-performers", "seasonality.monthly"]],
+  scores: [15, ["crypto.whale-transactions", "prediction.insiders", "prediction.market", "prediction.positions", "prediction.smart-money", "prediction.unusual", "prediction.user", "prediction.whales"]],
+  "spot-volume": [4, ["digital-currencies.history", "digital-currencies.intraday", "forex.history", "forex.intraday"]],
+});
+const NOT_IN_THE_HOUSE_TABLE = Object.freeze(["counterparty_address"]);
+const TRANSIENT_READS = Object.freeze({ "pred-positions": ["user_address"] });
+const LEFT_UNHELD = Object.freeze(["address_tags", "category_score", "category_scores", "category_sum_pnl", "name", "overall_pnl", "overall_pnl_pct", "realized_pnl", "score", "sum_pnl", "tag_scores", "token_name", "unrealized_pnl", "wallet_age_days"]);
+const EXAMPLES_SHOWN = 127;
+
+const leafName = (fieldPath) => fieldPath.replace(/\[\]/g, "").split(".").pop();
+const expectedHeld = (id) => new Set(HOLD_EXPECT.filter((h) => h.ops.some((scope) => id.startsWith(scope))).flatMap((h) => h.names));
+const pathHeld = (fieldPath, names) => fieldPath.replace(/\[\]/g, "").split(".").some((part) => names.has(part));
+
+function pruned(value, names, base, dropped) {
+  if (Array.isArray(value)) return value.map((v) => pruned(v, names, `${base}[]`, dropped));
+  if (!isObj(value)) return value;
+  const out = {};
+  for (const key of Object.keys(value)) {
+    const here = base === "" ? key : `${base}.${key}`;
+    if (names.has(key)) { dropped.add(here); continue; }
+    out[key] = pruned(value[key], names, here, dropped);
+  }
+  return out;
+}
+
+const keysWithin = (value) => {
+  const found = new Set();
+  const todo = [value];
+  while (todo.length) {
+    const v = todo.pop();
+    if (v === null || typeof v !== "object") continue;
+    if (!Array.isArray(v)) for (const key of Object.keys(v)) found.add(key);
+    for (const child of Array.isArray(v) ? v : Object.values(v)) todo.push(child);
+  }
+  return found;
+};
+
+function exampleOf(doc, o) {
+  const media = doc.paths[o.path][o.method.toLowerCase()].responses["200"].content["application/json"];
+  const pool = doc.components.schemas;
+  const byTrimmed = new Map(Object.keys(pool).map((k) => [k.trim(), k]));
+  let node = media.schema;
+  for (let hops = 0; isObj(node) && typeof node.$ref === "string" && hops < 32; hops++) {
+    const name = node.$ref.slice("#/components/schemas/".length);
+    node = Object.hasOwn(pool, name) ? pool[name] : pool[byTrimmed.get(name.trim())];
+  }
+  return isObj(node) ? node.example : undefined;
+}
+
+const answer = (data, extra = {}) => Object.assign({ ok: true, data, rows: Array.isArray(data) ? data : [data], meta: {}, form: "wrapped", undocumented: [], withheld: [] }, extra);
 
 function clientProblems(lib, catalog = FEED_CATALOG) {
   const problems = [];
@@ -302,10 +410,20 @@ function clientProblems(lib, catalog = FEED_CATALOG) {
   const refused = (fn, param, reason, msg) => { const r = refusal(fn); need(r !== null && r.param === param && r.reason === reason, `${msg}: wanted a refusal naming ${param} (${reason}), got ${r ? `${r.param} (${r.reason})` : "a built request"}`); };
 
   same(mini.request("t.rows", { name: "a b", day: "2026-10-02" }), { id: "t.rows", method: "GET", path: "/x/a%20b/rows", query: [["day", "2026-10-02"]], search: "?day=2026-10-02" }, "a request is the method, the path with its parameter encoded, and the query");
-  for (const hostile of ["A/B", "BRK.B", "a b", "x?y=1#z", "50%", "é", "..", "{name}"]) {
+  for (const hostile of HOSTILE_SEGMENTS) {
+    const made = refusal(() => mini.request("t.rows", { name: hostile, day: "2026-10-02" }));
+    if (made !== null) { problems.push(`the path parameter ${JSON.stringify(hostile.slice(0, 20))} is refused (${made.reason})`); continue; }
     const built = mini.request("t.rows", { name: hostile, day: "2026-10-02" });
-    need(built.path === `/x/${encodeURIComponent(hostile)}/rows` && built.path.split("/").length === 4 && decodeURIComponent(built.path.split("/")[2]) === hostile, `the path parameter ${hostile} is not encoded as one segment (${built.path})`);
+    need(built.path === `/x/${encodeURIComponent(hostile)}/rows` && built.path.split("/").length === 4 && decodeURIComponent(built.path.split("/")[2]) === hostile, `the path parameter ${JSON.stringify(hostile.slice(0, 20))} is not encoded as one segment (${built.path.slice(0, 60)})`);
+    const address = new URL(VENDOR_BASE_DEFAULT + built.path + built.search);
+    need(address.pathname === built.path && address.pathname.split("/").length === 4 && vendorUrl(VENDOR_BASE_DEFAULT, built.path, {}).pathname === built.path, `the path parameter ${JSON.stringify(hostile.slice(0, 20))} names another path once the request is an address (${address.pathname.slice(0, 60)})`);
   }
+  for (const dots of [".", ".."]) {
+    refused(() => mini.request("t.rows", { name: dots, day: "2026-10-02" }), "name", "segment", `a path parameter of ${JSON.stringify(dots)}, which an address resolves away`);
+    need(new URL(`${VENDOR_BASE_DEFAULT}/x/${encodeURIComponent(dots)}/rows`).pathname !== `/x/${dots}/rows`, `the refusal of ${JSON.stringify(dots)} is still needed: an address keeps it as a segment`);
+  }
+  refused(() => mini.request("t.rows", { name: "\ud800", day: "2026-10-02" }), "name", "type", "a path parameter holding half of a surrogate pair");
+  refused(() => mini.request("t.rows", { name: "n", day: "2026-10-02", free: "a\udc00" }), "free", "type", "a query parameter holding half of a surrogate pair");
   same(mini.request("t.rows", { name: "n", day: "2026-10-02", side: "put", limit: 500, ratio: 0.25, live: false, "tags[]": ["a", "c"], ids: [3, 4], quarter: "2026Q3", free: "z y" }).query,
     [["side", "put"], ["limit", "500"], ["ratio", "0.25"], ["live", "false"], ["day", "2026-10-02"], ["tags[]", "a"], ["tags[]", "c"], ["ids", "3"], ["ids", "4"], ["quarter", "2026Q3"], ["free", "z y"]], "the query is in the documented order, a list repeats its name");
   need(mini.request("t.rows", { name: "n", day: "2026-10-02", "tags[]": ["a", "c"], free: "z y" }).search === "?day=2026-10-02&tags%5B%5D=a&tags%5B%5D=c&free=z+y", "the search string is not form-encoded");
@@ -332,26 +450,41 @@ function clientProblems(lib, catalog = FEED_CATALOG) {
   refused(() => mini.request("t.rows", "name=n"), null, "params", "parameters that are not an object");
   refused(() => mini.request("t.nope", {}), null, "unknown-operation", "an operation that is not in the catalog");
   refused(() => mini.request("t.page", {}), null, "not-a-request", "a socket page asked for as a request");
-  refused(() => mini.request("t.write", {}), null, "write", "a write built without being asked for");
-  refused(() => mini.request("t.write", {}, { write: true, body: { name: "n" } }), "config", "missing", "a body that satisfies no required set");
-  refused(() => mini.request("t.write", {}, { write: true, body: { name: "n", input: "x", status: "gone" } }), "status", "enum", "a body value outside the enum");
-  refused(() => mini.request("t.write", {}, { write: true, body: { name: "n", input: "x", extra: 1 } }), "extra", "unknown", "a body field that is not documented");
-  refused(() => mini.request("t.write", {}, { write: true, body: { name: 5, input: "x" } }), "name", "type", "a body value of another type");
-  refused(() => mini.request("t.rows", { name: "n", day: "2026-10-02" }, { body: { a: 1 } }), null, "body", "a body given to an operation that takes none");
-  same(mini.request("t.write", {}, { write: true, body: { name: "n", input: "x", status: "paused" } }), { id: "t.write", method: "POST", path: "/x/write", query: [], search: "", body: { name: "n", input: "x", status: "paused" } }, "a write that is asked for is built with its body");
+  refused(() => mini.request("t.silent", {}), null, "not-a-request", "an operation that documents no answer");
+  refused(() => mini.request("t.write", {}), null, "write", "a write");
+  refused(() => mini.request("t.write", {}, { write: true, body: { name: "n" } }), null, "write", "a write asked for with the option an earlier client took");
+  refused(() => mini.request("t.drop", {}), null, "write", "a delete");
+  refused(() => mini.request("t.header", {}), "x-sample", "place", "an operation with a header parameter, even left out");
+  refused(() => mini.request("t.header", { "x-sample": "v" }), "x-sample", "place", "a header parameter given a value");
+  refused(() => mini.request("t.listpath", { names: ["a", "b"] }), "names", "place", "a list where one path segment goes");
   same(mini.request("t.file", { day: "2026-10-02" }).path, "/x/file/2026-10-02", "a file operation is a request like any other");
+  need(Object.keys(mini.request("t.rows", { name: "n", day: "2026-10-02" })).join() === "id,method,path,query,search", "a built request carries something beside its id, method, path and query");
+
+  for (const id of ["prediction.search-users", "alerts.create-config"]) {
+    for (const params of [{ q: "sample" }, {}, undefined]) refused(() => mini.request(id, params), null, "held", `the held ${id} asked for`);
+    refused(() => mini.request(id, { q: "sample" }, { write: true, body: {} }), null, "held", `the held ${id} asked for with options`);
+    for (const body of [{ data: [{ address: "0x00", name: "n" }] }, {}, null]) refused(() => mini.read(id, body), null, "held", `an answer of the held ${id} read`);
+    need(mini.op(id).id === id && mini.find(MINI.ops.find((o) => o.id === id).method, MINI.ops.find((o) => o.id === id).path).id === id, `the held ${id} is hidden from the catalog; the catalog lists what exists`);
+    const table = lib.FEED_HELD[id] || {};
+    const told = mini.held(id) || {};
+    need(typeof told.reason === "string" && told.reason.length > 10 && told.reason === table.reason && /^docs\/packages\/WP[0-9]-[a-z-]+\.md [0-9.]+$/.test(String(told.cite)) && told.cite === table.cite, `the client does not say why ${id} is held`);
+    const said = refusal(() => mini.request(id, { q: "sample" }));
+    need(said !== null && /is held and never asked for/.test(said.message) && said.message.includes(String(table.reason)) && said.message.includes(String(table.cite)), `the refusal of ${id} does not say why`);
+  }
+  need(mini.held("t.rows") === null && mini.held("t.write") === null, "an operation that is not held is said to be");
+  need(mini.held("t.nope") === null, "an operation the catalog does not list is said to be held");
 
   const got = (id, body) => mini.read(id, body);
   const rows = (row) => ({ data: [row] });
-  same(got("t.rows", rows({ px: "12.50", n: "7", f: null, s: "x", b: true, id: "007", legs: [{ k: "1e3" }, { k: null }], meta: { z: "1" }, any: "0012", extra: "1" })),
-    { ok: true, data: [{ px: 12.5, n: 7, f: null, s: "x", b: true, id: "007", legs: [{ k: 1000 }, { k: null }], meta: { z: "1" }, any: "0012", extra: "1" }], rows: [{ px: 12.5, n: 7, f: null, s: "x", b: true, id: "007", legs: [{ k: 1000 }, { k: null }], meta: { z: "1" }, any: "0012", extra: "1" }], meta: {}, undocumented: ["extra"] },
+  const full = [{ px: 12.5, n: 7, f: null, s: "x", b: true, id: "007", legs: [{ k: 1000 }, { k: null }], meta: { z: "1" }, any: "0012", extra: "1" }];
+  same(got("t.rows", rows({ px: "12.50", n: "7", f: null, s: "x", b: true, id: "007", legs: [{ k: "1e3" }, { k: null }], meta: { z: "1" }, any: "0012", extra: "1" })), answer(full, { undocumented: ["extra"] }),
     "a row is read: numeric strings become numbers, a null stays null, an identifier stays text, a free-form object and an untyped field pass through, an undocumented key is kept and named");
-  for (const [value, want, why] of [["", null, "an empty numeric string is an absent value"], [null, null, "a null stays null"], [0, 0, "a zero stays zero"], ["0", 0, "the string 0 is zero"], ["-0.0", 0, "minus zero is zero"],
-    ["9007199254740991", 9007199254740991, "the largest exact integer is read"], ["-12.5e-1", -1.25, "an exponent is read"], [3.5, 3.5, "a number where a numeric string is documented is a number"]]) {
+  for (const [value, want, why] of [["", null, "an empty numeric string is an absent value"], [null, null, "a null stays null"], [0, 0, "a zero stays zero"], ["0", 0, "the string 0 is zero"], ["-0.0", 0, "minus zero is zero"], ["0e-999", 0, "a zero with an exponent is zero"],
+    ["0.000", 0, "a zero with decimals is zero"], ["9007199254740991", 9007199254740991, "the largest exact integer is read"], ["-12.5e-1", -1.25, "an exponent is read"], [3.5, 3.5, "a number where a numeric string is documented is a number"], ["5e-324", 5e-324, "the smallest number a double holds is read"]]) {
     const r = got("t.rows", rows({ px: value, s: "k" }));
     need(r.ok === true && Object.is(r.rows[0].px, want), `${why}: ${JSON.stringify(value)} read as ${r.ok ? JSON.stringify(r.rows[0].px) : r.reason}`);
   }
-  for (const value of ["abc", "1,234", " 12", "12 ", "0012", "+1", ".5", "1.", "NaN", "Infinity", "1e400", "9007199254740993", "0x10", true, {}, []]) {
+  for (const value of ["abc", "1,234", " 12", "12 ", "0012", "+1", ".5", "1.", "NaN", "Infinity", "1e400", "9007199254740993", "0x10", "1e-999", "-1e-400", "0.1e-400", "2e-324", true, {}, []]) {
     same(got("t.rows", rows({ px: value, s: "k" })), { ok: false, reason: "type:px" }, `a numeric field holding ${JSON.stringify(value)} is named, not guessed`);
   }
   const absent = got("t.rows", rows({ s: "only" }));
@@ -364,29 +497,30 @@ function clientProblems(lib, catalog = FEED_CATALOG) {
   same(got("t.rows", rows({ legs: [5] })), { ok: false, reason: "type:legs[]" }, "a scalar where a row is documented");
   same(got("t.rows", rows({ legs: [{ k: [] }] })), { ok: false, reason: "type:legs[].k" }, "a list where a nested numeric is documented");
   same(got("t.rows", rows({ meta: 5 })), { ok: false, reason: "type:meta" }, "a scalar where an object is documented");
-  for (const body of ["text", null, undefined, 5, [1], [null], [[{ px: "1" }]], { rows: [] }, { data: 5 }, { data: "x" }, { data: [1] }, { data: [null] }]) same(got("t.rows", body), { ok: false, reason: "unshaped" }, `the body ${JSON.stringify(body)} is not the documented shape`);
+  for (const body of ["text", null, undefined, 5, [1], [null], [[{ px: "1" }]], { rows: [] }, { px: "1", s: "a row with no key around it" }, { data: 5 }, { data: "x" }, { data: [1] }, { data: [null] }]) same(got("t.rows", body), { ok: false, reason: "unshaped" }, `the body ${JSON.stringify(body)} is not the documented shape`);
   for (const body of [{ data: [] }, { data: null }, { data: {} }, []]) same(got("t.rows", body), { ok: false, reason: "empty" }, `the body ${JSON.stringify(body)} holds no row`);
-  same(got("t.rows", [{ px: "1.5", s: "bare" }]), { ok: true, data: [{ px: 1.5, s: "bare" }], rows: [{ px: 1.5, s: "bare" }], meta: {}, undocumented: [] }, "a bare list of rows is the rows");
-  same(got("t.list", ["a"]), { ok: true, data: ["a"], rows: ["a"], meta: {}, undocumented: [] }, "a bare documented list is read");
+  same(got("t.rows", [{ px: "1.5", s: "bare" }]), answer([{ px: 1.5, s: "bare" }], { form: "bare" }), "a bare list of rows is the rows");
+  same(got("t.list", ["a"]), answer(["a"], { form: "bare" }), "a bare documented list is read");
   same(got("t.env", [{ v: "1" }]), { ok: false, reason: "unshaped" }, "a bare list where the document describes the whole answer");
-  same(got("t.chain", { chains: [{ px: "2.5" }] }), { ok: true, data: [{ px: 2.5 }], rows: [{ px: 2.5 }], meta: {}, undocumented: [] }, "an answer under the key the document shows is read");
+  same(got("t.chain", { chains: [{ px: "2.5" }] }), answer([{ px: 2.5 }]), "an answer under the key the document shows is read");
   same(got("t.chain", { data: [{ px: "2.5" }] }), { ok: false, reason: "unshaped" }, "the same answer under another key is not");
-  same(got("t.wired", { si: [{ flag: true, px: "3" }] }), { ok: true, data: [{ flag: true, px: 3 }], rows: [{ flag: true, px: 3 }], meta: {}, undocumented: [] }, "an observed wrapper and a field the wire types otherwise are read as observed");
+  same(got("t.wired", { si: [{ flag: true, px: "3" }] }), answer([{ flag: true, px: 3 }]), "an observed wrapper and a field the wire types otherwise are read as observed");
   same(got("t.wired", { data: [{ flag: "x", px: "3" }] }), { ok: false, reason: "unshaped" }, "the documented wrapper is not accepted where another was observed");
   same(got("t.wired", { si: [{ flag: true, px: "x" }] }), { ok: false, reason: "type:px" }, "the other fields of an observed operation keep their types");
-  same([mini.envelope("t.wired"), mini.envelope("t.chain"), mini.envelope("t.rows")], ["si", "chains", "data"], "the client says which key it unwraps");
+  same([mini.envelope("t.wired"), mini.envelope("t.chain"), mini.envelope("t.rows"), mini.envelope("t.seen")], ["si", "chains", "data", "si"], "the client says which key it unwraps");
   same(lib.createFeedClient(MINI, { wire: {} }).read("t.wired", { data: [{ flag: true, px: "3" }] }), { ok: false, reason: "type:flag" }, "without the observation the declared type is held");
   same(lib.createFeedClient(MINI, { wire: {} }).read("t.wired", { data: [{ flag: "y", px: "3" }] }).ok, true, "and the documented wrapper is the one read");
-  same(got("t.rows", { data: { px: "1", s: "one" }, has_more: false }), { ok: true, data: { px: 1, s: "one" }, rows: [{ px: 1, s: "one" }], meta: { has_more: false }, undocumented: [] }, "a single row is one row, and what sits beside the envelope is kept");
-  same(got("t.env", { data: [{ v: "1.5" }, { v: "" }], date: "2026-10-02", more: 1 }), { ok: true, data: [{ v: 1.5 }, { v: null }], rows: [{ v: 1.5 }, { v: null }], meta: { date: "2026-10-02", more: 1 }, undocumented: ["more"] }, "a documented envelope is read whole");
+  same(got("t.rows", { data: { px: "1", s: "one" }, has_more: false }), answer({ px: 1, s: "one" }, { meta: { has_more: false } }), "a single row is one row, and what sits beside the envelope is kept");
+  same(got("t.env", { data: [{ v: "1.5" }, { v: "" }], date: "2026-10-02", more: 1 }), answer([{ v: 1.5 }, { v: null }], { meta: { date: "2026-10-02", more: 1 }, undocumented: ["more"] }), "a documented envelope is read whole");
   same(got("t.env", { date: "2026-10-02" }), { ok: false, reason: "unshaped" }, "a documented envelope without its data");
   same(got("t.env", { data: { v: "1" } }), { ok: false, reason: "type:data" }, "an object where the envelope documents a list");
   same(got("t.env", { data: [{ v: "1" }], date: 20261002 }), { ok: false, reason: "type:date" }, "a mistyped field beside the envelope");
-  same(got("t.list", { data: ["a", "b"] }), { ok: true, data: ["a", "b"], rows: ["a", "b"], meta: {}, undocumented: [] }, "a documented list is read");
+  same(got("t.list", { data: ["a", "b"] }), answer(["a", "b"]), "a documented list is read");
   same(got("t.list", { data: ["a", 1] }), { ok: false, reason: "type:[]" }, "a mistyped list item");
   same(got("t.list", { data: {} }), { ok: false, reason: "unshaped" }, "an object where a list is documented");
-  same(got("t.open", { data: { anything: [1, "2", null] } }), { ok: true, data: { anything: [1, "2", null] }, rows: [{ anything: [1, "2", null] }], meta: {}, undocumented: [] }, "a free-form answer passes through untouched");
+  same(got("t.open", { data: { anything: [1, "2", null] } }), answer({ anything: [1, "2", null] }), "a free-form answer passes through untouched");
   same(got("t.open", { data: 7 }), { ok: false, reason: "unshaped" }, "a scalar where a free-form answer is documented");
+  same(got("t.open", { anything: [1] }), { ok: false, reason: "unshaped" }, "a free-form answer without the key the document gives it");
   refused(() => mini.read("t.file", {}), null, "not-a-request", "a file read as JSON");
   const polluted = JSON.parse("{\"data\":[{\"__proto__\":{\"x\":1},\"px\":\"1\",\"s\":\"k\"}]}");
   const clean = got("t.rows", polluted);
@@ -395,6 +529,59 @@ function clientProblems(lib, catalog = FEED_CATALOG) {
   const before = JSON.stringify(input);
   got("t.rows", input);
   need(JSON.stringify(input) === before, "reading changes the body it was given");
+
+  same(got("t.loose", { data: [{ px: "2", s: "a" }] }), answer([{ px: 2, s: "a" }]), "where the wrapper is only assumed, an answer under it is read");
+  same(got("t.loose", { px: "2", s: "a", more: 1 }), answer({ px: 2, s: "a", more: 1 }, { form: "unwrapped", undocumented: ["more"] }), "where the wrapper is only assumed, the row itself is the answer when no key is around it");
+  same(got("t.loose", [{ px: "2" }]), answer([{ px: 2 }], { form: "bare" }), "and so is a bare list of rows");
+  same(got("t.loose", { message: "not found", status: 404 }), { ok: false, reason: "unshaped" }, "an object holding no documented field is not taken for a row");
+  same(got("t.loose", {}), { ok: false, reason: "unshaped" }, "an empty object where the wrapper is assumed");
+  same(got("t.loose", { px: "x" }), { ok: false, reason: "type:px" }, "a row with no key around it keeps its types");
+  same(got("t.loose", { data: null }), { ok: false, reason: "empty" }, "an assumed wrapper holding nothing");
+  same(got("t.loose-open", { company: "Sample", filings: [{ n: 1 }] }), answer({ company: "Sample", filings: [{ n: 1 }] }, { form: "unwrapped" }), "where nothing is documented and the wrapper is assumed, an object is the answer");
+  same(got("t.loose-open", { data: { company: "Sample" }, page: 2 }), answer({ company: "Sample" }, { meta: { page: 2 } }), "and an answer under the assumed key is unwrapped");
+  same(got("t.loose-open", {}), { ok: false, reason: "empty" }, "an empty object where nothing is documented");
+  same(got("t.loose-list", { other: ["a"] }), { ok: false, reason: "unshaped" }, "an object where a list is documented is not the list");
+  same(got("t.loose-list", { data: ["a"] }), answer(["a"]), "a documented list under its assumed key");
+  same(got("t.shown", { px: "2" }), { ok: false, reason: "unshaped" }, "where the document's example shows the wrapper, an answer without it is not read");
+  same(got("t.stated", { px: "2" }), { ok: false, reason: "unshaped" }, "where the schema states the wrapper, an answer without it is not read");
+  same(got("t.seen", { px: "2" }), { ok: false, reason: "unshaped" }, "where the wire's wrapper was observed, an answer without it is not read");
+  same(got("t.seen", { si: [{ px: "2" }] }), answer([{ px: 2 }]), "and the observed wrapper is");
+  same(got("t.seen", { data: [{ px: "2" }] }), { ok: false, reason: "unshaped" }, "the assumed key is not read where another was observed");
+  need(JSON.stringify(lib.FEED_READ_FORMS) === JSON.stringify(["wrapped", "bare", "unwrapped"]), "the client names the three forms an answer comes in");
+
+  const held = got("prediction.rows", {
+    data: [{
+      asset_id: "1", user_address: "0x01", smart_score: {}, counterparty_address: "0x02", stray: { to_address: "0x03", fine: true }, bag: { address: "0x04", note: "n" }, list: [{ from_address: "0x05", v: 1 }, 2],
+      extra: { user_name: "sample", keep: [{ transaction_hash: "0x06", ok: 1 }, [{ whale_score: 9, deep: null }]] }, trades: [{ maker_address: "0x07", price: "0.5", taker_address: "0x08" }, { price: "", pnl_percent: "x" }],
+    }],
+    user_address: "0x09", has_more: { address: "0x0a", n: 1 }, next: "c",
+  });
+  same(held, answer([{ asset_id: "1", stray: { fine: true }, bag: { note: "n" }, list: [{ v: 1 }, 2], extra: { keep: [{ ok: 1 }, [{ deep: null }]] }, trades: [{ price: 0.5 }, { price: null }] }], {
+    meta: { has_more: { n: 1 }, next: "c" }, undocumented: ["stray"],
+    withheld: ["bag.address", "counterparty_address", "extra.keep[].transaction_hash", "extra.keep[][].whale_score", "extra.user_name", "has_more.address", "list[].from_address", "smart_score", "stray.to_address", "trades[].maker_address", "trades[].pnl_percent", "trades[].taker_address", "user_address"],
+  }), "A HELD FIELD NEVER LEAVES THE READER: at a documented place, beside the wrapper, in an undocumented key, in a free-form object, in an untyped value and in a list it is left out and named, whatever it holds");
+  need(held.ok && !/0x0[0-9a]/.test(JSON.stringify(held)), "a held value is somewhere in what the reader returns");
+  same(got("forex.bars", { data: { bars: [{ close: "1.1", volume: "5" }, { close: "1.2", volume: null }], volume: "9" } }), answer({ bars: [{ close: 1.1 }, { close: 1.2 }] }, { withheld: ["data.bars[].volume", "data.volume"] }), "a held field of a whole documented answer");
+  same(got("crypto.bars", rows({ close: "2", volume: "7", whale_score: 3 })), answer([{ close: 2, volume: 7 }], { withheld: ["whale_score"] }), "a hold covers the families it names: volume is read where the house reads it");
+  same(got("crypto.open", { data: { whales: [{ from_address: "a", usd_value: "5" }], whale_score: 1 } }), answer({ whales: [{ usd_value: "5" }] }, { withheld: ["whale_score", "whales[].from_address"] }), "a held field inside an answer nothing documents");
+  same(got("crypto.open", { whales: [{ to_address: "b", usd_value: "5" }] }), answer({ whales: [{ usd_value: "5" }] }, { form: "unwrapped", withheld: ["whales[].to_address"] }), "and inside one that came with no key around it");
+  same(got("crypto.list", { data: [{ transaction_hash: "h", v: 1 }, "x"] }), answer([{ v: 1 }, "x"], { withheld: ["[].transaction_hash"] }), "a held field in a list whose items are not documented");
+  same(got("crypto.list", [{ user_name: "u" }, { v: 2 }]), answer([{}, { v: 2 }], { form: "bare", withheld: ["[].user_name"] }), "and in the same list sent bare");
+  same(got("seasonality.month", rows({ avg_change: "0.4", years: 12 })), answer([{ years: 12 }], { withheld: ["avg_change"] }), "the feed's own seasonal average is left out");
+  same(got("private-markets.management", rows({ first_name: "Sample", last_name: "Person", title: "Chief" })), answer([{ title: "Chief" }], { withheld: ["first_name", "last_name"] }), "a leader's name is left out and the title kept");
+  same(got("t.rows", rows({ s: "k", user_address: "0x0b", volume: 3 })), answer([{ s: "k", user_address: "0x0b", volume: 3 }], { undocumented: ["user_address", "volume"] }), "a family no hold names keeps what it is sent");
+  let nest = { user_name: "deep", v: 1 };
+  for (let i = 0; i < 30000; i++) nest = i % 2 ? { k: nest } : [nest];
+  const deepRead = got("prediction.rows", rows({ asset_id: "1", extra: nest }));
+  let cursor = deepRead.ok ? deepRead.rows[0].extra : null;
+  let levels = 0;
+  while (cursor !== null && typeof cursor === "object" && !Object.hasOwn(cursor, "v")) { cursor = Array.isArray(cursor) ? cursor[0] : cursor.k; levels++; }
+  need(deepRead.ok === true && levels === 30000 && cursor !== null && cursor.v === 1 && !Object.hasOwn(cursor, "user_name") && deepRead.withheld.length === 1, "a held field 30,000 levels down an untyped value is not found, or the reader runs out of stack");
+  const names = (id) => [...lib.heldFieldsOf(id).keys()].sort();
+  same(names("prediction.anything"), [...HOLD_EXPECT[0].names, ...HOLD_EXPECT[3].names].sort(), "the prediction family is held to the wallet and score rules");
+  same(names("forex.rate"), ["volume"], "the spot families are held to the volume rule");
+  same([names("crypto.ohlc").includes("volume"), names("predictionx.rows"), names("prediction"), names("t.rows"), names("")], [false, [], [], [], []], "a hold covers a family by its whole name and nothing beside it");
+  same(lib.heldFieldsOf("prediction.rows").get("user_address"), "wallet", "a held name says which rule holds it");
 
   same(mini.join("px:<T>", "SYX101"), { channel: "px:SYX101", message: "{\"channel\":\"px:SYX101\",\"msg_type\":\"join\"}" }, "a per-name channel is joined with its name");
   same(mini.join("all"), { channel: "all", message: "{\"channel\":\"all\",\"msg_type\":\"join\"}" }, "a channel for every name is joined as it is");
@@ -411,16 +598,59 @@ function clientProblems(lib, catalog = FEED_CATALOG) {
   same(mini.frame("[\"px:SYX101\",{\"close\":{}}]"), { ok: false, reason: "type:close" }, "a mistyped payload field");
   refused(() => lib.createFeedClient({ ...MINI, version: 2 }).op("t.rows"), null, "threw Error", "a catalog of another version");
 
+  need(canon(Object.keys(lib.FEED_HELD).sort()) === canon(Object.keys(HELD_ROUTES).sort()), `the held operations are ${Object.keys(lib.FEED_HELD).sort().join(", ")}`);
+  for (const [id, [method, route]] of Object.entries(HELD_ROUTES)) {
+    const o = catalog.ops.find((x) => x.id === id);
+    need(Boolean(o) && o.method === method && o.path === route, `THE HOLDS POINT AT WHAT THE HOUSE DECIDED: ${id} is no longer ${method} ${route} in the catalog`);
+    const at = client.find(method, route);
+    need(at !== null && at.id === id, `${method} ${route} is in the catalog under the id ${at && at.id}, so its hold no longer covers it`);
+    need(!OPS.some((e) => e.method === method && e.op === route), `the registry has an entry for the held ${method} ${route}`);
+    const [file, heading, sentence] = HELD_SOURCES[id];
+    const hold = lib.FEED_HELD[id] || {};
+    const text = fs.existsSync(path.join(ROOT, file)) ? read(file) : "";
+    need(hold.cite === `${file} ${heading.replace(/[# ]/g, "").replace(/\.$/, "")}` && text.includes(`\n${heading}`) && text.includes(sentence), `the hold on ${id} cites ${hold.cite}, which does not say it`);
+  }
+  need(canon(lib.FEED_HELD_FIELDS) === canon(HOLD_EXPECT), `THE FIELD HOLDS ARE THE HOUSE'S TABLE: ${JSON.stringify(lib.FEED_HELD_FIELDS)}`);
+  const houseTable = read("docs/packages/WP5-cross-asset-macro.md");
+  for (const hold of HOLD_EXPECT) {
+    need(houseTable.includes(hold.reason), `the reason given for the ${hold.rule} hold is not a sentence of the document it cites`);
+    for (const name of hold.names) need(houseTable.includes(`\`${name}\``) !== NOT_IN_THE_HOUSE_TABLE.includes(name), `the held name ${name} ${NOT_IN_THE_HOUSE_TABLE.includes(name) ? "is now in" : "is not in"} the document the hold cites`);
+    need(hold.ops.every((scope) => scope.endsWith(".") && catalog.ops.some((o) => o.id.startsWith(scope))), `the ${hold.rule} hold names a family the catalog does not have`);
+    const documentedIn = catalog.ops.filter((o) => hold.ops.some((scope) => o.id.startsWith(scope)));
+    need(hold.names.every((name) => documentedIn.some((o) => o.fields.some((f) => leafName(f.path) === name))), `the ${hold.rule} hold names a field no operation of its families documents`);
+    const fields = documentedIn.filter((o) => !Object.hasOwn(HELD_ROUTES, o.id)).flatMap((o) => o.fields.filter((f) => hold.names.includes(leafName(f.path))).map((f) => `${o.id} ${f.path}`));
+    need(canon([fields.length, [...new Set(fields.map((f) => f.split(" ")[0]))]]) === canon(HOLD_COUNTS[hold.rule]), `the ${hold.rule} hold covers ${fields.length} documented fields on ${[...new Set(fields.map((f) => f.split(" ")[0]))].join(", ")}`);
+  }
+  const everyHeld = new Set(HOLD_EXPECT.flatMap((h) => h.names));
+  const leftUnheld = [...new Set(catalog.ops.filter((o) => /^(?:prediction|crypto)\./.test(o.id)).flatMap((o) => o.fields.map((f) => leafName(f.path))).filter((name) => /address|wallet|hash|user|name|score|pnl/.test(name) && !everyHeld.has(name)))].sort();
+  need(canon(leftUnheld) === canon(LEFT_UNHELD), `the documented names that look like a wallet, a person or a score and that no hold covers are ${JSON.stringify(leftUnheld)}`);
+  const personal = new Set(HOLD_EXPECT.filter((h) => h.rule === "wallet" || h.rule === "leaders").flatMap((h) => h.names));
+  const uncovered = [
+    ...catalog.ops.flatMap((o) => o.fields.filter((f) => personal.has(leafName(f.path)) && !lib.heldFieldsOf(o.id).has(leafName(f.path))).map((f) => `${o.id} ${f.path}`)),
+    ...catalog.channels.flatMap((c) => c.fields.filter((f) => personal.has(leafName(f.path))).map((f) => `${c.id} ${f.path}`)),
+  ];
+  need(uncovered.length === 0, `A WALLET OR A LEADER'S NAME IS HELD WHEREVER THE DOCUMENT HAS ONE: ${uncovered.join(", ")} lie outside the families the holds cover, or on a socket channel, whose frames are read with no hold`);
+
+  const specDoc = yaml.parseYaml(SPEC);
+  let shown = 0;
   for (const o of catalog.ops) {
     const key = `${o.method} ${o.path}`;
     const fx = FIXTURES.ops[key];
     if (!fx) { problems.push(`${key} has no fixture`); continue; }
+    need(!Object.hasOwn(fx, "requestBody"), `${key}: the fixtures hold a body to write`);
+    if (Object.hasOwn(HELD_ROUTES, o.id)) {
+      refused(() => client.request(o.id, fx.request.params), null, "held", `${key}: the held operation asked for`);
+      refused(() => client.read(o.id, fx.body), null, "held", `${key}: an answer of the held operation read`);
+      need(client.held(o.id) !== null && client.op(o.id) === o && client.find(o.method, o.path) === o, `${key}: the held operation is not listed and marked`);
+      continue;
+    }
+    need(client.held(o.id) === null, `${key}: an operation the house has not held is marked held`);
     if (o.kind === "socket") { refused(() => client.request(o.id, {}), null, "not-a-request", `${key}: a socket page`); continue; }
-    const options = o.method === "GET" ? undefined : { write: true, body: fx.requestBody };
+    if (o.method !== "GET") { refused(() => client.request(o.id, fx.request.params), null, "write", `${key}: a write`); continue; }
     let built;
-    try { built = client.request(o.id, fx.request.params, options); } catch (error) { problems.push(`${key}: the fixture's parameters are refused (${error.message})`); continue; }
+    try { built = client.request(o.id, fx.request.params); } catch (error) { problems.push(`${key}: the fixture's parameters are refused (${error.message})`); continue; }
     need(built.method === o.method && built.path === fx.request.path && built.search === fx.request.search, `${key}: the request is not the one the fixture generator builds (${built.path}${built.search})`);
-    const lean = client.request(o.id, fx.request.required, options);
+    const lean = client.request(o.id, fx.request.required);
     need(lean.path === fx.request.path && lean.search === fx.request.searchRequired, `${key}: the request with only its required parameters differs (${lean.path}${lean.search})`);
     const template = o.path.split("/");
     const segments = built.path.split("/");
@@ -437,57 +667,94 @@ function clientProblems(lib, catalog = FEED_CATALOG) {
     for (const p of o.params) {
       const without = { ...fx.request.params };
       delete without[p.name];
-      if (p.required) refused(() => client.request(o.id, without, options), p.name, "missing", `${key} without ${p.name}`);
-      else need(refusal(() => client.request(o.id, without, options)) === null, `${key}: leaving out the optional ${p.name} is refused`);
+      if (p.required) refused(() => client.request(o.id, without), p.name, "missing", `${key} without ${p.name}`);
+      else need(refusal(() => client.request(o.id, without)) === null, `${key}: leaving out the optional ${p.name} is refused`);
       const leaf = p.type === "array" ? p.items : p.type;
       const wrap = (v) => ({ ...fx.request.params, [p.name]: p.type === "array" ? [v] : v });
-      if (p.enum !== undefined) refused(() => client.request(o.id, wrap(leaf === "integer" || leaf === "number" ? 987654321 : "not a documented value"), options), p.name, "enum", `${key}: ${p.name} outside its enum`);
-      if (leaf === "integer") refused(() => client.request(o.id, wrap("7"), options), p.name, "type", `${key}: ${p.name} given as text`);
-      if (leaf === "number") refused(() => client.request(o.id, wrap("0.5"), options), p.name, "type", `${key}: ${p.name} given as text`);
-      if (leaf === "boolean") refused(() => client.request(o.id, wrap("true"), options), p.name, "type", `${key}: ${p.name} given as text`);
-      if (leaf === "string") refused(() => client.request(o.id, wrap(7), options), p.name, "type", `${key}: ${p.name} given as a number`);
-      if (p.type === "array") refused(() => client.request(o.id, { ...fx.request.params, [p.name]: "one" }, options), p.name, "type", `${key}: ${p.name} given as one value`);
-      if (p.min !== undefined && p.enum === undefined) refused(() => client.request(o.id, wrap(p.min - 1), options), p.name, "min", `${key}: ${p.name} below its minimum`);
-      if (p.max !== undefined && p.enum === undefined) refused(() => client.request(o.id, wrap(p.max + 1), options), p.name, "max", `${key}: ${p.name} above its maximum`);
-      if (p.format === "date" && p.enum === undefined) refused(() => client.request(o.id, wrap("2026-02-30"), options), p.name, "format", `${key}: ${p.name} given a day that does not exist`);
-      if (p.pattern !== undefined) refused(() => client.request(o.id, wrap("no match"), options), p.name, "pattern", `${key}: ${p.name} outside its pattern`);
+      if (p.enum !== undefined) refused(() => client.request(o.id, wrap(leaf === "integer" || leaf === "number" ? 987654321 : "not a documented value")), p.name, "enum", `${key}: ${p.name} outside its enum`);
+      if (leaf === "integer") refused(() => client.request(o.id, wrap("7")), p.name, "type", `${key}: ${p.name} given as text`);
+      if (leaf === "number") refused(() => client.request(o.id, wrap("0.5")), p.name, "type", `${key}: ${p.name} given as text`);
+      if (leaf === "boolean") refused(() => client.request(o.id, wrap("true")), p.name, "type", `${key}: ${p.name} given as text`);
+      if (leaf === "string") refused(() => client.request(o.id, wrap(7)), p.name, "type", `${key}: ${p.name} given as a number`);
+      if (p.type === "array") refused(() => client.request(o.id, { ...fx.request.params, [p.name]: "one" }), p.name, "type", `${key}: ${p.name} given as one value`);
+      if (p.min !== undefined && p.enum === undefined) refused(() => client.request(o.id, wrap(p.min - 1)), p.name, "min", `${key}: ${p.name} below its minimum`);
+      if (p.max !== undefined && p.enum === undefined) refused(() => client.request(o.id, wrap(p.max + 1)), p.name, "max", `${key}: ${p.name} above its maximum`);
+      if (p.format === "date" && p.enum === undefined) refused(() => client.request(o.id, wrap("2026-02-30")), p.name, "format", `${key}: ${p.name} given a day that does not exist`);
+      if (p.pattern !== undefined) refused(() => client.request(o.id, wrap("no match")), p.name, "pattern", `${key}: ${p.name} outside its pattern`);
       if (p.in === "path" && leaf === "string" && p.enum === undefined && p.format === undefined && p.pattern === undefined) {
-        const hostile = client.request(o.id, wrap("A/B c?#"), options);
-        need(hostile.path.split("/").length === template.length && hostile.path.includes(encodeURIComponent("A/B c?#")), `${key}: ${p.name} is not encoded as one segment`);
+        const hostile = client.request(o.id, wrap("A/B c?#"));
+        need(hostile.path.split("/").length === template.length && hostile.path.includes(encodeURIComponent("A/B c?#")) && new URL(VENDOR_BASE_DEFAULT + hostile.path).pathname === hostile.path, `${key}: ${p.name} is not encoded as one segment`);
+        for (const dots of [".", ".."]) refused(() => client.request(o.id, wrap(dots)), p.name, "segment", `${key}: ${p.name} given ${dots}`);
       }
     }
-    refused(() => client.request(o.id, { ...fx.request.params, no_such_parameter: 1 }, options), "no_such_parameter", "unknown", `${key} with an undocumented parameter`);
-    if (o.method !== "GET") refused(() => client.request(o.id, fx.request.params), null, "write", `${key} without write`);
+    refused(() => client.request(o.id, { ...fx.request.params, no_such_parameter: 1 }), "no_such_parameter", "unknown", `${key} with an undocumented parameter`);
 
     if (o.kind !== "json") { refused(() => client.read(o.id, {}), null, "not-a-request", `${key}: a file read as JSON`); continue; }
     const result = documented.read(o.id, fx.body);
     if (!result.ok) { problems.push(`${key}: the fixture does not read back (${result.reason})`); continue; }
-    need(fx.envelope === o.envelope && (fx.bare === true) === (o.bare === true), `${key}: the catalog and the fixture generator disagree on how the answer is wrapped (${o.envelope} against ${fx.envelope})`);
+    need(fx.envelope === o.envelope && (fx.bare === true) === (o.bare === true) && (fx.unwrapped === true) === (o.unwrapped === true), `${key}: the catalog and the fixture generator disagree on how the answer is wrapped (${o.envelope} against ${fx.envelope})`);
+    need(result.form === (fx.bare ? "bare" : fx.unwrapped ? "unwrapped" : "wrapped"), `${key}: the fixture is read as ${result.form}`);
+    const heldNames = expectedHeld(o.id);
     const numeric = new Set(o.fields.filter((f) => f.type === "integer" || f.type === "number" || f.numeric).map((f) => f.path));
     const marked = o.fields.filter((f) => f.numeric).map((f) => f.path);
     need(fx.numeric.every((p) => marked.includes(p)), `${key}: the fixture generator finds numbers in text where the catalog marks none (${fx.numeric.filter((p) => !marked.includes(p))})`);
     const nullable = new Set(o.fields.filter((f) => f.nullable).map((f) => f.path));
     need(fx.nulls.every((p) => nullable.has(p)), `${key}: the fixture holds a null where the catalog documents none`);
     const enveloped = o.documents === "envelope";
-    const inner = enveloped ? fx.body[o.envelope] : fx.bare ? fx.body : fx.body[fx.envelope];
-    const whole = enveloped ? Object.fromEntries(Object.keys(fx.body).map((k) => [k, k === o.envelope ? result.data : result.meta[k]])) : result.data;
-    const compared = o.documents === "row" ? new Set([...numeric].map((p) => `[].${p}`)) : numeric;
-    const bad = o.documents === "open" ? (JSON.stringify(result.data) === JSON.stringify(inner) ? null : "a free-form answer changed") : sameShape(enveloped ? fx.body : inner, whole, compared);
+    const alone = fx.bare === true || fx.unwrapped === true;
+    const sent = enveloped ? fx.body : alone ? fx.body : fx.body[fx.envelope];
+    const dropped = new Set();
+    const kept = o.documents === "row" && Array.isArray(sent) ? sent.map((row) => pruned(row, heldNames, "", dropped)) : pruned(sent, heldNames, "", dropped);
+    const whole = enveloped ? Object.fromEntries(Object.keys(kept).map((k) => [k, k === o.envelope ? result.data : result.meta[k]])) : result.data;
+    const rowList = o.documents === "row" && Array.isArray(sent);
+    const compared = rowList ? new Set([...numeric].map((p) => `[].${p}`)) : numeric;
+    const bad = o.documents === "open" ? (JSON.stringify(result.data) === JSON.stringify(kept) ? null : "a free-form answer changed") : sameShape(kept, whole, compared);
     need(bad === null, `${key}: the fixture did not read back faithfully (${bad})`);
+    need(canon(result.withheld) === canon([...dropped].sort()), `${key}: the reader says it left out ${JSON.stringify(result.withheld)}; the house's table leaves out ${JSON.stringify([...dropped].sort())}`);
+    const documentedHeld = o.fields.filter((f) => pathHeld(f.path, heldNames)).length;
+    need((dropped.size > 0) === (documentedHeld > 0), `${key}: ${documentedHeld} documented fields are held and the fixture ${dropped.size ? "leaves some out" : "leaves none out"}`);
+    need(![...keysWithin(result.data), ...keysWithin(result.meta)].some((name) => heldNames.has(name)), `${key}: a held field is in what the reader returns`);
     const roots = o.documents === "row" ? result.rows : [whole];
-    const sources = o.documents === "row" ? inner : [enveloped ? fx.body : inner];
+    const sources = o.documents === "row" ? (rowList ? sent : [sent]) : [sent];
     for (const p of marked) {
+      if (pathHeld(p, heldNames)) continue;
       const before = valuesAt(sources, p).filter((v) => v !== null);
       const after = valuesAt(roots, p).filter((v) => v !== null);
       need(before.length > 0 && after.length === before.length && after.every((v) => typeof v === "number") && before.every((v) => typeof v === (fx.numeric.includes(p) ? "string" : "number")), `${key}: ${p} is marked as a number in text and the fixture or the reader disagrees`);
     }
-    for (const p of fx.nulls) need(valuesAt(roots, p).some((v) => v === null), `${key}: the null at ${p} did not survive`);
+    for (const p of fx.nulls) if (!pathHeld(p, heldNames)) need(valuesAt(roots, p).some((v) => v === null), `${key}: the null at ${p} did not survive`);
     need(!JSON.stringify(result).includes("undefined") && result.undocumented.length === 0, `${key}: the reader names undocumented keys in a fixture built from the document (${result.undocumented.slice(0, 3)})`);
     if (fx.envelope === catalog.envelope && !fx.bare) need(Array.isArray(unwrap(fx.body)) === Array.isArray(result.data), `${key}: the reader and the existing unwrap disagree on the container`);
-    need(documented.read(o.id, { not_the_wrapper: inner }).ok === false, `${key}: an answer wrapped under another key is read`);
-    if (fx.bare) need(documented.read(o.id, { [o.envelope]: fx.body }).ok === true, `${key}: the same rows under the usual key are not read`);
+    const inner = enveloped ? fx.body[o.envelope] : sent;
+    const elsewhere = documented.read(o.id, { not_the_wrapper: inner });
+    if (o.envelopeFrom === "assumed" && o.documents === "open") need(elsewhere.ok === true && elsewhere.form === "unwrapped", `${key}: nothing is documented and the wrapper is assumed, and an object is not taken as the answer`);
+    else need(elsewhere.ok === false && elsewhere.reason === "unshaped", `${key}: an answer wrapped under another key is read`);
+    if (alone) {
+      const under = documented.read(o.id, { [o.envelope]: fx.body });
+      need(under.ok === true && under.form === "wrapped" && canon(under.data) === canon(result.data), `${key}: the same answer under the usual key is not read the same`);
+    }
+    const one = Array.isArray(inner) ? inner[0] : inner;
+    if (!alone && o.documents !== "list" && isObj(one) && !Object.hasOwn(one, o.envelope)) {
+      const stripped = documented.read(o.id, one);
+      if (o.envelopeFrom === "assumed") need(stripped.ok === true && stripped.form === "unwrapped", `${key}: the wrapper is only assumed, and the answer without it is not read (${stripped.reason})`);
+      else need(stripped.ok === false && stripped.reason === "unshaped", `${key}: the document shows the wrapper, and an answer without it is read`);
+    }
     need(result.rows.length === (Array.isArray(result.data) ? result.data.length : 1), `${key}: rows is not the list of rows`);
   }
+
+  for (const o of catalog.ops) {
+    if (o.kind !== "json") continue;
+    const example = exampleOf(specDoc, o);
+    if (example === undefined) continue;
+    shown += 1;
+    const key = `${o.method} ${o.path}`;
+    if (Object.hasOwn(HELD_ROUTES, o.id)) { refused(() => documented.read(o.id, example), null, "held", `${key}: the document's example of a held operation read`); continue; }
+    const got1 = documented.read(o.id, example);
+    need(got1.ok === true, `THE READER TAKES EVERY ANSWER THE DOCUMENT SHOWS: the document's own example of ${key} does not read (${got1.reason})`);
+    need(got1.ok !== true || got1.form === (o.bare ? "bare" : o.unwrapped ? "unwrapped" : "wrapped"), `${key}: the document's example is read as ${got1.form}, and the catalog says it shows ${o.bare ? "bare rows" : o.unwrapped ? "the answer itself" : "a wrapper"}`);
+    need(got1.ok !== true || ![...keysWithin(got1.data), ...keysWithin(got1.meta)].some((name) => expectedHeld(o.id).has(name)), `${key}: a held field of the document's example is in what the reader returns`);
+  }
+  need(shown === EXAMPLES_SHOWN, `the document shows an example answer for ${shown} operations`);
 
   for (const c of catalog.channels) {
     const fx = FIXTURES.channels[c.id];
@@ -546,6 +813,8 @@ function clientProblems(lib, catalog = FEED_CATALOG) {
     const params = { ...fx.request.required, ...fixed };
     const built = refusal(() => client.request(o.id, params)) === null ? client.request(o.id, params) : null;
     need(built !== null && built.path === pathFor(e.id, Object.fromEntries(tokens.map((t) => [t, params[t]]))), `registry entry ${e.id}: the client and the registry build different paths (${built && built.path})`);
+    const mayNotRead = [...expectedHeld(o.id)].filter((name) => (e.reads || []).includes(name));
+    need(canon(mayNotRead) === canon(TRANSIENT_READS[e.id] || []), `registry entry ${e.id} reads ${mayNotRead.join(", ") || "no held field"} of ${o.id}; the house's table allows ${(TRANSIENT_READS[e.id] || []).join(", ") || "none"}`);
     if (e.reads && o.documents !== "open") {
       const names = new Set(o.fields.flatMap((f) => f.path.replace(/\[\]/g, "").split(".")));
       names.add(o.envelope);
@@ -577,9 +846,16 @@ function clientProblems(lib, catalog = FEED_CATALOG) {
   const readPaths = new Set(OPS.filter((e) => e.envelope !== null).map((e) => `${e.method} ${e.op}`));
   const readNow = requests.filter((o) => readPaths.has(`${o.method} ${o.path}`));
   need(coverage.operations.documented === catalog.ops.length && coverage.operations.requests === requests.length && coverage.operations.pages === catalog.ops.length - requests.length, "the coverage totals are not the catalog's");
-  need(coverage.operations.read === readNow.length && JSON.stringify(coverage.operations.unread) === JSON.stringify(requests.filter((o) => !readPaths.has(`${o.method} ${o.path}`)).map((o) => o.id)), "the coverage does not count the operations the registry reads");
-  need(coverage.operations.read + coverage.operations.unread.length === coverage.operations.requests, "read and unread do not add up to the requests");
-  need(Object.values(coverage.operations.byTag).reduce((n, row) => n + row.documented, 0) === requests.length && Object.values(coverage.operations.byTag).reduce((n, row) => n + row.unread.length, 0) === coverage.operations.unread.length, "the tags do not add up");
+  const notRead = requests.filter((o) => !readPaths.has(`${o.method} ${o.path}`));
+  need(coverage.operations.read === readNow.length && JSON.stringify(coverage.operations.unread) === JSON.stringify(notRead.filter((o) => !Object.hasOwn(HELD_ROUTES, o.id)).map((o) => o.id)), "the coverage does not count the operations the registry reads, or lists a held operation as merely unread");
+  need(canon(coverage.operations.held) === canon(notRead.filter((o) => Object.hasOwn(HELD_ROUTES, o.id)).map((o) => ({ id: o.id, reason: lib.FEED_HELD[o.id] && lib.FEED_HELD[o.id].reason, cite: lib.FEED_HELD[o.id] && lib.FEED_HELD[o.id].cite }))) && coverage.operations.held.length === Object.keys(HELD_ROUTES).length,
+    `the coverage does not set the held operations apart with their reasons: ${JSON.stringify(coverage.operations.held)}`);
+  need(coverage.operations.heldAndRead.length === 0, `production reads an operation the house holds: ${coverage.operations.heldAndRead}`);
+  need(coverage.operations.read + coverage.operations.unread.length + coverage.operations.held.length === coverage.operations.requests, "read, unread and held do not add up to the requests");
+  need(Object.values(coverage.operations.byTag).reduce((n, row) => n + row.documented, 0) === requests.length && Object.values(coverage.operations.byTag).reduce((n, row) => n + row.unread.length, 0) === coverage.operations.unread.length &&
+    Object.values(coverage.operations.byTag).reduce((n, row) => n + row.held.length, 0) === coverage.operations.held.length, "the tags do not add up");
+  need(canon(coverage.operations.fieldHolds.map((h) => [h.rule, h.reason, h.cite, h.fields.length, [...new Set(h.fields.map((f) => f.split(" ")[0]))]])) === canon(HOLD_EXPECT.map((h) => [h.rule, h.reason, h.cite, ...HOLD_COUNTS[h.rule]])),
+    `the coverage does not count the documented fields each hold leaves out: ${JSON.stringify(coverage.operations.fieldHolds.map((h) => [h.rule, h.fields.length]))}`);
   need(JSON.stringify(coverage.registry.absent) === JSON.stringify(OPS.filter((e) => !scanned.has(`${e.method} ${e.op}`)).map((e) => e.id)) && coverage.registry.entries === OPS.length, "the coverage does not name the registry entries the document lacks");
   const listed = new Set(Object.values(RT_UPSTREAM).flatMap((row) => row.channels));
   const joinedNow = new Set(Object.values(SOCKET_CHANNELS).map((row) => row.template));
@@ -599,9 +875,17 @@ const NUMERIC_CASES = [
 ];
 
 const ID_CASES = [
-  ["PublicApi.TickerController.greeks", "ticker.greeks"], ["PublicApi.OptionTradeController.full_tape", "option-trade.full-tape"], ["PublicApi.NasdaqPulseController.top", "nasdaq-pulse.top"],
+  ["PublicApi.TickerController.greeks", "ticker.greeks"], ["PublicApi.OptionTradeController.full_tape", "option-trade.full-prints"], ["PublicApi.NasdaqPulseController.top", "nasdaq-pulse.top"],
   ["PublicApi.ETFController.in_outflow", "etf.in-outflow"], ["Other.Thing.do_it", "other.thing.do-it"], ["PublicApi.Controller.index", "controller.index"], ["solo", "solo"], ["", "refused"], ["...", "refused"],
+  ["PublicApi.VendorController.vendor_tapes", "source.source-prints"], ["PublicApi.TapeController.vendorsList", "prints.sources-list"], ["PublicApi.TaperController.untaped_vendored", "taper.untaped-vendored"],
 ];
+
+const FREE_DEFAULTS = [
+  "intel.analytics-sliding interval=DAILY", "intel.analytics-sliding ohlc=close", "market.correlations interval=1Y", "ticker.greek-exposure timeframe=1Y", "ticker.historical-risk-reversal-skew timeframe=1Y",
+  "ticker.ohlc timeframe=1Y", "ticker.realized-volatility timeframe=1Y",
+];
+const SHOWN_UNWRAPPED = ["etf.weights", "option-contract.flow", "option-trade.flow-alert", "politics-fec.lobbying", "politics-fec.people"];
+const SHOWN_BARE = ["ticker.flow-per-strike", "ticker.flow-per-strike-intraday"];
 
 const BRAND_CASES = [
   ["https://api.samplebrand.test", "s[\\s_-]*a[\\s_-]*m[\\s_-]*p[\\s_-]*l[\\s_-]*e[\\s_-]*b[\\s_-]*r[\\s_-]*a[\\s_-]*n[\\s_-]*d"], ["https://ab.test/path?x=1", "a[\\s_-]*b"], ["http://localhost:8787", null], ["http://127.0.0.1:8787", null], ["https://10.20.30.40", null],
@@ -630,7 +914,9 @@ const TINY = {
     "/api/tiny/{name}/rows": {
       get: {
         operationId: "PublicApi.TinyThingController.list_rows", tags: ["tiny"], summary: "Sample Brand tape rows", description: "Returns rows. It needs the Pro plan.\n\nHistory is limited to 30 days.\n",
-        parameters: [{ name: "from", in: "query", schema: { type: "string" } }, { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 9, default: 3 } }, { name: "limit", in: "query", schema: { type: "string" } }, { name: "day", in: "query", required: true, schema: { type: "date" } }],
+        parameters: [{ name: "from", in: "query", schema: { type: "string" } }, { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 9, default: 3 } }, { name: "limit", in: "query", schema: { type: "string" } }, { name: "day", in: "query", required: true, schema: { type: "date" } },
+          { name: "who", in: "query", schema: { type: "string", default: "Sample Person" } }, { name: "span", in: "query", schema: { type: "string", default: "1Y" } }, { name: "side", in: "query", schema: { type: "string", enum: ["call", "put"], default: "put" } },
+          { name: "odd", in: "query", schema: { type: "string", enum: ["a", "b"], default: "c" } }, { name: "live", in: "query", schema: { type: "boolean", default: false } }],
         responses: { 200: { description: "ok", content: { "application/json": { schema: { $ref: "#/components/schemas/Tiny row" } } } }, 422: { description: "bad" } },
       },
       delete: { operationId: "PublicApi.TinyThingController.drop", tags: ["tiny"], summary: "Drop (DEPRECATED)", responses: { 204: { description: "gone" } } },
@@ -655,7 +941,9 @@ const TINY_CATALOG = {
     { id: "tiny-thing.file", method: "GET", path: "/api/tiny/file", operationId: "PublicApi.TinyThingController.file", tags: ["tiny"], summary: "File for AI: import (zip); export from 'here', sold on the ask side by a source", kind: "file", deprecated: false, plan: [], limits: [], statuses: [200], params: [], envelope: null, documents: null, fields: [], media: "application/zip" },
     { id: "tiny-thing.list-rows", method: "GET", path: "/api/tiny/{name}/rows", operationId: "PublicApi.TinyThingController.list_rows", tags: ["tiny"], summary: "the feed prints rows", kind: "json", deprecated: false,
       plan: ["It needs the Pro plan."], limits: ["History is limited to 30 days."], statuses: [200, 422],
-      params: [{ name: "from", in: "query", required: false, type: "string" }, { name: "limit", in: "query", required: false, type: "integer", default: 3, min: 1, max: 9 }, { name: "day", in: "query", required: true, type: "string", format: "date" }, { name: "name", in: "path", required: true, type: "string", implied: true }],
+      params: [{ name: "from", in: "query", required: false, type: "string" }, { name: "limit", in: "query", required: false, type: "integer", default: 3, min: 1, max: 9 }, { name: "day", in: "query", required: true, type: "string", format: "date" },
+        { name: "who", in: "query", required: false, type: "string" }, { name: "span", in: "query", required: false, type: "string", default: "1Y" }, { name: "side", in: "query", required: false, type: "string", enum: ["call", "put"], default: "put" },
+        { name: "odd", in: "query", required: false, type: "string", enum: ["a", "b"] }, { name: "live", in: "query", required: false, type: "boolean", default: false }, { name: "name", in: "path", required: true, type: "string", implied: true }],
       envelope: "rows", envelopeFrom: "example", documents: "row", fields: [
         { path: "bag", type: "object", open: true }, { path: "bid", type: "string", numeric: true }, { path: "code_id", type: "string" }, { path: "flag", type: "any" }, { path: "legs", type: "array" }, { path: "legs[]", type: "object" },
         { path: "legs[].k", type: "string", numeric: true }, { path: "level", type: "integer", nullable: true }, { path: "on", type: "any" }, { path: "prev", type: "string" }, { path: "rate", type: "string", numeric: true },
@@ -670,14 +958,21 @@ const TINY_CATALOG = {
 const WRAPPER_CASES = [
   ["an example that is the rows themselves", (row) => { row.example = row.example.rows; }, { envelope: "data", envelopeFrom: "assumed", bare: true }],
   ["an example under data", (row) => { row.example = { data: row.example.rows, date: "2026-03-04" }; }, { envelope: "data", envelopeFrom: "example" }],
-  ["an example that is one row", (row) => { row.example = row.example.rows[0]; }, { envelope: "data", envelopeFrom: "assumed" }],
-  ["an example with two candidate wrappers", (row) => { row.example = { rows: row.example.rows, more: [] }; }, { envelope: "data", envelopeFrom: "assumed" }],
-  ["an example whose one list is a documented field", (row) => { row.example = { legs: [{ k: "5" }] }; }, { envelope: "data", envelopeFrom: "assumed" }],
+  ["an example that is one row", (row) => { row.example = row.example.rows[0]; }, { envelope: "data", envelopeFrom: "assumed", unwrapped: true }],
+  ["an example with two candidate wrappers and no documented key", (row) => { row.example = { rows: row.example.rows, more: [] }; }, { envelope: "data", envelopeFrom: "assumed" }],
+  ["an example with two candidate wrappers beside a documented key", (row) => { row.example = { rows: row.example.rows, more: [], zip: "0012" }; }, { envelope: "data", envelopeFrom: "assumed", unwrapped: true }],
+  ["an example whose one list is a documented field", (row) => { row.example = { legs: [{ k: "5" }] }; }, { envelope: "data", envelopeFrom: "assumed", unwrapped: true }],
+  ["an empty example", (row) => { row.example = {}; }, { envelope: "data", envelopeFrom: "assumed" }],
   ["no example", (row) => { delete row.example; }, { envelope: "data", envelopeFrom: "assumed" }],
+  ["an example of an answer the schema does not describe", (row) => { delete row.properties; row.example = { company: "Sample", filings: [], periods: [] }; }, { envelope: "data", envelopeFrom: "assumed", unwrapped: true }],
+  ["an example with one container where the schema describes nothing", (row) => { delete row.properties; row.example = { results: [{ a: 1 }] }; }, { envelope: "results", envelopeFrom: "example" }],
   ["a schema that documents data", (row) => { row.properties = { data: { type: "array", items: { type: "object", properties: { k: { type: "string" } } } } }; row.example = { rows: [] }; }, { envelope: "data", envelopeFrom: "schema" }],
 ];
 
 const REFUSED_DOCUMENTS = [
+  ["a parameter sent in a header", (doc) => { doc.paths["/api/tiny/file"].get.parameters = [{ name: "x-sample", in: "header", schema: { type: "string" } }]; }],
+  ["a parameter sent in a cookie", (doc) => { doc.paths["/api/tiny/file"].get.parameters = [{ name: "session", in: "cookie", schema: { type: "string" } }]; }],
+  ["a parameter that names no place", (doc) => { doc.paths["/api/tiny/file"].get.parameters = [{ name: "nowhere", schema: { type: "string" } }]; }],
   ["two operations of one name", (doc) => { doc.paths["/api/tiny/file"].get.operationId = "PublicApi.TinyThingController.drop"; }],
   ["an operation with no operationId", (doc) => { delete doc.paths["/api/tiny/file"].get.operationId; }],
   ["a reference to a schema that does not exist", (doc) => { doc.components.schemas["Tiny row "].properties.self = { $ref: "#/components/schemas/Nowhere" }; }],
@@ -692,7 +987,7 @@ const WIRE_ONLY_READS = [
 ];
 const OTHER_WRAPPERS = Object.freeze({ "contract-historic": "chains", "shorts-volume": "si" });
 const BARE_LISTS = Object.freeze(["flow-per-strike", "strike-flow-intraday"]);
-const MINI_WIRE = Object.freeze({ "t.wired": { envelope: "si", untyped: ["flag"] } });
+const MINI_WIRE = Object.freeze({ "t.wired": { envelope: "si", untyped: ["flag"] }, "t.seen": { envelope: "si" } });
 
 function observedOps(catalog) {
   const byRoute = new Map(catalog.ops.map((o) => [`${o.method} ${o.path}`, o]));
@@ -793,6 +1088,63 @@ function bodyFromSets(sets, pick) {
   ok(rewritten.split("\n").length >= SPEC.split("\n").length - 2 && moved < SPEC.split("\n").length, `the rewrite keeps the committed layout: ${rewritten.split("\n").length} lines against ${SPEC.split("\n").length}`);
 }
 
+const YAML_FILE = "scripts/feed-yaml.mjs";
+const OLD_COMMENT_CUT = [["const commentAt = (s) => {\n  let at = s.indexOf(\" #\");\n  if (at < 0) return -1;\n  while (at > 0 && s[at - 1] === \" \") at--;\n  return at;\n};", "const commentAt = (s) => {\n  const hit = / +#/.exec(s);\n  return hit ? hit.index : -1;\n};"]];
+const nestedYaml = (levels) => `${Array.from({ length: levels - 1 }, (_, i) => `${" ".repeat(i * 2)}k:\n`).join("")}${" ".repeat((levels - 1) * 2)}v: 1\n`;
+const nestedLists = (levels) => `${"- ".repeat(levels)}x\n`;
+const nestedValue = (levels) => { let v = 1; for (let i = 0; i < levels; i++) v = i % 2 ? [v] : { k: v }; return v; };
+const outcome = (fn) => { try { return canon(fn()); } catch (error) { return `${error && error.name}: ${error && error.message}`; } };
+
+function yamlProblems(mod, source) {
+  const problems = [];
+  const need = (cond, msg) => { checks++; if (!cond) problems.push(msg); };
+  const refusedBy = (fn) => { try { fn(); } catch (error) { return error instanceof mod.YamlError ? "refused" : `threw ${error && error.name}`; } return "read"; };
+  const literals = source.match(/(?<![\w)\]])\/(?![*/])(?:[^/\\\n[]|\\.|\[(?:[^\]\\\n]|\\.)*\])+\/[dgimsuvy]*/g) || [];
+  need(literals.length > 15, `the reader's regular expressions are found (${literals.length})`);
+  const sliding = literals.filter((lit) => /^\/(?:\(\?:)?(?: |\\s|\[ \\t\]|\[^\S\n\]|\.)[+*]/.test(lit));
+  need(sliding.length === 0, `THE READER SCANS A LINE ONCE: a regular expression that starts with an unanchored run is tried from every position of that run, and ${sliding.join(" ")} does`);
+  need(mod.MAX_DEPTH === 64, `the reader follows ${mod.MAX_DEPTH} levels`);
+  for (const [what, text, depths] of [["mappings", nestedYaml, [mod.MAX_DEPTH + 1, 2000]], ["lists", nestedLists, [mod.MAX_DEPTH + 1, 2000, 60000]]]) {
+    need(refusedBy(() => mod.parseYaml(text(mod.MAX_DEPTH))) === "read", `${mod.MAX_DEPTH} levels of ${what} are refused`);
+    for (const deeper of depths) need(refusedBy(() => mod.parseYaml(text(deeper))) === "refused", `${deeper} levels of ${what} are not refused by name (${refusedBy(() => mod.parseYaml(text(deeper)))})`);
+  }
+  need(refusedBy(() => mod.dumpYaml(nestedValue(mod.MAX_DEPTH))) === "read" && refusedBy(() => mod.parseYaml(mod.dumpYaml(nestedValue(mod.MAX_DEPTH)))) === "read", `a value ${mod.MAX_DEPTH} levels deep is not written and read back`);
+  for (const deeper of [mod.MAX_DEPTH + 1, 5000]) need(refusedBy(() => mod.dumpYaml(nestedValue(deeper))) === "refused", `a value ${deeper} levels deep is not refused by name when written (${refusedBy(() => mod.dumpYaml(nestedValue(deeper)))})`);
+  return problems;
+}
+
+{
+  const source = read(YAML_FILE);
+  deep(yamlProblems(yaml, source), [], "THE READER IS BOUNDED: no regular expression in it slides along a run of spaces, and a document nested deeper than 64 levels is refused by name, read or written");
+  const wide = 1 << 20;
+  const long = yaml.parseYaml(`a: x${" ".repeat(wide)}y\nb: ${" ".repeat(wide)}z # note\nc: w${" ".repeat(wide)}# tail\n`);
+  ok(long.a.length === wide + 2 && long.b === "z" && long.c === "w", "a line a mebibyte wide is read, with its comment cut where the first run of spaces before a # begins");
+  const before = await loadMutated(YAML_FILE, OLD_COMMENT_CUT, { salt: 1 });
+  let seed = 20261122;
+  const next = (n) => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed % n; };
+  const alphabet = [" ", " ", "#", "a", ":", "'", "\"", "-", "|", "x #", " # ", ": "];
+  let compared = 0;
+  for (let i = 0; i < 4000; i++) {
+    const line = Array.from({ length: 1 + next(14) }, () => alphabet[next(alphabet.length)]).join("");
+    const text = `${next(2) ? "k: " : "- "}${line}\n${next(3) ? "" : `j: ${alphabet[next(alphabet.length)]}v # c\n`}`;
+    if (outcome(() => yaml.parseYaml(text)) !== outcome(() => before.parseYaml(text))) assert.fail(`the comment cut reads ${JSON.stringify(text)} as ${outcome(() => yaml.parseYaml(text))}, where the expression it replaced read ${outcome(() => before.parseYaml(text))}`);
+    compared++;
+  }
+  ok(compared === 4000 && canon(before.parseYaml(SPEC)) === canon(yaml.parseYaml(SPEC)), "the comment cut reads 4,000 random lines and the whole document exactly as the regular expression it replaced did");
+  for (const [title, transforms] of [
+    ["the comment cut done with a sliding regular expression", OLD_COMMENT_CUT],
+    ["no limit on nesting when reading", [["    if (depth >= MAX_DEPTH) fail(`nested deeper than the ${MAX_DEPTH} levels this reader follows`);\n", ""]]],
+    ["a limit one level short when reading", [["    if (depth >= MAX_DEPTH) fail(", "    if (depth >= MAX_DEPTH - 1) fail("]]],
+    ["no limit on nesting when writing", [["  if (depth > MAX_DEPTH) throw new YamlError(`nested deeper than the ${MAX_DEPTH} levels this writer follows`, 0);\n", ""]]],
+    ["lists inside lists not counted", [["        out.push(deeper(() => (ENTRY.test(item) ? sequence(inner) : mapping(inner))));", "        out.push(ENTRY.test(item) ? sequence(inner) : mapping(inner));"]]],
+  ]) {
+    const planted = await loadMutated(YAML_FILE, transforms, { salt: ++plantedYaml });
+    const problems = yamlProblems(planted, applyTransforms(source, transforms, YAML_FILE));
+    ok(problems.length > 0, `PLANTED WRONG BUILD, ${title}: the reader's checks must fail it`);
+    show(title, problems);
+  }
+}
+
 {
   const problems = catalogProblems(generator);
   deep(problems, [], "THE CATALOG IS THE DOCUMENT, OPERATION FOR OPERATION: counted on the document's own lines, held to the existing reader on ids, parameters, required flags, plan sentences and deprecations, and to the Python oracle on every typed parameter and response field");
@@ -836,7 +1188,7 @@ const GENERATOR_MUTANTS = [
   ["the provider named", [["    if (brand) out = out.replace(brand, \"the feed\");\n", ""]]],
   ["an address left in a sentence", [["      .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}/g, \"the feed's support\");", ";"]]],
   ["the wrapper the document's example shows ignored", [["    if (wrappers.length === 1) return { envelope: wrappers[0], envelopeFrom: \"example\" };\n", ""]]],
-  ["a documented field taken for the wrapper", [["Object.keys(example).filter((k) => !documented.has(k) && WRAPPER_NAME.test(k)", "Object.keys(example).filter((k) => WRAPPER_NAME.test(k)"]]],
+  ["a documented field taken for the wrapper", [["keys.filter((k) => !documented.has(k) && WRAPPER_NAME.test(k)", "keys.filter((k) => WRAPPER_NAME.test(k)"]]],
   ["an example of bare rows not noticed", [["  if (Array.isArray(example) && example.length > 0 && example.every(isObj)) return { envelope: ENVELOPE, envelopeFrom: \"assumed\", bare: true };\n", ""]]],
   ["the example's word on a field's kind ignored", [["roots === null ? shape.fields : shape.fields.map((f) => refineField(f, shownAt(roots, f.path), notes));", "shape.fields;"]]],
   ["a declared date kept over a number in the example", [["      if (TEXT_FORMATS.has(entry.format)) delete out.format;\n", ""]]],
@@ -853,13 +1205,27 @@ const GENERATOR_MUTANTS = [
   ["a channel dropped", [["    if (seen.has(id)) continue;\n    seen.add(id);", "    if (seen.has(id) || row.family === \"news\") continue;\n    seen.add(id);"]]],
   ["channel payloads not read", [["      if (payload) payloadFields(payload, types, \"\", fields);\n", ""]]],
   ["an id that is not the operationId's", [["  return parts.map((p) => kebab(p.replace(/Controller$/, \"\")) || kebab(p)).join(\".\");", "  return parts.map((p) => kebab(p)).join(\".\");"]]],
-  ["a file called JSON", [["media.includes(\"application/json\") ? \"json\" : media.length ? \"file\" : \"none\",", "media.length ? \"json\" : \"none\","]]],
+  ["a file called JSON", [["media.includes(\"application/json\") ? \"json\" : media.length ? \"file\" : \"none\",", "media.length ? \"json\" : \"none\","], ["    const schema = content[\"application/json\"].schema;", "    const schema = content[media[0]].schema;"]]],
+  ["a parameter sent in a header described as a query parameter", [["  if (!PLACES.has(raw.in)) throw new CatalogError(", "  if (false) throw new CatalogError("]]],
+  ["a free-text default kept", [["const keepsDefault = (leaf) => typeof leaf.default !== \"string\" || (leaf.enum !== undefined ? leaf.enum.includes(leaf.default) : TOKEN_DEFAULT.test(leaf.default));", "const keepsDefault = (leaf) => leaf !== null;"]]],
+  ["a default that is no member of its enum kept", [["(leaf.enum !== undefined ? leaf.enum.includes(leaf.default) : TOKEN_DEFAULT.test(leaf.default));", "TOKEN_DEFAULT.test(leaf.default);"]]],
+  ["every text default dropped", [["const keepsDefault = (leaf) => typeof leaf.default !== \"string\" || (leaf.enum !== undefined ? leaf.enum.includes(leaf.default) : TOKEN_DEFAULT.test(leaf.default));", "const keepsDefault = (leaf) => typeof leaf.default !== \"string\";"]]],
+  ["a retired word left in an id", [["const houseWord = (word) => word.replace(/^tapes?$/, \"prints\").replace(/^vendor(s?)$/, \"source$1\");", "const houseWord = (word) => word;"]]],
+  ["only one of the retired words replaced in an id", [[".replace(/^vendor(s?)$/, \"source$1\");", ";"]]],
+  ["a retired word's plural left in an id", [["word.replace(/^tapes?$/, \"prints\")", "word.replace(/^tape$/, \"prints\")"]]],
+  ["a word rewritten inside another word of an id", [[".toLowerCase().split(\"-\").map(houseWord).join(\"-\");", ".toLowerCase().replace(/tapes?/g, \"prints\").replace(/vendor/g, \"source\");"]]],
+  ["an example of the answer itself not noticed", [["    if (keys.length > 0 && (shape.documents === \"open\" || keys.some((k) => documented.has(k)))) return { envelope: ENVELOPE, envelopeFrom: \"assumed\", unwrapped: true };\n", ""]]],
+  ["an example holding no documented key called the answer itself", [["    if (keys.length > 0 && (shape.documents === \"open\" || keys.some((k) => documented.has(k))))", "    if (keys.length > 0)"]]],
+  ["an empty example called the answer itself", [["    if (keys.length > 0 && (shape.documents === \"open\" || keys.some((k) => documented.has(k))))", "    if (shape.documents === \"open\" || keys.some((k) => documented.has(k)) || keys.length === 0)"]]],
 ];
+
 
 for (const [title, transforms] of GENERATOR_MUTANTS) {
   const planted = await loadMutated("scripts/gen-feed-catalog.mjs", transforms, { salt: ++plantedCount });
   const problems = catalogProblems(planted);
   ok(problems.length > 0, `PLANTED WRONG BUILD, ${title}: the catalog checks must fail it`);
+  ok(judged(problems).length > 0, `PLANTED WRONG BUILD, ${title}: a check must fail it, not only a crash (${problems[0]})`);
+  show(title, problems);
 }
 {
   const stale = await loadMutated("scripts/gen-feed-catalog.mjs", [["    if (committed === made.text) {", "    if (committed !== null) {"]], { salt: ++plantedCount });
@@ -883,10 +1249,38 @@ const CLIENT_MUTANTS = [
   ["a parameter's type not checked", [["    if (typeof value !== \"number\" || !Number.isFinite(value) || (leafType === \"integer\" && !Number.isSafeInteger(value))) refuse(\"type\", `must be ${leafType === \"integer\" ? \"an integer\" : \"a number\"}`);\n", ""]]],
   ["a calendar day not checked", [["    if (p.format === \"date\" && !realDay(value)) refuse(\"format\", \"must be a calendar day written YYYY-MM-DD\");\n", ""]]],
   ["a list joined with commas", [["          query.push([p.name, paramText(o, p, item, p.items)]);\n        }\n        continue;", "          paramText(o, p, item, p.items);\n        }\n        query.push([p.name, raw.join(\",\")]);\n        continue;"]]],
-  ["a write built without being asked", [["    if (o.method !== \"GET\" && opts.write !== true) throw new FeedRequestError(o.id, null, \"write\", `is a ${o.method}; it is built only when the caller passes write: true`);\n", ""]]],
-  ["a socket page built as a request", [["    if (o.kind === \"socket\" || o.kind === \"none\") throw new FeedRequestError(o.id, null, \"not-a-request\", \"is a socket channel page, not a request\");\n", ""]]],
-  ["a body without its envelope read", [["    if (!bare && (!isObj(body) || !Object.hasOwn(body, key))) return fail(\"unshaped\");", "    if (!bare && !isObj(body)) return fail(\"unshaped\");\n    if (!bare && !Object.hasOwn(body, key)) body = { [key]: body };"]]],
-  ["an observed wrapper ignored", [["    return note && typeof note.envelope === \"string\" ? note.envelope : o.envelope;", "    return o.envelope;"]]],
+  ["a write built", [["    if (o.method !== \"GET\") throw new FeedRequestError(o.id, null, \"write\", `is a ${o.method}; this client builds reads only`);\n", ""]]],
+  ["a socket page built as a request", [["    if (o.kind === \"socket\") throw new FeedRequestError(o.id, null, \"not-a-request\", \"is a socket channel page, not a request\");\n", ""]]],
+  ["an operation that documents no answer built as a request", [["    if (o.kind === \"none\") throw new FeedRequestError(o.id, null, \"not-a-request\", \"documents no answer, so there is nothing to ask it for\");\n", ""]]],
+  ["a body without its wrapper read as the answer", [["    if (!bare && !wrapped && !loose) return fail(\"unshaped\");\n", ""]]],
+  ["an observed wrapper ignored", [["  const envelopeOf = (o) => observed(o) || o.envelope;", "  const envelopeOf = (o) => o.envelope;"]]],
+  ["a held operation built", [["    if (hold) throw new FeedRequestError(o.id, null, \"held\", `is held and never asked for: ${hold.reason} (${hold.cite})`);\n", ""]]],
+  ["the people lookup taken off the table of held operations", [["  \"prediction.search-users\": Object.freeze({ reason: \"The site does not look people up.\", cite: MACRO_RULES }),\n", ""]]],
+  ["the feed's one write taken off the table of held operations", [["  \"alerts.create-config\": Object.freeze({ reason: \"The site reads the feed and writes nothing to it.\", cite: EVENT_RULES }),\n", ""]]],
+  ["an answer of a held operation read", [["    const o = allowed(id);\n    if (o.kind !== \"json\")", "    const o = op(id);\n    if (o.kind !== \"json\")"]]],
+  ["a held operation built when options are passed", [["  const request = (id, params) => {\n    const o = allowed(id);", "  const request = (id, params, options) => {\n    const o = options ? op(id) : allowed(id);"]]],
+  ["a dot segment built", [["      if (text === \".\" || text === \"..\") throw new FeedRequestError(o.id, p.name, \"segment\", \"is a dot segment, which an address reads as another path\");\n", ""]]],
+  ["only the double dot refused", [["      if (text === \".\" || text === \"..\") throw", "      if (text === \"..\") throw"]]],
+  ["half of a surrogate pair encoded", [["  if (typeof value === \"string\" && !wellFormed(value)) refuse(\"type\", \"must be well-formed text; it holds half of a surrogate pair\");\n", ""]]],
+  ["a header parameter sent in the query", [["      if (p.in !== \"path\" && p.in !== \"query\") throw new FeedRequestError(o.id, p.name, \"place\", `is documented in the ${String(p.in)}, where this client sends nothing`);\n", ""]]],
+  ["a list written into the path", [["        if (p.in === \"path\") throw new FeedRequestError(o.id, p.name, \"place\", \"is a list, which a path segment cannot carry\");\n", ""]]],
+  ["a nonzero text read as zero", [["  if (n === 0 && /[1-9]/.test(value.split(/[eE]/)[0])) return { ok: false };\n", ""]]],
+  ["a zero in text refused", [["  if (n === 0 && /[1-9]/.test(value.split(/[eE]/)[0])) return { ok: false };", "  if (n === 0 && /[eE]/.test(value)) return { ok: false };"]]],
+  ["the assumed wrapper insisted on", [["    const loose = !bare && !wrapped && isObj(body) && o.envelopeFrom === \"assumed\"", "    const loose = false && isObj(body) && o.envelopeFrom === \"assumed\""]]],
+  ["an answer read without the wrapper its document shows", [["isObj(body) && o.envelopeFrom === \"assumed\" && observed(o) === null &&", "isObj(body) &&"]]],
+  ["an answer read without the wrapper the wire was seen to use", [["o.envelopeFrom === \"assumed\" && observed(o) === null &&", "o.envelopeFrom === \"assumed\" &&"]]],
+  ["an object holding no documented field taken for a row", [["(o.documents === \"row\" && Object.keys(body).some((name) => root.children.has(name))));", "o.documents === \"row\");"]]],
+  ["the form an answer came in misreported", [["form: bare ? \"bare\" : wrapped ? \"wrapped\" : \"unwrapped\",", "form: bare ? \"bare\" : \"wrapped\","]]],
+  ["a held field returned", [["    if (ctx.held.has(key)) { ctx.withheld.add(here); continue; }\n    const child = node.children.get(key);", "    const child = node.children.get(key);"]]],
+  ["a held field left inside a value that is passed through", [["  if (ctx.held.size === 0 || value === null || typeof value !== \"object\") return value;", "  if (value !== undefined) return value;"]]],
+  ["a held field kept beside the wrapper", [["            if (ctx.held.has(name)) ctx.withheld.add(name);\n            else put(meta, name, passed(ctx, body[name], name));", "            put(meta, name, passed(ctx, body[name], name));"]]],
+  ["a held field left out and not named", [["      if (!list && ctx.held.has(key)) { ctx.withheld.add(here); continue; }", "      if (!list && ctx.held.has(key)) continue;"]]],
+  ["the holds applied to every family", [["const holdCovers = (hold, id) => hold.ops.some((scope) => (scope.endsWith(\".\") ? id.startsWith(scope) : id === scope));", "const holdCovers = (hold, id) => hold.ops.length > 0 && id !== null;"]]],
+  ["a family matched without its dot", [["(scope.endsWith(\".\") ? id.startsWith(scope) : id === scope)", "id.startsWith(scope.replace(/\\.$/, \"\"))"]]],
+  ["a wallet name dropped from the table", [["\"transaction_hash\", \"user_address\", \"user_name\"]),", "\"transaction_hash\", \"user_name\"]),"]]],
+  ["the volume hold spread to every family that has one", [["rule: \"spot-volume\", ops: Object.freeze([\"digital-currencies.\", \"forex.\"])", "rule: \"spot-volume\", ops: Object.freeze([\"crypto.\", \"digital-currencies.\", \"forex.\"])"]]],
+  ["a held operation counted as merely unread", [["  const unread = requests.filter((o) => !isHeld(o) && readers.get(o.id).length === 0);", "  const unread = requests.filter((o) => readers.get(o.id).length === 0);"]]],
+  ["a reason other than the house's own", [["reason: \"Wallet addresses are not shown.\"", "reason: \"Addresses are private.\""]]],
   ["a field the wire types otherwise still held to the document", [["    return o.fields.map((f) => (note.untyped.includes(f.path) ? { path: f.path, type: \"any\" } : f));", "    return o.fields;"]]],
   ["a bare list of rows not read", [["    const bare = Array.isArray(body) && o.documents !== \"envelope\";", "    const bare = false;"]]],
   ["a bare list read where the whole answer is documented", [["    const bare = Array.isArray(body) && o.documents !== \"envelope\";", "    const bare = Array.isArray(body);"]]],
@@ -894,14 +1288,14 @@ const CLIENT_MUTANTS = [
   ["an empty answer not named", [["    if (isEmpty(data)) return fail(\"empty\");\n", ""]]],
   ["a mistyped field passed through", [["    if (typeof value !== \"string\") throw new Mistyped(entry.path);\n    return value;\n  }\n  if (entry.type === \"boolean\") {", "    return value;\n  }\n  if (entry.type === \"boolean\") {"]]],
   ["a type failure that names no field", [["      if (error instanceof Mistyped) return fail(`type:${error.at}`);\n      throw error;\n    }\n    if (isEmpty(data))", "      if (error instanceof Mistyped) return fail(\"type\");\n      throw error;\n    }\n    if (isEmpty(data))"]]],
-  ["an undocumented key dropped", [["      if (!free) strays.add(base + key);\n      put(out, key, value[key]);", "      if (!free) strays.add(base + key);"]]],
+  ["an undocumented key dropped", [["      if (!free) ctx.strays.add(here);\n      put(out, key, passed(ctx, value[key], here));", "      if (!free) ctx.strays.add(here);"]]],
   ["a __proto__ key assigned", [["const put = (target, key, value) => Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });", "const put = (target, key, value) => { target[key] = value; };"]]],
   ["a per-name channel joined without a name", [["      if (typeof ticker !== \"string\" || !SYMBOL.test(ticker)) throw new FeedRequestError(c.id, \"ticker\", \"ticker\", \"must be a symbol in capitals\");\n", ""]]],
   ["another join message", [["export const FEED_JOIN = \"join\";", "export const FEED_JOIN = \"subscribe\";"]]],
   ["an acknowledgement read as data", [["    if (typeof payload.status === \"string\" && Object.hasOwn(payload, \"response\")) return { ok: true, kind: \"ack\", channel: name, status: payload.status };\n", ""]]],
   ["a frame filed under any channel", [["    return entry && SYMBOL.test(ticker) ? { entry, ticker } : null;", "    return entry ? { entry, ticker } : null;"]]],
   ["a join that ignores the method", [["  const byRoute = new Map(catalog.ops.map((o) => [`${o.method} ${o.path}`, o]));\n  const readers = new Map(catalog.ops.map((o) => [o.id, []]));", "  const byRoute = new Map(catalog.ops.map((o) => [`GET ${o.path}`, o]));\n  const readers = new Map(catalog.ops.map((o) => [o.id, []]));"]]],
-  ["socket pages counted as requests", [["  const requests = catalog.ops.filter((o) => o.kind === \"json\" || o.kind === \"file\");\n  const read = requests.filter", "  const requests = catalog.ops;\n  const read = requests.filter"]]],
+  ["socket pages counted as requests", [["  const requests = catalog.ops.filter((o) => o.kind === \"json\" || o.kind === \"file\");\n  const isHeld =", "  const requests = catalog.ops;\n  const isHeld ="]]],
   ["a listed channel counted as joined", [["      joined: catalog.channels.filter((c) => joinedChannels.has(c.id)).map((c) => c.id),", "      joined: catalog.channels.filter((c) => railChannels.has(c.id)).map((c) => c.id),"]]],
   ["a fixed path segment not recovered", [["    if (call[i] !== template[i]) fixed[m[1]] = decodeURIComponent(call[i]);", "    if (call[i] !== template[i]) fixed[m[1]] = template[i];"]]],
 ];
@@ -910,6 +1304,8 @@ for (const [title, transforms] of CLIENT_MUTANTS) {
   const planted = await loadMutated("shared/flows-feed-client.js", transforms, { salt: ++plantedCount });
   const problems = clientProblems(planted);
   ok(problems.length > 0, `PLANTED WRONG BUILD, ${title}: the client checks must fail it`);
+  ok(judged(problems).length > 0, `PLANTED WRONG BUILD, ${title}: a check must fail it, not only a crash (${problems[0]})`);
+  show(title, problems);
 }
 
 {
@@ -946,9 +1342,24 @@ for (const [title, transforms] of CLIENT_MUTANTS) {
   ok(/if \(rule === "chains"\) return body && typeof body === "object" && Array\.isArray\(body\.chains\) \? body\.chains : null;/.test(read("shared/flows-positioning.js")), "production reads a contract's history under chains, as the document's example shows");
   const lines = generator.coverageLines(await generator.coverageOf(FEED_CATALOG));
   const coverage = feed.feedCoverage(FEED_CATALOG, { registry: OPS, rail: RT_UPSTREAM, joined: SOCKET_CHANNELS });
-  ok(lines.some((l) => l.includes(`${coverage.operations.read} of ${coverage.operations.requests} requests have a reader`)) && lines.some((l) => l.includes(`${FEED_CATALOG.channels.length} documented; the rail lists ${coverage.channels.listed.length} and joins ${coverage.channels.joined.length}`)),
-    "the coverage report prints the counts the join computes");
-  for (const id of coverage.operations.unread) ok(lines.some((l) => l.includes(`    ${id}  `)), `the coverage report lists the unread ${id}`);
+  ok(lines.some((l) => l.includes(`${coverage.operations.read} of ${coverage.operations.requests} requests have a reader`) && l.includes(`${coverage.operations.unread.length} have none and ${coverage.operations.held.length} are held`)) &&
+    lines.some((l) => l.includes(`${FEED_CATALOG.channels.length} documented; the rail lists ${coverage.channels.listed.length} and joins ${coverage.channels.joined.length}`)), "the coverage report prints the counts the join computes");
+  const [unreadAt, heldAt, withheldAt, channelsAt] = ["unread by tag", "held ", "withheld ", "channels "].map((head) => lines.findIndex((l) => l.startsWith(head)));
+  ok(unreadAt > 0 && unreadAt < heldAt && heldAt < withheldAt && withheldAt < channelsAt, "the coverage report has its unread, held, withheld and channel parts, in that order");
+  for (const id of coverage.operations.unread) ok(lines.slice(unreadAt, heldAt).some((l) => l.includes(`    ${id}  `)), `the coverage report lists the unread ${id}`);
+  ok(coverage.operations.held.length === Object.keys(HELD_ROUTES).length, "the coverage counts the held operations");
+  for (const hold of coverage.operations.held) {
+    ok(lines.slice(heldAt, withheldAt).some((l) => l.includes(`    ${hold.id}  ${HELD_ROUTES[hold.id].join(" ")}  `) && l.includes(hold.reason) && l.endsWith(`(${hold.cite})`)) && !lines.slice(0, heldAt).some((l) => l.includes(`    ${hold.id}  `)),
+      `THE COVERAGE REPORT SETS A HELD OPERATION APART: ${hold.id} is printed under held, with the house's reason and where it is written, and not among the unread`);
+  }
+  for (const hold of coverage.operations.fieldHolds) {
+    ok(lines.slice(withheldAt, channelsAt).some((l) => l.startsWith(`    ${hold.rule}  ${hold.fields.length} fields on ${HOLD_COUNTS[hold.rule][1].length} operation`) && l.includes(hold.reason) && l.endsWith(`(${hold.cite})`)), `the coverage report says what the ${hold.rule} hold leaves out`);
+  }
+  for (const file of ["shared/flows-feed-client.js", "scripts/gen-feed-catalog.mjs", "scripts/feed-yaml.mjs", "scripts/feed-spec-refresh.mjs", "tests/gen-feed-fixtures.mjs", "tests/gen-feed-catalog-oracle.py", ".github/workflows/feed-spec-refresh.yml",
+    "tests/flows-feed-catalog.mjs", "tests/flows-feed-spec-refresh.mjs"]) {
+    const odd = [...read(file)].filter((c) => (c < " " && c !== "\n") || c > "~").map((c) => `U+${c.codePointAt(0).toString(16).toUpperCase().padStart(4, "0")}`);
+    deep(odd, file.startsWith("tests/flows-feed-") ? ["U+2713"] : [], `${file} is written in printable ASCII: a control, separator or direction character in it is written as an escape, where a reader can see it`);
+  }
   ok(!lines.some((l) => BRAND.test(l)), "and names no provider"); BRAND.lastIndex = 0;
   console.log(`✓ flows-feed-catalog: ${checks} checks. ${FEED_CATALOG.source.operations} operations on ${FEED_CATALOG.source.paths} paths (${coverage.operations.requests} requests, ${coverage.operations.pages} socket pages), ${FEED_CATALOG.channels.length} channels; ` +
     `the registry reads ${coverage.operations.read} of the ${coverage.operations.requests} requests and ${coverage.registry.absent.length} operations this copy of the document lacks; the hub joins ${coverage.channels.joined.length} of ${FEED_CATALOG.channels.length} channels; ` +

@@ -35,6 +35,8 @@ const ESCAPES = new Map([
 ]);
 const HEX_ESCAPES = new Map([["x", 2], ["u", 4], ["U", 8]]);
 
+export const MAX_DEPTH = 64;
+
 const ENTRY = /^-(?: |$)/;
 const PLAIN_REFUSED_FIRST = new Set(["&", "*", "!", "%", "@", "`", ",", "]", "}", "#"]);
 
@@ -45,6 +47,13 @@ const leadOf = (line) => {
 };
 
 const isBlank = (line) => line.trim() === "";
+
+const commentAt = (s) => {
+  let at = s.indexOf(" #");
+  if (at < 0) return -1;
+  while (at > 0 && s[at - 1] === " ") at--;
+  return at;
+};
 
 export function parseYaml(text, { nodes = false } = {}) {
   if (typeof text !== "string") throw new YamlError("the document is not text", 0);
@@ -107,8 +116,8 @@ export function parseYaml(text, { nodes = false } = {}) {
   };
 
   const cutComment = (s) => {
-    const hit = / +#/.exec(s);
-    return (hit ? s.slice(0, hit.index) : s).trimEnd();
+    const hit = commentAt(s);
+    return (hit < 0 ? s : s.slice(0, hit)).trimEnd();
   };
 
   const keyOf = (s) => {
@@ -122,8 +131,8 @@ export function parseYaml(text, { nodes = false } = {}) {
     if (s[0] === "?" && (s.length === 1 || s[1] === " ")) fail("a complex mapping key");
     const hit = /:(?: |$)/.exec(s);
     if (!hit) return null;
-    const comment = / +#/.exec(s);
-    if (comment && comment.index < hit.index) return null;
+    const comment = commentAt(s);
+    if (comment >= 0 && comment < hit.index) return null;
     const key = s.slice(0, hit.index).trimEnd();
     if (key === "") fail("an empty mapping key");
     return { key, rest: s.slice(hit.index + 1) };
@@ -189,13 +198,22 @@ export function parseYaml(text, { nodes = false } = {}) {
     return value;
   };
 
+  let depth = 0;
+  const deeper = (read) => {
+    if (depth >= MAX_DEPTH) fail(`nested deeper than the ${MAX_DEPTH} levels this reader follows`);
+    depth++;
+    const value = read();
+    depth--;
+    return value;
+  };
+
   const nested = (parent, flush) => {
     at++;
     if (!skip()) return plain("");
     const line = lines[at];
     const lead = leadOf(line);
     if (lead > parent) return node(lead);
-    if (flush && lead === parent && ENTRY.test(line.slice(lead))) return sequence(lead);
+    if (flush && lead === parent && ENTRY.test(line.slice(lead))) return deeper(() => sequence(lead));
     return plain("");
   };
 
@@ -233,7 +251,7 @@ export function parseYaml(text, { nodes = false } = {}) {
       const inner = indent + 1 + pad;
       if (ENTRY.test(item) || (item[0] !== "|" && item[0] !== ">" && keyOf(item))) {
         lines[at] = " ".repeat(inner) + item;
-        out.push(ENTRY.test(item) ? sequence(inner) : mapping(inner));
+        out.push(deeper(() => (ENTRY.test(item) ? sequence(inner) : mapping(inner))));
       } else {
         out.push(inline(item, indent));
       }
@@ -241,7 +259,7 @@ export function parseYaml(text, { nodes = false } = {}) {
     return out;
   };
 
-  const node = (indent) => (ENTRY.test(lines[at].slice(indent)) ? sequence(indent) : keyOf(lines[at].slice(indent)) ? mapping(indent) : inline(lines[at].slice(indent), indent - 1));
+  const node = (indent) => deeper(() => (ENTRY.test(lines[at].slice(indent)) ? sequence(indent) : keyOf(lines[at].slice(indent)) ? mapping(indent) : inline(lines[at].slice(indent), indent - 1)));
 
   if (!skip()) return plain("");
   if (/^%/.test(lines[at])) fail("a directive");
@@ -338,7 +356,8 @@ function leafText(v) {
   return scalarText(v);
 }
 
-function emit(value, indent, out, lead) {
+function emit(value, indent, out, lead, depth) {
+  if (depth > MAX_DEPTH) throw new YamlError(`nested deeper than the ${MAX_DEPTH} levels this writer follows`, 0);
   const pad = " ".repeat(indent);
   if (Array.isArray(value)) {
     let prefix = lead;
@@ -349,7 +368,7 @@ function emit(value, indent, out, lead) {
         const lines = blockLines(item, `${pad}  `);
         out.push(head + lines[0], ...lines.slice(1));
       } else if (isLeaf(item)) out.push(head + leafText(item));
-      else emit(item, indent + 2, out, head);
+      else emit(item, indent + 2, out, head, depth + 1);
     }
     return;
   }
@@ -365,7 +384,7 @@ function emit(value, indent, out, lead) {
     else if (isLeaf(v)) out.push(`${head} ${leafText(v)}`);
     else {
       out.push(head);
-      emit(v, indent + 2, out, null);
+      emit(v, indent + 2, out, null, depth + 1);
     }
   }
 }
@@ -373,6 +392,6 @@ function emit(value, indent, out, lead) {
 export function dumpYaml(value) {
   const out = ["---"];
   if (isLeaf(value)) out.push(leafText(value));
-  else emit(value, 0, out, null);
+  else emit(value, 0, out, null, 1);
   return `${out.join("\n")}\n`;
 }

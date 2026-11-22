@@ -324,7 +324,7 @@ WRAPPER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 def wrapper(spec, schema, documents, rows):
     if documents == "envelope":
-        return ["data", "schema", False]
+        return ["data", "schema", False, False]
     node = schema
     hops = 0
     while isinstance(node, dict) and "$ref" in node and hops < 32:
@@ -332,16 +332,32 @@ def wrapper(spec, schema, documents, rows):
         hops += 1
     sample = node.get("example") if isinstance(node, dict) else None
     if isinstance(sample, list) and sample and all(isinstance(item, dict) for item in sample):
-        return ["data", "assumed", True]
+        return ["data", "assumed", True, False]
     if isinstance(sample, dict):
         top = set(row["path"] for row in rows if "." not in row["path"] and "[" not in row["path"])
         named = [key for key in sample if key not in top and WRAPPER.match(key) and isinstance(sample[key], (list, dict))]
         if len(named) == 1:
-            return [named[0], "example", False]
-    return ["data", "assumed", False]
+            return [named[0], "example", False, False]
+        if sample and (documents == "open" or any(key in top for key in sample)):
+            return ["data", "assumed", False, True]
+    return ["data", "assumed", False, False]
+
+
+SINGLE_TOKEN = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def stated_default(leaf):
+    value = leaf["default"]
+    if not isinstance(value, str):
+        return True
+    if "enum" in leaf:
+        return value in leaf["enum"]
+    return bool(SINGLE_TOKEN.match(value))
 
 
 def param_row(spec, raw):
+    if raw["in"] not in ("path", "query"):
+        raise SystemExit("a parameter in the %s" % raw["in"])
     d = spec.describe(raw.get("schema"))
     row = {"name": str(raw["name"]), "in": str(raw["in"]), "required": raw.get("required") is True, "type": d["t"]}
     leaf = d
@@ -349,7 +365,7 @@ def param_row(spec, raw):
         leaf = spec.describe(d["items"], d["chain"]) if d.get("has_items") else {"t": "any", "null": False}
         row["items"] = leaf["t"]
     for key in ("format", "enum", "default", "min", "max", "pattern"):
-        if key in leaf:
+        if key in leaf and (key != "default" or stated_default(leaf)):
             row[key] = leaf[key]
     if d["null"] or leaf.get("null"):
         row["nullable"] = True
@@ -377,7 +393,7 @@ def operation(spec, verb, route, op):
     content = (responses.get("200") or {}).get("content") or {}
     kind = "socket" if SOCKET in tags else "json" if "application/json" in content else "file" if content else "none"
     documents, rows = (None, [])
-    wrapped = [None, None, False]
+    wrapped = [None, None, False, False]
     if kind == "json":
         documents, rows = body_rows(spec, content["application/json"]["schema"])
         wrapped = wrapper(spec, content["application/json"]["schema"], documents, rows)

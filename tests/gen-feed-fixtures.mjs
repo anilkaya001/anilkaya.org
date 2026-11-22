@@ -110,11 +110,13 @@ function seenAt(tops, where) {
   return [...new Set(layer.filter((v) => v !== null && v !== undefined).map(kindSeen))];
 }
 
-function wrapperShown(sample, members) {
+function wrapperShown(sample, members, freeForm) {
   if (Array.isArray(sample) && sample.length && sample.every(plain)) return { key: "data", bare: true, shown: false };
   if (plain(sample)) {
-    const named = Object.keys(sample).filter((k) => !Object.hasOwn(members, k) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && (Array.isArray(sample[k]) || plain(sample[k])));
+    const present = Object.keys(sample);
+    const named = present.filter((k) => !Object.hasOwn(members, k) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && (Array.isArray(sample[k]) || plain(sample[k])));
     if (named.length === 1) return { key: named[0], bare: false, shown: true };
+    if (present.length && (freeForm || present.some((k) => Object.hasOwn(members, k)))) return { key: "data", bare: false, shown: false, alone: true };
   }
   return { key: "data", bare: false, shown: false };
 }
@@ -279,26 +281,23 @@ export function buildFixtures(specText) {
         const sample = node ? node.example : undefined;
         const enveloped = root.kind === "object" && Object.hasOwn(root.members, "data");
         const rowDocumented = root.kind === "object" && !enveloped && Object.keys(root.members).length > 0;
-        const wrap = enveloped ? { key: "data", bare: false, shown: false } : wrapperShown(sample, root.kind === "object" ? root.members : {});
+        const wrap = enveloped ? { key: "data", bare: false, shown: false } : wrapperShown(sample, root.kind === "object" ? root.members : {}, !rowDocumented && root.kind !== "array");
         if (sample !== undefined && sample !== null) {
           const inner = !enveloped && wrap.shown ? sample[wrap.key] : sample;
           marks.tops = enveloped ? [sample] : [rowDocumented && !Array.isArray(inner) ? [inner] : inner];
         }
         let rows;
         if (enveloped) rows = null;
-        else if (rowDocumented) rows = [0, 1].map((r) => inventBody(w, ok.schema, "", "[]", r, [], marks));
+        else if (rowDocumented) rows = wrap.alone ? inventBody(w, ok.schema, "", "[]", 0, [], marks) : [0, 1].map((r) => inventBody(w, ok.schema, "", "[]", r, [], marks));
         else if (root.kind === "array") rows = root.each === undefined ? [...TICKERS] : [0, 1].map((r) => inventBody(w, root.each, "", "[]", r, root.trail, marks));
         else rows = { sample_key: "sample value", sample_list: [1, 2] };
         const strip = (p) => (rowDocumented ? p.replace(/^\[\]\.?/, "") : p);
         entry.envelope = wrap.key;
         if (wrap.bare) entry.bare = true;
-        entry.body = enveloped ? inventBody(w, ok.schema, "", "", 0, [], marks) : wrap.bare ? rows : { [wrap.key]: rows };
+        if (wrap.alone) entry.unwrapped = true;
+        entry.body = enveloped ? inventBody(w, ok.schema, "", "", 0, [], marks) : wrap.bare || wrap.alone ? rows : { [wrap.key]: rows };
         entry.numeric = [...marks.numeric].map(strip).sort();
         entry.nulls = [...marks.nulls].map(strip).sort();
-      }
-      if (plain(op.requestBody)) {
-        const json = plain(op.requestBody.content) && plain(op.requestBody.content["application/json"]) ? op.requestBody.content["application/json"].schema : undefined;
-        if (json !== undefined) entry.requestBody = inventBody(w, json, "", "", 0, [], { numeric: new Set(), nulls: new Set() });
       }
       ops[key] = entry;
     }

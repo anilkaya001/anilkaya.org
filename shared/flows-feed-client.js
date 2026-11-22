@@ -2,13 +2,57 @@ export const FEED_CATALOG_VERSION = 1;
 
 export const FEED_READ_FAILURES = Object.freeze(["unshaped", "type", "empty"]);
 
-export const FEED_REFUSALS = Object.freeze(["unknown-operation", "not-a-request", "write", "params", "unknown", "missing", "type", "format", "enum", "min", "max", "pattern", "body", "unknown-channel", "ticker"]);
+export const FEED_REFUSALS = Object.freeze(["unknown-operation", "not-a-request", "held", "write", "params", "unknown", "missing", "place", "type", "format", "enum", "min", "max", "pattern", "segment", "unknown-channel", "ticker"]);
+
+export const FEED_READ_FORMS = Object.freeze(["wrapped", "bare", "unwrapped"]);
 
 export const FEED_JOIN = "join";
 
 export const FEED_WIRE = Object.freeze({
   "short.short-volume-and-ratio": Object.freeze({ envelope: "si" }),
 });
+
+const MACRO_RULES = "docs/packages/WP5-cross-asset-macro.md 2.3";
+const EVENT_RULES = "docs/packages/WP6-event-risk.md 3";
+
+export const FEED_HELD = Object.freeze({
+  "alerts.create-config": Object.freeze({ reason: "The site reads the feed and writes nothing to it.", cite: EVENT_RULES }),
+  "prediction.search-users": Object.freeze({ reason: "The site does not look people up.", cite: MACRO_RULES }),
+});
+
+export const FEED_HELD_FIELDS = Object.freeze([
+  Object.freeze({
+    rule: "wallet", ops: Object.freeze(["crypto.", "prediction."]), cite: MACRO_RULES, reason: "Wallet addresses are not shown.",
+    names: Object.freeze(["address", "counterparty_address", "from_address", "maker_address", "taker_address", "to_address", "transaction_hash", "user_address", "user_name"]),
+  }),
+  Object.freeze({
+    rule: "leaders", ops: Object.freeze(["private-markets."]), cite: MACRO_RULES, reason: "Leaders are counted by title; names are not shown.",
+    names: Object.freeze(["first_name", "last_name"]),
+  }),
+  Object.freeze({
+    rule: "seasonal-averages", ops: Object.freeze(["seasonality."]), cite: MACRO_RULES, reason: "The feed describes the average as per day for the month; the site computes its own from each year's open and close.",
+    names: Object.freeze(["avg_change", "max_change", "median_change", "min_change", "positive_months_perc"]),
+  }),
+  Object.freeze({
+    rule: "scores", ops: Object.freeze(["crypto.", "prediction."]), cite: MACRO_RULES, reason: "The feed's scores are not explained, so they are not shown.",
+    names: Object.freeze(["invested_zscore", "pnl_percent", "smart_gap", "smart_score", "tags_score", "unusual_score", "whale_score"]),
+  }),
+  Object.freeze({
+    rule: "spot-volume", ops: Object.freeze(["digital-currencies.", "forex."]), cite: MACRO_RULES, reason: "Spot FX has no consolidated volume.",
+    names: Object.freeze(["volume"]),
+  }),
+]);
+
+const holdCovers = (hold, id) => hold.ops.some((scope) => (scope.endsWith(".") ? id.startsWith(scope) : id === scope));
+
+export function heldFieldsOf(id, holds = FEED_HELD_FIELDS) {
+  const out = new Map();
+  for (const hold of holds) {
+    if (!holdCovers(hold, String(id))) continue;
+    for (const name of hold.names) if (!out.has(name)) out.set(name, hold.rule);
+  }
+  return out;
+}
 
 const DECIMAL = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?$/;
 const WHOLE = /^-?[0-9]+$/;
@@ -46,6 +90,7 @@ export function feedNumber(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return { ok: false };
   if (WHOLE.test(value) && !Number.isSafeInteger(n)) return { ok: false };
+  if (n === 0 && /[1-9]/.test(value.split(/[eE]/)[0])) return { ok: false };
   return { ok: true, value: n === 0 ? 0 : n };
 }
 
@@ -74,8 +119,30 @@ function shapeOf(fields) {
   return root;
 }
 
-function readLeaf(entry, value) {
-  if (entry.type === "any") return value;
+const joined = (base, key) => (base === "" ? key : `${base}.${key}`);
+
+function passed(ctx, value, at) {
+  if (ctx.held.size === 0 || value === null || typeof value !== "object") return value;
+  const top = Array.isArray(value) ? [] : {};
+  const todo = [[value, top, at]];
+  while (todo.length) {
+    const [from, to, where] = todo.pop();
+    const list = Array.isArray(from);
+    for (const key of list ? from.keys() : Object.keys(from)) {
+      const here = list ? `${where}[]` : joined(where, key);
+      if (!list && ctx.held.has(key)) { ctx.withheld.add(here); continue; }
+      const v = from[key];
+      if (v === null || typeof v !== "object") { put(to, key, v); continue; }
+      const next = Array.isArray(v) ? [] : {};
+      put(to, key, next);
+      todo.push([v, next, here]);
+    }
+  }
+  return top;
+}
+
+function readLeaf(ctx, entry, value) {
+  if (entry.type === "any") return passed(ctx, value, entry.path);
   if (entry.type === "integer" || entry.type === "number" || (entry.type === "string" && entry.numeric === true)) {
     const got = feedNumber(value);
     if (!got.ok) throw new Mistyped(entry.path);
@@ -92,33 +159,43 @@ function readLeaf(entry, value) {
   throw new Mistyped(entry.path);
 }
 
-function readNode(node, value, strays) {
+function readNode(ctx, node, value) {
   if (value === null) return null;
   const entry = node.entry;
   if (entry.type === "object") {
     if (!isObj(value)) throw new Mistyped(entry.path);
-    return readKeys(node, value, strays);
+    return readKeys(ctx, node, value);
   }
   if (entry.type === "array") {
     if (!Array.isArray(value)) throw new Mistyped(entry.path);
-    return node.item === null ? value.slice() : value.map((v) => readNode(node.item, v, strays));
+    return node.item === null ? passed(ctx, value.slice(), entry.path) : value.map((v) => readNode(ctx, node.item, v));
   }
-  return readLeaf(entry, value);
+  return readLeaf(ctx, entry, value);
 }
 
-function readKeys(node, value, strays) {
+function readKeys(ctx, node, value) {
   const out = {};
-  const base = node.entry === null ? "" : `${node.entry.path}.`;
+  const base = node.entry === null ? "" : node.entry.path;
   const free = node.entry !== null && (node.entry.open === true || node.children.size === 0);
   for (const key of Object.keys(value)) {
+    const here = joined(base, key);
+    if (ctx.held.has(key)) { ctx.withheld.add(here); continue; }
     const child = node.children.get(key);
     if (child === undefined) {
-      if (!free) strays.add(base + key);
-      put(out, key, value[key]);
-    } else put(out, key, readNode(child, value[key], strays));
+      if (!free) ctx.strays.add(here);
+      put(out, key, passed(ctx, value[key], here));
+    } else put(out, key, readNode(ctx, child, value[key]));
   }
   return out;
 }
+
+const NO_HOLDS = new Map();
+const reading = (held) => ({ held, strays: new Set(), withheld: new Set() });
+
+const wellFormed = (text) => {
+  try { encodeURIComponent(text); } catch { return false; }
+  return true;
+};
 
 const isEmpty = (v) => v === null || v === undefined || (Array.isArray(v) ? v.length === 0 : isObj(v) && Object.keys(v).length === 0);
 
@@ -139,6 +216,7 @@ function paramText(op, p, value, leafType) {
     refuse("type", "must be a string, a number or a boolean");
   }
   const text = String(value);
+  if (typeof value === "string" && !wellFormed(value)) refuse("type", "must be well-formed text; it holds half of a surrogate pair");
   if (p.enum !== undefined && !p.enum.map(String).includes(text)) refuse("enum", `is not one of the documented values (${p.enum.join(", ")})`);
   if (p.pattern !== undefined && typeof value === "string") {
     let re = null;
@@ -146,35 +224,6 @@ function paramText(op, p, value, leafType) {
     if (re && !re.test(value)) refuse("pattern", `does not match the documented pattern ${p.pattern}`);
   }
   return text;
-}
-
-function bodyOf(op, body) {
-  const refuse = (param, reason, detail) => { throw new FeedRequestError(op.id, param, reason, detail); };
-  if (op.body === undefined) {
-    if (body !== undefined && body !== null) refuse(null, "body", "takes no request body");
-    return undefined;
-  }
-  if (body === undefined || body === null) {
-    if (op.body.required) refuse(null, "body", "needs a request body");
-    return undefined;
-  }
-  if (!isObj(body)) refuse(null, "body", "the request body must be an object");
-  const top = new Map(op.body.fields.filter((f) => !f.path.includes(".") && !f.path.includes("[")).map((f) => [f.path, f]));
-  for (const key of Object.keys(body)) {
-    const f = top.get(key);
-    if (!f) refuse(key, "unknown", "is not a documented body field");
-    const v = body[key];
-    if (v === null || v === undefined) continue;
-    const okType = f.type === "any" || (f.type === "object" ? isObj(v) : f.type === "array" ? Array.isArray(v) : f.type === "integer" ? Number.isSafeInteger(v) : f.type === "number" ? typeof v === "number" && Number.isFinite(v) : typeof v === f.type);
-    if (!okType) refuse(key, "type", `must be ${f.type === "object" ? "an object" : f.type === "array" ? "a list" : `a ${f.type}`}`);
-    if (f.enum !== undefined && !f.enum.map(String).includes(String(v))) refuse(key, "enum", `is not one of the documented values (${f.enum.join(", ")})`);
-  }
-  const given = (key) => body[key] !== undefined && body[key] !== null;
-  if (op.body.requiredSets.length && !op.body.requiredSets.some((set) => set.every(given))) {
-    const first = op.body.requiredSets[0].find((key) => !given(key));
-    refuse(first, "missing", `is missing from the request body (it needs ${op.body.requiredSets.map((set) => set.join(" + ")).join(", or ")})`);
-  }
-  return body;
 }
 
 export function createFeedClient(catalog, options) {
@@ -190,11 +239,17 @@ export function createFeedClient(catalog, options) {
     if (!shapes.has(key)) shapes.set(key, shapeOf(fields));
     return shapes.get(key);
   };
-  const seen = (o) => (Object.hasOwn(wire, o.id) && isObj(wire[o.id]) ? wire[o.id] : null);
-  const envelopeOf = (o) => {
-    const note = seen(o);
-    return note && typeof note.envelope === "string" ? note.envelope : o.envelope;
+  const holds = new Map();
+  const heldIn = (o) => {
+    if (!holds.has(o.id)) holds.set(o.id, heldFieldsOf(o.id));
+    return holds.get(o.id);
   };
+  const seen = (o) => (Object.hasOwn(wire, o.id) && isObj(wire[o.id]) ? wire[o.id] : null);
+  const observed = (o) => {
+    const note = seen(o);
+    return note && typeof note.envelope === "string" ? note.envelope : null;
+  };
+  const envelopeOf = (o) => observed(o) || o.envelope;
   const fieldsOf = (o) => {
     const note = seen(o);
     if (!note || !Array.isArray(note.untyped) || !note.untyped.length) return o.fields;
@@ -209,11 +264,20 @@ export function createFeedClient(catalog, options) {
 
   const find = (method, pathTemplate) => byRoute.get(`${String(method).toUpperCase()} ${pathTemplate}`) || null;
 
-  const request = (id, params, options) => {
+  const held = (id) => (Object.hasOwn(FEED_HELD, id) ? FEED_HELD[id] : null);
+
+  const allowed = (id) => {
     const o = op(id);
-    const opts = options || {};
-    if (o.kind === "socket" || o.kind === "none") throw new FeedRequestError(o.id, null, "not-a-request", "is a socket channel page, not a request");
-    if (o.method !== "GET" && opts.write !== true) throw new FeedRequestError(o.id, null, "write", `is a ${o.method}; it is built only when the caller passes write: true`);
+    const hold = held(o.id);
+    if (hold) throw new FeedRequestError(o.id, null, "held", `is held and never asked for: ${hold.reason} (${hold.cite})`);
+    return o;
+  };
+
+  const request = (id, params) => {
+    const o = allowed(id);
+    if (o.method !== "GET") throw new FeedRequestError(o.id, null, "write", `is a ${o.method}; this client builds reads only`);
+    if (o.kind === "socket") throw new FeedRequestError(o.id, null, "not-a-request", "is a socket channel page, not a request");
+    if (o.kind === "none") throw new FeedRequestError(o.id, null, "not-a-request", "documents no answer, so there is nothing to ask it for");
     if (params !== undefined && params !== null && !isObj(params)) throw new FeedRequestError(o.id, null, "params", "the parameters must be an object");
     const given = params || {};
     const known = new Set(o.params.map((p) => p.name));
@@ -223,6 +287,7 @@ export function createFeedClient(catalog, options) {
     const segments = new Map();
     const query = [];
     for (const p of o.params) {
+      if (p.in !== "path" && p.in !== "query") throw new FeedRequestError(o.id, p.name, "place", `is documented in the ${String(p.in)}, where this client sends nothing`);
       const raw = given[p.name];
       const absent = raw === undefined || raw === null || raw === "" || (Array.isArray(raw) && raw.length === 0);
       if (absent) {
@@ -231,6 +296,7 @@ export function createFeedClient(catalog, options) {
       }
       if (p.type === "array") {
         if (!Array.isArray(raw)) throw new FeedRequestError(o.id, p.name, "type", "must be a list");
+        if (p.in === "path") throw new FeedRequestError(o.id, p.name, "place", "is a list, which a path segment cannot carry");
         for (const item of raw) {
           if (item === undefined || item === null || item === "") throw new FeedRequestError(o.id, p.name, "type", "holds an empty item");
           query.push([p.name, paramText(o, p, item, p.items)]);
@@ -238,49 +304,56 @@ export function createFeedClient(catalog, options) {
         continue;
       }
       const text = paramText(o, p, raw, p.type);
-      if (p.in === "path") segments.set(p.name, text);
-      else query.push([p.name, text]);
+      if (p.in === "query") { query.push([p.name, text]); continue; }
+      if (text === "." || text === "..") throw new FeedRequestError(o.id, p.name, "segment", "is a dot segment, which an address reads as another path");
+      segments.set(p.name, text);
     }
     const path = o.path.replace(TOKEN, (_, name) => {
       if (!segments.has(name)) throw new FeedRequestError(o.id, name, "missing", "is missing");
       return encodeURIComponent(segments.get(name));
     });
     const search = query.length ? `?${new URLSearchParams(query).toString()}` : "";
-    const out = { id: o.id, method: o.method, path, query, search };
-    const body = bodyOf(o, opts.body);
-    if (body !== undefined) out.body = body;
-    return out;
+    return { id: o.id, method: o.method, path, query, search };
   };
 
   const read = (id, body) => {
-    const o = op(id);
+    const o = allowed(id);
     if (o.kind !== "json") throw new FeedRequestError(o.id, null, "not-a-request", "does not answer JSON, so it has no body to read");
     const key = envelopeOf(o);
-    const bare = Array.isArray(body) && o.documents !== "envelope";
-    if (!bare && (!isObj(body) || !Object.hasOwn(body, key))) return fail("unshaped");
-    const strays = new Set();
     const root = shape(o.id, fieldsOf(o));
+    const bare = Array.isArray(body) && o.documents !== "envelope";
+    const wrapped = !bare && isObj(body) && Object.hasOwn(body, key);
+    const loose = !bare && !wrapped && isObj(body) && o.envelopeFrom === "assumed" && observed(o) === null &&
+      (o.documents === "open" || (o.documents === "row" && Object.keys(body).some((name) => root.children.has(name))));
+    if (!bare && !wrapped && !loose) return fail("unshaped");
+    const ctx = reading(heldIn(o));
     let data;
     const meta = {};
     try {
       if (o.documents === "envelope") {
-        const whole = readKeys(root, body, strays);
+        const whole = readKeys(ctx, root, body);
         for (const name of Object.keys(whole)) if (name !== key) put(meta, name, whole[name]);
         data = whole[key];
       } else {
-        if (!bare) for (const name of Object.keys(body)) if (name !== key) put(meta, name, body[name]);
-        const inner = bare ? body : body[key];
+        if (wrapped) {
+          for (const name of Object.keys(body)) {
+            if (name === key) continue;
+            if (ctx.held.has(name)) ctx.withheld.add(name);
+            else put(meta, name, passed(ctx, body[name], name));
+          }
+        }
+        const inner = wrapped ? body[key] : body;
         if (inner === null) data = null;
         else if (o.documents === "open") {
           if (!isObj(inner) && !Array.isArray(inner)) return fail("unshaped");
-          data = inner;
+          data = passed(ctx, inner, "");
         } else if (o.documents === "list") {
           if (!Array.isArray(inner)) return fail("unshaped");
-          data = root.item === null ? inner.slice() : inner.map((v) => readNode(root.item, v, strays));
+          data = root.item === null ? passed(ctx, inner.slice(), "") : inner.map((v) => readNode(ctx, root.item, v));
         } else if (Array.isArray(inner)) {
           if (!inner.every(isObj)) return fail("unshaped");
-          data = inner.map((row) => readKeys(root, row, strays));
-        } else if (isObj(inner)) data = readKeys(root, inner, strays);
+          data = inner.map((row) => readKeys(ctx, root, row));
+        } else if (isObj(inner)) data = readKeys(ctx, root, inner);
         else return fail("unshaped");
       }
     } catch (error) {
@@ -288,7 +361,10 @@ export function createFeedClient(catalog, options) {
       throw error;
     }
     if (isEmpty(data)) return fail("empty");
-    return { ok: true, data, rows: Array.isArray(data) ? data : [data], meta, undocumented: [...strays].sort() };
+    return {
+      ok: true, data, rows: Array.isArray(data) ? data : [data], meta, form: bare ? "bare" : wrapped ? "wrapped" : "unwrapped",
+      undocumented: [...ctx.strays].sort(), withheld: [...ctx.withheld].sort(),
+    };
   };
 
   const channel = (id) => {
@@ -326,18 +402,18 @@ export function createFeedClient(catalog, options) {
     const found = channelOf(name);
     if (!found) return fail("unshaped");
     if (!Object.keys(payload).length) return fail("empty");
-    const strays = new Set();
-    let read;
+    const ctx = reading(NO_HOLDS);
+    let got;
     try {
-      read = readKeys(shape(`channel ${found.entry.id}`, found.entry.fields), payload, strays);
+      got = readKeys(ctx, shape(`channel ${found.entry.id}`, found.entry.fields), payload);
     } catch (error) {
       if (error instanceof Mistyped) return fail(`type:${error.at}`);
       throw error;
     }
-    return { ok: true, kind: "data", channel: found.entry.id, family: found.entry.family, ticker: found.ticker, payload: read, undocumented: [...strays].sort() };
+    return { ok: true, kind: "data", channel: found.entry.id, family: found.entry.family, ticker: found.ticker, payload: got, undocumented: [...ctx.strays].sort() };
   };
 
-  return Object.freeze({ catalog, op, find, request, read, envelope: (id) => envelopeOf(op(id)), channel, join, frame });
+  return Object.freeze({ catalog, op, find, held, request, read, envelope: (id) => envelopeOf(op(id)), channel, join, frame });
 }
 
 const templateOf = (path) => String(path).split("/");
@@ -372,16 +448,27 @@ export function registryParams(entry) {
 export function feedCoverage(catalog, { registry = [], rail = {}, joined = {} } = {}) {
   const { readers, absent, pages } = registryJoin(catalog, registry);
   const requests = catalog.ops.filter((o) => o.kind === "json" || o.kind === "file");
+  const isHeld = (o) => Object.hasOwn(FEED_HELD, o.id);
   const read = requests.filter((o) => readers.get(o.id).length > 0);
-  const unread = requests.filter((o) => readers.get(o.id).length === 0);
+  const held = requests.filter((o) => isHeld(o) && readers.get(o.id).length === 0);
+  const unread = requests.filter((o) => !isHeld(o) && readers.get(o.id).length === 0);
   const byTag = {};
   for (const o of requests) {
     const tag = o.tags[0] || "untagged";
-    const row = byTag[tag] || (byTag[tag] = { documented: 0, read: 0, unread: [] });
+    const row = byTag[tag] || (byTag[tag] = { documented: 0, read: 0, unread: [], held: [] });
     row.documented += 1;
     if (readers.get(o.id).length) row.read += 1;
+    else if (isHeld(o)) row.held.push(o.id);
     else row.unread.push(o.id);
   }
+  const fieldHolds = FEED_HELD_FIELDS.map((hold) => {
+    const fields = [];
+    for (const o of catalog.ops) {
+      if (!holdCovers(hold, o.id) || isHeld(o)) continue;
+      for (const f of o.fields) if (hold.names.includes(f.path.replace(/\[\]/g, "").split(".").pop())) fields.push(`${o.id} ${f.path}`);
+    }
+    return { rule: hold.rule, reason: hold.reason, cite: hold.cite, fields };
+  });
   const railChannels = new Map();
   for (const [topic, row] of Object.entries(rail)) for (const c of row.channels || []) railChannels.set(c, topic);
   const joinedChannels = new Set(Object.values(joined).map((row) => row.template));
@@ -393,6 +480,9 @@ export function feedCoverage(catalog, { registry = [], rail = {}, joined = {} } 
       pages: catalog.ops.length - requests.length,
       read: read.length,
       unread: unread.map((o) => o.id),
+      held: held.map((o) => ({ id: o.id, reason: FEED_HELD[o.id].reason, cite: FEED_HELD[o.id].cite })),
+      heldAndRead: read.filter(isHeld).map((o) => o.id),
+      fieldHolds,
       byTag,
       readers: Object.fromEntries([...readers].filter(([, ids]) => ids.length)),
     },

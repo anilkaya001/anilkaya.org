@@ -120,11 +120,13 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
     });
     return found;
   };
+  const spellsPaths = (f) => f === REGISTRY || f === CATALOG;
+  const strayPaths = (sources) => sources.flatMap(([f, text]) => (spellsPaths(f) ? [] : literalsIn(f, text)));
   ok(files.includes(CATALOG) && files.includes("shared/flows-feed-client.js") && files.includes("scripts/gen-feed-catalog.mjs"), "the feed catalog, its client and its generator are among the scanned sources");
+  literals.push(...strayPaths(files.map((f) => [f, fs.readFileSync(path.join(ROOT, f), "utf8")])));
   for (const f of files) {
-    if (f === REGISTRY || f === CATALOG) continue;
+    if (spellsPaths(f)) continue;
     const text = fs.readFileSync(path.join(ROOT, f), "utf8");
-    literals.push(...literalsIn(f, text));
     for (const m of text.matchAll(/\b(?:pathFor|opById)\(\s*"([^"]*)"/g)) bad.push([f, m[1]]);
     for (const m of text.matchAll(/\b(?:pathFor|opById)\(([^,)]*)/g)) {
       for (const q of m[1].matchAll(/"([a-z0-9-]+)"/g)) refs.set(q[1], [...(refs.get(q[1]) || []), f]);
@@ -145,11 +147,21 @@ const specDigest = digestSpec(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.y
   const catalogPaths = new Set(literalsIn(CATALOG, catalogText).map((hit) => hit.split(" ")[1]));
   ok(catalogPaths.size > 200 && [...catalogPaths].every((p) => spec.has(p)), `and every path it spells is a path of the committed spec (${catalogPaths.size})`);
   const stray = "const stray = \"/api/stock/{ticker}/greeks\";\n";
-  for (const f of ["shared/flows-feed-client.js", "scripts/gen-feed-catalog.mjs", "scripts/feed-spec-refresh.mjs", "shared/flows-feed-catalog-extra.js", "worker.js"]) {
-    const text = fs.existsSync(path.join(ROOT, f)) ? fs.readFileSync(path.join(ROOT, f), "utf8") : "";
-    deep(literalsIn(f, text + stray).slice(-1), [`${f}:${text.split("\n").length} /api/stock/{ticker}/greeks`], `PLANTED WRONG BUILD: a feed path written by hand in ${f} is still found, so the catalog's exemption is that one generated file and nothing beside it`);
+  const tree = files.map((f) => [f, fs.readFileSync(path.join(ROOT, f), "utf8")]);
+  for (const f of ["shared/flows-feed-client.js", "scripts/gen-feed-catalog.mjs", "scripts/feed-yaml.mjs", "scripts/feed-spec-refresh.mjs", "worker.js", "shared/flows-vendor-core.js"]) {
+    const planted = tree.map(([name, text]) => [name, name === f ? text + stray : text]);
+    ok(tree.some(([name]) => name === f), `${f} is among the scanned sources`);
+    deep(strayPaths(planted), [`${f}:${tree.find(([name]) => name === f)[1].split("\n").length} /api/stock/{ticker}/greeks`], `PLANTED WRONG BUILD: a feed path written by hand in ${f} fails the scan of the whole tree, so the catalog's exemption is that one generated file and nothing beside it`);
   }
-  ok(catalogText.replace("\"path\":\"/api/alerts\"", "\"path\":\"/api/alerts-by-hand\"") !== catalogText && literalsIn("shared/other.js", catalogText).length > 200, "PLANTED WRONG BUILD: the same paths in a file of any other name are every one a finding, and a path changed by hand in the catalog no longer equals what the generator writes");
+  for (const f of ["shared/flows-feed-catalog-extra.js", "shared/flows-feed-catalog.js.mjs", "scripts/flows-feed-catalog.js", "shared/sub/flows-feed-catalog.js", "shared/flows-vendor-ops-2.js", "server/flows-feed-catalog.js"]) {
+    deep(strayPaths([...tree, [f, stray]]), [`${f}:1 /api/stock/{ticker}/greeks`], `PLANTED WRONG BUILD: a new file named ${f} is no home for a feed path; the exemption goes by the two files' whole names`);
+  }
+  ok(strayPaths([["shared/other.js", catalogText]]).length > 200, "PLANTED WRONG BUILD: the catalog's own paths in a file of any other name are every one a finding");
+  const generated = renderCatalog(buildCatalog(fs.readFileSync(path.join(ROOT, "docs/uw-openapi.yaml"), "utf8")));
+  for (const edited of [catalogText + stray, catalogText.replace("\"path\":\"/api/alerts\"", "\"path\":\"/api/alerts-by-hand\"")]) {
+    deep(strayPaths([[CATALOG, edited]]), [], "a path written into the catalog by hand is no finding of the scan, which does not read that file");
+    ok(edited !== catalogText && edited !== generated, "PLANTED WRONG BUILD: a path written into the catalog by hand fails the byte comparison with what the generator writes, which is what holds that file");
+  }
   const ids = new Set(OPS.map((e) => e.id));
   eq(ids.size, OPS.length, "every registry id is unique");
   deep(bad.filter(([, id]) => !ids.has(id)), [], "and every id a call site names is in the registry");
