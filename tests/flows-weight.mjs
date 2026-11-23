@@ -237,6 +237,8 @@ CSS_KIB.tickerPage += MEMBER_TICKER_CSS.bytes / 1024;
 CSS_GZIP_KIB.tickerPage += MEMBER_TICKER_CSS.gzip / 1024;
 const RAIL_FIT = { bytes: 790, gzip: 141, why: "shell follow-ups: flows.css sizes the sidebar's rows to the height the rail has (a grid of 26 to 34 px rows per group, a :has floor per group size, tighter headings under 900 px and again under 800 px), 78,168 to 78,958 B raw; every Flows route links flows.css" };
 for (const name of Object.keys(CSS_KIB)) { CSS_KIB[name] += RAIL_FIT.bytes / 1024; CSS_GZIP_KIB[name] += RAIL_FIT.gzip / 1024; }
+const RAIL_TEN = { bytes: 262, gzip: 28, why: "Rotation: the Market group holds a tenth entry, so flows.css adds the ten-row height floor and tightens the group margins under 850 and 800 px tall so the rail still fits at 1440x820 and 1024x768 with no row under 26 px, 80,483 to 80,745 B raw; every Flows route links flows.css" };
+for (const name of ["eventsPage", "wiresPage"]) { CSS_KIB[name] += RAIL_TEN.bytes / 1024; CSS_GZIP_KIB[name] += RAIL_TEN.gzip / 1024; }
 const PULSE_BEAT = { bytes: 1535 + 380, gzip: 411 + 130, cssBytes: 783 + 240, cssGzip: 74 + 30, why: "the pulse: flows-ui.js beats the freshness pill and the Fire & Forget flame once only when a committed key's write stamp advances (the per-source stamps, the beat counter, the Pulse sentence in the pill's details and freshness.pulse), 75,300 to 76,835 B raw and 24,012 to 24,423 B gzip; flows.css replaces the timer-driven breathing with two one-shot beat animations on the flame, its halo and the pill and puts the flame out while the pill is stale or pending, 78,958 to 79,741 B raw and 15,732 to 15,806 B gzip" };
 for (const name of Object.keys(CEILING_KIB)) {
   if (NO_UI_ROUTES.has(name)) continue;
@@ -567,7 +569,7 @@ for (const m of measured) {
   ok(judge({ ...base, raw: base.raw - 13 * 1024 }).length > 0,
      "the ratchet fails a route that saved 13 KiB raw and left its ceiling where it was");
   ok(judge({ ...base, name: "nowhere" }).length === 4, "a route with no ceilings fails on all four bases");
-  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 40627 + NN_KERNEL.gzip + EVENTS_ER.gzip + PULSE_BEAT.gzip, css: 119045 + NN_FLOWS_CSS.bytes + RAIL_FIT.bytes + ER_HALTS_CSS.cssBytes + PULSE_BEAT.cssBytes + ORB_SLOT.bytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip + RAIL_FIT.gzip + ER_HALTS_CSS.cssGzip + PULSE_BEAT.cssGzip + ORB_SLOT.gzip };
+  const events = { name: "eventsPage", raw: 118228 + NN_KERNEL.bytes, gzip: 40627 + NN_KERNEL.gzip + EVENTS_ER.gzip + PULSE_BEAT.gzip, css: 119045 + NN_FLOWS_CSS.bytes + RAIL_FIT.bytes + RAIL_TEN.bytes + ER_HALTS_CSS.cssBytes + PULSE_BEAT.cssBytes + ORB_SLOT.bytes, cssGzip: 24824 + NN_FLOWS_CSS.gzip + RAIL_FIT.gzip + ER_HALTS_CSS.cssGzip + PULSE_BEAT.cssGzip + ORB_SLOT.gzip };
   eq(judge(events).join("; "), "", "events, whose ceiling is held for the earnings strip, passes with its wide raw headroom");
   eq(Object.keys(HELD_RAW_KIB).join(", "), "eventsPage", "events is the only route whose raw ceiling is held above the ratchet");
 }
