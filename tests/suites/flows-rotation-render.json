@@ -1,0 +1,1 @@
+{"name": "flows-rotation-render", "class": "N", "group": "shard", "timing": false, "medianS": 30, "shard": 5, "command": "node flows-rotation-render.mjs", "files": ["flows-rotation-render.mjs"], "covers": ["assets/css/flows-rotation.css","assets/js/flows-rotation.js","wrangler.toml"]}

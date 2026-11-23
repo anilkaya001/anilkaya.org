@@ -48,6 +48,7 @@ import { flowsEventRiskRows } from "./server/routes/flows-eventrisk.js";
 import { eventRiskOpen } from "./shared/flows-er-switch.js";
 import { flowsOracleRows } from "./server/routes/flows-oracle.js";
 import { flowsLedgerRows } from "./server/routes/flows-ledger.js";
+import { flowsRotationRows } from "./server/routes/flows-rotation.js";
 import { flowsMacroRows } from "./server/routes/flows-macro.js";
 import { buildLive, BOARD_FUTURES, BOARD_CRYPTO } from "./shared/flows-macro-live.js";
 import { FX_PAIRS } from "./shared/flows-macro.js";
@@ -3526,6 +3527,7 @@ flowsOpsRows({ ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitch
 flowsOracleRows({ store: FLOWS_STORE, ensureFlowsTables, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), nightlyFreshHeaders, recallLastGood }),
 flowsVoldeskRows({ store: FLOWS_STORE, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username), passthrough, recallLastGood, storeGone }),
 flowsLedgerRows({ store: FLOWS_STORE, ensureFlowsTables, readLiveRows: FLOWS_LIVE.readLiveRows, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
+flowsRotationRows({ store: FLOWS_STORE, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsMeRows({ store: MEMBER_STORE, flowsStore: FLOWS_STORE, readLiveRows: FLOWS_LIVE.readLiveRows, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsMacroRows({ readServed, passthrough, macroOn, macroLiveOn, serveCachedVendorRead, vendorGate, buildNow: buildMacroNow, nightlyFreshHeaders, isOwner: (env, username) => rtIsOwner(rtSwitches(env), username) }),
 flowsFilmRows(),

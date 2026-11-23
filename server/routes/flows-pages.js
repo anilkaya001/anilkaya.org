@@ -55,6 +55,7 @@ const PAGES = Object.freeze([
   { slug: "strategy", render: (username) => FLOWS_PAGES.strategyPage({ username }) },
   { slug: "ticker", render: (username, summary, owner, scenes, env, voldesk, gates) => FLOWS_PAGES.tickerPage({ username, scenes, xcheck: voldesk, privateLens: gates.macroOn(env, owner) }) },
   { slug: "moves", gate: "FLOWS_MOVES", render: (username) => FLOWS_PAGES.movesPage({ username }) },
+  { slug: "rotation", gate: "FLOWS_ROTATION", render: (username) => FLOWS_PAGES.rotationPage({ username }) },
   { slug: "flowlab", flowlab: true, render: (username) => FLOWS_PAGES.flowlabPage({ username }) },
   { slug: "unusual", render: (username, summary, owner) => FLOWS_PAGES.unusualPage({ username, owner }) },
   { slug: "ledger", gate: "FLOWS_LEDGER", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.ledgerPage({ username, live: ledgerLiveOn(env, owner) }) },

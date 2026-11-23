@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "446";
+export const ASSET_VERSION = "447";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -87,6 +87,7 @@ const GLYPHS = {
   list: '<path d="M9 7h11M9 12h11M9 17h11"/><circle cx="4.8" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="4.8" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="4.8" cy="17" r="1" fill="currentColor" stroke="none"/>',
   stack: '<rect x="4" y="9" width="16" height="11" rx="2.8"/><path d="M6.5 6h11M9 3.2h6"/>',
   wave: '<path d="M3 12.5c2.3-5.3 4.7-5.3 7 0s4.7 5.3 7 0c1.2-2.7 2.5-3.5 4-3"/>',
+  quad: '<path d="M12 3.5v17M3.5 12h17"/><circle cx="16.5" cy="7.5" r="1.6"/><path d="M6.5 17.5c1.2-3.6 3.4-6 7.4-8.4"/>',
   levels: '<path d="M4 7h16M4 12h9M4 17h16"/>',
   shield: '<path d="M12 3.5 19 6v5.5c0 4.3-2.9 7.6-7 9-4.1-1.4-7-4.7-7-9V6z"/>',
   uncovered: '<path d="M12 3.5 19 6v5.5c0 4.3-2.9 7.6-7 9-4.1-1.4-7-4.7-7-9V6z"/><path d="M4 4l16 16"/>',
@@ -156,6 +157,7 @@ export const FLOWS_NAV = [
   { group: "Market", id: "railMarket", items: [
     { key: "market", href: "/flows/market/", label: "Market", glyph: "market" },
     { key: "moves", href: "/flows/moves/", label: "Moves", glyph: "wave" },
+    { key: "rotation", href: "/flows/rotation/", label: "Rotation", glyph: "quad" },
     { key: "unusual", href: "/flows/unusual/", label: "Unusual", glyph: "unusual" },
     { key: "flowlab", href: "/flows/flowlab/", label: "Flow Lab", glyph: "flask", ownerOnly: true },
     { key: "ledger", href: "/flows/ledger/", label: "Ledger", glyph: "levels" },
@@ -482,6 +484,7 @@ export function aboutPage({ positioning = false } = {}) {
       <li><strong>Boards.</strong> The names whose option flow leans bullish or bearish for the session, and the names that nearly qualified (the Watchlist).</li>
       <li><strong>Market.</strong> The session tide, breadth, sectors, index ETFs, expiries and volatility, with the market-wide feeds.</li>
       <li><strong>Moves.</strong> Every name's move today against its own typical day and against the day its options implied, with how often a move that size has happened in the last year, and each sector&#39;s median move beside the list of names.</li>
+      <li><strong>Rotation.</strong> Twelve funds placed by price against each other: how far each sits from its own norm and how fast that gap is moving, from stored daily closes. A state is named only when every window agrees.</li>
       <li><strong>Unusual.</strong> The option windows the feed flagged, drawn as a flow network from sector through the side of the quote and name to lean, and the contracts trading far above their open interest.</li>
       <li><strong>Flow Lab.</strong> The contracts behind a name's flow: a screener ranked by the site's own ratios, strike and Greek flow, price ladders, routing, lit prints and group flow, each with its unit or a dash and the reason.</li>
       <li><strong>Ledger.</strong> The flagged option premium booked as a closed ledger: takers on one side, liquidity providers on the other, so every row and column sums to zero. It sets each sector's share against its market-cap share, with the bounds it can prove.</li>
@@ -1208,6 +1211,47 @@ export function movesPage({ username = "" } = {}) {
   });
 }
 
+export function rotationPage({ username = "" } = {}) {
+  return flowsDocument({
+    title: "Rotation",
+    description: "Each fund's price against the other funds: how far it sits from its own norm and how fast that gap is moving, from stored daily closes.",
+    active: "rotation",
+    username,
+    chrome: false,
+    styles: ["/assets/css/flows-rotation.css"],
+    scripts: ["/assets/js/flows-rotation.js"],
+    body: `
+  <p class="visually-hidden" id="rtStatus" role="status">Loading the stored closes\u2026</p>
+  <div class="rt" id="rt">
+    <div class="rt-title" data-fx-hero>
+      <h1 id="fxTitle">Rotation</h1>
+      <div class="rt-stamp" id="rtStamp"></div>
+      <div class="rt-chips"><span class="rt-chip">States, not a forecast</span></div>
+      <button type="button" class="rt-ibtn" id="rtInfoBtn" aria-label="How to read this page" aria-haspopup="dialog">${glyph("info")}</button>
+    </div>
+    <div class="rt-seg3" role="tablist" aria-label="Panels" id="rtSeg3">
+      <button type="button" role="tab" aria-selected="true" aria-controls="rtMain" data-v="plane">Plane</button><button type="button" role="tab" aria-selected="false" aria-controls="rtList" data-v="funds">Funds</button><button type="button" role="tab" aria-selected="false" aria-controls="rtCard" data-v="detail">Detail</button>
+    </div>
+    <div class="rt-stage" id="rtStage" data-view="plane">
+      <section class="rt-panel rt-main" id="rtMain" aria-label="The plane">
+        <div class="rt-ph">
+          <div class="rt-ctl"><span id="rtLensL">Lens</span><div class="rt-seg" role="group" aria-labelledby="rtLensL" id="rtLens"><button type="button" data-lens="prices" aria-pressed="true">Prices</button><button type="button" data-lens="flows" aria-pressed="false" disabled title="Flow history not stored yet">Flows</button></div></div>
+          <div class="rt-ctl"><span id="rtNormL">Norm</span><div class="rt-seg" role="group" aria-labelledby="rtNormL" id="rtNorm"></div></div>
+          <div class="rt-ctl"><span id="rtVelL">Velocity</span><div class="rt-seg" role="group" aria-labelledby="rtVelL" id="rtVel"></div></div>
+          <div class="rt-ctl rt-wk"><span id="rtWkL">Week</span><button type="button" class="rt-step" id="rtPrev" aria-label="Earlier week">\u2039</button><input type="range" id="rtWeek" min="0" max="0" value="0" aria-labelledby="rtWkL"><button type="button" class="rt-step" id="rtNext" aria-label="Later week">\u203a</button><span class="rt-wkt" id="rtWkT"></span></div>
+        </div>
+        <div class="rt-plot" id="rtPlot"></div>
+        <div class="rt-foot" id="rtFoot"></div>
+      </section>
+      <section class="rt-panel rt-list" id="rtList" aria-label="Funds"></section>
+      <section class="rt-panel rt-card" id="rtCard" aria-label="Selected fund" aria-live="polite"></section>
+    </div>
+  </div>
+  <dialog class="rt-dlg" id="rtInfoDlg" aria-labelledby="rtInfoT"><div class="dg"><h2 id="rtInfoT">How to read this page</h2><div class="body" id="rtInfoB"></div><div class="x"><button type="button" class="link" id="rtInfoX">Close</button></div></div></dialog>
+`,
+  });
+}
+
 export function flowlabPage({ username = "" } = {}) {
   return flowsDocument({
     title: "Flow Lab",
@@ -1784,6 +1828,6 @@ export function positioningNav(html, on, slug) {
 export const FLOWS_PAGES = {
   loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, networkPage, nowPage, deskPage,
   politicalPage, positioningPage,
-  tickerPage, unusualPage, movesPage, flowlabPage, ledgerPage, macroPage, statusPage, eventsPage, strategyPage, firePage, inboxPage, digestPage, wiresPage, ffPendingPage, ASSET_VERSION,
+  tickerPage, unusualPage, movesPage, rotationPage, flowlabPage, ledgerPage, macroPage, statusPage, eventsPage, strategyPage, firePage, inboxPage, digestPage, wiresPage, ffPendingPage, ASSET_VERSION,
 };
 

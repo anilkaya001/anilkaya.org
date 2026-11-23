@@ -117,6 +117,7 @@ export const SPECS = [
   { id: "unusual", fn: "unusualPage", url: "/flows/unusual/" },
   { id: "events", fn: "eventsPage", url: "/flows/events/" },
   { id: "moves", fn: "movesPage", url: "/flows/moves/" },
+  { id: "rotation", fn: "rotationPage", url: "/flows/rotation/" },
   { id: "political", fn: "politicalPage", url: "/flows/political/" },
   { id: "political-layers", fn: "politicalPage", args: { layers: true }, url: "/flows/political/" },
   { id: "positioning", fn: "positioningPage", url: "/flows/positioning/" },
