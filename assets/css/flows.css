@@ -764,13 +764,19 @@ td.c-num { white-space: nowrap; }
 .rail-items:has(> :nth-child(7)) { min-height: 188px; }
 .rail-items:has(> :nth-child(8)) { min-height: 215px; }
 .rail-items:has(> :nth-child(9)) { min-height: 242px; }
+.rail-items:has(> :nth-child(10)) { min-height: 269px; }
 .rail-group { flex: none; }
 @media (max-height: 899.98px) {
   .flows-rail { padding-bottom: var(--sp-3); }
   .rail-group { margin-top: var(--sp-3); margin-bottom: var(--sp-1); }
 }
+@media (max-height: 849.98px) {
+  .rail-group { margin-top: var(--sp-2); margin-bottom: 0; }
+}
 @media (max-height: 799.98px) {
-  .rail-group { margin-top: var(--sp-2); }
+  .flows-rail { padding-bottom: var(--sp-1); }
+  .rail-group { margin-top: var(--sp-1); margin-bottom: 0; }
+  .rail-group:first-child { margin-top: 0; }
 }
 .flows-rail a {
   position: relative;

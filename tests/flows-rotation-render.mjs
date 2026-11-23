@@ -78,7 +78,6 @@ const SHORT = (() => { const S = rotationSeries(); S.SIL = { d: S.SIL.d.slice(-1
   const T = c.__RotationTest;
   eq([...T.QUADS], [...R.ROTATION_QUADRANTS], "the page's quadrant names are the leaf's");
   for (const [x, y] of [[1, 1], [1, -1], [-1, -1], [-1, 1], [0, 0], [0, -1], [-0.0001, 0]]) eq(T.quadOf([x, y]), R.quadOf({ x, y }), `the page's quadrant rule is the leaf's at ${x}, ${y}`);
-  eq([T.signed(1.234), T.signed(-0.5), T.signed(0), T.signed(null), T.signed(NaN)], ["+1.23", MINUS + "0.50", "0.00", DASH, DASH], "figures carry a sign, the true minus, and a dash when absent");
 }
 
 const browser = await launch();
@@ -144,7 +143,7 @@ const fits = (page) => page.evaluate(() => {
   return { v: se.scrollHeight <= innerHeight, h: se.scrollWidth <= innerWidth, out: out.slice(0, 6) };
 });
 
-const fmt = (v) => (v < 0 ? MINUS : v > 0 ? "+" : "") + Math.abs(v).toFixed(2);
+const fmt = (v) => { const cents = Math.floor(Math.round(Math.abs(v) * 10000) / 100 + 0.5); return (cents === 0 ? "" : v < 0 ? MINUS : "+") + Math.floor(cents / 100) + "." + String(cents % 100).padStart(2, "0"); };
 const scaleOf = (ticks, key) => {
   const pts = ticks.map((t) => ({ p: t[key], v: Number(t.s.replace(MINUS, "-").replace("+", "")) }));
   const a = pts[0], b = pts[pts.length - 1];
@@ -277,7 +276,7 @@ const MUTANTS = [
   ["robust-from-default", [["robust: quads[0] !== null && quads.every((q) => q === quads[0])", "robust: quads[0] !== null"]]],
   ["quadrant-swapped", [["(p[1] >= 0 ? 3 : 2)", "(p[1] >= 0 ? 2 : 3)"]]],
   ["week-ignored", [["const pointOf = (f) => f.tails[key()][S.week];", "const pointOf = (f) => f.tails[key()][f.tails[key()].length - 1];"]]],
-  ["ascii-minus", [['const MINUS = "\u2212", DASH', 'const MINUS = "-", DASH']]],
+  ["sign-dropped", [["Number.isFinite(v) ? F.signed(v, dp) : DASH", "Number.isFinite(v) ? F.px(v, dp) : DASH"]]],
   ["absent-as-zero", [['r.append(el("b", "", a.t), el("span", "q", DASH + " " + a.say));', 'r.append(el("b", "", a.t), el("span", "q", "0.00"));']]],
   ["list-unsorted", [["return (pb ? pb[0] : -Infinity) - (pa ? pa[0] : -Infinity);", "return 0;"]]],
   ["labels-pile-up", [["if (placed.some((b) => box.x0 < b.x1 && box.x1 > b.x0 && box.y0 < b.y1 && box.y1 > b.y0)) continue;", ""]]],

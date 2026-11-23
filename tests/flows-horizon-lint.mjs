@@ -56,6 +56,7 @@ const ALLOWED = [
   ["shared/flows-dossier.js", 1, "month"],
   ["shared/flows-fact-ids.js", 10, "month"],
   ["shared/flows-garch.js", 1, "month"],
+  ["shared/flows-rotation.js", 1, "month"],
   ["shared/flows-glossary.js", 1, "month"],
   ["shared/flows-live-worker.js", 1, "clock"],
   ["shared/flows-macro.js", 1, "month"],

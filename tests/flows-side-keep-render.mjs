@@ -36,7 +36,7 @@ const VARIANTS = {
   "the button never learns the state": { js: (src) => swap(src, 'if (btn) btn.setAttribute("aria-expanded", on);', "") },
   "the rail keeps its roomy rhythm at every height": { css: (src) => swap(src, "grid-auto-rows: minmax(26px, 34px);", "grid-auto-rows: 34px;") },
   "the rail fits by hiding an entry": { css: (src) => src + "\n.flows-rail a[data-pos-nav] { display: none; }\n" },
-  "a short window squeezes rows under their floor": { css: (src) => swap(swap(src, ".rail-items:has(> :nth-child(8)) { min-height: 215px; }", ""), ".rail-items:has(> :nth-child(9)) { min-height: 242px; }", "") + "\n.rail-items { min-height: 0; }\n.flows-rail a { min-height: 0; }\n.rail-items { grid-auto-rows: minmax(0, 34px); }\n" },
+  "a short window squeezes rows under their floor": { css: (src) => swap(swap(swap(src, ".rail-items:has(> :nth-child(8)) { min-height: 215px; }", ""), ".rail-items:has(> :nth-child(9)) { min-height: 242px; }", ""), ".rail-items:has(> :nth-child(10)) { min-height: 269px; }", "") + "\n.rail-items { min-height: 0; }\n.flows-rail a { min-height: 0; }\n.rail-items { grid-auto-rows: minmax(0, 34px); }\n" },
 };
 
 const run = async (browser, variant = {}) => {

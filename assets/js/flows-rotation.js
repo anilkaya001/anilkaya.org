@@ -2,12 +2,11 @@
   "use strict";
   const QUADS = ["Above norm, gaining", "Above norm, losing", "Below norm, losing", "Below norm, gaining"];
   const SVG = "http://www.w3.org/2000/svg";
-  const MINUS = "−", DASH = "—";
+  const DASH = "—";
   const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   const quadOf = (p) => (p[0] >= 0 ? (p[1] >= 0 ? 0 : 1) : (p[1] >= 0 ? 3 : 2));
-  const signed = (v, dp = 2) => (v === null || v === undefined || !Number.isFinite(v) ? DASH : (v < 0 ? MINUS : v > 0 ? "+" : "") + Math.abs(v).toFixed(dp));
   const dayLabel = (d) => {
     const x = new Date(d + "T00:00:00Z");
     return `${DOW[x.getUTCDay()]} ${x.getUTCDate()} ${MON[x.getUTCMonth()]} ${x.getUTCFullYear()}`;
@@ -31,10 +30,12 @@
   const agree = (st, q) => st.quads.filter((x) => x === q).length;
 
   if (typeof document === "undefined") {
-    globalThis.__RotationTest = { QUADS, quadOf, signed, dayLabel, niceStep, rangeOf, stateAt, agree };
+    globalThis.__RotationTest = { QUADS, quadOf, dayLabel, niceStep, rangeOf, stateAt, agree };
     return;
   }
 
+  const F = window.FlowsUI.F;
+  const signed = (v, dp = 2) => (typeof v === "number" && Number.isFinite(v) ? F.signed(v, dp) : DASH);
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
   const sv = (tag, attrs, text) => { const e = document.createElementNS(SVG, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text !== undefined) e.textContent = text; return e; };
@@ -119,7 +120,7 @@
       const p = pointOf(f);
       if (!p) continue;
       if (tail.length > 1) {
-        svg.append(sv("polyline", { class: "rt-tail" + (S.sel === f.t ? " sel" : ""), points: tail.map((q) => X(q[0]).toFixed(1) + "," + Y(q[1]).toFixed(1)).join(" "), "data-t": f.t }));
+        svg.append(sv("polyline", { class: "rt-tail" + (S.sel === f.t ? " sel" : ""), points: tail.map((q) => Math.round(X(q[0]) * 10) / 10 + "," + Math.round(Y(q[1]) * 10) / 10).join(" "), "data-t": f.t }));
         tail.slice(0, -1).forEach((q) => svg.append(sv("circle", { class: "rt-tp", cx: X(q[0]), cy: Y(q[1]), r: 1.8 })));
       }
       dots.push({ f, p, x: X(p[0]), y: Y(p[1]) });
@@ -136,7 +137,7 @@
     }
     for (const o of dots.slice().sort((a, b) => (a.f.t === S.sel ? -1 : b.f.t === S.sel ? 1 : 0))) {
       const w = o.f.t.length * 7.4 + 4, h = 14;
-      const tries = [[o.x + 10, o.y + 4], [o.x - 10 - w, o.y + 4], [o.x - w / 2, o.y - 11], [o.x - w / 2, o.y + 21]];
+      const tries = [[o.x + 10, o.y + 4], [o.x - 10 - w, o.y + 4], [o.x - w / 2, o.y - 11], [o.x - w / 2, o.y + 22]];
       for (const [lx, ly] of tries) {
         const box = { x0: lx, y0: ly - h + 2, x1: lx + w, y1: ly + 2 };
         if (box.x0 < mL || box.x1 > W - mR || box.y0 < mT || box.y1 > H - mB) continue;
@@ -201,7 +202,7 @@
     add("Gap from its own norm", p ? signed(p[0]) + " log %" : DASH);
     add("Change of the gap per 5 sessions", p ? signed(p[1]) + " log %" : DASH);
     add("Windows that agree", p ? `${agree(st, q)} of ${d.conventions.length}` : DASH);
-    add(`Last stored close, ${dayLabel(d.asOf)}`, typeof f.close === "number" ? f.close.toFixed(2) : DASH);
+    add(`Last stored close, ${dayLabel(d.asOf)}`, typeof f.close === "number" ? F.px(f.close, 2) : DASH);
     card.append(kv);
     const a = el("a", "link", `Open ${f.t}`);
     a.href = "/flows/ticker/?t=" + encodeURIComponent(f.t);
@@ -278,7 +279,7 @@
       for (const t of [
         "Each dot is a fund. Its price is compared with the other funds drawn, so the plane shows who is ahead of the group and who is behind, never the market's direction.",
         "Across is the gap between that relative price and its own norm, a weighted average of earlier sessions. Up is how much the gap changed over five sessions.",
-        "The norm can be a half-life of 126 or 63 sessions and the change can be measured over 10, 5 or 21. A dot is filled only when every one of those six windows gives the same state; a hollow dot depends on the window.",
+        "The norm has two half-lives to choose from and the change three spans, as the buttons show. A dot is filled only when every one of those six windows gives the same state; a hollow dot depends on the window.",
         "The path behind a dot is its last weeks. Figures come from stored daily closes only. The money-flow lens is not drawn because no flow history is stored yet.",
         "This page shows states, not a forecast.",
       ]) body.append(el("p", "", t));
