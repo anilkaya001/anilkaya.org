@@ -367,6 +367,29 @@
   "overflowPx": 0,
   "targetsUnder24": 0
  },
+ "rotation@320": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 1,
+  "targetsUnder44": 2
+ },
+ "rotation@390": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 1,
+  "targetsUnder44": 1
+ },
+ "rotation@1440": {
+  "contrast": 0,
+  "names": 0,
+  "structure": 0,
+  "overflowPx": 0,
+  "targetsUnder24": 1
+ },
  "political@320": {
   "contrast": 0,
   "names": 0,
