@@ -24,7 +24,7 @@ const EMIT = Object.fromEntries(KEYS.map((k) => [k, emitRead(dir, k)]));
 
 {
   eq((HTML.match(/<h1[ >]/g) || []).length, 1, "PAGE: one h1");
-  ok(/data-flows-page="flows2"/.test(HTML) && /href="\/flows\/2\/"[^>]*aria-current="page"/.test(HTML), "the page owns its hook and the rail marks it");
+  ok(/data-flows-page="flows2"/.test(HTML) && /<a href="\/flows\/2\/">Flows 2<\/a><a href="\/flows\/about\/">/.test(PAGES.FLOWS_PAGES.marketPage({ username: "t" })), "the page owns its hook and every page links it from the sidebar's footer row");
   ok(/\/assets\/js\/flows2\.js\?v=\d+/.test(HTML) && /\/assets\/css\/flows2\.css\?v=\d+/.test(HTML), "script and sheet are versioned");
   ok(!/#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla)\(/.test(JS) && !/#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla)\(/.test(CSS), "no colour literal in the script or the sheet");
   ok(!/\/\/ |\/\*/.test(JS) && !/\/\*/.test(CSS) && !/localStorage|sessionStorage|innerHTML/.test(JS), "no comment, no browser storage, no innerHTML");

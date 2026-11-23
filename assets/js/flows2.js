@@ -22,11 +22,6 @@
   const sectorRows = (rows) => (Array.isArray(rows) ? rows : []).filter((r) => r && typeof r.sector === "string" && r.status === "ok" && num(r.net) !== null).slice().sort((a, b) => b.net - a.net);
   const nextEvents = (rows, n) => (Array.isArray(rows) ? rows : []).filter((r) => r && typeof r.t === "string" && /^\d{4}-\d{2}-\d{2}$/.test(String(r.d))).slice().sort((a, b) => (a.d === b.d ? (a.t < b.t ? -1 : 1) : a.d < b.d ? -1 : 1)).slice(0, n);
 
-  if (typeof document === "undefined") {
-    globalThis.__Flows2Test = { tidePath, topAlerts, sideOf, sectorRows, nextEvents, sumOr };
-    return;
-  }
-
   const F = window.FlowsUI.F;
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };

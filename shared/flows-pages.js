@@ -149,7 +149,6 @@ export const FLOWS_NAV = [
   { group: "Today", id: "railToday", items: [
     { key: "overview", href: "/flows/", label: "Home", glyph: "home", title: "Today" },
     { key: "watch", href: "/flows/watch/", label: "Watchlist", glyph: "star", count: true },
-    { key: "flows2", href: "/flows/2/", label: "Flows 2", glyph: "layers" },
   ] },
   { group: "Boards", id: "railBoards", items: [
     { key: "long", href: "/flows/long/", label: "Bullish", glyph: "long", count: true },
@@ -248,7 +247,7 @@ const sidebar = (active, username) => {
       <a href="/">Home</a><a href="/articles/">Articles</a><a href="/lab/">Lab</a><a href="/flows/" aria-current="true">Flows</a>
     </nav>
     <nav class="fx-site" aria-label="About Flows">
-      <a href="/flows/about/">About</a><a href="/flows/glossary/">Glossary</a>
+      <a href="/flows/2/">Flows 2</a><a href="/flows/about/">About</a><a href="/flows/glossary/">Glossary</a>
     </nav>
     ${brandMark(active === "status" ? BRAND_OWNER : BRAND_MEMBER)}
     <div class="fx-who">
