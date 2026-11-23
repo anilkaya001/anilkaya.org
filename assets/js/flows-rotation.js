@@ -60,6 +60,7 @@
     list.replaceChildren();
     card.replaceChildren();
     $("rtFoot").replaceChildren();
+    $("rt").dataset.ready = retry ? "failed" : "empty";
   }
 
   function seg(host, values, current, label, pick) {
@@ -168,7 +169,7 @@
       b.setAttribute("aria-pressed", String(S.sel === f.t));
       const x = el("span", "n " + (p && p[0] > 0 ? "rt-up" : p && p[0] < 0 ? "rt-down" : ""), p ? signed(p[0]) : DASH);
       const y = el("span", "n " + (p && p[1] > 0 ? "rt-up" : p && p[1] < 0 ? "rt-down" : ""), p ? signed(p[1]) : DASH);
-      b.append(el("b", "", f.t), el("span", "q", !p ? "Not drawn this week" : st.robust ? QUADS[st.quads[0]] : "Depends on the window"), x, y);
+      b.append(el("b", "", f.t), el("span", "q", !p ? "Not drawn this week" : st.robust ? QUADS[st.quads[0]] : "Window-dependent"), x, y);
       b.addEventListener("click", () => select(f.t, true));
       rows.append(b);
     }
@@ -224,15 +225,20 @@
     const b = document.createElement("b");
     b.textContent = dayLabel(d.asOf);
     $("rtStamp").replaceChildren("Closes through ", b, ` · ${d.sessions} sessions · ${d.funds.length} funds`);
+    $("rt").dataset.ready = "ok";
     status.textContent = `Rotation plane for the week ending ${dayLabel(d.weeks[S.week])}, ${d.funds.length} funds.`;
   }
 
   function select(t, show) {
+    const held = document.activeElement;
+    const onDot = Boolean(held && held.classList && held.classList.contains("rt-dot"));
+    const onRow = Boolean(held && held.classList && held.classList.contains("rt-row"));
     S.sel = t;
     paint();
     if (show && window.matchMedia("(max-width: 899px)").matches) view("detail");
-    const again = plot.querySelector(`.rt-dot[data-t="${t}"]`);
-    if (again && document.activeElement && document.activeElement.classList && document.activeElement.classList.contains("rt-dot")) again.focus();
+    const again = onDot ? plot.querySelector(`.rt-dot[data-t="${t}"]`) : onRow ? list.querySelector(`button.rt-row[data-t="${t}"]`) : null;
+    if (again && again.offsetParent !== null) again.focus();
+    else if (again && onDot) again.focus();
   }
 
   function view(v) {
