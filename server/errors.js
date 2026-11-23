@@ -55,6 +55,7 @@ export const ERRORS = Object.freeze({
   ledger_live_off: entry(404, "The live ledger is off"),
   live_token_scope: entry(403, "The live token reads one key at a time"),
   method_not_allowed: entry(405, "Method not allowed"),
+  rotation_off: entry(404, "Not found"),
   owner_only: entry(403, "This check is limited to the owner"),
   no_question: entry(400, "Ask a question in the `question` field."),
   not_found: entry(404, "Not found"),
