@@ -15,7 +15,7 @@ const { HttpError, redirect, requireMethod } = K;
 const STUB = { currentFlowsUser: async () => null, readFlowsSummary: async () => null, isOwner: () => false };
 const table = createRouter(flowsPageRows(STUB));
 
-const SLUGS = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "rotation", "flowlab", "unusual", "ledger", "macro", "events", "political", "positioning", "status", "fire", "inbox", "digest", "wires"];
+const SLUGS = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "rotation", "2", "flowlab", "unusual", "ledger", "macro", "events", "political", "positioning", "status", "fire", "inbox", "digest", "wires"];
 eq(FLOWS_PAGE_SLUGS, SLUGS, "the page list is the gated pages in their old order, the Network and Flagged now pop-outs after Market, the owner-gated moves and Flow Lab pages before unusual, and the four Fire & Forget pages last");
 eq(FLOWS_PUBLIC_SLUGS, ["about", "glossary"], "and the public front door is the two pages a signed-out reader gets");
 const expectedPaths = ["/flows", "/flows/login/"];
@@ -97,6 +97,7 @@ function oldChain(path, rc, d) {
       "/flows/ticker/": (u) => FLOWS_PAGES.tickerPage({ username: u }),
       "/flows/moves/": (u) => FLOWS_PAGES.movesPage({ username: u }),
       "/flows/rotation/": (u) => FLOWS_PAGES.rotationPage({ username: u }),
+      "/flows/2/": (u) => FLOWS_PAGES.flows2Page({ username: u }),
       "/flows/flowlab/": (u) => FLOWS_PAGES.flowlabPage({ username: u }),
       "/flows/unusual/": (u, summary, owner) => FLOWS_PAGES.unusualPage({ username: u, owner }),
       "/flows/ledger/": (u) => FLOWS_PAGES.ledgerPage({ username: u }),
@@ -120,7 +121,7 @@ function oldChain(path, rc, d) {
     if (Object.hasOwn(FLOWS_ROUTES, path)) {
       requireMethod(request, ["GET", "HEAD"]);
       const session = await d.currentFlowsUser(request, env);
-      const gateOf = { "/flows/moves/": "FLOWS_MOVES", "/flows/rotation/": "FLOWS_ROTATION", "/flows/ledger/": "FLOWS_LEDGER", "/flows/positioning/": "FLOWS_POSITIONING" }[path];
+      const gateOf = { "/flows/moves/": "FLOWS_MOVES", "/flows/rotation/": "FLOWS_ROTATION", "/flows/2/": "FLOWS_2", "/flows/ledger/": "FLOWS_LEDGER", "/flows/positioning/": "FLOWS_POSITIONING" }[path];
       if (session && gateOf) {
         const mode = String(env[gateOf] || "owner").trim().toLowerCase();
         if (mode === "off" || (mode !== "on" && !d.isOwner(env, session.username))) throw HttpError.of("not_found");
@@ -144,7 +145,7 @@ function oldChain(path, rc, d) {
     if (path === "/flows/long" || path === "/flows/short" || path === "/flows/desk"
         || path === "/flows/watch"
         || path === "/flows/market" || path === "/flows/network" || path === "/flows/now" || path === "/flows/ticker"
-        || path === "/flows/moves" || path === "/flows/rotation" || path === "/flows/flowlab" || path === "/flows/unusual" || path === "/flows/ledger" || path === "/flows/macro" || path === "/flows/events"
+        || path === "/flows/moves" || path === "/flows/rotation" || path === "/flows/2" || path === "/flows/flowlab" || path === "/flows/unusual" || path === "/flows/ledger" || path === "/flows/macro" || path === "/flows/events"
         || path === "/flows/political" || path === "/flows/positioning"
         || path === "/flows/strategy"
         || path === "/flows/status" || path === "/flows/about" || path === "/flows/glossary"
@@ -262,10 +263,10 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
   eq(await gate({ username: "anilkaya" }), [200, "page"], "the Status page is served to an owner");
   eq(await gate({ username: "member<x>" }), [404, "not_found"], "a signed-in member who is not an owner gets the unknown-page 404");
   eq(await gate(null), [200, "login"], "and an anonymous visitor gets the sign-in page like every gated page");
-  const SIDEBAR_PAGES = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "rotation", "flowlab", "unusual", "ledger", "macro", "events", "political", "positioning", "status", "fire", "inbox", "digest", "wires"];
+  const SIDEBAR_PAGES = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "rotation", "2", "flowlab", "unusual", "ledger", "macro", "events", "political", "positioning", "status", "fire", "inbox", "digest", "wires"];
   for (const slug of SIDEBAR_PAGES) {
     const path = "/flows/" + (slug ? slug + "/" : "");
-    const env = { FLOWS_MOVES: "on", FLOWS_ROTATION: "on", FLOWS_LEDGER: "on", FLOWS_FLOWLAB: "on", FLOWS_POSITIONING: "on", FLOWS_MACRO: "on", FF_MODE: "shadow", FF_ROUTE_FIRE: "on", FF_ROUTE_INBOX: "on", FF_ROUTE_WIRES: "on" };
+    const env = { FLOWS_MOVES: "on", FLOWS_ROTATION: "on", FLOWS_2: "on", FLOWS_LEDGER: "on", FLOWS_FLOWLAB: "on", FLOWS_POSITIONING: "on", FLOWS_MACRO: "on", FF_MODE: "shadow", FF_ROUTE_FIRE: "on", FF_ROUTE_INBOX: "on", FF_ROUTE_WIRES: "on" };
     const call = (deps) => createRouter(flowsPageRows({ ...deps, macroOn: (e) => e.FLOWS_MACRO === "on" })).find(path).handler({ ...rc(path), env }).then((r) => r.text());
     const asOwner = await call(scenario({ username: "anilkaya" }).deps);
     ok(!asOwner.includes("railOps") && !asOwner.includes(">Operations<") && !asOwner.includes('href="/flows/status/"') && !asOwner.includes("view=latency"), path + ": NO SIDEBAR CARRIES AN OPERATIONS GROUP, a Status link or a Latency link, an owner's included");
@@ -382,8 +383,8 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
       ok(text.includes('<a class="ds-btn" href="/flows/fire/">Open Fire</a>'), "and links to Fire");
     }
   }
-  const NAV_PAGES = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "rotation", "flowlab", "unusual", "ledger", "events", "political", "inbox", "digest", "wires"];
-  const navEnv = { FLOWS_MOVES: "on", FLOWS_ROTATION: "on", FLOWS_LEDGER: "on", FLOWS_FLOWLAB: "on" };
+  const NAV_PAGES = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "rotation", "2", "flowlab", "unusual", "ledger", "events", "political", "inbox", "digest", "wires"];
+  const navEnv = { FLOWS_MOVES: "on", FLOWS_ROTATION: "on", FLOWS_2: "on", FLOWS_LEDGER: "on", FLOWS_FLOWLAB: "on" };
   for (const slug of NAV_PAGES) {
     const path = "/flows/" + (slug ? slug + "/" : "");
     const draw = (env) => createRouter(flowsPageRows(scenario(member).deps)).find(path).handler({ ...rc(path), env }).then((r) => r.text());
@@ -432,7 +433,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     ok(groupOf("railTools").includes("fire") && groupOf("railMarket").includes("positioning"), "Fire is a Tools page and Positioning a Market page");
     const lit = (html) => { const bar = html.slice(html.indexOf('<nav class="fx-tabs"'), html.indexOf("</nav>", html.indexOf('<nav class="fx-tabs"'))); return [...bar.matchAll(/<a href="([^"]+)"[^>]*aria-current="true"/g)].map((m) => m[1]); };
     const pageOf = { overview: () => FLOWS_PAGES.overviewPage({ username: "m" }), long: () => FLOWS_PAGES.sidePage({ username: "m", side: "long" }), short: () => FLOWS_PAGES.sidePage({ username: "m", side: "short" }), watch: () => FLOWS_PAGES.watchPage({ username: "m" }),
-      market: () => FLOWS_PAGES.marketPage({ username: "m" }), moves: () => FLOWS_PAGES.movesPage({ username: "m" }), rotation: () => FLOWS_PAGES.rotationPage({ username: "m" }), unusual: () => FLOWS_PAGES.unusualPage({ username: "m" }), flowlab: () => FLOWS_PAGES.flowlabPage({ username: "m" }), ledger: () => FLOWS_PAGES.ledgerPage({ username: "m" }), macro: () => FLOWS_PAGES.macroPage({ username: "m" }),
+      market: () => FLOWS_PAGES.marketPage({ username: "m" }), moves: () => FLOWS_PAGES.movesPage({ username: "m" }), rotation: () => FLOWS_PAGES.rotationPage({ username: "m" }), flows2: () => FLOWS_PAGES.flows2Page({ username: "m" }), unusual: () => FLOWS_PAGES.unusualPage({ username: "m" }), flowlab: () => FLOWS_PAGES.flowlabPage({ username: "m" }), ledger: () => FLOWS_PAGES.ledgerPage({ username: "m" }), macro: () => FLOWS_PAGES.macroPage({ username: "m" }),
       events: () => FLOWS_PAGES.eventsPage({ username: "m" }), political: () => FLOWS_PAGES.politicalPage({ username: "m" }), positioning: () => FLOWS_PAGES.positioningPage({ username: "m" }),
       fire: () => FLOWS_PAGES.firePage({ username: "m" }), strategy: () => FLOWS_PAGES.strategyPage({ username: "m" }), desk: () => FLOWS_PAGES.deskPage({ username: "m" }) };
     eq(Object.keys(pageOf).sort(), FLOWS_NAV.flatMap((g) => g.items.map((i) => i.key)).sort(), "every sidebar entry has a page to draw here");
@@ -460,7 +461,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     absent(text, new RegExp('path === "' + p.replace(/[-/]/g, "\\$&") + '"'), { anchor: /path === "\/flows\/login"/, why: p + " is a table row and no longer a branch of the chain" });
   }
   absent(text, /\bFLOWS_ROUTES\b|\bFLOWS_READER_FROM\b/, { anchor: /path === "\/flows\/logout"/, why: "the page table moved out of the Worker" });
-  absent(text, /FLOWS_PAGES\.(overviewPage|sidePage|watchPage|marketPage|networkPage|nowPage|deskPage|strategyPage|tickerPage|unusualPage|movesPage|rotationPage|ledgerPage|macroPage|eventsPage|politicalPage|positioningPage|statusPage|firePage|inboxPage|digestPage|wiresPage|ffPendingPage)/, { anchor: /FLOWS_PAGES\.loginPage\(/, why: "the Worker renders only the sign-in page itself" });
+  absent(text, /FLOWS_PAGES\.(overviewPage|sidePage|watchPage|marketPage|networkPage|nowPage|deskPage|strategyPage|tickerPage|unusualPage|movesPage|rotationPage|flows2Page|ledgerPage|macroPage|eventsPage|politicalPage|positioningPage|statusPage|firePage|inboxPage|digestPage|wiresPage|ffPendingPage)/, { anchor: /FLOWS_PAGES\.loginPage\(/, why: "the Worker renders only the sign-in page itself" });
   const src = moduleSource("server/routes/flows-pages.js");
   ok(!/from "\.\.\/\.\.\/worker\.js"|cloudflare:|\bfetch\(|\benv\.DB\b/.test(src), "the family imports neither the Worker nor the platform and reads no store: the session and the summary are injected");
   ok(!/\bsetCookie\b|Set-Cookie|\.json\(/.test(src), "and sets no cookie and answers no JSON");

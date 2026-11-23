@@ -61,6 +61,7 @@
       try { body = await read(path); } catch { state.failed++; hosts.forEach((h) => say(h, "This could not be read. Try again.", run)); settle(); return; }
       if (!body || body.status === "pending") hosts.forEach((h) => say(h, "Not published yet for this session."));
       else draw(body, hosts);
+      fit();
       settle();
     };
     PANES[path] = run;
@@ -75,6 +76,25 @@
     }
   }
 
+  function fit() {
+    for (const box of document.querySelectorAll("#f2Grid .f2-rows")) {
+      const rows = [...box.children];
+      rows.forEach((r) => { r.hidden = false; });
+      const more = box.parentElement.querySelector(":scope > .f2-more");
+      if (more) more.remove();
+      if (box.offsetParent === null) continue;
+      let shown = rows.length;
+      while (shown > 1 && box.scrollHeight > box.clientHeight + 1) rows[--shown].hidden = true;
+      if (shown < rows.length) {
+        const note = el("div", "f2-note f2-more", `Showing ${shown} of ${rows.length}`);
+        box.after(note);
+        while (shown > 1 && box.scrollHeight > box.clientHeight + 1) { rows[--shown].hidden = true; note.textContent = `Showing ${shown} of ${rows.length}`; }
+      }
+    }
+  }
+  let fitRaf = 0;
+  const refit = () => { cancelAnimationFrame(fitRaf); fitRaf = requestAnimationFrame(fit); };
+
   const stat = (k, v, cls) => { const d = el("div"); d.append(el("dt", "", k), el("dd", cls || "", v)); return d; };
 
   function drawMarket(m, [hero, vol]) {
@@ -85,8 +105,8 @@
     hero.append(el("div", "f2-hero", money(s.total)));
     const dl = el("dl", "f2-stats");
     dl.append(stat("Calls", money(calls)), stat("Puts", money(puts)),
-      stat("Net premium, screened names", money(m.premium && m.premium.net, true), tone(m.premium && m.premium.net).trim()),
-      stat("Names leaning up / down", m.breadth && num(m.breadth.bull) !== null && num(m.breadth.bear) !== null ? m.breadth.bull + " / " + m.breadth.bear : DASH),
+      stat("Net premium, screened", money(m.premium && m.premium.net, true), tone(m.premium && m.premium.net).trim()),
+      stat("Leaning up / down", m.breadth && num(m.breadth.bull) !== null && num(m.breadth.bear) !== null ? m.breadth.bull + " / " + m.breadth.bear : DASH),
       stat("Put to call, premium", m.pcr && num(m.pcr.premium) !== null ? F.px(m.pcr.premium, 2) : DASH));
     hero.append(dl);
     hero.append(el("div", "f2-note", fu ? `${st.n} screened names and ${fu.n} of ${fu.of} funds and index options` : `${num(st.n) === null ? DASH : st.n} screened names; funds not read`));
@@ -210,7 +230,9 @@
   for (const b of $("f2Seg").querySelectorAll("button")) b.addEventListener("click", () => {
     $("f2Grid").dataset.view = b.dataset.v;
     for (const x of $("f2Seg").querySelectorAll("button")) x.setAttribute("aria-selected", String(x === b));
+    fit();
   });
+  window.addEventListener("resize", refit);
 
   pane(["hero", "vol"], "/api/flows/market", drawMarket);
   pane(["tide"], "/api/flows/pulse", drawTide);
