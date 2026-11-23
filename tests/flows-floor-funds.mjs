@@ -168,27 +168,58 @@ const asked = (cases) => {
 }
 
 {
+  const C = L.rotationCandidates();
+  eq(C.list.length, 66, "ROTATION: sixty-six funds are described; the six index roots have no fund description");
+  same(C.root, ["SPX", "NDX", "RUT", "VIX", "XSP", "DJX"], "and the roots are named, never read");
+  same(L.rotationCandidates({ absent: ["TBT", "SPX"] }).unlisted, ["TBT"], "a fund the directory lacks is skipped as unlisted");
   const plan = L.rotationPlan({ prior: {}, today: S });
-  eq(plan.length, 12, "ROTATION: a cold start reads twelve funds");
+  eq(plan.length, 12, "a cold start reads twelve funds");
+  ok(plan.every((t) => C.list.includes(t)), "and no index root among them");
+  const list = C.list;
   const prior = {};
-  for (const t of L.readList().slice(0, 40)) prior[t] = { at: "2026-09-27T20:00:00Z" };
-  for (const t of L.readList().slice(40, 50)) prior[t] = { at: "2026-09-01T20:00:00Z" };
+  for (const t of list.slice(0, 40)) prior[t] = { at: "2026-09-27T20:00:00Z" };
+  for (const t of list.slice(40, 50)) prior[t] = { at: "2026-09-01T20:00:00Z" };
   const never = L.rotationPlan({ prior, today: S });
-  same(never, L.readList().slice(50).sort().slice(0, 12), "a fund never described is read before any that is only old");
-  for (const t of L.readList().slice(50)) prior[t] = { at: "2026-09-28T20:00:00Z" };
+  same(never, list.slice(50).sort().slice(0, 12), "a fund never described is read before any that is only old");
+  for (const t of list.slice(50)) prior[t] = { at: "2026-09-28T20:00:00Z" };
   const next = L.rotationPlan({ prior, today: S });
-  same(next.slice(0, 10).sort(), L.readList().slice(40, 50).sort(), "the oldest descriptions are read first");
-  ok(next.length === 10 && !next.some((t) => L.readList().indexOf(t) < 40), "and a fresh one is not read again");
+  same(next.slice(0, 10).sort(), list.slice(40, 50).sort(), "the oldest descriptions are read first");
+  ok(next.length === 10 && !next.some((t) => list.indexOf(t) < 40), "and a fresh one is not read again");
+  const heldOne = L.rotationPlan({ prior, today: S, backoff: { [list[40]]: { k: 2, next: "2026-10-30", why: "empty" } } });
+  ok(!heldOne.includes(list[40]) && heldOne.length === 9, "a fund in back-off is not asked");
   const carry = L.carryMeta(prior, S);
-  eq(carry.size, 62, "a description under fourteen days old is carried and the ten older ones are dropped");
-  const days = new Set();
+  eq(carry.size, 56, "a description under fourteen days old is carried and the ten older ones are dropped");
   const sim = {};
   for (let d = 0; d < 14; d++) {
     const day = new Date(Date.parse(S + "T00:00:00Z") + d * 86400000).toISOString().slice(0, 10);
     for (const t of L.rotationPlan({ prior: sim, today: day })) sim[t] = { at: day + "T20:00:00Z" };
-    days.add(day);
   }
-  eq(Object.keys(sim).length, 72, "a fortnight of nights reaches every fund");
+  eq(Object.keys(sim).length, 66, "a fortnight of nights reaches every described fund");
+}
+
+{
+  same([1, 2, 3, 4, 5, 6, 7].map(L.backoffDays), [1, 2, 4, 8, 16, 28, 28], "BACK-OFF: 1, 2, 4, 8, 16, then 28 calendar days at most");
+  same(L.noteMiss(null, S, "empty"), { k: 1, next: "2026-09-30", why: "empty" }, "a first empty miss waits one day");
+  same(L.noteMiss({ k: 3 }, S, "refused"), { k: 4, next: "2026-10-07", why: "refused" }, "a fourth miss waits eight");
+  same(L.noteMiss({ k: 5 }, S, "failed"), { k: 1, next: "2026-09-30", why: "failed" }, "a transient failure never escalates");
+  eq(L.noteMiss({ k: 5 }, S, "limited").k, 1, "nor a rate limit");
+  eq(L.noteMiss({ k: 99 }, S, "empty").k, 99, "the count stops at ninety-nine");
+  ok(L.heldBy({ next: "2026-09-30" }, S) && !L.heldBy({ next: S }, S) && !L.heldBy(null, S), "a fund is held only while its next day is later than today");
+  same(L.carryBackoff({ TLT: { k: 2, next: "2026-10-01", why: "empty" }, SPX: { k: 1, next: "2026-10-01", why: "empty" }, GLD: { k: 0, next: "x", why: "empty" }, SLV: { k: 1, next: "2026-10-01", why: "huh" } }, ["TLT", "GLD", "SLV"]),
+    { TLT: { k: 2, next: "2026-10-01", why: "empty" } }, "only valid entries for listed funds are carried");
+  const T = [[{ ok: true }, true, "ok"], [{ ok: true }, false, "empty"], [{ status: 429 }, false, "limited"], [{ status: 404 }, false, "refused"], [{ status: 403 }, false, "refused"], [{ status: 422 }, false, "refused"], [{ status: 503 }, false, "failed"], [{ status: null }, false, "failed"]];
+  for (const [r, u, want] of T) eq(L.readOutcome(r, u), want, `OUTCOME: ${JSON.stringify(r)} usable ${u} is ${want}`);
+  eq(L.missOf({ info: "refused", weights: "ok", flow: "empty" }), null, "one usable read is no miss");
+  eq(L.missOf({ info: "refused", weights: "empty", flow: "failed" }), "failed", "a failure is named before an empty answer");
+  eq(L.missOf({ info: "refused", weights: "limited", flow: "empty" }), "limited", "a rate limit before an empty answer");
+  eq(L.missOf({ info: "refused", weights: "empty", flow: "refused" }), "empty", "an empty answer before a refusal");
+  eq(L.missOf({ info: "refused", weights: "refused", flow: "refused" }), "refused", "refused only when every read was refused");
+  const t = L.tallyOutcomes([{ info: "ok", weights: "empty", flow: "ok" }, { info: "refused", weights: "ok", flow: "failed" }]);
+  same(t.info, { ok: 1, empty: 0, refused: 1, limited: 0, failed: 0 }, "the tally counts every read of every fund");
+  same(t.weights, { ok: 1, empty: 1, refused: 0, limited: 0, failed: 0 }, "the weights read too");
+}
+
+{
   const small = L.metaFrom({ at: S, info: { data: { name: "A Fund", etf_company: "Co", aum: "1", holdings_count: 5, expense_ratio: "0.1" } } });
   same(Object.keys(small).sort(), ["at", "issuer", "n", "name"], "the description keeps the name, issuer and holdings, and withholds the amount whose unit is not stated");
   const full = L.metaFrom({ at: S, weights: { sector: [{ sector: "Tech", weight: "0.5" }, { sector: "Other", weight: "0.4" }, { sector: "Energy", weight: "0.1" }], country: [{ country: "US", weight: "0.9" }] }, flow: { data: [{ date: "2026-09-26", change: -5 }, { date: "2026-09-27", change: 12 }] } });

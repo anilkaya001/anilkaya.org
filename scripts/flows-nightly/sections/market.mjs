@@ -11,7 +11,7 @@ import { DRY_RUN } from "../flags.mjs";
 import { pathFor } from "../../../shared/flows-vendor-ops.js";
 import { num } from "../../../shared/flows-features.js";
 import { runSigmaLedger } from "../../flows-legs/sigma-ledger.mjs";
-import { runFundsLeg, unavailable as fundsUnavailable } from "../../flows-legs/funds.mjs";
+import { fundsDetail, runFundsLeg, unavailable as fundsUnavailable } from "../../flows-legs/funds.mjs";
 import { fakeFundsRead } from "../../flows-legs/funds-fake.mjs";
 import { stampNow } from "../../flows-legs/stamp.mjs";
 import { nightlyFundsOn } from "../../../shared/flows-floor-funds.js";
@@ -41,6 +41,7 @@ export async function runMarket(ctx) {
       stop: () => Date.now() > stats.startedAt + DEADLINE_MS * 0.5 || stats.calls >= CALL_BUDGET * (1 + CALL_OVERRUN_MARGIN),
     });
     console.log(`  funds: ${funds.status}` + (funds.counts ? ` — ${funds.counts.read} of ${funds.counts.listed} read` : ""));
+    if (funds.reads) stages.detail(fundsDetail(funds.reads));
   }, (error) => {
     console.warn(`  funds: ${error.message}`);
   });

@@ -2,8 +2,9 @@ import { read, rowsOf } from "./common.mjs";
 import { pathFor } from "../../shared/flows-vendor-ops.js";
 import { sectorEtfsDay } from "../../shared/flows-live.js";
 import {
-  FLOOR_FUNDS, FUNDS_FALLBACK_MAX, FUNDS_INFO_ROTATE, carryMeta, fitFunds, fundActivity, metaFrom, missingAfter,
-  planFallback, readList, rotationPlan,
+  DESC_READS, FLOOR_FUNDS, FUNDS_FALLBACK_MAX, FUNDS_INFO_ROTATE, carryBackoff, carryMeta, fitFunds, flowMeta, fundActivity,
+  heldBy, infoMeta, metaFrom, missOf, missingAfter, noteMiss, planFallback, readList, readOutcome, rotationCandidates, rotationPlan,
+  tallyOutcomes, weightsMeta,
 } from "../../shared/flows-floor-funds.js";
 
 const DIR_REFRESH_DAYS = 7;
@@ -52,23 +53,6 @@ export async function runFundsLeg({
     });
   }
 
-  const priorMeta = prior && prior.meta && typeof prior.meta === "object" ? prior.meta : {};
-  const meta = carryMeta(priorMeta, session);
-  const due = stop() ? [] : rotationPlan({ prior: priorMeta, today: session, list, cap: rotate });
-  if (due.length) {
-    await run(due, async (t) => {
-      calls.info++; calls.weights++; calls.flow++;
-      const [info, weights, flow] = await Promise.all([
-        read(uw, pathFor("etf-info", { ticker: t }), {}),
-        read(uw, pathFor("etf-weights", { ticker: t }), {}),
-        read(uw, pathFor("etf-in-outflow", { ticker: t }), {}),
-      ]);
-      if (!info.ok && !weights.ok && !flow.ok) return;
-      const m = metaFrom({ at: readAt, info: info.ok ? info.body : null, weights: weights.ok ? weights.body : null, flow: flow.ok ? flow.body : null, prior: meta.get(t) || null });
-      if (m) meta.set(t, m);
-    });
-  }
-
   let dir = prior && prior.dir && typeof prior.dir === "object" ? prior.dir : null;
   const dirAge = dir && isDay(dir.at) ? dayN(session) - dayN(dir.at) : Infinity;
   if (dirAge >= DIR_REFRESH_DAYS && !stop()) {
@@ -79,8 +63,53 @@ export async function runFundsLeg({
   }
   if (dir && Array.isArray(dir.absent)) for (const t of dir.absent) if (!reasons.has(t) || reasons.get(t) === "over_cap") reasons.set(t, "not_listed");
 
+  const priorMeta = prior && prior.meta && typeof prior.meta === "object" ? prior.meta : {};
+  const meta = carryMeta(priorMeta, session);
+  const cand = rotationCandidates({ list, absent: dir && Array.isArray(dir.absent) ? dir.absent : [] });
+  const backoff = carryBackoff(prior && prior.backoff, cand.list);
+  const held = cand.list.filter((t) => heldBy(backoff[t], session)).length;
+  const due = stop() ? [] : rotationPlan({ prior: priorMeta, today: session, list: cand.list, backoff, cap: rotate });
+  const perFund = [];
+  if (due.length) {
+    await run(due, async (t) => {
+      calls.info++; calls.weights++; calls.flow++;
+      const [info, weights, flow] = await Promise.all([
+        read(uw, pathFor("etf-info", { ticker: t }), {}),
+        read(uw, pathFor("etf-weights", { ticker: t }), {}, { envelope: true }),
+        read(uw, pathFor("etf-in-outflow", { ticker: t }), {}),
+      ]);
+      const outcomes = {
+        info: readOutcome(info, info.ok && Object.keys(infoMeta(info.body)).length > 0),
+        weights: readOutcome(weights, weights.ok && Object.keys(weightsMeta(weights.body)).length > 0),
+        flow: readOutcome(flow, flow.ok && Object.keys(flowMeta(flow.body)).length > 0),
+      };
+      perFund.push(outcomes);
+      const miss = missOf(outcomes);
+      if (miss) backoff[t] = noteMiss(backoff[t], session, miss);
+      else delete backoff[t];
+      if (!info.ok && !weights.ok && !flow.ok) return;
+      const m = metaFrom({ at: readAt, info: info.ok ? info.body : null, weights: weights.ok ? weights.body : null, flow: flow.ok ? flow.body : null, prior: meta.get(t) || null });
+      if (m) meta.set(t, m);
+    });
+  }
+  const tally = tallyOutcomes(perFund);
+  const found = perFund.filter((o) => !missOf(o)).length;
+  const reads = { asked: due.length, found, missed: due.length - found, held, root: cand.root.length, unlisted: cand.unlisted.length, ...tally };
+
   const block = fundActivity({ session, readAt, screener, sectorEtfs, volume, reasons, meta, mode });
   if (dir) block.dir = dir;
   block.calls = calls;
+  block.backoff = backoff;
+  block.reads = reads;
   return fitFunds(block);
+}
+
+export function fundsDetail(reads) {
+  if (!reads || typeof reads !== "object") return {};
+  const part = (r) => {
+    const t = reads[r] || {};
+    const bits = Object.entries(t).filter(([, n]) => n > 0).map(([o, n]) => `${o} ${n}`);
+    return `${r} ${bits.length ? bits.join(", ") : "none"}`;
+  };
+  return { desc: `asked ${reads.asked}, held ${reads.held}, skipped ${reads.root + reads.unlisted}; ${DESC_READS.map(part).join("; ")}` };
 }

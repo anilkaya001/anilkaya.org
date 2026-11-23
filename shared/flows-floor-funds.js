@@ -18,7 +18,18 @@ export const ROOT_ALIAS = Object.freeze({ SPXW: "SPX", NDXP: "NDX", RUTW: "RUT",
 export const FUNDS_FALLBACK_MAX = 24;
 export const FUNDS_INFO_ROTATE = 12;
 export const FUNDS_META_MAX_AGE_DAYS = 14;
-export const FUNDS_BLOCK_BYTES = 16 * 1024;
+export const FUNDS_BLOCK_BYTES = 32 * 1024;
+export const FUNDS_ROTATE_SKIP = Object.freeze(["Index options"]);
+export const FUNDS_BACKOFF_MAX_DAYS = 28;
+export const FUNDS_BACKOFF_MAX_MISSES = 99;
+export const DESC_READS = Object.freeze(["info", "weights", "flow"]);
+export const DESC_OUTCOMES = Object.freeze(["ok", "empty", "refused", "limited", "failed"]);
+export const BACKOFF_WHY = Object.freeze({
+  empty: "The feed's description reads for this fund gave nothing usable.",
+  refused: "The feed refused every description read for this fund.",
+  limited: "The feed's rate limit stopped this fund's description reads.",
+  failed: "This fund's description reads failed.",
+});
 export const FUNDS_SWITCH = "FLOWS_FLOOR_FUNDS";
 
 export const SOURCE_ORDER = Object.freeze(["screener", "sector-etfs", "options-volume"]);
@@ -197,11 +208,24 @@ export function liveRows(screenerRows, session) {
 
 const bytesOf = (v) => new TextEncoder().encode(JSON.stringify(v)).length;
 
+const SHED_STEPS = Object.freeze([["ctry"], ["sec"], ["name", "issuer", "n", "flow"]]);
+
 export function fitFunds(block, maxBytes = FUNDS_BLOCK_BYTES) {
   if (!block || typeof block !== "object" || !block.meta || bytesOf(block) <= maxBytes) return block;
-  const meta = { ...block.meta };
-  const order = Object.keys(meta).sort((a, b) => (String(meta[a] && meta[a].at || "") < String(meta[b] && meta[b].at || "") ? -1 : 1));
+  const meta = {};
+  for (const [t, m] of Object.entries(block.meta)) meta[t] = m && typeof m === "object" ? { ...m } : m;
+  const atOf = (t) => String(meta[t] && meta[t].at || "");
+  const order = Object.keys(meta).sort((a, b) => (atOf(a) === atOf(b) ? (a < b ? -1 : 1) : atOf(a) < atOf(b) ? -1 : 1));
   let shed = 0;
+  for (const keys of SHED_STEPS) {
+    for (const t of order) {
+      const m = meta[t];
+      if (!m || typeof m !== "object" || !keys.some((k) => k in m)) continue;
+      for (const k of keys) delete m[k];
+      shed++;
+      if (bytesOf({ ...block, meta }) <= maxBytes) return { ...block, meta, shed };
+    }
+  }
   for (const t of order) {
     delete meta[t];
     shed++;
@@ -210,17 +234,23 @@ export function fitFunds(block, maxBytes = FUNDS_BLOCK_BYTES) {
   return { ...block, meta: {}, shed };
 }
 
-export function metaFrom({ at, info, weights, flow, prior }) {
-  const m = { at };
-  const body = (b) => (b && typeof b === "object" && b.data && typeof b.data === "object" && !Array.isArray(b.data) ? b.data : b);
-  const i = body(info);
+const bodyOf = (b) => (b && typeof b === "object" && b.data && typeof b.data === "object" && !Array.isArray(b.data) ? b.data : b);
+
+export function infoMeta(info) {
+  const m = {};
+  const i = bodyOf(info);
   if (i && typeof i === "object") {
     if (typeof i.name === "string" && i.name) m.name = i.name.slice(0, 80);
     if (typeof i.etf_company === "string" && i.etf_company) m.issuer = i.etf_company.slice(0, 40);
     const n = amount(i.holdings_count, true);
     if (n.v !== null) m.n = n.v;
   }
-  const w = body(weights);
+  return m;
+}
+
+export function weightsMeta(weights) {
+  const m = {};
+  const w = bodyOf(weights);
   const top = (list, key) => (Array.isArray(list)
     ? list.map((x) => [x && x[key], amount(x && x.weight, false).v]).filter((x) => typeof x[0] === "string" && x[0] && x[1] !== null && x[0] !== "Other")
       .sort((a, b) => b[1] - a[1]).slice(0, 3).map((x) => [x[0].slice(0, 40), Math.round(x[1] * 10000) / 10000])
@@ -230,17 +260,77 @@ export function metaFrom({ at, info, weights, flow, prior }) {
     if (sec.length) m.sec = sec;
     if (ctry.length) m.ctry = ctry;
   }
+  return m;
+}
+
+export function flowMeta(flow) {
   const flows = rowsOf(flow).filter((r) => r && typeof r.date === "string" && DAY_RE.test(r.date) && Number.isFinite(Number(r.change)));
-  if (flows.length) {
-    const last = flows.slice().sort((a, b) => (a.date < b.date ? 1 : -1))[0];
-    m.flow = { d: last.date, sh: Math.round(Number(last.change)) };
-  }
+  if (!flows.length) return {};
+  const last = flows.slice().sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+  return { flow: { d: last.date, sh: Math.round(Number(last.change)) } };
+}
+
+export function metaFrom({ at, info, weights, flow, prior }) {
+  const m = { at, ...infoMeta(info), ...weightsMeta(weights), ...flowMeta(flow) };
   const base = prior && typeof prior === "object" ? prior : {};
   if (Object.keys(m).length === 1) return Object.keys(base).length ? base : null;
   return { ...base, ...m };
 }
 
-export function rotationPlan({ prior = {}, today, list = readList(), cap = FUNDS_INFO_ROTATE, maxAgeDays = FUNDS_META_MAX_AGE_DAYS }) {
+const dayNum = (d) => Math.floor(Date.parse(d + "T00:00:00Z") / 86400000);
+const dayStr = (n) => new Date(n * 86400000).toISOString().slice(0, 10);
+
+export function rotationCandidates({ list = readList(), absent = [] } = {}) {
+  const skip = new Set(FUNDS_ROTATE_SKIP.flatMap((c) => FLOOR_FUNDS.other[c] || []));
+  const gone = new Set(Array.isArray(absent) ? absent : []);
+  const root = list.filter((t) => skip.has(t));
+  const unlisted = list.filter((t) => !skip.has(t) && gone.has(t));
+  return { list: list.filter((t) => !skip.has(t) && !gone.has(t)), root, unlisted };
+}
+
+export const backoffDays = (k) => Math.min(FUNDS_BACKOFF_MAX_DAYS, 2 ** (Math.max(1, k) - 1));
+
+export const heldBy = (entry, today) => Boolean(entry && typeof entry.next === "string" && DAY_RE.test(entry.next) && entry.next > today);
+
+export function noteMiss(prev, today, why) {
+  const k = why === "failed" || why === "limited" ? 1 : Math.min(FUNDS_BACKOFF_MAX_MISSES, ((prev && Number.isInteger(prev.k) && prev.k > 0) ? prev.k : 0) + 1);
+  return { k, next: dayStr(dayNum(today) + backoffDays(k)), why };
+}
+
+export function carryBackoff(prior, list = readList()) {
+  const out = {};
+  if (!prior || typeof prior !== "object") return out;
+  for (const t of list) {
+    const e = prior[t];
+    if (e && typeof e === "object" && Number.isInteger(e.k) && e.k > 0 && e.k <= FUNDS_BACKOFF_MAX_MISSES
+      && typeof e.next === "string" && DAY_RE.test(e.next) && Object.prototype.hasOwnProperty.call(BACKOFF_WHY, e.why)) out[t] = { k: e.k, next: e.next, why: e.why };
+  }
+  return out;
+}
+
+export function readOutcome(result, usable) {
+  if (result && result.ok) return usable ? "ok" : "empty";
+  const s = result && result.status;
+  if (s === 429) return "limited";
+  if (s === 400 || s === 401 || s === 402 || s === 403 || s === 404 || s === 422) return "refused";
+  return "failed";
+}
+
+export function missOf(outcomes) {
+  const list = Object.values(outcomes || {});
+  if (list.includes("ok")) return null;
+  for (const w of ["failed", "limited", "empty"]) if (list.includes(w)) return w;
+  return "refused";
+}
+
+export function tallyOutcomes(perFund) {
+  const out = {};
+  for (const r of DESC_READS) out[r] = Object.fromEntries(DESC_OUTCOMES.map((o) => [o, 0]));
+  for (const outcomes of perFund) for (const r of DESC_READS) if (outcomes && outcomes[r] && out[r][outcomes[r]] !== undefined) out[r][outcomes[r]]++;
+  return out;
+}
+
+export function rotationPlan({ prior = {}, today, list = rotationCandidates().list, backoff = {}, cap = FUNDS_INFO_ROTATE, maxAgeDays = FUNDS_META_MAX_AGE_DAYS }) {
   const dayN = (d) => Math.floor(Date.parse(d + "T00:00:00Z") / 86400000);
   const t0 = DAY_RE.test(String(today)) ? dayN(today) : null;
   const age = (t) => {
@@ -249,7 +339,7 @@ export function rotationPlan({ prior = {}, today, list = readList(), cap = FUNDS
     if (!at || !DAY_RE.test(at) || t0 === null) return Infinity;
     return t0 - dayN(at);
   };
-  const due = list.filter((t) => age(t) >= maxAgeDays - 1);
+  const due = list.filter((t) => age(t) >= maxAgeDays - 1 && !heldBy(backoff[t], today));
   due.sort((a, b) => (age(b) === age(a) ? (a < b ? -1 : 1) : age(b) > age(a) ? 1 : -1));
   return due.slice(0, cap);
 }
