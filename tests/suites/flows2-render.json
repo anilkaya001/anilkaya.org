@@ -1,0 +1,1 @@
+{"name": "flows2-render", "class": "N", "group": "shard", "timing": false, "medianS": 80, "shard": 9, "command": "node flows2-render.mjs", "files": ["flows2-render.mjs"], "covers": ["assets/css/flows2.css","assets/js/flows2.js","scripts/flows-pipeline.mjs","wrangler.toml"]}

@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "447";
+export const ASSET_VERSION = "448";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -247,7 +247,7 @@ const sidebar = (active, username) => {
       <a href="/">Home</a><a href="/articles/">Articles</a><a href="/lab/">Lab</a><a href="/flows/" aria-current="true">Flows</a>
     </nav>
     <nav class="fx-site" aria-label="About Flows">
-      <a href="/flows/about/">About</a><a href="/flows/glossary/">Glossary</a>
+      <a href="/flows/2/">Flows 2</a><a href="/flows/about/">About</a><a href="/flows/glossary/">Glossary</a>
     </nav>
     ${brandMark(active === "status" ? BRAND_OWNER : BRAND_MEMBER)}
     <div class="fx-who">
@@ -485,6 +485,7 @@ export function aboutPage({ positioning = false } = {}) {
       <li><strong>Market.</strong> The session tide, breadth, sectors, index ETFs, expiries and volatility, with the market-wide feeds.</li>
       <li><strong>Moves.</strong> Every name's move today against its own typical day and against the day its options implied, with how often a move that size has happened in the last year, and each sector&#39;s median move beside the list of names.</li>
       <li><strong>Rotation.</strong> Twelve funds placed by price against each other: how far each sits from its own norm and how fast that gap is moving, from stored daily closes. A state is named only when every window agrees.</li>
+      <li><strong>Flows 2.</strong> The first view of the next design: the whole session on one screen, from the same stored figures the other pages read.</li>
       <li><strong>Unusual.</strong> The option windows the feed flagged, drawn as a flow network from sector through the side of the quote and name to lean, and the contracts trading far above their open interest.</li>
       <li><strong>Flow Lab.</strong> The contracts behind a name's flow: a screener ranked by the site's own ratios, strike and Greek flow, price ladders, routing, lit prints and group flow, each with its unit or a dash and the reason.</li>
       <li><strong>Ledger.</strong> The flagged option premium booked as a closed ledger: takers on one side, liquidity providers on the other, so every row and column sums to zero. It sets each sector's share against its market-cap share, with the bounds it can prove.</li>
@@ -1211,6 +1212,42 @@ export function movesPage({ username = "" } = {}) {
   });
 }
 
+export function flows2Page({ username = "" } = {}) {
+  return flowsDocument({
+    title: "Flows 2",
+    description: "The session on one screen: whole-session premium, the tide, volatility, sectors, alerts, movers, the brief, news and what reports next.",
+    active: "flows2",
+    username,
+    chrome: false,
+    styles: ["/assets/css/flows2.css"],
+    scripts: ["/assets/js/flows2.js"],
+    body: `
+  <p class="visually-hidden" id="f2Status" role="status">Loading the session\u2026</p>
+  <div class="f2" id="f2">
+    <div class="f2-title" data-fx-hero>
+      <h1 id="fxTitle">Now</h1>
+      <div class="f2-stamp" id="f2Stamp"></div>
+      <span class="f2-chip">Flows 2 \u00b7 first view</span>
+    </div>
+    <div class="f2-seg" role="tablist" aria-label="Panels" id="f2Seg">
+      <button type="button" role="tab" aria-selected="true" data-v="a">Session</button><button type="button" role="tab" aria-selected="false" data-v="b">Flow</button><button type="button" role="tab" aria-selected="false" data-v="c">Ahead</button>
+    </div>
+    <div class="f2-grid" id="f2Grid" data-view="a">
+      <section class="f2-pane" data-a="hero" aria-labelledby="f2heroT"><div class="f2-ph"><h2 id="f2heroT">Session premium</h2><span class="f2-ps" id="f2heroS">Every option dollar the feed reports for the session</span></div><div class="f2-pb" id="f2hero"></div></section>
+      <section class="f2-pane" data-a="tide" aria-labelledby="f2tideT"><div class="f2-ph"><h2 id="f2tideT">Tide</h2><span class="f2-ps" id="f2tideS">The feed's running net call premium less net put premium</span></div><div class="f2-pb" id="f2tide"></div></section>
+      <section class="f2-pane" data-a="vol" aria-labelledby="f2volT"><div class="f2-ph"><h2 id="f2volT">Volatility</h2><span class="f2-ps" id="f2volS">Implied volatility across the screened names</span></div><div class="f2-pb" id="f2vol"></div></section>
+      <section class="f2-pane" data-a="map" aria-labelledby="f2mapT"><div class="f2-ph"><h2 id="f2mapT">Sectors</h2><span class="f2-ps" id="f2mapS">Net option premium by sector</span></div><div class="f2-pb" id="f2map"></div></section>
+      <section class="f2-pane" data-a="sig" aria-labelledby="f2sigT"><div class="f2-ph"><h2 id="f2sigT">Alerts</h2><span class="f2-ps" id="f2sigS">An alert is a short window of trading the feed flagged as unusual</span></div><div class="f2-pb" id="f2sig"></div></section>
+      <section class="f2-pane" data-a="mov" aria-labelledby="f2movT"><div class="f2-ph"><h2 id="f2movT">Movers</h2><span class="f2-ps" id="f2movS">Largest price changes among screened names</span></div><div class="f2-pb" id="f2mov"></div></section>
+      <section class="f2-pane" data-a="brief" aria-labelledby="f2briefT"><div class="f2-ph"><h2 id="f2briefT">Brief</h2><span class="f2-ps" id="f2briefS">What the session measured</span></div><div class="f2-pb" id="f2brief"></div></section>
+      <section class="f2-pane" data-a="news" aria-labelledby="f2newsT"><div class="f2-ph"><h2 id="f2newsT">News</h2><span class="f2-ps" id="f2newsS">Latest headlines</span></div><div class="f2-pb" id="f2news"></div></section>
+      <section class="f2-pane" data-a="next" aria-labelledby="f2nextT"><div class="f2-ph"><h2 id="f2nextT">Reporting next</h2><span class="f2-ps" id="f2nextS">Earnings ahead</span></div><div class="f2-pb" id="f2next"></div></section>
+    </div>
+  </div>
+`,
+  });
+}
+
 export function rotationPage({ username = "" } = {}) {
   return flowsDocument({
     title: "Rotation",
@@ -1828,6 +1865,6 @@ export function positioningNav(html, on, slug) {
 export const FLOWS_PAGES = {
   loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, networkPage, nowPage, deskPage,
   politicalPage, positioningPage,
-  tickerPage, unusualPage, movesPage, rotationPage, flowlabPage, ledgerPage, macroPage, statusPage, eventsPage, strategyPage, firePage, inboxPage, digestPage, wiresPage, ffPendingPage, ASSET_VERSION,
+  tickerPage, unusualPage, movesPage, rotationPage, flows2Page, flowlabPage, ledgerPage, macroPage, statusPage, eventsPage, strategyPage, firePage, inboxPage, digestPage, wiresPage, ffPendingPage, ASSET_VERSION,
 };
 

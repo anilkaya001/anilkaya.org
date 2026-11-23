@@ -133,6 +133,7 @@ const SPECS = [
   { id: "events", fn: "eventsPage", url: "/flows/events/" },
   { id: "moves", fn: "movesPage", url: "/flows/moves/" },
   { id: "rotation", fn: "rotationPage", url: "/flows/rotation/" },
+  { id: "flows2", fn: "flows2Page", url: "/flows/2/" },
   { id: "political", fn: "politicalPage", url: "/flows/political/" },
   { id: "political-layers", fn: "politicalPage", args: { layers: true }, url: "/flows/political/" },
   { id: "positioning", fn: "positioningPage", url: "/flows/positioning/" },
