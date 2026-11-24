@@ -166,7 +166,9 @@ async function runLiveMode() {
     return loop;
   };
   if (force || process.env.FLOWS_LIVE_LOOP !== "1") {
-    const clock = force ? null : await readClock();
+    const current = await readClock();
+    if (current && current.liveOwner === "worker") return { skipped: "worker-owner" };
+    const clock = force ? null : current;
     const result = await runLive({ uw, publish, readStored, shapeNews, origin, force, clock, universe });
     settle({ passes: [reportErrors(result)] });
     return result;

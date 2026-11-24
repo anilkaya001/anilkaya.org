@@ -14,8 +14,8 @@ import { fitGarch } from "../../shared/flows-garch.js";
 import { pathFor } from "../../shared/flows-vendor-ops.js";
 import { unwrapRows as unwrapVendorRows } from "../../shared/flows-political.js";
 import { yearOfCandles } from "../flows-legs/vol.mjs";
-import { newsFields } from "../../shared/flows-news.js";
-import { IV_RANK_PARAMS, NEWS_VENDOR_LIMIT, UNIVERSE } from "./vendor-params.mjs";
+export { NEWS_ROWS, shapeNews } from "../../shared/flows-news.js";
+import { IV_RANK_PARAMS, UNIVERSE } from "./vendor-params.mjs";
 import { readFailure, uw } from "./vendor.mjs";
 import { ARCHIVE_DATE_RE } from "./store.mjs";
 
@@ -1355,54 +1355,6 @@ export function holdersRefusal(prior, sessionDate, { days = HOLDERS_RETRY_DAYS }
     reason: `not requested this run: the feed answered this route with HTTP ${status[1]}, ` +
       `refused since ${first}, and a refusal that is a property of the plan is not bought ` +
       `again every night — it is asked once more ${days} days after ${first}`,
-  };
-}
-
-export const NEWS_ROWS = 60;
-
-export function shapeNews(raw, { cap = NEWS_ROWS, requested = NEWS_VENDOR_LIMIT } = {}) {
-  const wire = unwrapVendorRows(raw);
-
-  let unusable = 0, undatedSeen = 0;
-  const shaped = [];
-  for (const row of wire) {
-    const fields = newsFields(row);
-    if (fields === null) { unusable++; continue; }
-    if (fields.createdAtMs === null) undatedSeen++;
-    shaped.push(fields);
-  }
-
-  shaped.sort((a, b) => {
-    if (a.createdAtMs === null && b.createdAtMs === null) return 0;
-    if (a.createdAtMs === null) return 1;
-    if (b.createdAtMs === null) return -1;
-    return b.createdAtMs - a.createdAtMs;
-  });
-
-  const rows = shaped.slice(0, cap);
-  const dated = rows.map((r) => r.createdAtMs).filter((ms) => ms !== null);
-
-  return {
-    rows,
-
-    requested, returned: wire.length, kept: rows.length,
-    cap, capped: shaped.length > cap, shed: Math.max(0, shaped.length - cap),
-    atVendorLimit: wire.length >= requested,
-    unusable,
-
-    undatedKept: rows.filter((r) => r.createdAtMs === null).length,
-    undatedSeen,
-
-    newest: dated.length ? new Date(Math.max(...dated)).toISOString() : null,
-    oldest: dated.length ? new Date(Math.min(...dated)).toISOString() : null,
-    ordered: true, orderedBy: "createdAt", orderedDesc: true,
-
-    status: rows.length ? "ok" : (wire.length ? "unreadable" : "quiet"),
-    reason: rows.length
-      ? null
-      : (wire.length
-        ? `the headlines feed returned ${wire.length} row(s) and none carried a headline`
-        : "the headlines feed was read and returned no rows"),
   };
 }
 

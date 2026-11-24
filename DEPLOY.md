@@ -2729,6 +2729,54 @@ not registered, so an old row can never be the ledger's worst lapse. A Tier 2
 job that was already running when the Worker was promoted logs two `invalid_key`
 400s a pass until it ends.
 
+#### 10.5i.1 Cloudflare ownership of Tier 2
+
+`FLOWS_LIVE_MODE=actions` remains the production setting. The existing
+five-minute regular-session Cloudflare cron can own Tier 2 when set to
+`worker`. It runs the same pass as the Actions job through a local D1 adapter,
+claims the scheduled slot once through the existing clock row, and publishes
+only the Tier 2 keys. Its heartbeats have source `worker` and writer
+`worker@tier2`. Five-minute slots older than two minutes are discarded.
+Reads are paced at the existing 333 ms floor with a maximum of four in flight,
+48 per pass and 8 seconds each. Screener bodies are limited to 1.25 MiB
+and other bodies to 384 KiB. A rate-limit response stops
+further calls in the pass. An expired pass leaves any previous blocks in place.
+
+For staging, provision its dedicated D1 database and bindings as in section
+10.6. Leave its committed no-cron config in place for ordinary testing. For a
+temporary scheduled test, apply only the RTH trigger from the production file
+and set `FLOWS_LIVE_MODE=worker` on staging. Validate one full session (including
+an early close or a replay), payloads and timestamps, CPU and memory,
+feed quota, duplicate slots, and a refused feed read. The staging feed entitlement
+and quota must cover both passes if production is reading at the same time.
+Use a permitted fixture for the local contract suites.
+
+For a production switch, confirm the native pass on staging, stop new
+`flows-live.yml` starts and drain running jobs, then change the production mode
+in the deploy owner's configuration. The new Worker refuses Actions live
+writes and suppresses the GitHub Tier 2 dispatch and watchdog. Verify
+`live:heartbeat`, breadth, strips and the alerts cursor over consecutive slots.
+The nightly and the weekly external checks are separate owners. Keep the
+nightly's workflow, configuration and ingest credential in place. For
+rollback, restore `actions`, verify that GitHub writes are accepted, and
+restart the existing live workflow if its runner was disabled.
+
+To move the nightly job, first stage the existing pinned Node entrypoint on
+Cloudflare Containers with the same environment settings, a fixture-only
+initial run, then isolated D1 and a separately authorized feed credential.
+Preserve the scheduled session gate, the archive read and retry behavior, the
+ingest door's batch and fixture checks, and each stage's deadline and
+telemetry. An alternative Workflows port needs persisted intermediate state,
+bounded steps and idempotent stage commits. The current job reads process
+environment and fixture files, keeps mutable vendor retry state, and can
+spend tens of minutes wall-clock across hundreds of feed reads. Compare the
+complete archive, board, cards, history, meta and witness outcomes over
+regular sessions, calendar transitions, partial vendor responses, duplicate
+starts and same-session recovery. Promote one nightly writer only after this
+parity and a rollback drill. Keep GitHub scheduling through the comparison
+and until the native owner can independently start, monitor and recover a
+nightly run.
+
 ### 10.5j The weekly monitors
 
 - **The vendor probe** (`.github/workflows/flows-probe.yml`) runs every Sunday at

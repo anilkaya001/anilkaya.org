@@ -131,7 +131,7 @@ export const LIVE_VENDOR = Object.freeze({ timeoutMs: 20_000, timeoutRetries: 1 
 
 export const NIGHTLY_VENDOR = Object.freeze({ timeoutMs: 30_000, longTimeoutMs: 45_000, timeoutRetries: 1 });
 
-export const NEWS_VENDOR_LIMIT = 100;
+export { NEWS_VENDOR_LIMIT } from "../../shared/flows-news.js";
 
 export const IV_RANK_PARAMS = Object.freeze({ timespan: "1y" });
 

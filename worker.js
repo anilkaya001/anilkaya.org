@@ -28,6 +28,7 @@ import { stateOf, printOf, coherence } from "./shared/flows-basis.js";
 import { etDayOf } from "./shared/flows-quant-time.js";
 import { FRESH_CLASSES, isRefreshWindow, freshHeaders, pendingHeaders, phaseAt, easternDay, sessionOpen, shiftDay } from "./shared/flows-freshness.js";
 import * as FLOWS_LIVE from "./shared/flows-live-worker.js";
+import { tier2Tick } from "./server/flows-live-tier2.js";
 import * as FLOWS_DOSSIER from "./shared/flows-dossier-worker.js";
 import { TICKER_RE } from "./shared/flows-live.js";
 import {
@@ -4273,7 +4274,10 @@ export default {
     if (job === "rth") {
       guard("flows rth tick failed", (async () => {
         await ensureFlowsTables(env);
-        return FLOWS_LIVE.rthTick(env, at, tickVendor(env));
+        await FLOWS_LIVE.rthTick(env, at, tickVendor(env));
+        if (FLOWS_LIVE.liveMode(env) === "worker") {
+          await tier2Tick(env, at, { store: FLOWS_STORE, fetchVendor: (path, params, opts) => uwFetch(env, path, params, opts) });
+        }
       })());
       return;
     }

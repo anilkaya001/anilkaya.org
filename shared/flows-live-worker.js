@@ -229,9 +229,10 @@ export function writeLiveStatement(db, key, text, meta, now) {
 
 const LIVE_ROW_SQL = "SELECT payload, read_at, session, cadence_s, source, writer, updated_at FROM flows_live WHERE id = ?";
 
-export async function readLive(db, key) {
+export async function readLive(db, key, { strict = false } = {}) {
   if (!db) return null;
-  const row = await db.prepare(LIVE_ROW_SQL).bind(key).first().catch(() => null);
+  const query = db.prepare(LIVE_ROW_SQL).bind(key).first();
+  const row = await (strict ? query : query.catch(() => null));
   return row && row.payload ? liveRow(row) : null;
 }
 
@@ -392,6 +393,10 @@ const readWhy = (status) => (status === 200 ? "ok" : status === 401 ? "bad-token
 
 export async function checkDispatchCredential(env, fetchImpl = fetch) {
   const workflow = env.FLOWS_LIVE_WORKFLOW || "flows-live.yml";
+  if (liveMode(env) === "worker") {
+    return { read: { status: null, why: "worker-owner" }, dispatch: { sent: false, status: null, why: "worker-owner" },
+      repo: null, workflow, outcome: null };
+  }
   const target = githubTarget(env);
   if (target.why) {
     return { read: { status: null, why: target.why }, dispatch: { sent: false, status: null, why: target.why }, repo: null, workflow, outcome: null };
@@ -537,16 +542,17 @@ export async function rthTick(env, at, { fetchVendor, fetchImpl = fetch, log = c
     ? ledgerOutcomeStatement(env.DB, { day: today, at, ...tickWindow(today, merged), ok: why === "written",
       failed: TIER1_FAILURES.test(why), stale: worstStale(liveRows, at, merged, LIVE_KEY_IDS), calls, meter: seen })
     : null;
+  const actionsOwnLive = liveMode(env) === "actions";
   const stalled = liveStalled(at, breadthReadAt, merged);
   const again = Number(merged.liveRedispatchedAt);
   const episode = Number.isFinite(again) && again > 0 && at - again < LIVE_CLOCK.watchdogMs;
-  const canDispatch = !!env.GITHUB_DISPATCH_TOKEN;
+  const canDispatch = actionsOwnLive && !!env.GITHUB_DISPATCH_TOKEN;
   let cancel = null;
   if (stalled && canDispatch && !episode) {
     cancel = await cancelHungRun(env, env.FLOWS_LIVE_WORKFLOW || "flows-live.yml", at - LIVE_CLOCK.watchdogMs, fetchImpl);
     out.cancel = cancel;
   }
-  const due = liveDispatchDue(at, merged);
+  const due = actionsOwnLive ? liveDispatchDue(at, merged) : { due: false, why: "worker-owner" };
   if (due.due) {
     const sent = await dispatchWorkflow(env, env.FLOWS_LIVE_WORKFLOW || "flows-live.yml",
       { tick: new Date(at).toISOString(), origin: "worker" }, fetchImpl);
@@ -868,6 +874,9 @@ export async function ingestLive(env, key, method, text, now, { json, host }) {
       "X-Fresh-Read-At": new Date(row.readAt).toISOString(), "X-Fresh-Session": row.session || "",
     } });
   }
+  if (liveMode(env) === "worker") {
+    return json({ error: { code: "wrong_writer", message: "Cloudflare owns Tier 2 writes" } }, 403);
+  }
   let body;
   try { body = JSON.parse(text); } catch {
     return json({ error: { code: "invalid_payload", message: "Payload is not valid JSON" } }, 400);
@@ -1105,6 +1114,7 @@ export async function serveIngestClock(env, { json, lab = false }) {
   const [clock, labActiveAt, ledgerRows] = await Promise.all([readClock(db), lab ? readLabActiveAt(db) : null,
     lab ? readLedgerRows(db) : null]);
   const body = { key: "clock", clock: ingestClockView(clock) };
+  if (liveMode(env) === "worker") body.liveOwner = "worker";
   if (lab) {
     body.labActiveAt = labActiveAt;
     if (ledgerRows) body.ledger = ledgerView(ledgerRows);
