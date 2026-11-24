@@ -1,4 +1,5 @@
 [
+  {"paths":["docs/flows-2-transition-audit.md"],"show":"`docs/flows-2-transition-audit.md`","role":"GitHub-to-Cloudflare cutover inventory for source history, hosted metadata, builds, nightly and live ownership, probes, and the real-data acceptance checks for Flows 2.","domain":"docs"},
   {"paths":["scripts/cloudflare-staging-build.mjs"],"show":"`scripts/cloudflare-staging-build.mjs`","role":"Cloudflare staging build command for a Git checkout. Prints the tested commit and tree, installs the locked dependencies, runs the fast and staging regression checks, prepares assets and validates the staging bundle using the repository Wrangler version.","domain":"worker"},
   {"paths":["index.html"],"show":"`index.html`","role":"Landing page and particle-field hero.","domain":"site"},
   {"paths":["articles/index.html","articles/_template/**"],"show":"`articles/index.html`, `articles/_template/`","role":"Articles index and article template.","domain":"site"},
