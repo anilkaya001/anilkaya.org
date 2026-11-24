@@ -1,4 +1,4 @@
-export const ASSET_VERSION = "447";
+export const ASSET_VERSION = "448";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
 import { RESET_SAID } from "./flows-ai.js";
@@ -529,7 +529,7 @@ export function aboutPage({ positioning = false } = {}) {
   <section aria-labelledby="aAccess">
     <h2 id="aAccess">Access</h2>
     <p>Access is by assigned credential. To ask for one, use the contact links on the <a href="/">home page</a>.</p>
-    <p class="fx-doc-actions"><a class="flows-submit" href="/flows/login/">Sign in</a><a href="/flows/glossary/">Glossary</a></p>
+    <p class="fx-doc-actions"><a class="flows-submit" href="/flows/login/">Sign in</a><a href="/flows/glossary/">Glossary</a><a href="/flows/research/">NVDA price-response research</a></p>
   </section>`);
 }
 
@@ -1383,6 +1383,7 @@ export function tickerPage({ username = "", scenes = false, xcheck = false, priv
       <div class="ft-gchart-h"><h2 id="ftGChartT">Price, levels and the month ahead</h2><span id="ftGTabs"></span><span class="ft-sp"></span><span id="ftGRange"></span><span id="ftGReset"></span></div>
       <div class="ft-glance-chart" id="ftGlanceChart" role="tabpanel"></div>
       <div class="ft-gsurf" id="ftGSurf" role="tabpanel" hidden></div>
+      <p class="ft-research-link"><a href="/flows/research/">Explore the NVDA scenario map</a> </p>
     </section>
     <section class="ft-rail nn-host" data-nn="off" id="ftReadRail" aria-labelledby="ftReadRailT" hidden></section>
   </div>

@@ -1,3 +1,4 @@
+import { researchPage } from "../shared/flows-research-page.js";
 import assert from "node:assert/strict";
 import * as K from "../server/http.js";
 import { createRouter } from "../server/router.js";
@@ -17,7 +18,7 @@ const table = createRouter(flowsPageRows(STUB));
 
 const SLUGS = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "rotation", "flowlab", "unusual", "ledger", "macro", "events", "political", "positioning", "status", "fire", "inbox", "digest", "wires"];
 eq(FLOWS_PAGE_SLUGS, SLUGS, "the page list is the gated pages in their old order, the Network and Flagged now pop-outs after Market, the owner-gated moves and Flow Lab pages before unusual, and the four Fire & Forget pages last");
-eq(FLOWS_PUBLIC_SLUGS, ["about", "glossary"], "and the public front door is the two pages a signed-out reader gets");
+eq(FLOWS_PUBLIC_SLUGS, ["about", "glossary", "research"], "the public front door admits the recorded-data research page");
 const expectedPaths = ["/flows", "/flows/login/"];
 for (const slug of SLUGS) {
   expectedPaths.push("/flows/" + (slug ? slug + "/" : ""));
@@ -27,7 +28,7 @@ for (const slug of FLOWS_PUBLIC_SLUGS) expectedPaths.push("/flows/" + slug + "/"
 eq(FLOWS_GONE_SLUGS, ["ask", "track", "history"], "the removed pages are Ask, Track and History");
 const gonePaths = FLOWS_GONE_SLUGS.flatMap((slug) => ["/flows/" + slug + "/", "/flows/" + slug]);
 expectedPaths.push(...gonePaths);
-eq(table.rows.map((r) => r.path), expectedPaths, "the family is /flows, the login page, each page and each page's bare form, the two public pages and their bare forms, then the removed pages in both forms");
+eq(table.rows.map((r) => r.path), expectedPaths, "the family is /flows, the login page, each page and each page's bare form, the public pages and their bare forms, then the removed pages in both forms");
 ok(table.rows.every((r) => r.auth === "none" && r.methods.join() === "GET,HEAD"), "every row is GET and HEAD with no gate: an anonymous visitor gets the login page, not a 401");
 ok(new Set(table.rows.map((r) => r.id)).size === table.rows.length && table.rows.every((r) => r.id.startsWith("flows.pages.")), "ids are unique and namespaced");
 eq(table.rows.filter((r) => r.path.length > "/flows/".length && !r.path.endsWith("/")).map((r) => r.path.slice("/flows/".length)),
@@ -79,6 +80,7 @@ function oldChain(path, rc, d) {
     const FLOWS_PUBLIC = {
       "/flows/about/": () => FLOWS_PAGES.aboutPage({ positioning: posWord(env) === "on" }),
       "/flows/glossary/": () => FLOWS_PAGES.glossaryPage(),
+      "/flows/research/": () => researchPage(),
     };
     if (Object.hasOwn(FLOWS_PUBLIC, path) && String(env.FLOWS_FRONT_DOOR || "on").trim().toLowerCase() !== "off") {
       requireMethod(request, ["GET", "HEAD"]);
@@ -147,7 +149,7 @@ function oldChain(path, rc, d) {
         || path === "/flows/moves" || path === "/flows/rotation" || path === "/flows/flowlab" || path === "/flows/unusual" || path === "/flows/ledger" || path === "/flows/macro" || path === "/flows/events"
         || path === "/flows/political" || path === "/flows/positioning"
         || path === "/flows/strategy"
-        || path === "/flows/status" || path === "/flows/about" || path === "/flows/glossary"
+        || path === "/flows/status" || path === "/flows/about" || path === "/flows/glossary" || path === "/flows/research"
         || path === "/flows/fire" || path === "/flows/inbox" || path === "/flows/digest" || path === "/flows/wires") {
       requireMethod(request, ["GET", "HEAD"]);
       return redirect(new URL(path + "/", url).toString(), 308);
@@ -208,7 +210,7 @@ for (const path of PATHS) {
           const got = await outcome(() => router.handle(a.rc, { flows: async () => assert.fail("the page rows never consult the Flows gate") }));
           const want = await outcome(() => oldChain(path, b.rc, b.sc.deps));
           const key = `${method} ${path}${q} ${user && user.username} ${JSON.stringify(env)}`;
-          const publicOff = isOff(env) && (path === "/flows/about/" || path === "/flows/glossary/");
+          const publicOff = isOff(env) && (path === "/flows/about/" || path === "/flows/glossary/" || path === "/flows/research/");
           if (gonePaths.includes(path)) {
             eq(want, { fell: true }, key + ": the chain had no row for a removed page and answered it with the unknown-page 404");
             if (method === "GET" || method === "HEAD") eq([got.status, got.headers.find((h) => h[0] === "location")], [308, ["location", "https://anilkaya.org/flows/"]], key + ": a removed page is a 308 to Flows home");

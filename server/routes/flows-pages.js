@@ -1,3 +1,4 @@
+import { researchPage } from "../../shared/flows-research-page.js";
 import { HttpError, redirect } from "../http.js";
 import { FLOWS_PAGES, ffSlots, fireNav, ownerNav, macroNav, oracleShell, positioningNav, sideShell } from "../../shared/flows-pages.js";
 import { ROUTE_FLAGS, flagOn, modeOf as ffMode } from "../ff-health.js";
@@ -73,6 +74,7 @@ const PAGES = Object.freeze([
 const PUBLIC_PAGES = Object.freeze([
   { slug: "about", render: (env) => FLOWS_PAGES.aboutPage({ positioning: positioningWord(env) === "on" }) },
   { slug: "glossary", render: () => FLOWS_PAGES.glossaryPage() },
+  { slug: "research", render: () => researchPage() },
 ]);
 
 export const FLOWS_PAGE_SLUGS = Object.freeze(PAGES.map((page) => page.slug));
