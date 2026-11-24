@@ -1045,7 +1045,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
     "vendor-params.mjs": [
       "UNIVERSE", "RATE", "CALL_COST", "NOMINAL_SHAPE", "callModel", "CALL_BUDGET", "CALL_OVERRUN_MARGIN",
       "EARNINGS_GATE_DAYS", "SCREENER_PAGE_ROWS", "SCREENER_SPLIT_DEPTH", "DEEP_NAMES", "MARKET_CROSS_LIMIT",
-      "DEEP_RULE", "deepNames", "DEADLINE_MS", "LIVE_VENDOR", "NIGHTLY_VENDOR", "NEWS_VENDOR_LIMIT", "ALERT_VENDOR_LIMIT",
+      "DEEP_RULE", "deepNames", "DEADLINE_MS", "LIVE_VENDOR", "NIGHTLY_VENDOR", "ALERT_VENDOR_LIMIT",
       "IV_RANK_PARAMS", "CHAIN_RESERVE_MS",
     ],
     "vendor.mjs": [
@@ -1079,7 +1079,7 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
       "BOARD_SCHEMA_VERSION", "scoreBoard", "partitionSides", "B64", "packSpark", "boardRow", "hz", "toRows",
       "WATCH_ROWS", "toWatchRows", "selectExtremes", "MOVER_ROWS", "netPremiumOf", "moverRow", "buildMovers",
       "SECTOR_ETFS", "TRIX_SPAN", "TRIX_SERIES", "TRIX_WARMUP", "TRIX_MIN_CANDLES", "ema", "trixSeriesBp",
-      "TRIX_FULL_SCALE_BP", "scaleTrix", "sectorTrix", "sectorLean", "NEWS_ROWS", "shapeNews", "HOLDERS_RETRY_DAYS",
+      "TRIX_FULL_SCALE_BP", "scaleTrix", "sectorTrix", "sectorLean", "HOLDERS_RETRY_DAYS",
       "holdersRefusal", "unusualContractId", "markNewContracts", "priorNote", "ideasPayload", "congressRows",
       "tickFieldsReported", "greekFieldsReported", "TICK_FIELDS_READ", "describeTickFields", "enrich", "readDeepFeeds",
     ],
@@ -1134,6 +1134,16 @@ const deep = (a, b, msg) => { assert.deepEqual(a, b, msg); checks++; };
   };
   const whole = nightlySource();
   const decl = (name) => new RegExp("^(?:export )?(?:async )?(?:function|const|let|class) " + name + "\\b", "gm");
+  const news = moduleSource("shared/flows-news.js");
+  for (const [home, names] of [["vendor-params.mjs", ["NEWS_VENDOR_LIMIT"]], ["rank.mjs", ["NEWS_ROWS", "shapeNews"]]]) {
+    const reexport = `export { ${names.join(", ")} } from "../../shared/flows-news.js";`;
+    ok(moduleSource(NIGHTLY + home).includes(reexport), home + " keeps its nightly news exports");
+    for (const name of names) {
+      expect(whole + "\n" + news, decl(name), { min: 1, max: 1, why: name + " is declared once for both writers" });
+      expect(news, decl(name), { min: 1, max: 1, why: name + " lives in the shared news builder" });
+      checks += 2;
+    }
+  }
   let homed = 0;
   for (const [file, names] of Object.entries(HOME)) {
     const src = moduleSource(NIGHTLY + file);

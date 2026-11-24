@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { fakeFlowAlerts } from "../scripts/flows-legs/live-fake.mjs";
 import { ROUTES, TEMPLATES } from "../shared/ff-contract.js";
 import { FF_TABLES } from "../shared/ff-schema.js";
 import { prepareVersion } from "../shared/ff-grammar.js";
@@ -59,6 +60,49 @@ const postLive = (worker, env, body, extra = {}) => send(worker, env, "/api/flow
 const liveEnv = { FLOWS_LIVE_TOKEN: LIVE_TOKEN };
 
 const GROUPS = {
+  async native(load, R, clock) {
+    const worker = await load();
+    const scheduledTime = clock.set("2026-10-26T15:01:00Z");
+    const { f, env } = world({ env: { FLOWS_LIVE_MODE: "worker", UW_API_KEY: "test-only" } });
+    f.db.prepare("INSERT INTO flows_clock (id, day, trading, early_close) VALUES (1, ?, 1, 0)").run(MONDAY);
+    const originalFetch = globalThis.fetch;
+    const alerts = fakeFlowAlerts({ tickers: ["NVDA"], count: 1, session: MONDAY, now: scheduledTime });
+    let alertReads = 0;
+    globalThis.fetch = async (url) => {
+      clock.at += 400;
+      if (new URL(url).pathname === "/api/option-trades/flow-alerts") {
+        alertReads++;
+        return Response.json(alerts);
+      }
+      return Response.json({ data: [] });
+    };
+    const tick = async (at) => {
+      const pending = [];
+      await worker.scheduled({ cron: "1-59/5 13-21 * * MON-FRI", scheduledTime: at }, env, { waitUntil: (p) => pending.push(p) });
+      for (const p of pending) await p;
+    };
+    try {
+      await tick(scheduledTime);
+      R.eq("native", rows(f, "SELECT source, writer FROM flows_live WHERE id = 'live:alerts'"),
+        [{ source: "worker", writer: "worker@tier2" }], "the actual native scheduled entry committed its alerts row to SQLite");
+      R.eq("native", rows(f, "SELECT id, status FROM ff_run"), [{ id: "live:" + MONDAY, status: "done" }],
+        "the committed native row started the shared evaluator in the same cron lifetime");
+      const firstReads = alertReads;
+      const from = f.trips.length;
+      await tick(scheduledTime);
+      R.eq("native", [alertReads, ffSql(f, from)], [firstReads, []], "a duplicate slot spends no Tier 2 feed read and starts no evaluation");
+      const later = scheduledTime + 300000;
+      clock.set(later);
+      f.db.prepare("UPDATE flows_live SET read_at = ? WHERE id = 'live:alerts'").run(later + 60000);
+      const second = f.trips.length;
+      await tick(later);
+      R.ok("native", alertReads > firstReads, "the next five-minute slot did run a fresh feed pass");
+      R.eq("native", ffSql(f, second), [], "an alerts write older than the held read starts no evaluation");
+    } finally {
+      globalThis.fetch = originalFetch;
+      f.db.close();
+    }
+  },
   async routes(load, R, clock) {
     clock.set(MON_RTH);
     const worker = await load();
@@ -495,16 +539,18 @@ const GROUPS = {
 };
 
 const MUTANTS = [
+  { name: "the native owner drops the post-commit live evaluation", group: "native", target: "worker.js",
+    transforms: [['if (pass.alertsWritten) ffAfterAlerts(env, ctx, "scheduled:tier2");', "void pass;"]] },
   { name: "the live tick is awaited before the write is answered", group: "live", target: "worker.js",
     transforms: [["      ffAfterLive(request, env, url, response, ctx);\n", "      if (url.searchParams.get(\"key\") === \"live:alerts\" && request.method === \"POST\" && response.status === 200 && ffMode(env) !== \"off\") await ffLiveTick(env, Date.now());\n"]] },
   { name: "a live tick starts behind every live key", group: "live", target: "worker.js",
-    transforms: [["if (url.searchParams.get(\"key\") !== \"live:alerts\" || ffMode(env) === \"off\") return;", "if (ffMode(env) === \"off\") return;"]] },
+    transforms: [["if (url.searchParams.get(\"key\") === \"live:alerts\") ffAfterAlerts(env, ctx, url.pathname);", "ffAfterAlerts(env, ctx, url.pathname);"]] },
   { name: "a refused live write starts an evaluation", group: "live", target: "worker.js",
     transforms: [["if (url.pathname !== \"/api/flows/ingest\" || request.method !== \"POST\" || response.status !== 200) return;", "if (url.pathname !== \"/api/flows/ingest\" || request.method !== \"POST\") return;"]] },
   { name: "the live record is read without its session day", group: "live", target: "worker.js",
     transforms: [["? { ...body, day: body.sessionDate } : null;", "? { ...body } : null;"]] },
   { name: "the hook's catch is gone", group: "live", target: "worker.js",
-    transforms: [["  } catch (error) {\n    logFailure(\"error\", \"ff live tick failed\", { route: url.pathname }, error);\n  }\n}", "  } finally {\n    void 0;\n  }\n}"]] },
+    transforms: [["  } catch (error) {\n    logFailure(\"error\", \"ff live tick failed\", { route }, error);\n  }\n}", "  } finally {\n    void 0;\n  }\n}"]] },
   { name: "a failed live tick is not logged", group: "live", target: "worker.js",
     transforms: [["      if (out && out.status === \"failed\") failed(out.error);\n    }, failed));", "    }, () => {}));"]] },
   { name: "housekeeping is awaited in the cron handler", group: "housekeeping", target: "worker.js",
@@ -614,7 +660,9 @@ if (exit === 0) {
   const text = moduleSource("worker.js");
   const ok = (cond, msg) => R.ok("scan", cond, msg);
   ok(expect(w, /createRouter\([\s\S]*?flowsFfRows\(\{ store: FF_STORE, flowsStore: FLOWS_STORE, core: FF_CORE,/, { min: 1, max: 1, why: "the Worker's one table takes the ff family" }) === 1, "the ff family is a family of the Worker's one route table");
-  ok(count(text, /ffAfterLive\(request, env, url, response, ctx\);/g) === 1 && count(text, /\bffLiveTick\(/g) === 3, "the live hook is called once, from the fetch handler, and the tick from the hook and the run route alone");
+  ok(count(text, /ffAfterLive\(request, env, url, response, ctx\);/g) === 1 && count(text, /\bffLiveTick\(/g) === 3, "the HTTP live hook is called once, and the shared post-commit hook and explicit run route own the tick");
+  ok(count(text, /if \(pass\.alertsWritten\) ffAfterAlerts\(env, ctx, "scheduled:tier2"\);/g) === 1 &&
+    count(text, /\bffAfterAlerts\(/g) === 3, "both the accepted HTTP alerts write and a committed native alerts row start the same evaluation");
   ok(count(text, /guard\("ff housekeeping failed", ffHousekeeping\(env, at\)\);/g) === 1 && count(text, /\bffHousekeeping\(/g) === 2, "the housekeeping runs once, behind its own guard");
   const block = slice(text, "async function ensureFf(env) {", "function nightlyFreshHeaders(");
   ok(absent(block, /\buwFetch\b|\bcappedAi\b|\baskModels\b|\bmeteredAi\b|\bvendorGate\b|\bfetch\(|\.AI\b|UW_ONDEMAND|MEMBER_VENDOR/, { anchor: /const FF_CORE = Object\.freeze\(\{/, why: "the mount reaches no feed, no model and no limiter of theirs" }), "the mount's block names no feed client, no model and no vendor limiter");

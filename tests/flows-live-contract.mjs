@@ -4399,6 +4399,15 @@ const cronMinutes = (cron) => {
     store: { read: async (_env, key, trace) => { if (key === "board:long") trace.failed = true; } },
   }), /store read failed/);
   eq(committed.length, beforeFail, "an unreadable board store cannot write a partial replacement");
+
+  const unicodeAt = next + 10 * 60_000;
+  const headline = "界".repeat(Math.ceil(L.LIVE_KEYS["live:news"].maxBytes / 2));
+  const unicode = await tier2Tick(env, unicodeAt, { ...options, now: () => unicodeAt,
+    fetchVendor: async (path) => ({ data: path === pathFor("news") ? [{ headline }] : [] }),
+  });
+  ok(!unicode.published.includes("live:news") && unicode.run.errors.some((error) => error.startsWith("live:news:")),
+    "a headline that fits in UTF-16 code units but exceeds the UTF-8 byte cap cannot replace held news");
+  eq(unicode.alertsWritten, false, "an empty alerts read does not signal alert evaluation");
 }
 
 console.log(`✓ flows-live: ${checks} assertions — one threshold table in code; phases on the Eastern clock at every ` +

@@ -520,7 +520,11 @@ eq(merge2.seen, 3, "and `seen` counts the session's windows, not this read's two
     "judged on the latest read alone, a capped read followed by a small one would publish readTruncated " +
     "false and the Unusual caption would drop its 'at least'");
 
-  const leg = readFileSync(new URL("../scripts/flows-legs/live.mjs", import.meta.url), "utf8");
+  const leg = moduleSource("shared/flows-live-pass.js");
+  for (const owner of ["scripts/flows-legs/live.mjs", "server/flows-live-tier2.js"]) {
+    ok(closure(owner).includes("shared/flows-live-pass.js"), owner + " reaches the same guarded alerts writer");
+    ok(!moduleSource(owner).includes('put("live:alerts"'), owner + " has no separate alerts write");
+  }
   eq((leg.match(/put\("live:alerts"/g) || []).length, 1,
     "the live leg writes the key exactly once, so the guard cannot be routed around");
   ok(/if \(merged\.write\) \{\s*await put\("live:alerts", merged\.write\);/.test(leg),

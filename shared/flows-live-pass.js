@@ -7,6 +7,8 @@ import {
 import { FOCUS_STRIP_FALLBACK, focusStripNames as focusNamesOf } from "./flows-focus.js";
 import { phaseAt, closeMinutes, inferredEarlyClose, PHASE_MINUTES, LIVE_CLOCK } from "./flows-freshness.js";
 import { pathFor } from "./flows-vendor-ops.js";
+import { fixedHalfUp } from "./flows-display-round.js";
+import { NEWS_VENDOR_LIMIT } from "./flows-news.js";
 import { fundsNote } from "./flows-floor-funds-live.js";
 
 export const LIVE_READ_PACE_MS = LIVE_BUDGET.tier2PaceMs;
@@ -187,7 +189,7 @@ export async function runLive({
 
   const alertsAt = now();
 
-  const newsRaw = await read(pathFor("news"), { limit: 100 });
+  const newsRaw = await read(pathFor("news"), { limit: NEWS_VENDOR_LIMIT });
   const newsAt = now();
   const at = now();
 
@@ -200,18 +202,18 @@ export async function runLive({
       note(`${key}: not published — no read behind it answered this run, so the held row keeps its own read time`);
       return;
     }
-    const text = JSON.stringify(payload);
+    const size = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
     const cap = LIVE_KEYS[key].maxBytes;
-    if (text.length > cap) {
-      errors.push(`${key}: ${text.length} bytes over its ${cap}-byte cap, not published`);
-      warn(`  live ${key}: ${text.length} bytes is over its ${cap}-byte cap — not published`);
+    if (size > cap) {
+      errors.push(`${key}: ${size} bytes over its ${cap}-byte cap, not published`);
+      warn(`  live ${key}: ${size} bytes is over its ${cap}-byte cap — not published`);
       bytes[key] = null;
       return;
     }
     try {
       await publish(key, payload);
       out[key] = payload;
-      bytes[key] = text.length;
+      bytes[key] = size;
     } catch (error) {
       bytes[key] = null;
       errors.push(`${key}: ${error && error.message ? error.message.slice(0, 200) : String(error)}`);
@@ -228,7 +230,7 @@ export async function runLive({
     const asked = capAsk.reduce((n, chunk) => n + chunk.length, 0);
     note(!capList.names.length ? `cap tide: not read — ${capList.why || "no universe list"}`
       : `cap tide: ${c.value === null ? "withheld (" + c.reason + ")" : c.value} over ${c.n} of ${c.of} name(s), coverage ` +
-        `${c.coverage === null ? "unknown" : (c.coverage * 100).toFixed(1) + "%"}; ${capRead.returned} of ${asked} asked name(s) ` +
+        `${c.coverage === null ? "unknown" : fixedHalfUp(c.coverage, 1, 2) + "%"}; ${capRead.returned} of ${asked} asked name(s) ` +
         `returned in ${capRead.calls} call(s), ${capRead.failed} failed` +
         (asked < capList.names.length ? `; ${capList.names.length - asked} name(s) past the call cap were not asked` : "") +
         (capRead.off ? `; ${capRead.off} row(s) dated before the session held out` : "") +
@@ -292,7 +294,7 @@ export async function runLive({
   if (typeof shapeNews === "function") {
     const news = failed(newsRaw)
       ? { status: "unavailable", reason: "vendor-failed", rows: [] }
-      : shapeNews(newsRaw, { requested: 100 });
+      : shapeNews(newsRaw, { requested: NEWS_VENDOR_LIMIT });
     await put("live:news", {
       v: 1, key: "live:news", session,
       fresh: freshEnvelope({ readAt: newsAt, source: "actions", cadenceS: LIVE_KEYS["live:news"].cadenceS, session, writer }),
@@ -320,7 +322,7 @@ export async function runLive({
     run,
   });
   log(`live: ${ledger.calls} call(s) (${ledger.failed} failed), ${Object.values(bytes).filter((b) => b !== null).length} ` +
-    `key(s) published in ${((finishedAt - startedAt) / 1000).toFixed(1)} s`);
+    `key(s) published in ${fixedHalfUp(Math.max(0, finishedAt - startedAt), 1, -3)} s`);
   return { run, published: Object.keys(out), bytes };
 }
 

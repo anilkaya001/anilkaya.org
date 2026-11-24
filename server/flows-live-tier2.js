@@ -6,6 +6,7 @@ import {
 import { fixtureRefusal } from "../shared/flows-fixture-names.js";
 import { vendorRedirected } from "../shared/flows-vendor-core.js";
 import { pathFor } from "../shared/flows-vendor-ops.js";
+import { emitFailure } from "../shared/flows-log.js";
 import { shapeNews } from "../shared/flows-news.js";
 
 export const TIER2_WRITER = "worker@tier2";
@@ -104,6 +105,7 @@ export async function tier2Tick(env, at, {
   const { uw, meter } = pacedVendor(fetchVendor, expires, now, wait);
   const statements = [];
   let ledger = null;
+  let alertsIndex = -1;
   const publish = (key, payload) => {
     if (LIVE_KEYS[key]?.writer !== "actions") throw new Error("Tier 2 cannot write " + key);
     const body = { ...payload, fresh: { ...payload.fresh, source: "worker" } };
@@ -112,7 +114,8 @@ export async function tier2Tick(env, at, {
     if (!verdict.ok) throw new Error(verdict.code);
     const text = JSON.stringify(body);
     if (fixtureRefusal(key, text)) throw new Error("Tier 2 fixture refused");
-    if (text.length > LIVE_KEYS[key].maxBytes) throw new Error("Tier 2 payload exceeds its byte cap");
+    if (new TextEncoder().encode(text).byteLength > LIVE_KEYS[key].maxBytes) throw new Error("Tier 2 payload exceeds its byte cap");
+    if (key === "live:alerts") alertsIndex = statements.length;
     statements.push(writeLiveStatement(db, key, text, verdict.meta, now()));
     if (key === "live:heartbeat") {
       statements.push(clockPatchStatement(db, { liveDoneAt: now(), dispatchWhy: "worker-owner" }, now()));
@@ -126,9 +129,10 @@ export async function tier2Tick(env, at, {
   });
   if (result.skipped) return result;
   if (now() >= expires || !ledger) throw new Error("Tier 2 pass expired or did not build a heartbeat");
-  await batchWithLedger(db, statements, ledger);
+  const committed = await batchWithLedger(db, statements, ledger);
+  const alertsWritten = Number(committed?.[alertsIndex]?.meta?.changes) === 1;
   if (!result.published.some((key) => key !== "live:heartbeat")) {
-    log.warn(JSON.stringify({ message: "Tier 2 published only a heartbeat", ...meter }));
+    emitFailure(log, "warn", "Tier 2 published only a heartbeat", meter);
   }
-  return { ...result, run: { ...result.run, ...meter } };
+  return { ...result, alertsWritten, run: { ...result.run, ...meter } };
 }

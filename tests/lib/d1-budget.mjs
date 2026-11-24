@@ -87,7 +87,7 @@ export const TIER2 = Object.freeze({
   storedReadsPerPass: 5,
   runReadsPerWeekday: 8,
   watchReadsPerWeekday: 520,
-  source: "W02 section 2.5: 84 passes a weekday; scripts/flows-legs/live.mjs reads board:long, board:short, board:watch, focus and live:heartbeat once a pass, and the universe once a run for the cap-weighted tide's ticker list (a weekday is five runs; priced at eight); watch.mjs at most 5 reads a 5-minute tick in session",
+  source: "W02 section 2.5: 84 passes a weekday; scripts/flows-legs/live.mjs reads board:long, board:short, board:watch, focus and live:heartbeat once a pass, and the universe once a run for the cap-weighted tide's ticker list (a weekday is five runs; priced at eight); watch.mjs at most 5 reads a 5-minute tick in session. The native owner also budgets one clock lookup per RTH firing, one slot claim per pass and reads of universe, held alerts, strips series and funds per pass. The alternatives are both priced as a conservative ceiling",
 });
 
 export const NIGHTLY = Object.freeze({
@@ -138,6 +138,7 @@ export const MEASURED_CEILINGS = Object.freeze({ nightlyPostWritten: 1, rosterRe
 export const D1_USERS = Object.freeze({
   "worker.js": ["engines", "members.pages", "nightly.ingest", "tier2.ingest", "ops.views", "ai.counters", "ff.mount"],
   "server/ai.js": ["ai.counters"],
+  "server/flows-live-tier2.js": ["tier2.ingest", "tier2.native-clock"],
   "server/ff-eval.js": ["ff.nightly", "ff.live", "ff.housekeeping"],
   "server/ff-store.js": ["ff"],
   "server/member-store.js": ["member.state"],
@@ -171,6 +172,8 @@ export function ledger(counts, measured = MEASURED_CEILINGS) {
     ...engines,
     { id: "tier2.ingest", kind: "engine", written: t2 * p.written,
       read: t2 * (p.read + UPSERT_READS_PER_WRITE * p.written + TIER2.storedReadsPerPass) + TIER2.runReadsPerWeekday + TIER2.watchReadsPerWeekday },
+    { id: "tier2.native-clock", kind: "engine", written: t2,
+      read: counts.weekday.rth + t2 * (1 + UPSERT_READS_PER_WRITE + 4) },
     { id: "nightly.ingest", kind: "engine", written: posts * measured.nightlyPostWritten + 1,
       read: NIGHTLY.readRows + UPSERT_READS_PER_WRITE * posts },
     { id: "rail.roster", kind: "reader", written: 0, read: railLoads() * measured.rosterRead },

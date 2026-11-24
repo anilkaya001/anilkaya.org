@@ -2740,7 +2740,12 @@ only the Tier 2 keys. Its heartbeats have source `worker` and writer
 Reads are paced at the existing 333 ms floor with a maximum of four in flight,
 48 per pass and 8 seconds each. Screener bodies are limited to 1.25 MiB
 and other bodies to 384 KiB. A rate-limit response stops
-further calls in the pass. An expired pass leaves any previous blocks in place.
+further calls in the pass. The builder counts UTF-8 bytes against the output
+caps. An expired pass leaves any previous blocks in place. A committed
+`live:alerts` update starts the same Fire & Forget evaluation as a successful
+live ingest, within the scheduled event's lifetime. A duplicate slot or
+older alerts row leaves the evaluator idle. `tests/server-ff.mjs` exercises
+these paths through the scheduled entry and SQLite.
 
 For staging, provision its dedicated D1 database and bindings as in section
 10.6. Leave its committed no-cron config in place for ordinary testing. For a

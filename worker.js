@@ -1138,17 +1138,21 @@ async function ffHousekeeping(env, at) {
   return { retried: retried ? retried.status : null, gap: gap.status };
 }
 
-function ffAfterLive(request, env, url, response, ctx) {
+function ffAfterAlerts(env, ctx, route) {
   try {
-    if (url.pathname !== "/api/flows/ingest" || request.method !== "POST" || response.status !== 200) return;
-    if (url.searchParams.get("key") !== "live:alerts" || ffMode(env) === "off") return;
-    const failed = (error) => logFailure("error", "ff live tick failed", { route: url.pathname }, error);
+    if (ffMode(env) === "off") return;
+    const failed = (error) => logFailure("error", "ff live tick failed", { route }, error);
     keepAlive(ctx, ffLiveTick(env, Date.now()).then((out) => {
       if (out && out.status === "failed") failed(out.error);
     }, failed));
   } catch (error) {
-    logFailure("error", "ff live tick failed", { route: url.pathname }, error);
+    logFailure("error", "ff live tick failed", { route }, error);
   }
+}
+
+function ffAfterLive(request, env, url, response, ctx) {
+  if (url.pathname !== "/api/flows/ingest" || request.method !== "POST" || response.status !== 200) return;
+  if (url.searchParams.get("key") === "live:alerts") ffAfterAlerts(env, ctx, url.pathname);
 }
 
 function nightlyFreshHeaders(stored) {
@@ -4276,7 +4280,10 @@ export default {
         await ensureFlowsTables(env);
         await FLOWS_LIVE.rthTick(env, at, tickVendor(env));
         if (FLOWS_LIVE.liveMode(env) === "worker") {
-          await tier2Tick(env, at, { store: FLOWS_STORE, fetchVendor: (path, params, opts) => uwFetch(env, path, params, opts) });
+          const pass = await tier2Tick(env, at, {
+            store: FLOWS_STORE, fetchVendor: (path, params, opts) => uwFetch(env, path, params, opts),
+          });
+          if (pass.alertsWritten) ffAfterAlerts(env, ctx, "scheduled:tier2");
         }
       })());
       return;
