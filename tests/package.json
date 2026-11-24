@@ -131,7 +131,7 @@
     "test:flows-vendor-budget": "node --disable-warning=ExperimentalWarning flows-vendor-budget.mjs"
   },
   "devDependencies": {
-    "axe-core": "4.13.0",
+    "axe-core": "4.14.0",
     "playwright": "1.61.1",
     "wrangler": "4.110.0"
   }
