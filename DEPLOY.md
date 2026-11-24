@@ -3729,23 +3729,15 @@ can never dispatch the live or nightly workflows; `FLOWS_READ_MODE` is `off`;
 the rail is on for `members`. `.assetsignore` keeps the file out of the static
 bundle. It carries no secret; set staging's own.
 
-The owner's steps (the first three cannot be done from the repository):
+The staging configuration binds `iewt-staging` to a dedicated database. On November 24, 2026, the schema was applied to this database and the resulting 45 tables, 11 indexes and 10 triggers matched the repository schema. Rehearse future schema changes there before promotion.
 
-```bash
-./tests/node_modules/.bin/wrangler d1 create iewt-staging
-```
-
-1. Put the printed `database_id` in `wrangler.staging.toml` (the committed value
-   is an all-zero placeholder, which names no database).
-2. Apply the schema and every migration to it:
-   `./tests/node_modules/.bin/wrangler d1 execute iewt-staging --remote --file=./schema.sql`.
-3. Set its secrets with `wrangler secret put --config wrangler.staging.toml`:
+1. Set its secrets with `wrangler secret put --config wrangler.staging.toml`:
    `SESSION_SECRET`, `FLOWS_PEPPER`, `FLOWS_CREDENTIALS` (test members only, never
    production's hashes) and, only if the vendor path is to be exercised,
    `UW_API_KEY`. Without `UW_API_KEY` no vendor read is made; with it, staging
    spends the same one vendor key production uses, so set it only for a run that
    is meant to exercise the vendor path.
-4. Deploy: `./tests/node_modules/.bin/wrangler deploy --config wrangler.staging.toml`.
+2. Deploy with `./tests/node_modules/.bin/wrangler deploy --config wrangler.staging.toml`.
    A Workers Builds project for staging uses that deploy command.
 
 The plan also had production built only from a `production` branch that a
