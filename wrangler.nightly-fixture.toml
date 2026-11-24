@@ -18,3 +18,8 @@ class_name = "NightlyFixture"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["NightlyFixture"]
+
+[[workflows]]
+name = "anilkaya-nightly-staging"
+binding = "NIGHTLY"
+class_name = "NightlyWorkflow"

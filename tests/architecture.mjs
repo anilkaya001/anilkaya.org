@@ -80,6 +80,7 @@ function cycles(g) {
 }
 
 const LAYERS = [
+  { name: "nightly Worker", from: /^scripts\/flows-container\/worker\.js$/, to: [], bare: [/^cloudflare:(workers|workflows)$/] },
   { name: "worker.js", from: /^worker\.js$/, to: [/^shared\//, /^server\//], bare: [/^cloudflare:/, /^node:/] },
   {
     name: "a route", from: /^server\/routes\/[^/]+\.js$/,
@@ -107,7 +108,7 @@ function layers(g) {
       if (!rule.to.some((rx) => rx.test(to))) problems.push(`${file} (${rule.name}) imports ${to}, which the layer table does not allow`);
     }
     for (const spec of g.bare.get(file) || []) {
-      if (/^cloudflare:/.test(spec) && file !== "worker.js") problems.push(`${file} imports ${spec}: only worker.js may touch the runtime`);
+      if (/^cloudflare:/.test(spec) && rule.name !== "worker.js" && rule.name !== "nightly Worker") problems.push(`${file} imports ${spec}: only Worker entrypoints may touch the runtime`);
       else if (!rule.bare.some((rx) => rx.test(spec))) problems.push(`${file} (${rule.name}) imports ${spec}, which the layer table does not allow`);
     }
   }
@@ -411,7 +412,7 @@ const real = run(realTree);
   const edgeCount = [...real.g.edges.values()].reduce((n, e) => n + e.length, 0);
   ok(edgeCount > 200, `and ${edgeCount} import edges, so a cycle test cannot pass on an empty graph`);
   deep(real.cycle.found, [], `NO IMPORT CYCLE from worker.js, the pipeline or any script (${real.cycle.walked} modules walked): a cycle leaves a const in its temporal dead zone and the Worker throws at module evaluation, taking every route down`);
-  deep(real.layer, [], "every import respects the layer table: shared/ imports shared/ only, scripts/ never server/, no cloudflare:* outside worker.js");
+  deep(real.layer, [], "every import respects the layer table: shared/ imports shared/ only, scripts/ never server/, no cloudflare:* outside the two Worker entrypoints");
   deep(real.asset, [], "assets/js carries no import or export statement");
   deep(real.leaf, [], "the declared leaves import exactly their declared set");
   const dynamicLiteral = real.g.nodes.filter((f) => (real.g.edges.get(f) || []).some((e) => e.dynamic));

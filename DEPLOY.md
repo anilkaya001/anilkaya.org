@@ -163,10 +163,7 @@ resulting version/deployment identifier.
 
 ## 6. Verify routes and dashboard response rules
 
-The apex custom domain should route to Worker `anilkaya`. As observed on
-2026-07-12, `www.anilkaya.org` still used GitHub Pages to redirect to the apex.
-Keep `CNAME` until `www` is explicitly attached to the Worker and its redirect
-is verified.
+The apex custom domain routes to Worker `anilkaya`. The Cloudflare redirect for `www.anilkaya.org` preserves paths and query strings. On November 24, 2026, the URL `https://www.anilkaya.org/flows/ticker/?t=NVDA` returned 301 to the same path and query on the HTTPS apex.
 
 Before this repair, live response headers differed from `worker.js`, consistent
 with a dashboard Transform Rule. Inspect **Rules → Transform Rules → Modify
@@ -249,7 +246,7 @@ curl -fsSI https://anilkaya.org/assets/fonts-version.txt | grep -i '^cache-contr
 `docs/` and `server/` are not part of the static bundle (`.assetsignore`;
 `tests/contracts.mjs` holds the served file list). After a promotion, the
 1 MB vendor specification must answer 404 on the apex, and the same request
-on `www` settles whether `www` still serves the GitHub Pages copy:
+on `www` must redirect to the corresponding HTTPS apex URL:
 
 ```bash
 curl -sSI https://anilkaya.org/docs/uw-openapi.yaml | head -1
@@ -2766,21 +2763,71 @@ nightly's workflow, configuration and ingest credential in place. For
 rollback, restore `actions`, verify that GitHub writes are accepted, and
 restart the existing live workflow if its runner was disabled.
 
-To move the nightly job, first stage the existing pinned Node entrypoint on
-Cloudflare Containers with the same environment settings, a fixture-only
-initial run, then isolated D1 and a separately authorized feed credential.
-Preserve the scheduled session gate, the archive read and retry behavior, the
-ingest door's batch and fixture checks, and each stage's deadline and
-telemetry. An alternative Workflows port needs persisted intermediate state,
-bounded steps and idempotent stage commits. The current job reads process
-environment and fixture files, keeps mutable vendor retry state, and can
-spend tens of minutes wall-clock across hundreds of feed reads. Compare the
-complete archive, board, cards, history, meta and witness outcomes over
-regular sessions, calendar transitions, partial vendor responses, duplicate
-starts and same-session recovery. Promote one nightly writer only after this
-parity and a rollback drill. Keep GitHub scheduling through the comparison
-and until the native owner can independently start, monitor and recover a
-nightly run.
+#### 10.5i.2 One-off nightly runs on Cloudflare
+
+The private `anilkaya-nightly-staging` Workflow starts a pinned Linux/amd64
+Node 22.23.5 Container. The controller has no public route or Cron Trigger.
+One Durable Object per profile and session records the start before launching
+the process. Retried Workflow steps read that same receipt. A nonzero exit,
+an expired deadline, or a stopped process whose exit could not be confirmed
+fails the run. Inspect that receipt before deciding how to repair the session.
+Process launches are never automatically repeated by the controller.
+
+The `fixture` profile runs the same nightly entrypoint twice, offline, at the
+golden fixture's pinned clock. It compares all 574 emitted files with the
+committed manifest. Its session is always `2026-08-24`. The heartbeat's
+alerts size records 97,933 UTF-8 bytes for this fixture. To verify the image
+locally with Docker, run these commands at the repository root.
+
+```sh
+docker build --platform linux/amd64 -f scripts/flows-container/Dockerfile -t anilkaya-nightly-fixture .
+docker run --rm --network=none anilkaya-nightly-fixture
+```
+
+To exercise the Workflow, start the local Docker engine and
+`tests/node_modules/.bin/wrangler dev --local --config wrangler.nightly-fixture.toml --port 8791`.
+In a second shell, submit and inspect the fixture with the project's pinned Wrangler.
+
+```sh
+W=tests/node_modules/.bin/wrangler
+CFG=wrangler.nightly-fixture.toml
+"$W" workflows trigger anilkaya-nightly-staging '{"profile":"fixture","session":"2026-08-24"}' \
+  --id nightly-fixture-2026-08-24 --config "$CFG" --local --port 8791
+"$W" workflows instances describe anilkaya-nightly-staging nightly-fixture-2026-08-24 \
+  --config "$CFG" --local --port 8791
+```
+
+For the deployed private Workflow, omit `--local --port 8791` from those two
+commands. Deployment needs the image built and pushed to Cloudflare's registry
+(or an available Docker engine for Wrangler), the configured Container
+application and its Durable Object association, and the Workflow binding.
+A Worker-only dry run with `--containers-rollout=none` verifies the script
+bundle and declared bindings. A completed Workflow receipt with profile
+`fixture` confirms the image ran on that target.
+
+The `staging` profile invokes `node /app/scripts/flows-pipeline.mjs` once
+against the isolated staging ingest. An operator enables this profile on the
+private controller with `NIGHTLY_STAGING_ENABLED=on` and separate
+`NIGHTLY_STAGING_UW_KEY` and `NIGHTLY_STAGING_INGEST_TOKEN` secret
+bindings. The ingest token must match the staging Worker's ingest token.
+Set `NIGHTLY_STAGING_UW_PLAN` to the staging feed's actual entitlement if
+known. The destination is fixed in code to the staging Worker's
+`/api/flows/ingest`. The private controller passes the selected feed key and
+ingest token only into the container process. Workflow input accepts just
+`profile` and the ISO session date. For example, a staging replay for
+`2026-11-23` uses ID `nightly-staging-2026-11-23`. The nightly checks the
+feed's resolved session against this date before its first publication and
+applies its ordinary intraday and same-session gates. Use a completed session
+that the current feed can still resolve. The fixture process has nine minutes,
+and the staged nightly has 199 minutes, followed by a 30-second kill grace.
+Workflow poll steps tolerate two transport retries. Elapsed limits of ten and
+200 minutes bound the respective receipts.
+
+For promotion, compare the complete archive, board, cards, history, meta and
+witness results across regular sessions, calendar transitions, partial feed
+responses, duplicate starts and same-session recovery. Keep GitHub scheduling
+through the comparison and rollback drill. Production nightly scheduling,
+the external witness and the vendor checks still have separate owners.
 
 ### 10.5j The weekly monitors
 
