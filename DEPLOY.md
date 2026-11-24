@@ -163,10 +163,7 @@ resulting version/deployment identifier.
 
 ## 6. Verify routes and dashboard response rules
 
-The apex custom domain should route to Worker `anilkaya`. As observed on
-2026-07-12, `www.anilkaya.org` still used GitHub Pages to redirect to the apex.
-Keep `CNAME` until `www` is explicitly attached to the Worker and its redirect
-is verified.
+The apex custom domain routes to Worker `anilkaya`. The Cloudflare redirect for `www.anilkaya.org` preserves paths and query strings. On November 24, 2026, the URL `https://www.anilkaya.org/flows/ticker/?t=NVDA` returned 301 to the same path and query on the HTTPS apex.
 
 Before this repair, live response headers differed from `worker.js`, consistent
 with a dashboard Transform Rule. Inspect **Rules → Transform Rules → Modify
@@ -249,7 +246,7 @@ curl -fsSI https://anilkaya.org/assets/fonts-version.txt | grep -i '^cache-contr
 `docs/` and `server/` are not part of the static bundle (`.assetsignore`;
 `tests/contracts.mjs` holds the served file list). After a promotion, the
 1 MB vendor specification must answer 404 on the apex, and the same request
-on `www` settles whether `www` still serves the GitHub Pages copy:
+on `www` must redirect to the corresponding HTTPS apex URL:
 
 ```bash
 curl -sSI https://anilkaya.org/docs/uw-openapi.yaml | head -1
@@ -2729,6 +2726,109 @@ not registered, so an old row can never be the ledger's worst lapse. A Tier 2
 job that was already running when the Worker was promoted logs two `invalid_key`
 400s a pass until it ends.
 
+#### 10.5i.1 Cloudflare ownership of Tier 2
+
+`FLOWS_LIVE_MODE=actions` remains the production setting. The existing
+five-minute regular-session Cloudflare cron can own Tier 2 when set to
+`worker`. It runs the same pass as the Actions job through a local D1 adapter,
+claims the scheduled slot once through the existing clock row, and publishes
+only the Tier 2 keys. Its heartbeats have source `worker` and writer
+`worker@tier2`. Five-minute slots older than two minutes are discarded.
+Reads are paced at the existing 333 ms floor with a maximum of four in flight,
+48 per pass and 8 seconds each. Screener bodies are limited to 1.25 MiB
+and other bodies to 384 KiB. A rate-limit response stops
+further calls in the pass. The builder counts UTF-8 bytes against the output
+caps. An expired pass leaves any previous blocks in place. A committed
+`live:alerts` update starts the same Fire & Forget evaluation as a successful
+live ingest, within the scheduled event's lifetime. A duplicate slot or
+older alerts row leaves the evaluator idle. `tests/server-ff.mjs` exercises
+these paths through the scheduled entry and SQLite.
+
+For staging, provision its dedicated D1 database and bindings as in section
+10.6. Leave its committed no-cron config in place for ordinary testing. For a
+temporary scheduled test, apply only the RTH trigger from the production file
+and set `FLOWS_LIVE_MODE=worker` on staging. Validate one full session (including
+an early close or a replay), payloads and timestamps, CPU and memory,
+feed quota, duplicate slots, and a refused feed read. The staging feed entitlement
+and quota must cover both passes if production is reading at the same time.
+Use a permitted fixture for the local contract suites.
+
+For a production switch, confirm the native pass on staging, stop new
+`flows-live.yml` starts and drain running jobs, then change the production mode
+in the deploy owner's configuration. The new Worker refuses Actions live
+writes and suppresses the GitHub Tier 2 dispatch and watchdog. Verify
+`live:heartbeat`, breadth, strips and the alerts cursor over consecutive slots.
+The nightly and the weekly external checks are separate owners. Keep the
+nightly's workflow, configuration and ingest credential in place. For
+rollback, restore `actions`, verify that GitHub writes are accepted, and
+restart the existing live workflow if its runner was disabled.
+
+#### 10.5i.2 One-off nightly runs on Cloudflare
+
+The private `anilkaya-nightly-staging` Workflow starts a pinned Linux/amd64
+Node 22.23.5 Container. The controller has no public route or Cron Trigger.
+One Durable Object per profile and session records the start before launching
+the process. Retried Workflow steps read that same receipt. A nonzero exit,
+an expired deadline, or a stopped process whose exit could not be confirmed
+fails the run. Inspect that receipt before deciding how to repair the session.
+Process launches are never automatically repeated by the controller.
+
+The `fixture` profile runs the same nightly entrypoint twice, offline, at the
+golden fixture's pinned clock. It compares all 574 emitted files with the
+committed manifest. Its session is always `2026-08-24`. The heartbeat's
+alerts size records 97,933 UTF-8 bytes for this fixture. To verify the image
+locally with Docker, run these commands at the repository root.
+
+```sh
+docker build --platform linux/amd64 -f scripts/flows-container/Dockerfile -t anilkaya-nightly-fixture .
+docker run --rm --network=none anilkaya-nightly-fixture
+```
+
+To exercise the Workflow, start the local Docker engine and
+`tests/node_modules/.bin/wrangler dev --local --config wrangler.nightly-fixture.toml --port 8791`.
+In a second shell, submit and inspect the fixture with the project's pinned Wrangler.
+
+```sh
+W=tests/node_modules/.bin/wrangler
+CFG=wrangler.nightly-fixture.toml
+"$W" workflows trigger anilkaya-nightly-staging '{"profile":"fixture","session":"2026-08-24"}' \
+  --id nightly-fixture-2026-08-24 --config "$CFG" --local --port 8791
+"$W" workflows instances describe anilkaya-nightly-staging nightly-fixture-2026-08-24 \
+  --config "$CFG" --local --port 8791
+```
+
+For the deployed private Workflow, omit `--local --port 8791` from those two
+commands. Deployment needs the image built and pushed to Cloudflare's registry
+(or an available Docker engine for Wrangler), the configured Container
+application and its Durable Object association, and the Workflow binding.
+A Worker-only dry run with `--containers-rollout=none` verifies the script
+bundle and declared bindings. A completed Workflow receipt with profile
+`fixture` confirms the image ran on that target.
+
+The `staging` profile invokes `node /app/scripts/flows-pipeline.mjs` once
+against the isolated staging ingest. An operator enables this profile on the
+private controller with `NIGHTLY_STAGING_ENABLED=on` and separate
+`NIGHTLY_STAGING_UW_KEY` and `NIGHTLY_STAGING_INGEST_TOKEN` secret
+bindings. The ingest token must match the staging Worker's ingest token.
+Set `NIGHTLY_STAGING_UW_PLAN` to the staging feed's actual entitlement if
+known. The destination is fixed in code to the staging Worker's
+`/api/flows/ingest`. The private controller passes the selected feed key and
+ingest token only into the container process. Workflow input accepts just
+`profile` and the ISO session date. For example, a staging replay for
+`2026-11-23` uses ID `nightly-staging-2026-11-23`. The nightly checks the
+feed's resolved session against this date before its first publication and
+applies its ordinary intraday and same-session gates. Use a completed session
+that the current feed can still resolve. The fixture process has nine minutes,
+and the staged nightly has 199 minutes, followed by a 30-second kill grace.
+Workflow poll steps tolerate two transport retries. Elapsed limits of ten and
+200 minutes bound the respective receipts.
+
+For promotion, compare the complete archive, board, cards, history, meta and
+witness results across regular sessions, calendar transitions, partial feed
+responses, duplicate starts and same-session recovery. Keep GitHub scheduling
+through the comparison and rollback drill. Production nightly scheduling,
+the external witness and the vendor checks still have separate owners.
+
 ### 10.5j The weekly monitors
 
 - **The vendor probe** (`.github/workflows/flows-probe.yml`) runs every Sunday at
@@ -3676,23 +3776,15 @@ can never dispatch the live or nightly workflows; `FLOWS_READ_MODE` is `off`;
 the rail is on for `members`. `.assetsignore` keeps the file out of the static
 bundle. It carries no secret; set staging's own.
 
-The owner's steps (the first three cannot be done from the repository):
+The staging configuration binds `iewt-staging` to a dedicated database. On November 24, 2026, the schema was applied to this database and the resulting 45 tables, 11 indexes and 10 triggers matched the repository schema. Rehearse future schema changes there before promotion.
 
-```bash
-./tests/node_modules/.bin/wrangler d1 create iewt-staging
-```
-
-1. Put the printed `database_id` in `wrangler.staging.toml` (the committed value
-   is an all-zero placeholder, which names no database).
-2. Apply the schema and every migration to it:
-   `./tests/node_modules/.bin/wrangler d1 execute iewt-staging --remote --file=./schema.sql`.
-3. Set its secrets with `wrangler secret put --config wrangler.staging.toml`:
+1. Set its secrets with `wrangler secret put --config wrangler.staging.toml`:
    `SESSION_SECRET`, `FLOWS_PEPPER`, `FLOWS_CREDENTIALS` (test members only, never
    production's hashes) and, only if the vendor path is to be exercised,
    `UW_API_KEY`. Without `UW_API_KEY` no vendor read is made; with it, staging
    spends the same one vendor key production uses, so set it only for a run that
    is meant to exercise the vendor path.
-4. Deploy: `./tests/node_modules/.bin/wrangler deploy --config wrangler.staging.toml`.
+2. Deploy with `./tests/node_modules/.bin/wrangler deploy --config wrangler.staging.toml`.
    A Workers Builds project for staging uses that deploy command.
 
 The plan also had production built only from a `production` branch that a

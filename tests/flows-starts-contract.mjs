@@ -40,6 +40,45 @@ const HOUR = 3600 * 1000;
 const MIN = 60 * 1000;
 
 {
+  const requests = [];
+  let status = 200;
+  const server = createServer((req, res) => {
+    requests.push(req.method + " " + req.url);
+    res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(status === 200 ? { key: "clock", liveOwner: "worker", clock: null } : { error: "refused" }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  try {
+    for (const [responseStatus, force] of [[200, "0"], [401, "1"], [401, "0"]]) {
+      status = responseStatus;
+      requests.length = 0;
+      const child = spawn(process.execPath, [new URL("scripts/flows-pipeline.mjs", ROOT).pathname, "--live"], {
+        env: { FLOWS_INGEST_URL: origin + "/ingest", FLOWS_UW_BASE_URL: origin, GITHUB_API_URL: origin,
+          FLOWS_LIVE_TOKEN: "test", UW_API_KEY: "test", FLOWS_LIVE_KEEP: "1", FLOWS_LIVE_LOOP: "1", FLOWS_LIVE_FORCE: force },
+        stdio: "ignore", timeout: 5000,
+      });
+      const code = await new Promise((resolve, reject) => { child.once("error", reject); child.once("exit", resolve); });
+      eq(code, status === 200 ? 0 : 1, "an idle native owner exits cleanly, an unreadable owner fails the starter");
+      deep(requests, ["GET /ingest?key=clock"], "the real entry point spends no feed, write, witness or chain call before ownership");
+    }
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+
+  const legacy = await readLiveClock(async () => ({ payload: { key: "clock", clock: null }, status: 200 }));
+  eq(legacy.liveOwner, "actions", "an answered legacy clock with no session verdict permits a fresh Actions database");
+  let time = at(D, 12);
+  let watches = 0, passes = 0, chains = 0, reads = 0;
+  const handoff = await runLiveLoop({ initialClock: legacy, now: () => time, sleep: async (ms) => { time += ms; }, log() {},
+    readClock: async () => (++reads === 1 ? null : { liveOwner: "worker" }),
+    pass: async () => { passes++; return { answered: 1, landed: 1 }; },
+    watch: { tick: async () => { watches++; } }, chain: async () => { chains++; return { sent: true }; } });
+  deep([handoff.exit, watches, passes, chains, reads], ["worker-owner", 2, 2, 0, 2],
+    "a temporary clock lapse preserves the running owner's work, then a native handoff ends before the witness or successor");
+}
+
+{
   const live = read(".github/workflows/flows-live.yml");
   ok(/permissions:\n {2}contents: read\n {2}id-token: write\n {2}actions: write\n {2}issues: write\n\n/.test(live),
     "THE LIVE WORKFLOW'S GRANTS are read on the contents, the OIDC token, actions: write (the chain and the nightly " +
@@ -1127,7 +1166,7 @@ const MIN = 60 * 1000;
   const pipelineSrc = nightlySource();
   ok(/settle\(loop\);\n  if \(loop\.exit === "hung"\) process\.exit\(process\.exitCode \|\| 1\);\n  return loop;/.test(pipelineSrc),
     "and the command line exits non-zero at once on a hung loop, because the abandoned pass may still hold a socket that would keep Node alive");
-  ok(/readClock, watch, progress: wireProgress\.lastAt,\n    onHung: \(\{ why \}\) => \{\n      if \(why === "tick-deadline"\) return;\n      console\.warn\(`live: \$\{stats\.timedOut - timedOutAtPass\} feed request\(s\) timed out/.test(pipelineSrc) &&
+  ok(/readClock, initialClock, watch, progress: wireProgress\.lastAt,\n    onHung: \(\{ why \}\) => \{\n      if \(why === "tick-deadline"\) return;\n      console\.warn\(`live: \$\{stats\.timedOut - timedOutAtPass\} feed request\(s\) timed out/.test(pipelineSrc) &&
      /in the abandoned pass before it was given up/.test(pipelineSrc) && !/if \(loop\.exit === "hung" && loop\.why === "pass-deadline"\)/.test(pipelineSrc),
   "THE COMMAND LINE hands the loop the feed and ingest clients' progress and counts the abandoned pass's timeouts at the moment it is given up");
   ok(/\)\.finally\(\(\) => wireProgress\.settled\(\)\);\n    const refusal = response\.status === 403/.test(pipelineSrc) &&

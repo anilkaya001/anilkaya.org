@@ -28,6 +28,7 @@ import { stateOf, printOf, coherence } from "./shared/flows-basis.js";
 import { etDayOf } from "./shared/flows-quant-time.js";
 import { FRESH_CLASSES, isRefreshWindow, freshHeaders, pendingHeaders, phaseAt, easternDay, sessionOpen, shiftDay } from "./shared/flows-freshness.js";
 import * as FLOWS_LIVE from "./shared/flows-live-worker.js";
+import { tier2Tick } from "./server/flows-live-tier2.js";
 import * as FLOWS_DOSSIER from "./shared/flows-dossier-worker.js";
 import { TICKER_RE } from "./shared/flows-live.js";
 import {
@@ -1137,17 +1138,21 @@ async function ffHousekeeping(env, at) {
   return { retried: retried ? retried.status : null, gap: gap.status };
 }
 
-function ffAfterLive(request, env, url, response, ctx) {
+function ffAfterAlerts(env, ctx, route) {
   try {
-    if (url.pathname !== "/api/flows/ingest" || request.method !== "POST" || response.status !== 200) return;
-    if (url.searchParams.get("key") !== "live:alerts" || ffMode(env) === "off") return;
-    const failed = (error) => logFailure("error", "ff live tick failed", { route: url.pathname }, error);
+    if (ffMode(env) === "off") return;
+    const failed = (error) => logFailure("error", "ff live tick failed", { route }, error);
     keepAlive(ctx, ffLiveTick(env, Date.now()).then((out) => {
       if (out && out.status === "failed") failed(out.error);
     }, failed));
   } catch (error) {
-    logFailure("error", "ff live tick failed", { route: url.pathname }, error);
+    logFailure("error", "ff live tick failed", { route }, error);
   }
+}
+
+function ffAfterLive(request, env, url, response, ctx) {
+  if (url.pathname !== "/api/flows/ingest" || request.method !== "POST" || response.status !== 200) return;
+  if (url.searchParams.get("key") === "live:alerts") ffAfterAlerts(env, ctx, url.pathname);
 }
 
 function nightlyFreshHeaders(stored) {
@@ -4273,7 +4278,13 @@ export default {
     if (job === "rth") {
       guard("flows rth tick failed", (async () => {
         await ensureFlowsTables(env);
-        return FLOWS_LIVE.rthTick(env, at, tickVendor(env));
+        await FLOWS_LIVE.rthTick(env, at, tickVendor(env));
+        if (FLOWS_LIVE.liveMode(env) === "worker") {
+          const pass = await tier2Tick(env, at, {
+            store: FLOWS_STORE, fetchVendor: (path, params, opts) => uwFetch(env, path, params, opts),
+          });
+          if (pass.alertsWritten) ffAfterAlerts(env, ctx, "scheduled:tier2");
+        }
       })());
       return;
     }

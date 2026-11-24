@@ -11,6 +11,7 @@ import {
 } from "../shared/flows-freshness.js";
 import * as L from "../shared/flows-live.js";
 import * as W from "../shared/flows-live-worker.js";
+import { tier2Tick, TIER2_WRITER } from "../server/flows-live-tier2.js";
 import { pathFor } from "../shared/flows-vendor-ops.js";
 import { upgradeColumns, applySchema, FLOWS_REGISTRY, FLOWS_SCHEMA_SQL as REGISTRY_SQL, columnProbe } from "../server/schema.js";
 import * as FAKE from "../scripts/flows-legs/live-fake.mjs";
@@ -627,7 +628,7 @@ const cronMinutes = (cron) => {
       "shared/flows-live.js, the builders both writers share, never imports it: the roster enters through the " +
         "two planners, the Actions leg (scripts/flows-legs/live.mjs) and the Worker's focus tick");
     ok(importsOf(src("shared/flows-live-worker.js")).includes("./flows-focus.js") &&
-       importsOf(src("scripts/flows-legs/live.mjs")).includes("../../shared/flows-focus.js"),
+       importsOf(src("shared/flows-live-pass.js")).includes("./flows-focus.js"),
       "and both planners import the one focusStripNames, so the Worker's live:focus and the Actions strip ask for the " +
         "same names in the same order");
   }
@@ -766,7 +767,7 @@ const cronMinutes = (cron) => {
 {
   const worker = workerSource();
   const liveWorker = read("shared/flows-live-worker.js");
-  const leg = read("scripts/flows-legs/live.mjs");
+  const leg = read("shared/flows-live-pass.js");
   const pipeline = nightlySource();
   const writes = /(INSERT(?: OR IGNORE)? INTO|UPDATE|DELETE FROM)\s+flows_payload/;
   ok(!writes.test(liveWorker),
@@ -1053,7 +1054,7 @@ const cronMinutes = (cron) => {
      /if \(job === "focus"\) \{\s*guard\("flows focus tick failed", \(async \(\) => \{\s*await ensureFlowsTables\(env\);\s*return FLOWS_LIVE\.focusTick\(env, at, tickVendor\(env\)\);/.test(worker),
     "the scheduled handler routes by the job a trigger's instant calls for, not by the trigger's exact string, and " +
     "the focus job reads the feed through the same uwFetch as Tier 1");
-  ok(/return FLOWS_LIVE\.rthTick\(env, at, tickVendor\(env\)\);/.test(worker) &&
+  ok(/await FLOWS_LIVE\.rthTick\(env, at, tickVendor\(env\)\);/.test(worker) &&
      /function tickVendor\(env\) \{[\s\S]*?deadlineMs: LIVE_BUDGET\.tier1TimeoutMs, onMeter: \(m\) => \{ seen = newerMeter\(seen, m\); \},/.test(worker) &&
      /fetchVendor: \(p, params\) => uwFetch\(env, p, params, \{ deadlineMs: LIVE_BUDGET\.tier1TimeoutMs \}\),\s*admit:/.test(worker),
     "the Tier 1 tick, the focus tick and the tape pass tier1TimeoutMs to uwFetch, so the subrequest a race gives up on is aborted " +
@@ -2680,8 +2681,8 @@ const cronMinutes = (cron) => {
     "EACH PASS HAS ITS OWN RETRY BUDGET: the loop resets the 90 s publish/read retry budget at the start of every " +
       "pass, as each separate run had, so a blip at 10:00 cannot leave the 15:00 pass with no retries");
   ok(/readClock = \(\) => readLiveClock\(readStoredOnce, \{ seen: \(body\) => \{ clockBody = body; \} \}\)/.test(pipeline) &&
-     /runLiveLoop\(\{\s*readClock,/.test(pipeline) &&
-     /const clock = force \? null : await readClock\(\);/.test(pipeline),
+     /runLiveLoop\(\{\s*readClock, initialClock,/.test(pipeline) &&
+     /const initialClock = await readClock\(\);[\s\S]*?initialClock.liveOwner === "worker"[\s\S]*?const clock = force \? null : initialClock;/.test(pipeline),
   "and --live gates both the loop and a single pass on the Worker's clock, the witness's copy of it set only by a read that parsed");
   ok(/runLive\(\{ uw, publish, readStored, shapeNews, origin, skipRecent: first, clock, universe \}\)/.test(pipeline) &&
      /chainDispatch\(\{ env: process\.env, at \}\)/.test(pipeline) && /process\.env\.FLOWS_LIVE_LOOP !== "1"/.test(pipeline),
@@ -3823,7 +3824,7 @@ const cronMinutes = (cron) => {
   eq(calls.length, 1, "ONE VENDOR CALL a tick");
   deep(calls[0], { path: "/api/screener/stocks", params: { ticker: names.join(","), limit: 500 } },
     "the screener read the Actions strip makes, for the focus names only");
-  ok(read("scripts/flows-legs/live.mjs").includes(
+  ok(read("shared/flows-live-pass.js").includes(
     `read(pathFor("screener-stocks"), { ticker: plan.names.join(","), limit: ${W.FOCUS_READ.limit} })`),
   "the same operation and parameters as the live leg's strip read, character for character");
   eq(W.FOCUS_READ.path, pathFor("screener-stocks"), "and the same registry path");
@@ -4327,6 +4328,86 @@ const cronMinutes = (cron) => {
   const series = withBase.published["live:strips:series"];
   ok(series.lag && series.lag.p50.length === series.t.length && series.lag.p50[0] !== null, "and its series keeps the spread of the first column");
   ok(strips.rows.SYL001 && strips.rows.SYL001[prev] !== null, "a board name has a prev in either case");
+}
+
+{
+  const session = "2026-09-24";
+  const at = easternInstant(session, 11 * 60 + 1);
+  const row = { id: 1, day: session, trading: 1, early_close: 0 };
+  const db = tickDb();
+  const prepare = db.prepare;
+  const committed = [];
+  const actual = [];
+  let heldAt = 0;
+  db.prepare = (sql) => {
+    const statement = prepare(sql);
+    if (/SELECT .* FROM flows_clock/.test(sql)) statement.first = async () => row;
+    if (sql.startsWith("UPDATE flows_clock SET live_dispatched_at")) statement.run = async () => {
+      if (heldAt >= statement.args[0]) return { meta: { changes: 0 } };
+      heldAt = statement.args[0];
+      return { meta: { changes: 1 } };
+    };
+    return statement;
+  };
+  db.batch = async (list) => { committed.push(list); return []; };
+  const env = { DB: db, UW_API_KEY: "local-fixture", FLOWS_LIVE_MODE: "worker", GITHUB_DISPATCH_TOKEN: "test" };
+  const options = {
+    store: { read: async () => null },
+    fetchVendor: async (path, params, opts) => { actual.push({ path, params, opts }); return { data: [] }; },
+    now: () => at,
+    wait: async () => {},
+    log: { warn: () => {} },
+  };
+  eq((await tier2Tick({ ...env, FLOWS_LIVE_MODE: "actions" }, at, options)).skipped,
+    "mode", "Actions retains Tier 2 ownership until the switch moves");
+  eq((await tier2Tick({ ...env, UW_BASE: "https://fixture.test" }, at, options)).skipped,
+    "redirected-feed", "native Tier 2 refuses a fixture vendor before its slot claim");
+  eq((await tier2Tick(env, at, { ...options, now: () => at + 120_000 })).skipped,
+    "late-slot", "an old cron invocation never spends vendor quota");
+  const pair = await Promise.all([tier2Tick(env, at, options), tier2Tick(env, at, options)]);
+  eq(pair.filter((r) => r.skipped === "no-slot").length, 1, "one D1 slot claim wins a duplicate invocation");
+  const pass = pair.find((r) => !r.skipped);
+  ok(pass.published.includes("live:heartbeat") && pass.run.calls === actual.length && actual.length <= L.LIVE_BUDGET.tier2MaxCalls,
+    "the native pass uses the shared Tier 2 builder and publishes a measured heartbeat");
+  ok(actual.every(({ path, opts }) => opts.deadlineMs <= 8000 && opts.maxBytes === (path === pathFor("screener-stocks") ? 1280 : 384) * 1024),
+    "native vendor reads have time and body ceilings");
+  eq(committed.length, 1, "native Tier 2 publishes in one transaction");
+  const heartbeat = committed[0].find((s) => s.args[0] === "live:heartbeat");
+  const body = JSON.parse(heartbeat.args[1]);
+  deep([body.fresh.source, body.fresh.writer, heartbeat.args[5]], ["worker", TIER2_WRITER, "worker"],
+    "native writes stamp the actual transport in both metadata and payload");
+  ok(committed[0].filter((s) => s.sql.startsWith("INSERT INTO flows_live")).every((s) => L.LIVE_KEYS[s.args[0]].writer === "actions"),
+    "the native pass cannot write Tier 1, focus or funds keys");
+  eq(liveWindow(at, sessionClock({ liveOwner: "worker" })).why, "worker-owner", "Actions sees the owner switch before a vendor pass");
+  const legacy = await W.ingestLive(env, "live:heartbeat", "POST", JSON.stringify(body), at, { json: (value, status) => Response.json(value, { status }), host: "anilkaya.org" });
+  eq(legacy.status, 403, "legacy live writes are fenced after promotion");
+  const dispatchCheck = await W.checkDispatchCredential(env, async () => { throw new Error("GitHub must not be called"); });
+  eq(dispatchCheck.dispatch.why, "worker-owner", "the manual live dispatch drill follows the same ownership");
+
+  const next = at + 5 * 60_000;
+  let refused = 0;
+  const limited = await tier2Tick(env, next, { ...options, now: () => next,
+    wait: () => new Promise((resolve) => setImmediate(resolve)), fetchVendor: async () => {
+    refused++;
+    throw Object.assign(new Error("quota"), { upstream: 429 });
+  } });
+  eq(refused, 1, "a vendor 429 closes the remaining feed-request budget");
+  deep([limited.run.calls, limited.run.failedCalls], [1, 1], "budget refusals do not inflate billed request counts");
+  const beforeFail = committed.length;
+  await assert.rejects(tier2Tick(env, next + 5 * 60_000, {
+    ...options, now: () => next + 5 * 60_000,
+    store: { read: async (_env, key, trace) => { if (key === "board:long") trace.failed = true; } },
+  }), /store read failed/);
+  eq(committed.length, beforeFail, "an unreadable board store cannot write a partial replacement");
+
+  const unicodeAt = next + 10 * 60_000;
+  const headline = "界".repeat(Math.ceil(L.LIVE_KEYS["live:news"].maxBytes / 2));
+  const unicode = await tier2Tick(env, unicodeAt, { ...options, now: () => unicodeAt,
+    fetchVendor: async (path) => ({ data: path === pathFor("news") ? [{ headline }] : [] }),
+  });
+  ok(!unicode.published.includes("live:news") && unicode.run.errors.some((error) => error.startsWith("live:news:")),
+    "a headline that fits in UTF-16 code units but exceeds the UTF-8 byte cap cannot replace held news");
+  eq(unicode.alertsWritten, false, "an empty alerts read does not signal alert evaluation");
 }
 
 console.log(`✓ flows-live: ${checks} assertions — one threshold table in code; phases on the Eastern clock at every ` +

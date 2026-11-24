@@ -20,7 +20,7 @@ enabled = false
 [[d1_databases]]
 binding = "DB"
 database_name = "iewt-staging"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "82ab4626-4078-4936-b4d6-79321dcc74db"
 migrations_dir = "migrations"
 
 [[ratelimits]]

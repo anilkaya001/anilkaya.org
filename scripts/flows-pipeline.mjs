@@ -165,8 +165,14 @@ async function runLiveMode() {
     }
     return loop;
   };
+  const initialClock = await readClock();
+  if (!initialClock) throw new Error("Could not confirm Tier 2 ownership from the Worker clock.");
+  if (initialClock.liveOwner === "worker") {
+    console.log("live: Cloudflare owns Tier 2; ending the Actions run");
+    return { skipped: "worker-owner" };
+  }
   if (force || process.env.FLOWS_LIVE_LOOP !== "1") {
-    const clock = force ? null : await readClock();
+    const clock = force ? null : initialClock;
     const result = await runLive({ uw, publish, readStored, shapeNews, origin, force, clock, universe });
     settle({ passes: [reportErrors(result)] });
     return result;
@@ -177,7 +183,7 @@ async function runLiveMode() {
     : null;
   let timedOutAtPass = stats.timedOut;
   const loop = await runLiveLoop({
-    readClock, watch, progress: wireProgress.lastAt,
+    readClock, initialClock, watch, progress: wireProgress.lastAt,
     onHung: ({ why }) => {
       if (why === "tick-deadline") return;
       console.warn(`live: ${stats.timedOut - timedOutAtPass} feed request(s) timed out after ${vendorTimeoutMs() / 1000} s ` +
@@ -234,6 +240,11 @@ async function main() {
   const transport = await openTransport();
   const sessionDate = DRY_RUN ? DRY_SESSION_DATE : await resolveSessionDate();
   console.log(`session date: ${sessionDate || "unresolved — falling back to undated calls"}`);
+  const expected = process.env.FLOWS_EXPECTED_SESSION;
+  if (expected && sessionDate !== expected) {
+    throw new Error(`nightly session mismatch: requested ${expected}, feed resolved ${sessionDate || "no session"}`);
+  }
+
 
   const intraday = DRY_RUN
     ? null

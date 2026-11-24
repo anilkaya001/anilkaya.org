@@ -26,10 +26,7 @@ delivery and provides:
 - atomic cross-device progress unions and exact progress-derived points;
 - owner-bound, same-origin mutations plus a generation-fenced transactional reset.
 
-As observed on 2026-07-12, the apex used the Worker API while
-`www.anilkaya.org` still used GitHub Pages to redirect to the apex. Dashboard
-deployment settings and custom-domain state are external to this repository;
-verify them before operational changes.
+Cloudflare serves the apex and redirects `www.anilkaya.org` to it while preserving the path and query. A private Cloudflare Artifacts repository holds the source and Git history. The production Workers Builds integration and remaining GitHub Actions workloads are tracked in the [migration audit](docs/flows-2-transition-audit.md).
 
 ## Repository map
 

@@ -1,0 +1,25 @@
+name = "anilkaya-nightly-fixture"
+main = "scripts/flows-container/worker.js"
+compatibility_date = "2026-07-08"
+workers_dev = false
+preview_urls = false
+
+[[containers]]
+class_name = "NightlyFixture"
+image = "./scripts/flows-container/Dockerfile"
+image_build_context = "."
+instance_type = "basic"
+max_instances = 1
+
+[[durable_objects.bindings]]
+name = "NIGHTLY_FIXTURE"
+class_name = "NightlyFixture"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["NightlyFixture"]
+
+[[workflows]]
+name = "anilkaya-nightly-staging"
+binding = "NIGHTLY"
+class_name = "NightlyWorkflow"

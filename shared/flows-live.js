@@ -1403,11 +1403,12 @@ export function liveKeyFromParam(k) {
   return LIVE_KEY_RE.test(key) && Object.hasOwn(LIVE_KEYS, key) ? key : null;
 }
 
-export function checkLiveWrite(key, body, { source } = {}) {
+export function checkLiveWrite(key, body, { source, tier2Writer = "actions" } = {}) {
   const spec_ = Object.hasOwn(LIVE_KEYS, key) ? LIVE_KEYS[key] : null;
   if (!spec_) return { ok: false, status: 400, code: "invalid_key", message: "Unknown live key" };
-  if (source && spec_.writer !== source) {
-    return { ok: false, status: 403, code: "wrong_writer", message: `${key} has one writer: ${spec_.writer}` };
+  const writer = spec_.writer === "actions" ? tier2Writer : spec_.writer;
+  if (source && writer !== source) {
+    return { ok: false, status: 403, code: "wrong_writer", message: `${key} has one writer: ${writer}` };
   }
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return { ok: false, status: 400, code: "invalid_payload", message: "A live payload is a JSON object" };
@@ -1424,11 +1425,11 @@ export function checkLiveWrite(key, body, { source } = {}) {
   if (f.cadenceS !== spec_.cadenceS) {
     return { ok: false, status: 400, code: "invalid_fresh", message: `fresh.cadenceS must be ${spec_.cadenceS} for ${key}` };
   }
-  if (f.source !== spec_.writer) {
-    return { ok: false, status: 400, code: "invalid_fresh", message: `fresh.source must be ${spec_.writer}` };
+  if (f.source !== writer) {
+    return { ok: false, status: 400, code: "invalid_fresh", message: `fresh.source must be ${writer}` };
   }
   return { ok: true, meta: { readAt, session: f.session, cadenceS: spec_.cadenceS, source: f.source,
-    writer: typeof f.writer === "string" && f.writer ? f.writer.slice(0, 80) : spec_.writer } };
+    writer: typeof f.writer === "string" && f.writer ? f.writer.slice(0, 80) : writer } };
 }
 
 export function nightlyFreshMeta(row) {
