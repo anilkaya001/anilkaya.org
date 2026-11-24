@@ -808,8 +808,8 @@ The shared Tier 2 pass and its Cloudflare adapter. The Node runner and the Worke
 
 | File | Exports | Suites |
 |---|---|---|
-| `server/flows-live-tier2.js` | `server/flows-live-tier2.js#TIER2_WRITER`, `server/flows-live-tier2.js#tier2Tick` | flows, flows-basis, flows-desk-audit, flows-dossier-reads, flows-engine-budget, flows-ledger and 6 more |
-| `shared/flows-live-pass.js` | `shared/flows-live-pass.js#FOCUS_FALLBACK`, `shared/flows-live-pass.js#LIVE_READ_PACE_MS`, `shared/flows-live-pass.js#LIVE_WRITER`, `shared/flows-live-pass.js#boardPlan`, `shared/flows-live-pass.js#focusStripNames`, `shared/flows-live-pass.js#liveWindow`, `shared/flows-live-pass.js#passOutcome`, `shared/flows-live-pass.js#runLive`, `shared/flows-live-pass.js#universeReader` | fixture-guard, flows, flows-basis, flows-deepen, flows-desk-audit, flows-dossier-reads and 25 more |
+| `server/flows-live-tier2.js` | `server/flows-live-tier2.js#TIER2_WRITER`, `server/flows-live-tier2.js#tier2Tick` | flows, flows-alerts, flows-basis, flows-d1-budget, flows-desk-audit, flows-dossier-reads and 10 more |
+| `shared/flows-live-pass.js` | `shared/flows-live-pass.js#FOCUS_FALLBACK`, `shared/flows-live-pass.js#LIVE_READ_PACE_MS`, `shared/flows-live-pass.js#LIVE_WRITER`, `shared/flows-live-pass.js#boardPlan`, `shared/flows-live-pass.js#focusStripNames`, `shared/flows-live-pass.js#liveWindow`, `shared/flows-live-pass.js#passOutcome`, `shared/flows-live-pass.js#runLive`, `shared/flows-live-pass.js#universeReader` | fixture-guard, flows, flows-alerts, flows-basis, flows-deepen, flows-desk-audit and 26 more |
 
 ### `shared/flows-basis.js`, `tests/flows-basis-contract.mjs`
 
