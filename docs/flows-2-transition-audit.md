@@ -2,6 +2,17 @@
 
 The source transfer, deploy gate and Flows data writers have separate success criteria. A passing site build proves that the Worker bundles. A published Worker version proves neither that all source history can be recovered nor that the next market session will archive exactly once. Use the receipts below before retiring the associated GitHub service. Environment-specific commands and rollback procedures belong in [DEPLOY.md](../DEPLOY.md).
 
+## Verified cutover checkpoints on November 24, 2026
+
+| Service | Observed result |
+| --- | --- |
+| Private source recovery | An authenticated fresh clone of Cloudflare Artifacts `anilkaya/anilkaya.org` passed full Git object integrity and OID-set comparison. At 13:54 Ankara time all 468 then-advertised GitHub refs matched: 119 branches, 337 pull-request heads and 12 pull-request merge refs. The destination also retained the superseded synthetic merge under a separate archive ref. That restore had 2,494 commits and 37,605 reachable objects. Subsequent source changes require another ref comparison. |
+| Collaboration archive | A fresh clone of private Artifacts `anilkaya/anilkaya.org-records` at `ce2a997d6537b174efa61c3c2fde5e6b00b250d4` passed Git integrity and SHA-256 verification of its 2,340 manifest entries. It includes 337 pull requests, seven standalone issues, 750 discussion comments, 213 inline review comments, 549 review submissions and 12 labels. Two credential-like values were redacted from historical review excerpts. No milestones, releases or unexpired Actions artifacts appeared in this inventory. |
+| Staging site | Worker `anilkaya-staging` version `88ff171e-b491-4dd4-8ded-5fb675a765e0` served the homepage, Lab and Flows sign-in. The protected board API returned HTTP 401 to an anonymous GET. The Google Sans asset matched the source checksum. Cloudflare reported zero cron entries and zero secrets on the staging Worker. |
+| Isolated staging database | Cloudflare D1 `iewt-staging` is distinct from production `iewt`. The applied repository schema matched all 45 tables, 11 indexes, and 10 triggers by name and type. |
+| Staging build gate | `node scripts/cloudflare-staging-build.mjs` passed on a clean Node 22 checkout of tree `a621b26ceafae9b1a917a5aaaee476c139f1998e`. It installed locked dependencies, ran the fast suite (1,638 assertions) and staging suite (149 checks), prepared assets and completed the staging Wrangler dry run. The gate was executed outside Workers Builds. |
+| Production dependency | Account settings still reported two GitHub-backed Workers Builds triggers for worker `anilkaya` and `FLOWS_LIVE_MODE=actions`. Production migration is open until a Cloudflare-sourced build and real-session data handoff succeed. |
+
 ## Coverage and baseline
 
 The inventory at `697c8b0` contains **1,557 tracked files**, including 862 under `tests/`, 257 under `assets/`, 192 under `shared/`, 113 under `scripts/`, 41 under `server/`, 29 under `docs/`, 26 migrations and seven GitHub configuration files. The inventory covers the full tree, including the public site, articles and Lab. The close read covered all six workflows, Dependabot configuration, dispatch and witness callers, deploy configuration, suite selection, nightly and live publication, archive fencing, route and authentication boundaries, and the separation of deployable assets from fixtures. Course content, fonts, all market models and every suite implementation were inventoried without a line-by-line review. Counts are anchored to this baseline so the migration branch can add modules and tests.
