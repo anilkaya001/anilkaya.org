@@ -12,6 +12,7 @@ const clockFlag = (v) => (v === 0 || v === 1 ? v : null);
 export function sessionClock(body) {
   const ownership = body && body.liveOwner === "worker" ? { liveOwner: "worker" } : null;
   const c = body && typeof body === "object" ? body.clock : null;
+  if (!ownership && body?.key === "clock" && body.clock === null) return { liveOwner: "actions" };
   if (!c || typeof c !== "object" || typeof c.day !== "string" || !DAY_RE.test(c.day)) return ownership;
   return { day: c.day, trading: clockFlag(c.trading), earlyClose: clockFlag(c.earlyClose), ...ownership };
 }
@@ -237,6 +238,11 @@ async function keepLoop({ startedAt, refresh, current, currentRead, pass, chain,
     await refresh();
     const clock = current();
     const here = window(now(), clock);
+    if (here.why === "worker-owner") {
+      log("live loop: Cloudflare owns Tier 2; ending the Actions run");
+      return { exit: "worker-owner", why: here.why, passes, waits, ticks, chained: null, clock, preOpenMs: 0, keep: true,
+        watch: typeof watch.summary === "function" ? watch.summary() : null };
+    }
     if (here.run) {
       const index = passes.length;
       let done = null;
@@ -296,7 +302,7 @@ async function keepLoop({ startedAt, refresh, current, currentRead, pass, chain,
 }
 
 export async function runLiveLoop({ pass, chain, now = () => Date.now(), sleep = realSleep, window = liveWindow,
-  readClock = async () => null, slotMs = LIVE_LOOP.slotMs, budgetMs = LIVE_LOOP.budgetMs, log = console.log,
+  readClock = async () => null, initialClock = null, slotMs = LIVE_LOOP.slotMs, budgetMs = LIVE_LOOP.budgetMs, log = console.log,
   warn = console.warn, watch = null, idleMs = LIVE_LOOP.idleMs, clockDeadlineMs = LIVE_LOOP.clockDeadlineMs,
   passIdleMs = LIVE_LOOP.passIdleMs, passDeadlineMs = LIVE_LOOP.passDeadlineMs, tickDeadlineMs = LIVE_LOOP.tickDeadlineMs,
   progress = null, onHung = null } = {}) {
@@ -305,7 +311,8 @@ export async function runLiveLoop({ pass, chain, now = () => Date.now(), sleep =
   let clock = null;
   let clockRead = false;
   const refresh = async () => {
-    const read = await withDeadline(Promise.resolve().then(readClock), clockDeadlineMs);
+    const read = initialClock || await withDeadline(Promise.resolve().then(readClock), clockDeadlineMs);
+    initialClock = null;
     clockRead = !!read && !read.failed;
     if (clockRead) clock = read;
     return clock;

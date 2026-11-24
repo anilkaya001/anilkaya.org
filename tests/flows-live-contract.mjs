@@ -2681,8 +2681,8 @@ const cronMinutes = (cron) => {
     "EACH PASS HAS ITS OWN RETRY BUDGET: the loop resets the 90 s publish/read retry budget at the start of every " +
       "pass, as each separate run had, so a blip at 10:00 cannot leave the 15:00 pass with no retries");
   ok(/readClock = \(\) => readLiveClock\(readStoredOnce, \{ seen: \(body\) => \{ clockBody = body; \} \}\)/.test(pipeline) &&
-     /runLiveLoop\(\{\s*readClock,/.test(pipeline) &&
-     /const current = await readClock\(\);[\s\S]*?current.liveOwner === "worker"[\s\S]*?const clock = force \? null : current;/.test(pipeline),
+     /runLiveLoop\(\{\s*readClock, initialClock,/.test(pipeline) &&
+     /const initialClock = await readClock\(\);[\s\S]*?initialClock.liveOwner === "worker"[\s\S]*?const clock = force \? null : initialClock;/.test(pipeline),
   "and --live gates both the loop and a single pass on the Worker's clock, the witness's copy of it set only by a read that parsed");
   ok(/runLive\(\{ uw, publish, readStored, shapeNews, origin, skipRecent: first, clock, universe \}\)/.test(pipeline) &&
      /chainDispatch\(\{ env: process\.env, at \}\)/.test(pipeline) && /process\.env\.FLOWS_LIVE_LOOP !== "1"/.test(pipeline),

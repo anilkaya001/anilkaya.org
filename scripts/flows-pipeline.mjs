@@ -165,10 +165,14 @@ async function runLiveMode() {
     }
     return loop;
   };
+  const initialClock = await readClock();
+  if (!initialClock) throw new Error("Could not confirm Tier 2 ownership from the Worker clock.");
+  if (initialClock.liveOwner === "worker") {
+    console.log("live: Cloudflare owns Tier 2; ending the Actions run");
+    return { skipped: "worker-owner" };
+  }
   if (force || process.env.FLOWS_LIVE_LOOP !== "1") {
-    const current = await readClock();
-    if (current && current.liveOwner === "worker") return { skipped: "worker-owner" };
-    const clock = force ? null : current;
+    const clock = force ? null : initialClock;
     const result = await runLive({ uw, publish, readStored, shapeNews, origin, force, clock, universe });
     settle({ passes: [reportErrors(result)] });
     return result;
@@ -179,7 +183,7 @@ async function runLiveMode() {
     : null;
   let timedOutAtPass = stats.timedOut;
   const loop = await runLiveLoop({
-    readClock, watch, progress: wireProgress.lastAt,
+    readClock, initialClock, watch, progress: wireProgress.lastAt,
     onHung: ({ why }) => {
       if (why === "tick-deadline") return;
       console.warn(`live: ${stats.timedOut - timedOutAtPass} feed request(s) timed out after ${vendorTimeoutMs() / 1000} s ` +
