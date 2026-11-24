@@ -240,6 +240,11 @@ async function main() {
   const transport = await openTransport();
   const sessionDate = DRY_RUN ? DRY_SESSION_DATE : await resolveSessionDate();
   console.log(`session date: ${sessionDate || "unresolved — falling back to undated calls"}`);
+  const expected = process.env.FLOWS_EXPECTED_SESSION;
+  if (expected && sessionDate !== expected) {
+    throw new Error(`nightly session mismatch: requested ${expected}, feed resolved ${sessionDate || "no session"}`);
+  }
+
 
   const intraday = DRY_RUN
     ? null
