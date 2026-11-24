@@ -1,5 +1,4 @@
-import { researchPage } from "../../shared/flows-research-page.js";
-import { HttpError, redirect } from "../http.js";
+import { HttpError, fixtureRefused, redirect, tickerParam } from "../http.js";
 import { FLOWS_PAGES, ffSlots, fireNav, ownerNav, macroNav, oracleShell, positioningNav, sideShell } from "../../shared/flows-pages.js";
 import { ROUTE_FLAGS, flagOn, modeOf as ffMode } from "../ff-health.js";
 import { memberShell } from "../../shared/flows-member-shell.js";
@@ -11,6 +10,7 @@ import { eventRiskOpen, eventRiskHalts } from "../../shared/flows-er-switch.js";
 import { flowlabMode } from "../../shared/flows-flowlab.js";
 import { flowlabShell } from "../../shared/flows-flowlab-shell.js";
 import { floorFundsMode } from "../../shared/flows-floor-funds.js";
+import { TICKER_RE } from "../../shared/flows-live.js";
 
 const floorFundsOn = (env, owner) => {
   const mode = floorFundsMode(env);
@@ -27,6 +27,28 @@ const oracleMode = (env, owner) => {
   if (mode === "on") return "on";
   return mode === "owner" && owner === true ? "on" : "off";
 };
+
+const researchOn = (env, owner) => {
+  const mode = modeOf(env?.FLOWS_RESEARCH ?? "owner");
+  return mode === "on" || (mode === "owner" && owner === true);
+};
+
+const gateWord = (env, key) => String(env[key] || "owner").trim().toLowerCase();
+const pageGateOpen = (mode, owner) => mode !== "off" && (mode === "on" || owner === true);
+
+const atlasAccess = (env, owner, macroOn) => ({
+  owner,
+  hasMacro: macroOn(env, owner),
+  hasFlowLab: flowlabMode(env, owner) === "on",
+  hasMoves: pageGateOpen(gateWord(env, "FLOWS_MOVES"), owner),
+  hasRotation: pageGateOpen(gateWord(env, "FLOWS_ROTATION"), owner),
+  hasLedger: pageGateOpen(gateWord(env, "FLOWS_LEDGER"), owner),
+  hasPositioning: pageGateOpen(gateWord(env, "FLOWS_POSITIONING"), owner),
+  hasFire: ffPageOpen(env, "fire"),
+  hasWires: ffPageOpen(env, "wires"),
+  hasInbox: ffPageOpen(env, "inbox"),
+  hasResearch: researchOn(env, owner),
+});
 
 export const memberOptions = (env, owner, slug) => {
   const state = modeOf(env && env.FLOWS_MEMBER_STATE);
@@ -54,7 +76,7 @@ const PAGES = Object.freeze([
   { slug: "now", render: (username) => FLOWS_PAGES.nowPage({ username }) },
   { slug: "desk", render: (username) => FLOWS_PAGES.deskPage({ username }) },
   { slug: "strategy", render: (username) => FLOWS_PAGES.strategyPage({ username }) },
-  { slug: "ticker", render: (username, summary, owner, scenes, env, voldesk, gates) => FLOWS_PAGES.tickerPage({ username, scenes, xcheck: voldesk, privateLens: gates.macroOn(env, owner) }) },
+  { slug: "ticker", render: (username, summary, owner, scenes, env, voldesk, gates) => FLOWS_PAGES.tickerPage({ username, scenes, xcheck: voldesk, privateLens: gates.macroOn(env, owner), research: researchOn(env, owner) }) },
   { slug: "moves", gate: "FLOWS_MOVES", render: (username) => FLOWS_PAGES.movesPage({ username }) },
   { slug: "rotation", gate: "FLOWS_ROTATION", render: (username) => FLOWS_PAGES.rotationPage({ username }) },
   { slug: "flowlab", flowlab: true, render: (username) => FLOWS_PAGES.flowlabPage({ username }) },
@@ -69,12 +91,12 @@ const PAGES = Object.freeze([
   { slug: "inbox", ff: "inbox", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.inboxPage({ username, shadow: ffMode(env) === "shadow" }) },
   { slug: "digest", ff: "inbox", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.digestPage({ username, shadow: ffMode(env) === "shadow" }) },
   { slug: "wires", ff: "wires", render: (username, summary, owner, scenes, env) => FLOWS_PAGES.wiresPage({ username, shadow: ffMode(env) === "shadow" }) },
+  { slug: "atlas", render: (username, summary, owner, scenes, env, _voldesk, gates) => FLOWS_PAGES.atlasPage({ username, access: atlasAccess(env, owner, gates.macroOn) }) },
 ]);
 
 const PUBLIC_PAGES = Object.freeze([
   { slug: "about", render: (env) => FLOWS_PAGES.aboutPage({ positioning: positioningWord(env) === "on" }) },
   { slug: "glossary", render: () => FLOWS_PAGES.glossaryPage() },
-  { slug: "research", render: () => researchPage() },
 ]);
 
 export const FLOWS_PAGE_SLUGS = Object.freeze(PAGES.map((page) => page.slug));
@@ -128,8 +150,8 @@ export function flowsPageRows(deps) {
         }
         const session = await currentFlowsUser(request, env);
         if (session && page.gate) {
-          const mode = String(env[page.gate] || "owner").trim().toLowerCase();
-          if (mode === "off" || (mode !== "on" && !isOwner(env, session.username))) throw HttpError.of("not_found");
+          const mode = gateWord(env, page.gate);
+          if (!pageGateOpen(mode, mode !== "off" && mode !== "on" && isOwner(env, session.username))) throw HttpError.of("not_found");
         }
         if (session && page.open === "macro" && !macroOn(env, isOwner(env, session.username))) throw HttpError.of("not_found");
         if (session && page.ff && !ffPageOpen(env, page.ff)) throw HttpError.of("not_found");
@@ -177,6 +199,22 @@ export function flowsPageRows(deps) {
       methods: GET_HEAD,
       auth: "none",
       handler: ({ url }) => redirect(new URL(path, url).toString(), 308),
+    });
+  }
+
+  for (const path of [slashed("research"), "/flows/research"]) {
+    rows.push({
+      id: "flows.pages.research" + (path.endsWith("/") ? "" : ".bare"),
+      path,
+      methods: GET_HEAD,
+      auth: "none",
+      handler: ({ url }) => {
+        const ticker = tickerParam(url);
+        const target = new URL("/flows/ticker/", url);
+        target.searchParams.set("t", TICKER_RE.test(ticker) && !fixtureRefused(url, ticker) ? ticker : "NVDA");
+        target.searchParams.set("chart", "response");
+        return redirect(target.toString(), 308);
+      },
     });
   }
 

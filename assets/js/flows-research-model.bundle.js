@@ -566,7 +566,37 @@ var FlowsResearchModel = (() => {
       result.liquidity,
       result.inventory,
       ...keys.map((key) => typeof row[key] === "number" ? round(row[key], 6) : row[key])
-    ])].map((row) => row.join(",")).join("\n") + "\n";
+    ])].map((row) => row.map(csvCell).join(",")).join("\n") + "\n";
+  }
+  function csvCell(value) {
+    if (typeof value !== "string") return String(value ?? "");
+    const cell = /^[\s]*[=+@-]/.test(value) ? "'" + value : value;
+    return /[",\r\n]/.test(cell) ? '"' + cell.replaceAll('"', '""') + '"' : cell;
+  }
+  var SYMBOL = /^[A-Z][A-Z0-9.-]{0,9}$/;
+  var OSI = /^([A-Z0-9]{1,6})( *)(\d{6})([CP])(\d{8})$/;
+  var MAX_SERIES = 220;
+  function labelText(value, size) {
+    if (typeof value !== "string" || /[\p{Cc}\p{Cf}]/u.test(value)) return "";
+    const label = value.trim();
+    return label.length <= size ? label : "";
+  }
+  function optionId(value, root) {
+    if (typeof value !== "string" || value.length > 21) return null;
+    const parts = OSI.exec(value);
+    if (!parts || parts[1] !== root || parts[2] && parts[1].length + parts[2].length !== 6) return null;
+    const [, , , end, side, strike] = parts;
+    return { id: root + end + side + strike, end, kind: side === "C" ? "call" : "put", strike: Number(strike) / 1e3 };
+  }
+  var expiryDate = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "2-digit",
+    month: "2-digit",
+    day: "2-digit"
+  });
+  function expiryCode(at) {
+    const parts = Object.fromEntries(expiryDate.formatToParts(at).map(({ type, value }) => [type, value]));
+    return parts.year + parts.month + parts.day;
   }
   var timeFormat = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Europe/Istanbul",
@@ -602,38 +632,58 @@ var FlowsResearchModel = (() => {
       volume5: volumes.length >= returns.length * 0.8 ? quantile(volumes, 0.5) : null
     };
   }
-  function optionRows(contracts, cutoff, spot, horizon, tape) {
+  function optionRows(contracts, cutoff, spot, horizon, tape, root) {
     const selected = new Map();
     for (const row of contracts) {
-      if (!row || typeof row !== "object" || typeof row.id !== "string" || !/^NVDA\d{6}[CP]\d{8}$/.test(row.id)) continue;
+      const contract = optionId(row?.id, root);
+      if (!contract) continue;
       const quoteAt = timestamp2(row.quoteAt);
       const interestAt = timestamp2(row.openInterestAsOf);
-      const expiry = (timestamp2(row.expiresAt) - cutoff) / MINUTE;
+      const expiryAt = timestamp2(row.expiresAt);
+      const expiry = (expiryAt - cutoff) / MINUTE;
       if (!(expiry >= horizon && expiry <= 65 * 24 * 60) || !(quoteAt <= cutoff && quoteAt >= cutoff - 10 * MINUTE)) continue;
       if (!(interestAt <= cutoff && interestAt >= cutoff - 7 * 24 * 60 * MINUTE)) continue;
-      if (!(Number.isFinite(row.strike) && Math.abs(Math.log(row.strike / spot)) <= 0.22 && Number.isFinite(row.iv) && row.iv >= 0.05 && row.iv <= 4 && Number.isFinite(row.openInterest) && row.openInterest >= 0 && row.multiplier === 100 && (row.type === "call" || row.type === "put"))) continue;
-      const expectedKind = row.id[10] === "C" ? "call" : "put";
-      const expectedStrike = Number(row.id.slice(-8)) / 1e3;
-      if (expectedKind !== row.type || expectedStrike !== row.strike || selected.get(row.id)?.quoteAt >= quoteAt) continue;
-      selected.set(row.id, { ...row, quoteAt, expiry, kind: row.type, flow: tape.byContract.get(row.id)?.signedContracts ?? 0 });
+      if (!(Number.isFinite(row.strike) && Math.abs(Math.log(row.strike / spot)) <= 0.22 && Number.isFinite(row.iv) && row.iv >= 0.05 && row.iv <= 4 && Number.isSafeInteger(row.openInterest) && row.openInterest >= 0 && row.multiplier === 100)) continue;
+      const { id, kind, strike, end } = contract;
+      if (kind !== row.type || strike !== row.strike || end !== expiryCode(expiryAt) || selected.get(id)?.quoteAt >= quoteAt) continue;
+      selected.set(id, {
+        id,
+        strike,
+        quoteAt,
+        expiry,
+        kind,
+        iv: row.iv,
+        multiplier: row.multiplier,
+        openInterest: row.openInterest,
+        flow: tape.byContract.get(id)?.signedContracts ?? 0
+      });
     }
     return [...selected.values()].sort((a, b) => Math.abs(Math.log(a.strike / spot)) - Math.abs(Math.log(b.strike / spot)));
   }
-  function checkedSnapshot(input) {
-    if (input?.schemaVersion !== 1 || input.source !== "Unusual Whales" || input.symbol !== "NVDA" || !["point-in-time", "historical-export", "historical-reconstruction"].includes(input.captureMode)) {
-      throw new Error("Upload a recorded Unusual Whales NVDA snapshot in the documented format.");
+  function checkedSnapshot(input, expectedSymbol) {
+    const source = labelText(input?.source, 80);
+    const symbol = typeof input?.symbol === "string" ? input.symbol : "";
+    if (input?.schemaVersion !== 1 || !source || !SYMBOL.test(symbol) || !["point-in-time", "historical-export", "historical-reconstruction"].includes(input.captureMode)) {
+      throw new Error("Load a recorded market-data snapshot in the documented format.");
+    }
+    if (expectedSymbol != null && expectedSymbol !== symbol) {
+      throw new Error("This recording is for " + symbol + ". Open its ticker before loading it.");
     }
     const cutoff = timestamp2(input.asOf);
     if (!Number.isFinite(cutoff) || cutoff > Date.now() + MINUTE) throw new Error("The snapshot needs a valid as-of timestamp.");
-    if (!Array.isArray(input.bars) || input.bars.length > 2e3) throw new Error("The snapshot needs completed NVDA price bars.");
+    if (!Array.isArray(input.bars) || input.bars.length > 2e3) throw new Error("The snapshot needs completed price bars.");
     const unique = new Map();
     for (const row of input.bars) {
       const at = timestamp2(row?.time);
-      if (!Number.isFinite(at) || at > cutoff || at < cutoff - 24 * 60 * MINUTE || !Number.isFinite(row.close) || row.close <= 0) {
+      if (!Number.isFinite(at) || at > cutoff || at < cutoff - 24 * 60 * MINUTE || !Number.isFinite(row.close) || row.close <= 0 || row.close > 1e7) {
         throw new Error("The snapshot contains a malformed or out-of-window price bar.");
       }
-      if (unique.has(at) && unique.get(at).price !== row.close) throw new Error("The snapshot contains conflicting bars for one timestamp.");
-      unique.set(at, { at, time: timeFormat.format(at), price: row.close, volume: Number.isFinite(row.volume) ? row.volume : null });
+      const existing = unique.get(at);
+      const volume = Number.isSafeInteger(row.volume) && row.volume >= 0 ? row.volume : null;
+      if (existing && (existing.price !== row.close || existing.volume !== null && volume !== null && existing.volume !== volume)) {
+        throw new Error("The snapshot contains conflicting bars for one timestamp.");
+      }
+      unique.set(at, { at, time: timeFormat.format(at), price: row.close, volume: volume ?? existing?.volume ?? null });
     }
     const bars = [...unique.values()].sort((a, b) => a.at - b.at);
     if (bars.length < 2) throw new Error("At least two completed price bars are required.");
@@ -645,7 +695,7 @@ var FlowsResearchModel = (() => {
     if (input.quoteMode && !["vendor-at-trade", "timestamped"].includes(input.quoteMode)) {
       throw new Error("Unknown quote timestamp provenance.");
     }
-    return { bars, contracts, trades, cutoff };
+    return { bars, contracts, trades, cutoff, source, symbol, root: symbol.replace(/[.-]/g, "") };
   }
   function skewByExpiry(options) {
     const expiries = new Map();
@@ -679,10 +729,17 @@ var FlowsResearchModel = (() => {
       ratio: clamp(Math.sqrt(sample.askShares / sample.bidShares), 0.65, 1.55)
     };
   }
-  function tapeEvidence(input, trades, cutoff, capturedAt) {
+  function tapeEvidence(input, trades, cutoff, capturedAt, root) {
     const packet = input.tapeSummary;
     if (!packet || trades.length) {
-      return summarizeTape(trades, {
+      const normalized = trades.map((trade) => {
+        const rawId = trade?.option_symbol ?? trade?.option_chain_id;
+        if (rawId == null) return trade;
+        const series = optionId(rawId, root);
+        if (!series) throw new Error("The option tape contains a contract outside this ticker or in an unsupported format.");
+        return { ...trade, option_symbol: series.id };
+      });
+      return summarizeTape(normalized, {
         cutoffMs: cutoff,
         receiptCutoffMs: capturedAt,
         quoteMode: input.quoteMode === "vendor-at-trade" ? "vendor-at-trade" : "require-timestamps"
@@ -697,8 +754,9 @@ var FlowsResearchModel = (() => {
     let signedPrints = 0;
     for (const pair of packet.byContract) {
       if (!Array.isArray(pair) || pair.length !== 2) throw new Error("Invalid trade summary entry.");
-      const [id, read] = pair;
-      if (typeof id !== "string" || !/^NVDA\d{6}[CP]\d{8}$/.test(id) || byContract.has(id) || !Number.isSafeInteger(read?.prints) || !Number.isSafeInteger(read?.signedPrints) || read.prints < read.signedPrints || read.signedPrints < 0 || !Number.isFinite(read.volume) || read.volume < 0 || !Number.isFinite(read.signedContracts) || Math.abs(read.signedContracts) > read.volume + 1e-8) {
+      const [rawId, read] = pair;
+      const id = optionId(rawId, root)?.id;
+      if (!id || byContract.has(id) || !Number.isSafeInteger(read?.prints) || !Number.isSafeInteger(read?.signedPrints) || read.prints < read.signedPrints || read.signedPrints < 0 || !Number.isFinite(read.volume) || read.volume < 0 || !Number.isFinite(read.signedContracts) || Math.abs(read.signedContracts) > read.volume + 1e-8) {
         throw new Error("Invalid per-contract trade summary.");
       }
       prints += read.prints;
@@ -710,17 +768,17 @@ var FlowsResearchModel = (() => {
     }
     return { byContract, counts, archiveSha256: packet.archiveSha256 };
   }
-  function load(input) {
-    const { bars, contracts, trades, cutoff } = checkedSnapshot(input);
+  function load(input, { symbol: expectedSymbol } = {}) {
+    const { bars, contracts, trades, cutoff, source, symbol, root } = checkedSnapshot(input, expectedSymbol);
     const retrospective = input.captureMode === "historical-reconstruction";
     const capturedAt = retrospective ? timestamp2(input.capturedAt) : cutoff;
     if (!Number.isFinite(capturedAt) || capturedAt < cutoff || capturedAt > Date.now() + MINUTE) {
       throw new Error("A historical reconstruction needs its actual capture timestamp.");
     }
-    const tape = tapeEvidence(input, trades, cutoff, capturedAt);
+    const tape = tapeEvidence(input, trades, cutoff, capturedAt, root);
     const spot = bars.at(-1).price;
-    const options = optionRows(contracts, cutoff, spot, 15, tape);
-    skewByExpiry(options);
+    const options = optionRows(contracts, cutoff, spot, 15, tape, root);
+    if (options.length <= MAX_SERIES) skewByExpiry(options);
     const depth = liquidityEvidence(input, cutoff);
     const { sigmaPerMinute, volume5 } = statistic(bars);
     const reasons = [];
@@ -729,7 +787,7 @@ var FlowsResearchModel = (() => {
     if (!(volume5 > 0)) reasons.push("underlying share volume is unavailable");
     if (options.length < 5) reasons.push("fewer than five timestamped, valid option series");
     if (!options.some((option) => Math.abs(option.flow) > 0)) reasons.push("no matched option prints with an eligible side");
-    if (options.length > 220) reasons.push("the option strip exceeds the 220-series limit");
+    if (options.length > MAX_SERIES) reasons.push("the option strip exceeds the " + MAX_SERIES + "-series limit");
     if (input.captureMode === "historical-export") reasons.push("the export lacks a point-in-time receipt archive");
     const sessionClose = timestamp2(input.sessionEndsAt);
     if (!Number.isFinite(sessionClose)) reasons.push("the exchange session close is unverified");
@@ -755,11 +813,11 @@ var FlowsResearchModel = (() => {
       depth
     };
     const meta = Object.freeze({
-      symbol: input.symbol,
-      name: "NVIDIA Corporation",
+      symbol,
+      name: labelText(input.name, 100) || symbol,
       spot,
-      source: input.source,
-      version: "2.0.0-research",
+      source,
+      version: "2.0.1-research",
       asOf: new Date(cutoff).toISOString(),
       asOfLabel: timeFormat.format(cutoff) + " TRT",
       capturedAt: new Date(capturedAt).toISOString(),
@@ -767,7 +825,7 @@ var FlowsResearchModel = (() => {
       captureMode: input.captureMode,
       priceBasis: input.priceBasis === "spot-marks" ? "spot-marks" : "completed-bars",
       seriesLabel: input.priceBasis === "spot-marks" ? "Underlying spot marks" : "Completed price bars",
-      provenance: input.priceBasis === "spot-marks" ? "Unusual Whales spot exposures · Flows cache" : "Unusual Whales · minute OHLCV and options tape",
+      provenance: source + (input.priceBasis === "spot-marks" ? " · recorded spot marks" : " · recorded price bars and options tape"),
       minutes: Object.freeze(minutes.length ? minutes : [15, 30, 60]),
       liquidity: Object.freeze(["normal", "thin"]),
       inventory: Object.freeze(["ensemble", "short", "long"]),
@@ -784,6 +842,5 @@ var FlowsResearchModel = (() => {
   }
   return __toCommonJS(flows_research_model_exports);
 })();
-window.FlowsUI ??= {};
-window.FlowsUI.researchModel = FlowsResearchModel;
+window.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { researchModel: FlowsResearchModel }));
 })();

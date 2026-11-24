@@ -993,6 +993,9 @@ body:has(#fxFresh:is([data-state="stale"], [data-state="pending"])) .ff-halo { s
   cursor: pointer;
 }
 .fx-iconbtn .ui-g { font-size: 21px; }
+.fx-iconbtn.fx-atlas-link { display: none; margin-left: 0; text-decoration: none; }
+.fx-iconbtn.fx-atlas-link[aria-current="page"] { box-shadow: inset 0 0 0 1px var(--sep-strong); }
+@media (max-width: 1024.98px) { .fx-iconbtn.fx-atlas-link { display: inline-grid; } }
 .fx-iconbtn:hover {
   background: var(--glass-ctl-hover);
   box-shadow: var(--glass-chrome-edge);

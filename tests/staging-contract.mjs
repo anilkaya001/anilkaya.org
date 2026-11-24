@@ -63,6 +63,8 @@ const quiet = () => {
   ok(!("FLOWS_LIVE_REPO" in staging.vars) && !("FLOWS_NIGHTLY_WORKFLOW" in staging.vars) && !("FLOWS_LIVE_WORKFLOW" in staging.vars),
      "and names no repository or workflow to dispatch");
   eq(staging.vars.FLOWS_READ_MODE, "off", "and its readings are the deterministic ones");
+  eq(production.vars.FLOWS_RESEARCH, "owner", "production enables price-response research for owners");
+  eq(staging.vars.FLOWS_RESEARCH, production.vars.FLOWS_RESEARCH, "staging exercises the same price-response role gate");
   eq(staging.vars.FLOWS_RT_MODE, "on", "the rail is on, so the socket rung can be measured");
   eq(staging.vars.FLOWS_RT_AUDIENCE, "members", "for members, so simulated members can open sockets");
   eq(production.vars.FLOWS_UW_PLAN, "advanced", "production records its feed plan");

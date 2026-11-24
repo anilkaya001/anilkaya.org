@@ -842,6 +842,7 @@
   const nnLoad = () => { UI.defer("nn-orb", { when: "idle" }).then(() => { if (window.FlowsUI.nnOrb) window.FlowsUI.nnOrb.scan(); }); };
   const GLANCE = { mount: null, ready: false, focus: null, read: null, claims: [], idx: null, pop: null, popBtn: null, sheet: null, expiry: null };
   const SURF = { view: "price", api: null, load: null, tabs: null, seq: 0 };
+  const RESPONSE = { api: null, load: null };
   const frameEl = $("ftGlance"), stripEl = $("ftStrip"), railEl = $("ftReadRail"), dockEl = $("ftDock"), diveEl = $("ftDive");
 
   function emitFocus(id, source) {
@@ -1031,7 +1032,7 @@
   function paintRail(read) {
     if (!railEl) return;
     closePop(false);
-    railEl.hidden = !STATE.glance || SURF.view === "surface";
+    railEl.hidden = !STATE.glance || SURF.view !== "price";
     railEl.replaceChildren(nnEdge());
     GLANCE.focus = null;
     railEl.dataset.focus = "";
@@ -1164,29 +1165,51 @@
     });
   }
 
-  const CHART_TITLES = { price: "Price, levels and the month ahead", surface: "Volatility surface and dealer gamma terrain" };
+  function loadResponse() {
+    const host = $("ftGResponse");
+    if (!host || !STATE.card) return;
+    if (RESPONSE.api) { RESPONSE.api.repaint(); return; }
+    if (RESPONSE.load) return;
+    host.replaceChildren(UI.silent(ST("pending", "Loading the response workspace."), "Price response", 140));
+    RESPONSE.load = UI.defer("response", { when: "visible", el: host, label: "Price response" }).then(() => {
+      if (SURF.view !== "response") return;
+      try {
+        RESPONSE.api = window.FlowsUI.tickerResponse.mount(host, { ticker: STATE.card.ticker });
+      } catch (e) {
+        console.error("flows-ticker: response mount failed", e);
+        host.replaceChildren(UI.silent(ST("unavailable", "The response workspace could not be opened."), "Price response", 140));
+      }
+    }).finally(() => { RESPONSE.load = null; });
+  }
+
+  const CHART_TITLES = { price: "Price, levels and the month ahead", surface: "Volatility surface and dealer gamma terrain", response: "Price response and liquidity" };
+  const linkedResponse = () => new URLSearchParams(location.search).get("chart") === "response";
 
   function setView(view) {
     if (view === "surface" && SURF.gated) view = "price";
-    const main = $("ftGMain"), a = $("ftGlanceChart"), b = $("ftGSurf");
-    if (!main || !a || !b || (view === "surface" && !$("ftSurface"))) return;
+    const main = $("ftGMain"), a = $("ftGlanceChart"), b = $("ftGSurf"), c = $("ftGResponse");
+    if (!main || !a || !b || (view === "surface" && !$("ftSurface")) || (view === "response" && !c)) return;
     SURF.view = view;
     main.dataset.view = view;
     const ttl = $("ftGChartT");
     if (ttl) ttl.textContent = CHART_TITLES[view] || CHART_TITLES.price;
-    a.hidden = view === "surface";
+    a.hidden = view !== "price";
     b.hidden = view !== "surface";
+    if (c) c.hidden = view !== "response";
     const range = $("ftGRange"), reset = $("ftGReset");
-    if (range) range.hidden = view === "surface";
+    if (range) range.hidden = view !== "price";
     if (reset) reset.hidden = view !== "surface";
-    railEl.hidden = !STATE.glance || view === "surface";
+    railEl.hidden = !STATE.glance || view !== "price";
     if (view === "surface") loadSurface();
-    else { dropSurface(); b.replaceChildren(); fitClaims(); }
+    else { dropSurface(); b.replaceChildren(); }
+    if (view === "response") loadResponse();
+    if (view === "price") fitClaims();
   }
 
   function paintTabs() {
     const host = $("ftGTabs");
-    if (!host || host.firstChild || !$("ftSurface")) return;
+    const surface = $("ftSurface"), response = $("ftResponse");
+    if (!host || host.firstChild || (!surface && !response)) return;
     const gl = window.FlowsUI && window.FlowsUI.tickerGlance;
     let em = null;
     try { em = gl && STATE.card ? gl.model.expiries(STATE.card, window.FlowsQuant || null) : null; } catch (e) { em = null; }
@@ -1194,14 +1217,26 @@
     const why = gated ? "Not on this card: " + (em.why.gamma || em.why.smile || "no expiries") + (em.why.gamma && em.why.smile ? " " + em.why.smile : "") : null;
     SURF.gated = gated;
     if (gated && SURF.view === "surface") setView("price");
-    const seg = UI.segmented("Chart view", [{ label: "Price & levels" }, { label: "Surface & terrain", disabled: gated, title: why }], (i) => setView(i === 1 ? "surface" : "price"), SURF.view === "surface" ? 1 : 0);
+    const views = [{ key: "price", tab: "ftTabPrice", panel: "ftGlanceChart", label: "Price & levels" }];
+    if (surface) views.push({ key: "surface", tab: "ftTabSurface", panel: "ftGSurf", label: "Surface & terrain", disabled: gated, title: why });
+    if (response) views.push({ key: "response", tab: "ftTabResponse", panel: "ftGResponse", label: "Price response" });
+    const linked = response && linkedResponse();
+    const start = Math.max(0, views.findIndex((it) => it.key === (linked ? "response" : SURF.view)));
+    const seg = UI.segmented("Chart view", views, (i) => setView(views[i].key), start);
     const btns = [...seg.querySelectorAll("button")];
-    ["ftTabPrice", "ftTabSurface"].forEach((id, i) => { btns[i].id = id; btns[i].dataset.tab = i ? "surface" : "price"; btns[i].setAttribute("aria-controls", i ? "ftGSurf" : "ftGlanceChart"); });
-    if (gated) btns[1].setAttribute("aria-disabled", "true");
+    for (const [i, it] of views.entries()) {
+      const b = btns[i];
+      b.id = it.tab;
+      b.dataset.tab = it.key;
+      b.setAttribute("aria-controls", it.panel);
+      if (it.disabled) b.setAttribute("aria-disabled", "true");
+      $(it.panel).setAttribute("aria-labelledby", it.tab);
+    }
     host.append(seg);
     SURF.tabs = seg;
     const reset = $("ftGReset");
     if (reset && !reset.firstChild) { reset.hidden = true; reset.append(h("button", { class: "ft-gbtn", type: "button", onclick: () => { if (SURF.api) SURF.api.reset(); } }, "Reset view")); }
+    if (linked) setView("response");
   }
 
   const BEHIND = "body > .flows-skip, #fxSide, #fxScrim, #fxBar, #flowsMain, #fxTabs, #askDock";
@@ -1343,6 +1378,7 @@
     paintTabs();
     dropSurface();
     if (SURF.view === "surface") loadSurface();
+    if (SURF.view === "response") loadResponse();
     paintDock();
     mountGlance();
     GLANCE.ready = true;
@@ -3096,6 +3132,12 @@
     if (STATE.tape) buildLiteFlow(card);
     if (STATE.neuron && STATE.neuron.tier) renderVerdict(card, STATE.neuron);
     paintFreshness(card);
+    if ($("ftResponse") && linkedResponse()) {
+      const panel = $("ftGResponse");
+      panel.setAttribute("role", "region");
+      panel.setAttribute("aria-labelledby", "ftGChartT");
+      setView("response");
+    }
     STATE.first = false;
   }
 

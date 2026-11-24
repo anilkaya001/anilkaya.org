@@ -1,6 +1,8 @@
-# Flows 2.0 NVDA price response
+# Flows 2.0 price response
 
-The research page reads a local JSON snapshot of observed Unusual Whales data. It does not send the file to the site or to the vendor. The public repository contains the browser model and its source. It contains no captured market rows. Rebuild the browser model after editing the tape or model module with `node scripts/build-flows-research-bundle.mjs` after installing the test dependencies.
+From an eligible ticker dossier, open **Price response** in the chart switch. `/flows/research/?t=<symbol>` redirects to `/flows/ticker/?t=<symbol>&chart=response`. In Wrangler, `FLOWS_RESEARCH=owner` grants access to owners, `on` grants access to signed-in members, and `off` removes the tab.
+
+The panel reads a local normalized JSON recording. It computes the scenario grid in the browser and leaves the file on the device. The repository ships the model and UI without upstream captures. Rebuild the browser model after changing the tape or model module with `node scripts/build-flows-research-bundle.mjs` after installing the test dependencies.
 
 ## Snapshot contract
 
@@ -8,11 +10,11 @@ All timestamps use ISO 8601 with an offset, or Unix milliseconds. Close prices a
 
 | Field | Requirements |
 | --- | --- |
-| `schemaVersion`, `source`, `symbol` | `1`, `Unusual Whales`, `NVDA` |
+| `schemaVersion`, `source`, `symbol` | `1`, the authorized recording’s source label, and the exact ticker in its canonical uppercase form. The ticker must match the dossier. |
 | `asOf`, `sessionEndsAt` | Research cutoff and verified exchange session close. A price replay can omit the close. |
 | `captureMode`, `capturedAt` | `point-in-time` for a capture with actual local receipt times, `historical-export` for an observation-only replay, or `historical-reconstruction` for retrospective tape with event and quote chronology and the independently retained download timestamp. |
 | `bars` | Rows with `time`, `close`, and `volume`. Use the time the bar completed. A price-only replay may leave volume absent and set `priceBasis` to `spot-marks`. |
-| `contracts` | Rows with `id` in OCC format, `strike`, `expiresAt`, `type` (`call` or `put`), `iv`, `openInterest`, `multiplier`, `quoteAt`, and `openInterestAsOf`. This version accepts standard NVDA equity contracts with a 100-share multiplier. |
+| `contracts` | Rows with `id` in OCC format, `strike`, `expiresAt`, `type` (`call` or `put`), `iv`, `openInterest`, `multiplier`, `quoteAt`, and `openInterestAsOf`. Use standard 100-share equity contracts. Compact and space-padded OCC identifiers are accepted. Dates, call/put flags, strikes, and the normalized OCC root must reconcile. Adjusted contracts and alternate roots require an explicit contract-mapping extension. |
 | `trades` | Raw trade rows with `id`, `option_chain_id` or `option_symbol`, `executed_at`, collector `received_at`, `price`, `size`, `nbbo_bid`, `nbbo_ask`, and any condition codes, tags, cancels and corrections present. |
 | `tapeSummary` | Optional replay receipt with `counts`, reconciled `byContract` pairs and `archiveSha256`. Created from the same raw adapter and used when the research file should omit print-level data. |
 | `litQuoteSummary` | Optional same-cutoff descriptive lit sample with `asOf`, `prints`, `bidShares` and `askShares` as medians of displayed shares at trade. |
@@ -32,6 +34,6 @@ The volatility ratio compares paired simulated five-minute log returns with comm
 
 ## Production validation
 
-Build a time-ordered archive with true receive clocks, quote vintages, timestamped prior OI, cancellable trade IDs, complex-order flags, and a calibrated American-option pricer. Model time-of-day volatility and estimate stock impact from signed lit order-flow imbalance and depth. Use realized log-return variance and pathwise continuation/reversal after first touch as separate held-out targets. Compare against a price-only seasonal HAR baseline, simple OI gamma, and independently tested flow-only features. Use QLIKE for variance, Brier and reliability curves for first-touch outcomes, purged session splits, and day-block intervals. Publish calibrated forecasts only after incremental out-of-sample evidence and applicable written display rights.
+Build a time-ordered archive with true receive clocks, quote vintages, timestamped prior OI, cancellable trade IDs, complex-order flags, and a calibrated American-option pricer. Model time-of-day volatility and estimate stock impact from signed lit order-flow imbalance and depth. Use realized log-return variance and pathwise continuation/reversal after first touch as separate held-out targets. Compare against a price-only seasonal HAR baseline, simple OI gamma, and independently tested flow-only features. Use QLIKE for variance, Brier and reliability curves for first-touch outcomes, purged session splits, and day-block intervals. Publish calibrated forecasts only after incremental out-of-sample evidence and contractual rights covering the intended options data, historical storage, computation and distribution. The client importer is provider-neutral and requires the operator to supply a recording authorized for their use.
 
-Sources include the [Unusual Whales API documentation](https://api.unusualwhales.com/docs), [API terms](https://unusualwhales.com/api-terms-of-service), [Gamma Fragility](https://www.abarbon.com/papers/gamma-fragility), [Corsi’s HAR-RV](https://doi.org/10.1093/jjfinec/nbp001), and [The Price Impact of Order Book Events](https://doi.org/10.1093/jjfinec/nbt003).
+Research references include [Gamma Fragility](https://www.abarbon.com/papers/gamma-fragility), [Corsi’s HAR-RV](https://doi.org/10.1093/jjfinec/nbp001), and [The Price Impact of Order Book Events](https://doi.org/10.1093/jjfinec/nbt003).

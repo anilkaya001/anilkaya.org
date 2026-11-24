@@ -17,7 +17,7 @@ const result = await build({
 });
 const moduleCode = result.outputFiles[0].text.replace(/^\s*\/\/ .*$/gm, "").replaceAll("/* @__PURE__ */ ", "").trim();
 const output = '(() => {\n"use strict";\n' + moduleCode
-  + '\nwindow.FlowsUI ??= {};\nwindow.FlowsUI.researchModel = FlowsResearchModel;\n})();\n';
+  + '\nwindow.FlowsUI = Object.freeze(Object.assign({}, window.FlowsUI, { researchModel: FlowsResearchModel }));\n})();\n';
 
 if (process.argv.includes("--check")) {
   if (readFileSync(target, "utf8") !== output) throw new Error("Rebuild the Flows research browser model.");
