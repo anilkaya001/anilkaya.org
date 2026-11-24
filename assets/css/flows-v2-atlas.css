@@ -1,0 +1,89 @@
+.fv2-atlas {
+  color: var(--label-1);
+  font-family: var(--font-text);
+  margin-inline: auto;
+  max-width: 1240px;
+}
+
+.fv2-atlas-head {
+  margin-bottom: 16px;
+}
+
+.fv2-atlas-head h1 {
+  font: 600 clamp(24px, 2.3vw, 34px) / 1.12 var(--font-display);
+  letter-spacing: -0.024em;
+  margin: 0 0 5px;
+}
+
+.fv2-atlas-head p,
+.fv2-destination p {
+  color: var(--label-2);
+  font-size: 13px;
+  line-height: 1.42;
+  margin: 0;
+}
+
+.fv2-destinations,
+.fv2-destination-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.fv2-destinations {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 235px), 1fr));
+}
+
+.fv2-destination {
+  background: #0c0f15;
+  border: 1px solid var(--sep-strong);
+  border-radius: 12px;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  min-width: 0;
+  padding: 12px;
+}
+
+.fv2-destination h2 {
+  font: 600 15px / 1.24 var(--font-display);
+  margin: 0 0 5px;
+}
+
+.fv2-destination-links {
+  align-content: start;
+  display: grid;
+  gap: 2px;
+  margin-top: 9px;
+}
+
+.fv2-destination-links a {
+  align-items: center;
+  border-radius: 6px;
+  color: var(--accent-soft);
+  display: flex;
+  font-size: 13px;
+  gap: 10px;
+  justify-content: space-between;
+  line-height: 1.28;
+  min-height: 32px;
+  padding: 5px 8px;
+  text-decoration: none;
+}
+
+.fv2-destination-links a:hover {
+  background: #18202c;
+  text-decoration: underline;
+}
+
+.fv2-destination-links a:focus-visible {
+  outline: 2px solid #69a9ff;
+  outline-offset: -2px;
+}
+
+@media (pointer: coarse) {
+  .fv2-destination-links a {
+    min-height: 44px;
+  }
+}

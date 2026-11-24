@@ -5,6 +5,7 @@ import { flowsPageRows, FLOWS_PAGE_SLUGS, FLOWS_PUBLIC_SLUGS, FLOWS_GONE_SLUGS }
 import { FLOWS_NAV, FLOWS_PAGES, FLOWS_TABS, FIRE_SHADOW_LINE, ffSlots, ownerNav } from "../shared/flows-pages.js";
 import { INBOX_SHADOW_LINE } from "../shared/ff-pages-inbox.js";
 import { positioningMode } from "../shared/flows-pos-switch.js";
+import { load as loadResearch } from "../shared/flows-research-model.js";
 import { workerSource, expect, absent, moduleSource } from "./lib/source-scan.mjs";
 
 let checks = 0;
@@ -15,23 +16,82 @@ const { HttpError, redirect, requireMethod } = K;
 const STUB = { currentFlowsUser: async () => null, readFlowsSummary: async () => null, isOwner: () => false };
 const table = createRouter(flowsPageRows(STUB));
 
-const SLUGS = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "rotation", "flowlab", "unusual", "ledger", "macro", "events", "political", "positioning", "status", "fire", "inbox", "digest", "wires"];
-eq(FLOWS_PAGE_SLUGS, SLUGS, "the page list is the gated pages in their old order, the Network and Flagged now pop-outs after Market, the owner-gated moves and Flow Lab pages before unusual, and the four Fire & Forget pages last");
-eq(FLOWS_PUBLIC_SLUGS, ["about", "glossary"], "and the public front door is the two pages a signed-out reader gets");
+const SLUGS = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "rotation", "flowlab", "unusual", "ledger", "macro", "events", "political", "positioning", "status", "fire", "inbox", "digest", "wires", "atlas"];
+eq(FLOWS_PAGE_SLUGS, SLUGS, "the page list is the gated pages in their old order, the Network and Flagged now pop-outs after Market, the owner-gated moves and Flow Lab pages before unusual, the four Fire & Forget pages, and the authenticated atlas");
+eq(FLOWS_PUBLIC_SLUGS, ["about", "glossary"], "the public front door serves About and Glossary");
 const expectedPaths = ["/flows", "/flows/login/"];
 for (const slug of SLUGS) {
   expectedPaths.push("/flows/" + (slug ? slug + "/" : ""));
   if (slug) expectedPaths.push("/flows/" + slug);
 }
 for (const slug of FLOWS_PUBLIC_SLUGS) expectedPaths.push("/flows/" + slug + "/", "/flows/" + slug);
+const researchPaths = ["/flows/research/", "/flows/research"];
+expectedPaths.push(...researchPaths);
 eq(FLOWS_GONE_SLUGS, ["ask", "track", "history"], "the removed pages are Ask, Track and History");
 const gonePaths = FLOWS_GONE_SLUGS.flatMap((slug) => ["/flows/" + slug + "/", "/flows/" + slug]);
 expectedPaths.push(...gonePaths);
-eq(table.rows.map((r) => r.path), expectedPaths, "the family is /flows, the login page, each page and each page's bare form, the two public pages and their bare forms, then the removed pages in both forms");
+eq(table.rows.map((r) => r.path), expectedPaths, "the family includes the signed-in pages, the public pages, and the research and retired aliases");
 ok(table.rows.every((r) => r.auth === "none" && r.methods.join() === "GET,HEAD"), "every row is GET and HEAD with no gate: an anonymous visitor gets the login page, not a 401");
 ok(new Set(table.rows.map((r) => r.id)).size === table.rows.length && table.rows.every((r) => r.id.startsWith("flows.pages.")), "ids are unique and namespaced");
 eq(table.rows.filter((r) => r.path.length > "/flows/".length && !r.path.endsWith("/")).map((r) => r.path.slice("/flows/".length)),
-  [...SLUGS.filter(Boolean), ...FLOWS_PUBLIC_SLUGS, ...FLOWS_GONE_SLUGS], "the bare redirects are generated from the page lists, one per page but the overview, and one per removed page");
+  [...SLUGS.filter(Boolean), ...FLOWS_PUBLIC_SLUGS, "research", ...FLOWS_GONE_SLUGS], "the bare redirects include the research alias and one per routed page other than the overview");
+
+{
+  const call = (user, path, env = {}) => {
+    const url = new URL(path, "https://anilkaya.org");
+    const router = createRouter(flowsPageRows({
+      ...scenario(user ? { username: user } : null).deps, macroOn: (e) => e.FLOWS_MACRO === "on",
+    }));
+    return router.handle({ request: new Request(url), url, env, ctx: {} });
+  };
+  const anonymous = await call(null, "/flows/atlas/");
+  eq(await anonymous.text(), FLOWS_PAGES.loginPage(), "the atlas uses Flows sign-in");
+  const bare = await call("member", "/flows/atlas");
+  eq([bare.status, bare.headers.get("Location")], [308, "https://anilkaya.org/flows/atlas/"], "the atlas has one canonical page");
+  const body = (html) => html.match(/<section class="fv2-atlas"[\s\S]*?<\/section>/)?.[0] || "";
+  const member = body(await (await call("member", "/flows/atlas/")).text());
+  ok(member.includes("All pages") && member.includes('href="/flows/ticker/?t=NVDA"'), "the member has a native name entry");
+  ok(["status", "flowlab", "macro", "moves", "rotation", "positioning", "ledger", "fire", "wires", "inbox"].every((slug) =>
+    !member.includes('href="/flows/' + slug + '/"')), "the atlas hides routes that the member cannot open");
+  ok(!member.includes("chart=response"), "owner research stays outside the member atlas");
+  const owner = body(await (await call("anilkaya", "/flows/atlas/", { FLOWS_MACRO: "on", FF_MODE: "shadow", FF_ROUTE_WIRES: "on" })).text());
+  ok(["status", "macro", "moves", "rotation", "positioning", "ledger", "wires"].every((slug) =>
+    owner.includes('href="/flows/' + slug + '/"')), "the atlas keeps eligible owner tools");
+  ok(owner.includes('href="/flows/ticker/?t=NVDA&amp;chart=response"'), "eligible readers can open the response tab from the atlas");
+  const disabled = body(await (await call("anilkaya", "/flows/atlas/", { FLOWS_RESEARCH: "off", FLOWS_MOVES: "off" })).text());
+  ok(!disabled.includes("chart=response") && !disabled.includes('href="/flows/moves/"'), "explicit off flags also hide links for the owner");
+}
+
+{
+  const at = Date.parse("2024-11-20T19:30:00Z");
+  const minute = 60_000;
+  const strikes = [98, 99, 100, 101, 102];
+  const contracts = strikes.map((strike) => ({
+    id: "TEST  241122C" + String(strike * 1000).padStart(8, "0"),
+    strike, type: "call", iv: .2, openInterest: 200, multiplier: 100,
+    quoteAt: at - 5_000, openInterestAsOf: at - 20 * minute, expiresAt: "2024-11-22T21:00:00Z",
+  }));
+  const trade = { id: "eligible", option_chain_id: contracts[2].id.replaceAll(" ", ""), price: 2, size: 10,
+    nbbo_bid: 1.8, nbbo_ask: 2, executed_at: at - 5_000, received_at: at - 4_500,
+    nbbo_bid_at: at - 5_100, nbbo_ask_at: at - 5_100 };
+  const input = {
+    schemaVersion: 1, source: '=Recording, "lab"', symbol: "TEST", captureMode: "point-in-time",
+    asOf: at, sessionEndsAt: at + 90 * minute, coverage: { chainComplete: true, tapeComplete: true },
+    contracts, trades: [trade],
+    bars: Array.from({ length: 46 }, (_, i) => ({ time: at - (45 - i) * minute, close: 100 + .05 * (i % 2), volume: 800 })),
+  };
+  const research = loadResearch(input, { symbol: "TEST" });
+  const result = research.evaluate();
+  eq([research.meta.symbol, result.contractCount, result.coverage.signedPrints, result.rows.length], ["TEST", 5, 1, 77],
+    "a provider-neutral ticker takes both compact tape and padded chain identifiers and produces all grid nodes");
+  ok(research.csv(result).split("\n")[1].startsWith('"\'=Recording, ""lab"""'),
+    "the recorded provider label is quoted and formula-safe in CSV");
+  assert.throws(() => loadResearch(input, { symbol: "AAPL" }), /recording is for TEST/);
+  assert.throws(() => loadResearch({ ...input, trades: [{ ...trade, option_chain_id: "AAPL241122C00100000" }] }), /outside this ticker/);
+  checks += 2;
+  const wrongExpiry = { ...input, contracts: [{ ...contracts[0], expiresAt: "2024-11-21T21:00:00Z" }, ...contracts.slice(1)] };
+  ok(!loadResearch(wrongExpiry).meta.modelReady, "a contract whose OCC expiry conflicts with its timestamp does not qualify");
+}
 
 const FLOWS_READER_FROM = { "/flows/": "overview", "/flows/long/": "long", "/flows/short/": "short", "/flows/watch/": "watch" };
 
@@ -94,7 +154,10 @@ function oldChain(path, rc, d) {
       "/flows/now/": (u) => FLOWS_PAGES.nowPage({ username: u }),
       "/flows/desk/": (u) => FLOWS_PAGES.deskPage({ username: u }),
       "/flows/strategy/": (u) => FLOWS_PAGES.strategyPage({ username: u }),
-      "/flows/ticker/": (u) => FLOWS_PAGES.tickerPage({ username: u }),
+      "/flows/ticker/": (u, summary, owner, e) => {
+        const mode = ffWord(e.FLOWS_RESEARCH ?? "owner");
+        return FLOWS_PAGES.tickerPage({ username: u, research: mode === "on" || (mode === "owner" && owner) });
+      },
       "/flows/moves/": (u) => FLOWS_PAGES.movesPage({ username: u }),
       "/flows/rotation/": (u) => FLOWS_PAGES.rotationPage({ username: u }),
       "/flows/flowlab/": (u) => FLOWS_PAGES.flowlabPage({ username: u }),
@@ -180,7 +243,7 @@ function scenario(user) {
   };
 }
 
-const PATHS = [...new Set([...expectedPaths, "/flows/zz/", "/flows/zz", "/flows/login", "/flows/logout", "/flows/long//", "/flows/LONG/", "/flows/", "/flows//"])];
+const PATHS = [...new Set([...expectedPaths.filter((path) => path !== "/flows/atlas" && path !== "/flows/atlas/"), "/flows/zz/", "/flows/zz", "/flows/login", "/flows/logout", "/flows/long//", "/flows/LONG/", "/flows/", "/flows//"])];
 const QUERIES = ["", "?t=NVDA", "?t=", "?t=%20", "?t=%20nvda%20", "?t=a%26b", "?x=1", "?t=NVDA&t=AAPL", "?t=BRK.B&refresh=1", "?T=NVDA"];
 const METHODS = ["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
 const USERS = [null, { username: "anilkaya" }, { username: "member<x>" }];
@@ -209,7 +272,12 @@ for (const path of PATHS) {
           const want = await outcome(() => oldChain(path, b.rc, b.sc.deps));
           const key = `${method} ${path}${q} ${user && user.username} ${JSON.stringify(env)}`;
           const publicOff = isOff(env) && (path === "/flows/about/" || path === "/flows/glossary/");
-          if (gonePaths.includes(path)) {
+          if (researchPaths.includes(path)) {
+            const name = q === "?t=BRK.B&refresh=1" ? "BRK.B" : "NVDA";
+            if (method === "GET" || method === "HEAD") eq([got.status, got.headers.find((h) => h[0] === "location")], [308, ["location", `https://anilkaya.org/flows/ticker/?t=${name}&chart=response`]], key + ": the research alias points to the canonical Ticker chart");
+            else eq(got.threw && [got.threw.status, got.threw.code], [405, "method_not_allowed"], key + ": the research alias accepts GET and HEAD");
+            eq(a.sc.log, [], key + ": the redirect does not read a session");
+          } else if (gonePaths.includes(path)) {
             eq(want, { fell: true }, key + ": the chain had no row for a removed page and answered it with the unknown-page 404");
             if (method === "GET" || method === "HEAD") eq([got.status, got.headers.find((h) => h[0] === "location")], [308, ["location", "https://anilkaya.org/flows/"]], key + ": a removed page is a 308 to Flows home");
             else eq(got.threw && [got.threw.status, got.threw.code], [405, "method_not_allowed"], key + ": a removed page takes GET and HEAD only");
@@ -233,6 +301,31 @@ for (const path of PATHS) {
 }
 ok(offOther > 0, "the switched-off front door was compared under methods other than GET and HEAD: " + offOther);
 ok(compared >= 5000, "every path, query, method and member was compared with the code it replaced: " + compared);
+
+{
+  const path = "/flows/ticker/?t=NVDA&chart=response";
+  const url = new URL(path, "https://anilkaya.org");
+  const call = async (user, env) => {
+    const router = createRouter(flowsPageRows(scenario(user ? { username: user } : null).deps));
+    return router.handle({ request: new Request(url), env, url, ctx: {} }).then((response) => response.text());
+  };
+  for (const [user, env, expected] of [
+    ["anilkaya", {}, true], ["anilkaya", { FLOWS_RESEARCH: "off" }, false],
+    ["anilkaya", { FLOWS_RESEARCH: "INVALID" }, false], ["member", {}, false],
+    ["member", { FLOWS_RESEARCH: " owner " }, false], ["member", { FLOWS_RESEARCH: " ON " }, true],
+    [null, { FLOWS_RESEARCH: "on" }, false],
+  ]) {
+    const page = await call(user, env);
+    eq(page.includes('id="ftGResponse"'), expected, "the signed-in response panel honors the research switch and owner role");
+    eq(page.includes('id="ftResponse"'), expected, "research code is absent when the response panel is gated");
+    if (user === null) eq(page, FLOWS_PAGES.loginPage(), "the explicit response deep link still requires a member session");
+  }
+  for (const [query, ticker] of [["?t=%20aapl%20", "AAPL"], ["?t=GONE1", "NVDA"], ["?t=https%3A%2F%2Fexample.com", "NVDA"]]) {
+    const alias = new URL("/flows/research/" + query, "https://anilkaya.org");
+    const response = await table.handle({ request: new Request(alias), env: {}, url: alias, ctx: {} });
+    eq(response.headers.get("Location"), `https://anilkaya.org/flows/ticker/?t=${ticker}&chart=response`, "the research alias accepts valid symbols and handles other values on the canonical origin");
+  }
+}
 
 {
   const sc = scenario({ username: "anilkaya" });
@@ -265,7 +358,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
   const SIDEBAR_PAGES = ["", "long", "short", "watch", "market", "network", "now", "desk", "strategy", "ticker", "moves", "rotation", "flowlab", "unusual", "ledger", "macro", "events", "political", "positioning", "status", "fire", "inbox", "digest", "wires"];
   for (const slug of SIDEBAR_PAGES) {
     const path = "/flows/" + (slug ? slug + "/" : "");
-    const env = { FLOWS_MOVES: "on", FLOWS_ROTATION: "on", FLOWS_LEDGER: "on", FLOWS_FLOWLAB: "on", FLOWS_POSITIONING: "on", FLOWS_MACRO: "on", FF_MODE: "shadow", FF_ROUTE_FIRE: "on", FF_ROUTE_INBOX: "on", FF_ROUTE_WIRES: "on" };
+    const env = { FLOWS_MOVES: "on", FLOWS_ROTATION: "on", FLOWS_RESEARCH: "on", FLOWS_LEDGER: "on", FLOWS_FLOWLAB: "on", FLOWS_POSITIONING: "on", FLOWS_MACRO: "on", FF_MODE: "shadow", FF_ROUTE_FIRE: "on", FF_ROUTE_INBOX: "on", FF_ROUTE_WIRES: "on" };
     const call = (deps) => createRouter(flowsPageRows({ ...deps, macroOn: (e) => e.FLOWS_MACRO === "on" })).find(path).handler({ ...rc(path), env }).then((r) => r.text());
     const asOwner = await call(scenario({ username: "anilkaya" }).deps);
     ok(!asOwner.includes("railOps") && !asOwner.includes(">Operations<") && !asOwner.includes('href="/flows/status/"') && !asOwner.includes("view=latency"), path + ": NO SIDEBAR CARRIES AN OPERATIONS GROUP, a Status link or a Latency link, an owner's included");
@@ -434,7 +527,7 @@ ok(compared >= 5000, "every path, query, method and member was compared with the
     const pageOf = { overview: () => FLOWS_PAGES.overviewPage({ username: "m" }), long: () => FLOWS_PAGES.sidePage({ username: "m", side: "long" }), short: () => FLOWS_PAGES.sidePage({ username: "m", side: "short" }), watch: () => FLOWS_PAGES.watchPage({ username: "m" }),
       market: () => FLOWS_PAGES.marketPage({ username: "m" }), moves: () => FLOWS_PAGES.movesPage({ username: "m" }), rotation: () => FLOWS_PAGES.rotationPage({ username: "m" }), unusual: () => FLOWS_PAGES.unusualPage({ username: "m" }), flowlab: () => FLOWS_PAGES.flowlabPage({ username: "m" }), ledger: () => FLOWS_PAGES.ledgerPage({ username: "m" }), macro: () => FLOWS_PAGES.macroPage({ username: "m" }),
       events: () => FLOWS_PAGES.eventsPage({ username: "m" }), political: () => FLOWS_PAGES.politicalPage({ username: "m" }), positioning: () => FLOWS_PAGES.positioningPage({ username: "m" }),
-      fire: () => FLOWS_PAGES.firePage({ username: "m" }), strategy: () => FLOWS_PAGES.strategyPage({ username: "m" }), desk: () => FLOWS_PAGES.deskPage({ username: "m" }) };
+      fire: () => FLOWS_PAGES.firePage({ username: "m" }), strategy: () => FLOWS_PAGES.strategyPage({ username: "m" }), desk: () => FLOWS_PAGES.deskPage({ username: "m" }), atlas: () => FLOWS_PAGES.atlasPage({ username: "m" }) };
     eq(Object.keys(pageOf).sort(), FLOWS_NAV.flatMap((g) => g.items.map((i) => i.key)).sort(), "every sidebar entry has a page to draw here");
     for (const [key, draw] of Object.entries(pageOf)) {
       const want = FLOWS_TABS.filter((t) => t.keys.includes(key)).map((t) => t.href);

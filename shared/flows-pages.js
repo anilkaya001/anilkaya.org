@@ -1,6 +1,7 @@
-export const ASSET_VERSION = "447";
+export const ASSET_VERSION = "449";
 
 import { GLOSSARY, GLOSSARY_PAGES } from "./flows-glossary.js";
+import { flowsV2AtlasBody } from "./flows-v2-atlas.js";
 import { RESET_SAID } from "./flows-ai.js";
 import { stamp as trtStamp } from "./flows-time.js";
 import { etDayOf, isSession, shiftDay } from "./flows-quant-time.js";
@@ -170,6 +171,7 @@ export const FLOWS_NAV = [
     { key: "fire", href: "/flows/fire/", label: "Fire", glyph: "fire", switched: true },
     { key: "strategy", href: "/flows/strategy/", label: "Strategy", glyph: "flask" },
     { key: "desk", href: "/flows/desk/", label: "Premium desk", glyph: "layers" },
+    { key: "atlas", href: "/flows/atlas/", label: "All pages", glyph: "quad" },
   ] },
 ];
 
@@ -268,6 +270,7 @@ const toolbar = (title, active, hero) => `
           aria-expanded="false" aria-label="Sidebar">${glyph("sidebar")}</button>
   <span class="fx-bar-t" id="fxBarT" aria-hidden="true">${title}</span>
   <span class="fx-bar-sp"></span>
+  <a class="fx-iconbtn fx-atlas-link" href="/flows/atlas/" aria-label="All pages"${active === "atlas" ? ' aria-current="page"' : ""}>${glyph("quad")}</a>
   <a class="fx-search" id="fxSearch" href="/flows/ticker/" aria-haspopup="dialog" aria-label="Search"
      aria-keyshortcuts="Meta+K Control+K">${glyph("search")}<span class="fx-search-l">Search</span><kbd>&#8984;K</kbd></a>${dockTab(active)}
   <button type="button" class="ui-fresh" id="fxFresh" data-state="pending"
@@ -495,6 +498,7 @@ export function aboutPage({ positioning = false } = {}) {
       <li><strong>Ticker.</strong> One name's dossier: price against the priced move, the dealer book, volatility, flow and positioning, and a written reading of how they fit together.</li>
       <li><strong>Fire.</strong> A wire is a standing condition a member writes once. Flows reads it on the nightly run or in the live session, records a hit when it first holds, and keeps a receipt for every session it was read or not read.</li>
       <li><strong>Strategy, Premium desk and Ask.</strong> Option structures priced on the name's own smile, and questions answered from what has been published.</li>
+      <li><strong>All pages.</strong> Find each Flows tool available to your account.</li>
     </ul>
   </section>
   <section aria-labelledby="aKeys">
@@ -529,7 +533,7 @@ export function aboutPage({ positioning = false } = {}) {
   <section aria-labelledby="aAccess">
     <h2 id="aAccess">Access</h2>
     <p>Access is by assigned credential. To ask for one, use the contact links on the <a href="/">home page</a>.</p>
-    <p class="fx-doc-actions"><a class="flows-submit" href="/flows/login/">Sign in</a><a href="/flows/glossary/">Glossary</a></p>
+    <p class="fx-doc-actions"><a class="flows-submit" href="/flows/login/">Sign in</a><a href="/flows/glossary/">Glossary</a><a href="/flows/research/">NVDA price-response research</a></p>
   </section>`);
 }
 
@@ -1353,7 +1357,7 @@ ${UI_CHART_SCRIPTS}
 </html>`;
 }
 
-export function tickerPage({ username = "", scenes = false, xcheck = false, privateLens = false, now = Date.now() } = {}) {
+export function tickerPage({ username = "", scenes = false, xcheck = false, privateLens = false, research = false, now = Date.now() } = {}) {
   return flowsDocument({
     title: "Ticker",
     description: "One name's options dossier: price against the priced move, the Neuron verdict with priced structures, and the dealer book, volatility, flow and positioning behind it.",
@@ -1382,7 +1386,8 @@ export function tickerPage({ username = "", scenes = false, xcheck = false, priv
     <section class="ft-gchart" aria-labelledby="ftGChartT">
       <div class="ft-gchart-h"><h2 id="ftGChartT">Price, levels and the month ahead</h2><span id="ftGTabs"></span><span class="ft-sp"></span><span id="ftGRange"></span><span id="ftGReset"></span></div>
       <div class="ft-glance-chart" id="ftGlanceChart" role="tabpanel"></div>
-      <div class="ft-gsurf" id="ftGSurf" role="tabpanel" hidden></div>
+      <div class="ft-gsurf" id="ftGSurf" role="tabpanel" hidden></div>${research ? `
+      <div class="ft-response" id="ftGResponse" role="tabpanel" aria-labelledby="ftTabResponse" hidden></div>` : ""}
     </section>
     <section class="ft-rail nn-host" data-nn="off" id="ftReadRail" aria-labelledby="ftReadRailT" hidden></section>
   </div>
@@ -1424,7 +1429,9 @@ export function tickerPage({ username = "", scenes = false, xcheck = false, priv
   </div>
   <i hidden data-defer="movelab" data-src="${v("/assets/js/flows-ticker-movelab.js")}" id="ftMoveLab"></i>
   <i hidden data-defer="network" data-src="${v("/assets/js/flows-ticker-network.js")}" data-css="${v("/assets/css/flows-ticker-network.css")}" id="ftNetwork"></i>
-  <i hidden data-defer="live" data-src="${v("/assets/js/flows-ticker-live.js")}" id="ftLive"></i>${privateLens ? `
+  <i hidden data-defer="live" data-src="${v("/assets/js/flows-ticker-live.js")}" id="ftLive"></i>${research ? `
+  <i hidden data-defer="response" data-src="${v("/assets/js/flows-research-model.bundle.js")}"></i>
+  <i hidden data-defer="response" data-src="${v("/assets/js/flows-ticker-response.js")}" id="ftResponse"></i>` : ""}${privateLens ? `
   <i hidden data-defer="private" data-src="${v("/assets/js/flows-ticker-private.js")}" data-css="${v("/assets/css/flows-ticker-private.css")}" id="ftPrivate"></i>` : ""}${scenes ? `
   <i hidden data-defer="surface" data-src="${v("/assets/js/flows-ticker-surface.js")}" id="ftSurface"${xcheck ? ' data-xcheck="1"' : ""}></i>${xcheck ? `
   <i hidden data-defer="xcheck" data-src="${v("/assets/js/flows-ticker-xcheck.js")}" data-css="${v("/assets/css/flows-voldesk.css")}" id="ftXcheckLoad"></i>` : ""}` : ""}
@@ -1690,6 +1697,18 @@ ${scripts.map((src) => `<script src="${v(String(src))}" defer></script>`).join("
 </html>`;
 }
 
+export function atlasPage({ username = "", access = {} } = {}) {
+  return flowsDocument({
+    title: "All pages",
+    description: "Find current market, options, and research tools in Flows.",
+    active: "atlas",
+    username,
+    chrome: false,
+    styles: ["/assets/css/flows-v2-atlas.css"],
+    body: flowsV2AtlasBody(access),
+  });
+}
+
 const ORACLE_MODES = Object.freeze(["on", "quiet"]);
 
 const SIDE_BODY = '<body class="flows-body has-rail"';
@@ -1826,6 +1845,7 @@ export function positioningNav(html, on, slug) {
 }
 
 export const FLOWS_PAGES = {
+  atlasPage,
   loginPage, aboutPage, glossaryPage, overviewPage, sidePage, watchPage, marketPage, networkPage, nowPage, deskPage,
   politicalPage, positioningPage,
   tickerPage, unusualPage, movesPage, rotationPage, flowlabPage, ledgerPage, macroPage, statusPage, eventsPage, strategyPage, firePage, inboxPage, digestPage, wiresPage, ffPendingPage, ASSET_VERSION,
